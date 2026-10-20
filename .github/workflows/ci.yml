@@ -9,17 +9,18 @@ jobs:
   check:
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:18-alpine
+      mariadb:
+        image: mariadb:11.8
         env:
-          POSTGRES_DB: btx24
-          POSTGRES_USER: btx24
-          POSTGRES_PASSWORD: ci
-        ports: ["5432:5432"]
+          MARIADB_DATABASE: btx24
+          MARIADB_USER: btx24
+          MARIADB_PASSWORD: ci
+          MARIADB_ROOT_PASSWORD: ci-root
+        ports: ["3306:3306"]
         options: >-
-          --health-cmd "pg_isready -U btx24" --health-interval 5s --health-timeout 3s --health-retries 20
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s --health-retries 30
     env:
-      DATABASE_URL: postgresql://btx24:ci@localhost:5432/btx24
+      DATABASE_URL: mysql://btx24:ci@127.0.0.1:3306/btx24
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,5 +31,7 @@ jobs:
       - run: npm run check
       - name: Migrations apply on a clean database
         run: npm run prisma:deploy -w @btx24/api
-      - name: Docker image builds
-        run: docker build -t btx24booking-app:ci .
+      - name: Docker images build
+        run: |
+          docker build --target api -t btx24booking-api:ci .
+          docker build --target web -t btx24booking-web:ci .

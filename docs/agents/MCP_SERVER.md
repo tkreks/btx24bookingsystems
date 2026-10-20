@@ -18,8 +18,8 @@
 | `get_task_state` | чекпоинт `.agent/tasks/<id>.md` | файл |
 | `env_status` | `docker compose ps` + ответ `/api/health` | Docker, HTTP |
 | `app_logs` | хвост логов сервиса compose, фильтр по подстроке | Docker |
-| `db_schema` | таблицы, колонки, ограничения (вкл. EXCLUDE), индексы, последние миграции | PostgreSQL (`agent_ro`) |
-| `db_query` | один read-only запрос (SELECT/WITH/EXPLAIN/…), лимит строк | PostgreSQL (`agent_ro`) |
+| `db_schema` | таблицы, колонки, ограничения (PK/FK/unique/check), индексы, последние миграции | MariaDB (`agent_ro`) |
+| `db_query` | один read-only запрос (SELECT/WITH/EXPLAIN/SHOW/DESCRIBE), лимит строк | MariaDB (`agent_ro`) |
 
 Все инструменты только читают. Запуск/остановка контейнеров, миграции, изменение данных
 намеренно не реализованы — это делается кодом, миграциями и явными командами человека/агента.
@@ -31,11 +31,11 @@
   `generated`, `.git`.
 - Всё, что уходит агенту (код, логи, строки БД), проходит маскирование секретов: пароли в URL,
   `*_TOKEN`/`*_SECRET`/`AUTH_ID`/`REFRESH_ID`, Bearer, JWT, PEM, коды входящих вебхуков.
-- БД: отдельная роль `agent_ro` (только `SELECT`, `default_transaction_read_only`,
-  `statement_timeout 5s`, ≤5 соединений) + транзакция `READ ONLY` + лексическая проверка
-  (один оператор, без DML/DDL/блокировок/опасных функций) + лимит строк + маскирование колонок
+- БД: отдельный пользователь `agent_ro` (только `SELECT`/`SHOW VIEW`, ≤5 соединений) +
+  `START TRANSACTION READ ONLY` + `max_statement_time 5s` + `sql_select_limit` + лексическая проверка
+  (один оператор, без DML/DDL/блокировок/`LOAD_FILE`/`INTO OUTFILE`/`SLEEP`) + лимит строк + маскирование колонок
   с именами вроде `*token*`, `*secret*`, `*password*`, `*hash*`.
-- Из корневого `.env` сервер читает только `POSTGRES_DB`, `DB_HOST_PORT`, `AGENT_DB_PASSWORD`,
+- Из корневого `.env` сервер читает только `DB_NAME`, `DB_HOST_PORT`, `AGENT_DB_PASSWORD`,
   `APP_HOST_PORT`, `BTX_AGENT_DB_URL` — и никогда не возвращает их значения.
 - Docker вызывается через `execFile` с фиксированными аргументами (`ps`, `logs`,
   `config --services`), без shell.
@@ -57,9 +57,9 @@ npm run mcp:cli -- search_code '{"query":"бронь ресурса"}'
 npm run mcp:cli -- search_code '{"kind":"endpoint"}'
 npm run mcp:cli -- read_source '{"path":"apps/api/src/main.ts"}'
 npm run mcp:cli -- env_status
-npm run mcp:cli -- app_logs '{"service":"app","tail":100,"grep":"error"}'
-npm run mcp:cli -- db_schema '{"table":"Booking"}'
-npm run mcp:cli -- db_query '{"sql":"SELECT count(*) FROM \"Booking\""}'
+npm run mcp:cli -- app_logs '{"service":"api","tail":100,"grep":"error"}'
+npm run mcp:cli -- db_schema '{"table":"Portal"}'
+npm run mcp:cli -- db_query '{"sql":"SELECT count(*) FROM `Portal`"}'
 ```
 
 ## Развитие

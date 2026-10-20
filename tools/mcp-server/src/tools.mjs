@@ -58,14 +58,14 @@ export const TOOLS = [
   {
     name: 'env_status',
     title: 'Environment status',
-    description: 'State of docker compose services (db, app: running/healthy, ports) and the app /api/health response. Read-only; does not start or stop anything.',
+    description: 'State of docker compose services (db, api, worker, web: running/healthy, ports) and the /api/health response through web. Read-only; does not start or stop anything.',
     inputSchema: {},
     run: (core) => core.envStatus(),
   },
   {
     name: 'app_logs',
     title: 'Container logs',
-    description: `Last lines of a docker compose service log (default service "app", default ${LIMITS.logsDefaultTail}, max ${LIMITS.logsMaxTail} lines), optionally filtered by substring. Secrets are redacted.`,
+    description: `Last lines of a docker compose service log (default service "api"; others: db, worker, web; default ${LIMITS.logsDefaultTail}, max ${LIMITS.logsMaxTail} lines), optionally filtered by substring. Secrets are redacted.`,
     inputSchema: {
       service: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/).optional(),
       tail: z.number().int().positive().max(LIMITS.logsMaxTail).optional(),
@@ -78,14 +78,14 @@ export const TOOLS = [
     name: 'db_schema',
     title: 'Database schema',
     description:
-      'Live PostgreSQL schema via the read-only agent_ro role: without "table" — list of tables/views with approximate row counts and recent Prisma migrations; with "table" — columns, constraints (incl. EXCLUDE), indexes.',
+      'Live MariaDB schema via the read-only agent_ro user: without "table" — list of tables/views with approximate row counts and recent Prisma migrations; with "table" — columns, constraints (PK/FK/unique/check), indexes.',
     inputSchema: { table: z.string().optional() },
     run: (core, a) => core.dbSchema(a),
   },
   {
     name: 'db_query',
     title: 'Read-only SQL query',
-    description: `Run ONE read-only statement (SELECT / WITH / EXPLAIN / TABLE / VALUES / SHOW) as agent_ro inside a READ ONLY transaction with a ${LIMITS.dbStatementTimeoutMs} ms timeout. Rows capped (default ${LIMITS.dbDefaultRows}, max ${LIMITS.dbMaxRows}); token/secret/password-like columns are masked. Table names from Prisma are PascalCase — quote them: SELECT * FROM "Booking".`,
+    description: `Run ONE read-only statement (SELECT / WITH / EXPLAIN / SHOW / DESCRIBE) on MariaDB as agent_ro inside a READ ONLY transaction with a ${LIMITS.dbStatementTimeoutMs} ms timeout. Rows capped (default ${LIMITS.dbDefaultRows}, max ${LIMITS.dbMaxRows}); token/secret/password-like columns are masked. Prisma table names are PascalCase — quote with backticks: SELECT * FROM \`Portal\`.`,
     inputSchema: {
       sql: z.string().min(1).max(10_000),
       max_rows: z.number().int().positive().max(LIMITS.dbMaxRows).optional(),

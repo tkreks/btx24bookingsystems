@@ -201,7 +201,7 @@ export class BtxCore {
         ok: true,
         containers,
         app: health,
-        db: { readOnlyAccessConfigured: Boolean(agentDbUrl(env)), hostPort: env.DB_HOST_PORT ?? '55432' },
+        db: { engine: 'mariadb', readOnlyAccessConfigured: Boolean(agentDbUrl(env)), hostPort: env.DB_HOST_PORT ?? '53306' },
       },
       RESPONSE_BUDGET_BYTES.runtime,
     );
@@ -224,7 +224,7 @@ export class BtxCore {
     }
   }
 
-  async appLogs({ service = 'app', tail, since, grep }) {
+  async appLogs({ service = 'api', tail, since, grep }) {
     const n = Math.min(tail ?? LIMITS.logsDefaultTail, LIMITS.logsMaxTail);
     const res = await composeLogs(this.root, { service, tail: n, since, grep });
     return fitBudget(res, RESPONSE_BUDGET_BYTES.runtime);

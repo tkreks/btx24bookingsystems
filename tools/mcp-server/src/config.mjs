@@ -88,7 +88,7 @@ export const LIMITS = {
 };
 
 /** Ключи корневого .env, которые сервер вправе прочитать (значения наружу не отдаются). */
-export const ENV_ALLOWLIST = ['POSTGRES_DB', 'DB_HOST_PORT', 'AGENT_DB_PASSWORD', 'APP_HOST_PORT', 'BTX_AGENT_DB_URL'];
+export const ENV_ALLOWLIST = ['DB_NAME', 'DB_HOST_PORT', 'AGENT_DB_PASSWORD', 'APP_HOST_PORT', 'BTX_AGENT_DB_URL'];
 
 /** Где лежат модули — для get_module_context и project_overview. */
 export const MODULE_ROOTS = [

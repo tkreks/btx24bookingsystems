@@ -11,11 +11,11 @@ npm workspaces, Node 24, TypeScript, ESM везде.
 
 | Путь | Что это |
 |---|---|
-| `apps/api` | NestJS 12 + Prisma 7 (**PostgreSQL**, не MySQL), `@btx24/api` |
-| `apps/web` | React 19 + Vite 8, `@btx24/web`; в prod раздаётся самим api |
+| `apps/api` | NestJS 12 + Prisma 7 (**MariaDB**), `@btx24/api`; там же `src/worker.ts` — фоновый процесс |
+| `apps/web` | React 19 + Vite 8, `@btx24/web`; в prod отдаёт контейнер `web` (nginx) |
 | `packages/shared` | `@btx24/shared` — типы/контракты/чистые функции для api и web |
 | `tools/mcp-server` | MCP-сервер `btx-dev` для агентов (см. ниже) |
-| `docker-compose.yml` | стенд: `db` (PostgreSQL 18) + `app` |
+| `docker-compose.yml` | стенд: `db` (MariaDB 11.8) + `api` + `worker` + `web` (ADR 0004) |
 | `docs/` | `agents/` (процесс), `decisions/` (ADR), `bitrix24/` (интеграция), `features/` |
 
 ## Порядок сборки (обязателен перед typecheck/тестами)
@@ -29,7 +29,7 @@ npm workspaces, Node 24, TypeScript, ESM везде.
 - **Мультитенантность.** Каждый портал Битрикс24 — отдельный тенант (`memberId`). Любая
   доменная таблица имеет ссылку на портал, любой запрос фильтруется по порталу из
   аутентифицированного контекста. Идентификатор портала из тела/квери запроса не доверяется.
-- **Время.** В БД — только `timestamptz` в UTC. Интервалы брони полуоткрытые `[start, end)`.
+- **Время.** В БД — `DATETIME(3)` строго в UTC (сервер с `default-time-zone=+00:00`). Интервалы брони полуоткрытые `[start, end)`.
   Часовой пояс — настройка портала (по умолчанию `Europe/Moscow`), только для отображения и
   расчёта периодов. Не зашивать `Europe/Moscow` в код, как в прототипе.
 - **Источник истины для броней и ресурсов — модуль бронирования Битрикс24** (`booking.v1.*`),

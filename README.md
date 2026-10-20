@@ -9,27 +9,30 @@
 - Архитектурные решения: [`docs/decisions/`](./docs/decisions/)
 
 ## Стек
-NestJS 12 + Prisma 7 + PostgreSQL 18 (api), React 19 + Vite 8 (web), npm workspaces, Node 24.
+NestJS 12 + Prisma 7 + MariaDB 11.8 (api, worker), React 19 + Vite 8 (web), npm workspaces, Node 24.
+Контейнеры: `db`, `api`, `worker`, `web` — см. ADR 0004.
 
 ## Стенд в Docker
 
 ```bash
-cp .env.example .env        # задать POSTGRES_PASSWORD и AGENT_DB_PASSWORD
+cp .env.example .env        # задать DB_PASSWORD, DB_ROOT_PASSWORD, AGENT_DB_PASSWORD
 docker compose up -d --build
 curl http://localhost:3080/api/health
 ```
 
 | Сервис | Что | Порт на хосте |
 |---|---|---|
-| `db` | PostgreSQL 18 | `127.0.0.1:55432` (`DB_HOST_PORT`) |
-| `app` | api + собранный web, миграции применяются при старте | `3080` (`APP_HOST_PORT`) |
+| `db` | MariaDB 11.8 | `127.0.0.1:53306` (`DB_HOST_PORT`) |
+| `api` | NestJS API, применяет миграции при старте | только внутри сети compose |
+| `worker` | фоновые задачи (тот же образ, `dist/worker.js`) | — |
+| `web` | nginx: фронтенд + прокси `/api` → `api` | `3080` (`APP_HOST_PORT`) |
 
 ## Локальная разработка
 
 ```bash
 npm ci
 npm run db:up                                   # только БД в Docker
-cp apps/api/.env.example apps/api/.env          # DATABASE_URL на 127.0.0.1:55432
+cp apps/api/.env.example apps/api/.env          # DATABASE_URL на 127.0.0.1:53306
 npm run build -w @btx24/shared
 npm run prisma:generate
 npm run prisma:deploy -w @btx24/api             # применить миграции
