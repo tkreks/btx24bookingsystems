@@ -1,14 +1,19 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.js';
+import { B24AuthGuard } from './auth/b24-auth.guard.js';
+import { UserTokenVerifier } from './auth/user-token.verifier.js';
 import { SecretBox } from './crypto/secret-box.js';
 import { EventsController } from './events/events.controller.js';
 import { EventsService } from './events/events.service.js';
 import { InstallController } from './install/install.controller.js';
 import { InstallService } from './install/install.service.js';
 import { OAuthClient } from './oauth/oauth.client.js';
+import { PlacementsController } from './placements/placements.controller.js';
+import { PlacementsService } from './placements/placements.service.js';
 import { PortalService } from './portals/portal.service.js';
 import { RateLimiter } from './rest/rate-limiter.js';
+import { SessionController } from './session/session.controller.js';
 import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js';
 
 /**
@@ -16,7 +21,7 @@ import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js
  * Доменные модули получают клиент через PortalService.clientFor(portal), а не ходят в портал сами.
  */
 @Module({
-  controllers: [InstallController, EventsController],
+  controllers: [InstallController, EventsController, PlacementsController, SessionController],
   providers: [
     { provide: B24_FETCH, useValue: globalThis.fetch.bind(globalThis) },
     {
@@ -42,7 +47,10 @@ import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js
     PortalService,
     InstallService,
     EventsService,
+    PlacementsService,
+    UserTokenVerifier,
+    B24AuthGuard,
   ],
-  exports: [PortalService],
+  exports: [PortalService, UserTokenVerifier, B24AuthGuard],
 })
 export class Bitrix24Module {}
