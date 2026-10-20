@@ -57,3 +57,24 @@ describe('InstallService', () => {
     await expect(install.install({ DOMAIN: 'x' })).rejects.toMatchObject({ code: 'BAD_INSTALL_REQUEST' });
   });
 });
+
+describe('normalizeInstallRequest', () => {
+  it('maps the ONAPPINSTALL event (auth[...]) to install fields', async () => {
+    const { normalizeInstallRequest } = await import('./install.service.js');
+    expect(
+      normalizeInstallRequest({ event: 'ONAPPINSTALL', auth: { refresh_token: 'r', application_token: 'a', member_id: 'm', domain: 'p.ru' } }),
+    ).toEqual({ REFRESH_ID: 'r', SERVER_ENDPOINT: 'https://oauth.bitrix.info/rest/', APPLICATION_TOKEN: 'a', member_id: 'm', DOMAIN: 'p.ru' });
+  });
+
+  it('defaults a missing SERVER_ENDPOINT to the cloud authorization server', async () => {
+    const { normalizeInstallRequest } = await import('./install.service.js');
+    expect(normalizeInstallRequest({ REFRESH_ID: 'r' }).SERVER_ENDPOINT).toBe('https://oauth.bitrix.info/rest/');
+  });
+
+  it('installs from an ONAPPINSTALL event end-to-end', async () => {
+    const { normalizeInstallRequest } = await import('./install.service.js');
+    const { install, portals } = setup();
+    await install.install(normalizeInstallRequest({ event: 'ONAPPINSTALL', auth: { refresh_token: 'r', application_token: 'a', member_id: MEMBER } }));
+    expect(portals).toHaveLength(1);
+  });
+});

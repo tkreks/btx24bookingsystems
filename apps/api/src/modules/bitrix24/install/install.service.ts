@@ -14,6 +14,28 @@ export interface InstallRequest {
   member_id?: string;
 }
 
+/** Тело события ONAPPINSTALL (режим «Приложение само завершает установку»). */
+export interface InstallEvent {
+  event?: string;
+  auth?: { refresh_token?: string; server_endpoint?: string; application_token?: string; member_id?: string; domain?: string };
+}
+
+/** Облачный сервер авторизации — если портал не прислал SERVER_ENDPOINT. */
+export const DEFAULT_SERVER_ENDPOINT = 'https://oauth.bitrix.info/rest/';
+
+/**
+ * Приводит оба варианта установки к одному виду: форма мастера установки (AUTH_ID/REFRESH_ID/…)
+ * или событие ONAPPINSTALL (auth[refresh_token]/…). Доверия это не добавляет — всё проверяется
+ * обменом refresh-токена на сервере авторизации.
+ */
+export function normalizeInstallRequest(input: InstallRequest & InstallEvent): InstallRequest {
+  if (String(input.event ?? '').toUpperCase() === 'ONAPPINSTALL' && input.auth) {
+    const a = input.auth;
+    return { REFRESH_ID: a.refresh_token, SERVER_ENDPOINT: a.server_endpoint ?? DEFAULT_SERVER_ENDPOINT, APPLICATION_TOKEN: a.application_token, member_id: a.member_id, DOMAIN: a.domain };
+  }
+  return { ...input, SERVER_ENDPOINT: input.SERVER_ENDPOINT || DEFAULT_SERVER_ENDPOINT };
+}
+
 /** События, на которые приложение подписывается при установке. */
 export const BOUND_EVENTS = ['ONAPPUNINSTALL'] as const;
 

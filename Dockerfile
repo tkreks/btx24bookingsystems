@@ -24,6 +24,9 @@ RUN npm run build -w @btx24/shared \
 
 # ---------- api / worker ----------
 FROM ${NODE_IMAGE} AS api
+# OpenSSL нужен движку миграций Prisma (prisma migrate deploy при старте).
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /repo
