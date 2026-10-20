@@ -4,6 +4,44 @@ import { z } from 'zod';
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
 const member = z.object({ kind: z.enum(['USER', 'DEPARTMENT']), bitrixId: z.number().int().positive() });
 
+const view = z.enum(['', 'calendar', 'list', 'availability']);
+const payStep = z.object({ stageId: z.string().max(100), moveStage: z.boolean(), templateId: z.string().max(50) }).strict();
+
+/** `WorkGroup.options` — настройки направления, перенесённые из прототипа. */
+export const groupOptionsSchema = z
+  .object({
+    dealFields: z
+      .array(
+        z
+          .object({
+            name: z.string().regex(/^[A-Z0-9_]+$/i).max(100),
+            title: z.string().max(200).optional(),
+            required: z.boolean(),
+            inlineNext: z.boolean(),
+            showCreate: z.boolean(),
+            showView: z.boolean(),
+            showList: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(80),
+    productSectionIds: z.array(z.string().max(32)).max(500),
+    resourceDefaults: z.record(z.string().regex(/^\d+$/), z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().positive() }).strict()).max(50)),
+    views: z.object({ desktop: view, mobile: view }).strict(),
+    payments: z
+      .object({
+        prepayment: payStep,
+        surcharge: payStep,
+        timeoutMinutes: z.number().int().min(1).max(10080),
+        successStageId: z.string().max(100),
+        failStageId: z.string().max(100),
+        successTemplateId: z.string().max(50),
+        failTemplateId: z.string().max(50),
+      })
+      .strict(),
+  })
+  .strict();
+
 /** Тело PUT/POST /api/admin/groups — полная замена настроек группы. */
 export const groupSettingsSchema = z
   .object({
@@ -18,6 +56,7 @@ export const groupSettingsSchema = z
     techWindowMinutes: z.number().int().min(0).max(1440),
     features: z.array(z.enum(GROUP_FEATURES)).max(GROUP_FEATURES.length),
     members: z.array(member.extend({ role: z.enum(ROLES) })).max(1000),
+    options: groupOptionsSchema.nullable().optional(),
   })
   .strict();
 
@@ -25,6 +64,7 @@ export const appSettingsSchema = z
   .object({
     dialogMetadataEnabled: z.boolean(),
     dialogTextsEnabled: z.boolean(),
+    removeWazzupEmail: z.boolean(),
     admins: z.array(member).max(200),
   })
   .strict()

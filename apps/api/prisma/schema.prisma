@@ -41,6 +41,7 @@ model Portal {
   groups               WorkGroup[]
   admins               AppAdmin[]
   settings             PortalSettings?
+  externalUsers        ExternalUser[]
 }
 
 enum PortalStatus {
@@ -106,13 +107,20 @@ model WorkGroup {
   techWindowMinutes Int                 @default(0)
   /// Включённые функции группы (GROUP_FEATURES из @btx24/shared).
   features          Json
+  /// Настройки направления без отдельных колонок (оплаты, поля сделки, каталог, товары по
+  /// умолчанию, виды) — схема `groupOptionsSchema`; переносятся из прототипа без потерь.
+  options           Json?
+  /// id группы в прототипе Node-RED — повторный импорт обновляет, а не дублирует.
+  legacyId          String?             @db.VarChar(64)
   archivedAt        DateTime?           @db.DateTime(3)
   createdAt         DateTime            @default(now()) @db.DateTime(3)
   updatedAt         DateTime            @updatedAt @db.DateTime(3)
   resources         WorkGroupResource[]
   members           WorkGroupMember[]
+  externalUsers     ExternalUserGroup[]
 
   @@index([portalId, archivedAt])
+  @@unique([portalId, legacyId])
 }
 
 /// Ресурс модуля бронирования Битрикс24 в группе. Один ресурс может входить в несколько групп.
@@ -153,6 +161,42 @@ model PortalSettings {
   portal                Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
   dialogMetadataEnabled Boolean  @default(false)
   dialogTextsEnabled    Boolean  @default(false)
+  /// Перед запуском оплаты удалять у контакта e-mail с «wazzup» (платёжный сервис отклоняет).
+  removeWazzupEmail     Boolean  @default(false)
   updatedByUserId       Int?
   updatedAt             DateTime @updatedAt @db.DateTime(3)
+}
+
+enum ExternalRole {
+  VIEWER
+  TECHNOLOGIST
+}
+
+/// Пользователь прямой ссылки (вне Битрикс24): только просмотр. Пароль — только хеш (scrypt).
+model ExternalUser {
+  id           String              @id @default(cuid())
+  portalId     String
+  portal       Portal              @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  login        String              @db.VarChar(100)
+  passwordHash String              @db.VarChar(255)
+  role         ExternalRole
+  /// true — доступ ко всем группам портала (как в прототипе при пустом списке групп).
+  allGroups    Boolean             @default(false)
+  /// null — видны все поля сделки; иначе список кодов полей.
+  visibleFields Json?
+  disabledAt   DateTime?           @db.DateTime(3)
+  createdAt    DateTime            @default(now()) @db.DateTime(3)
+  updatedAt    DateTime            @updatedAt @db.DateTime(3)
+  groups       ExternalUserGroup[]
+
+  @@unique([portalId, login])
+}
+
+model ExternalUserGroup {
+  externalUserId String
+  externalUser   ExternalUser @relation(fields: [externalUserId], references: [id], onDelete: Cascade)
+  groupId        String
+  group          WorkGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([externalUserId, groupId])
 }

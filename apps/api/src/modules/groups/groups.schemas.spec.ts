@@ -33,7 +33,7 @@ describe('groupSettingsSchema', () => {
 
 describe('appSettingsSchema', () => {
   it('requires metadata collection before texts can be collected', () => {
-    expect(appSettingsSchema.safeParse({ dialogMetadataEnabled: false, dialogTextsEnabled: true, admins: [] }).success).toBe(false);
-    expect(appSettingsSchema.safeParse({ dialogMetadataEnabled: true, dialogTextsEnabled: true, admins: [{ kind: 'DEPARTMENT', bitrixId: 3 }] }).success).toBe(true);
+    expect(appSettingsSchema.safeParse({ dialogMetadataEnabled: false, dialogTextsEnabled: true, removeWazzupEmail: false, admins: [] }).success).toBe(false);
+    expect(appSettingsSchema.safeParse({ dialogMetadataEnabled: true, dialogTextsEnabled: true, removeWazzupEmail: true, admins: [{ kind: 'DEPARTMENT', bitrixId: 3 }] }).success).toBe(true);
   });
 });

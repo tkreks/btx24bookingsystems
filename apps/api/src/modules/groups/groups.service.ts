@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { AppSettingsDto, GroupDto, GroupFeature, GroupRole, GroupSettingsDto, MemberKind } from '@btx24/shared';
-import type { Prisma } from '../../generated/prisma/client.js';
+import type { AppSettingsDto, GroupDto, GroupFeature, GroupOptionsDto, GroupRole, GroupSettingsDto, MemberKind } from '@btx24/shared';
+import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { appSettingsSchema, groupSettingsSchema } from './groups.schemas.js';
 
@@ -31,6 +31,7 @@ export class GroupsService {
       techWindowMinutes: g.techWindowMinutes,
       features: (Array.isArray(g.features) ? g.features : []) as GroupFeature[],
       members: g.members.map((m) => ({ kind: m.kind as MemberKind, bitrixId: m.bitrixId, role: m.role as GroupRole })),
+      options: (g.options ?? null) as GroupOptionsDto | null,
     }));
   }
 
@@ -68,13 +69,14 @@ export class GroupsService {
     return {
       dialogMetadataEnabled: s?.dialogMetadataEnabled ?? false,
       dialogTextsEnabled: s?.dialogTextsEnabled ?? false,
+      removeWazzupEmail: s?.removeWazzupEmail ?? false,
       admins: admins.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
     };
   }
 
   async saveSettings(portalId: string, userId: number, body: unknown): Promise<AppSettingsDto> {
     const s = this.parse(appSettingsSchema, body);
-    const flags = { dialogMetadataEnabled: s.dialogMetadataEnabled, dialogTextsEnabled: s.dialogTextsEnabled, updatedByUserId: userId };
+    const flags = { dialogMetadataEnabled: s.dialogMetadataEnabled, dialogTextsEnabled: s.dialogTextsEnabled, removeWazzupEmail: s.removeWazzupEmail, updatedByUserId: userId };
     const admins = [...new Map(s.admins.map((a) => [`${a.kind}:${a.bitrixId}`, a])).values()];
     await this.prisma.$transaction([
       this.prisma.portalSettings.upsert({ where: { portalId }, create: { portalId, ...flags }, update: flags }),
@@ -95,6 +97,7 @@ export class GroupsService {
       defaultNights: s.defaultNights,
       techWindowMinutes: s.techWindowMinutes,
       features: unique(s.features),
+      ...(s.options === undefined ? {} : { options: s.options === null ? Prisma.DbNull : (s.options as unknown as Prisma.InputJsonValue) }),
     };
   }
 
