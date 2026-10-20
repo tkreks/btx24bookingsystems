@@ -22,7 +22,8 @@ function setup(owned: number[] = []) {
       }),
     },
   } as unknown as PrismaService;
-  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? [140] : [])), rows };
+  const relations = { contactIds: [140], invoiceIds: [5152], paymentIds: [8672, 8674] };
+  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [] })), rows };
 }
 
 describe('SandboxWritePolicy', () => {
@@ -46,6 +47,15 @@ describe('SandboxWritePolicy', () => {
     await expect(policy.allows('crm.item.update', { entityTypeId: 3, id: 140 })).resolves.toBe(true);
     await expect(policy.allows('crm.contact.update', { id: 141 })).resolves.toBe(false);
     await expect(policy.allows('crm.contact.delete', { id: 140 })).resolves.toBe(false);
+  });
+
+  it('allows annulling payments and editing invoices of the sandbox deal only', async () => {
+    const { policy } = setup();
+    await expect(policy.allows('crm.item.payment.delete', { id: 8674 })).resolves.toBe(true);
+    await expect(policy.allows('crm.item.payment.delete', { id: 9999 })).resolves.toBe(false);
+    await expect(policy.allows('crm.item.update', { entityTypeId: 31, id: 5152, fields: { stageId: 'DT31_2:D' } })).resolves.toBe(true);
+    await expect(policy.allows('crm.item.update', { entityTypeId: 31, id: 5153 })).resolves.toBe(false);
+    await expect(policy.allows('crm.item.delete', { entityTypeId: 31, id: 5152 })).resolves.toBe(false);
   });
 
   it('allows creating bookings only inside the period', async () => {
