@@ -91,8 +91,33 @@ export class PortalService {
     return new Bitrix24RestClient({ clientEndpoint, access, limiter: this.limiter, limiterKey: memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly, writePolicy: portal ? this.policyFor(portal) : undefined });
   }
 
+  /** portalId → контакты сделок песочницы (кэш 5 мин): у сделки может смениться контакт. */
+  private readonly sandboxContacts = new Map<string, { ids: number[]; expiresAt: number }>();
+
   private policyFor(portal: Portal): WritePolicy | undefined {
-    return this.config.readOnly && this.config.sandbox ? new SandboxWritePolicy(this.prisma, portal, this.config.sandbox) : undefined;
+    if (!this.config.readOnly || !this.config.sandbox) return undefined;
+    return new SandboxWritePolicy(this.prisma, portal, this.config.sandbox, (dealIds) => this.contactsOfDeals(portal, dealIds));
+  }
+
+  /** Все контакты сделок (crm.deal.contact.items.get) — чтением, токеном приложения. */
+  private async contactsOfDeals(portal: Portal, dealIds: number[]): Promise<number[]> {
+    const hit = this.sandboxContacts.get(portal.id);
+    if (hit && hit.expiresAt > Date.now()) return hit.ids;
+    const reader = new Bitrix24RestClient({
+      clientEndpoint: portal.clientEndpoint,
+      access: { getAccessToken: () => this.currentAccessToken(portal.id), refresh: (t) => this.refreshTokens(portal.id, t) },
+      limiter: this.limiter,
+      limiterKey: portal.memberId,
+      fetch: this.fetchImpl,
+      readOnly: true,
+    });
+    const ids = new Set<number>();
+    for (const id of dealIds) {
+      const res = await reader.call<{ CONTACT_ID?: string | number }[]>('crm.deal.contact.items.get', { id });
+      for (const c of Array.isArray(res.result) ? res.result : []) if (Number(c.CONTACT_ID) > 0) ids.add(Number(c.CONTACT_ID));
+    }
+    this.sandboxContacts.set(portal.id, { ids: [...ids], expiresAt: Date.now() + 5 * 60_000 });
+    return [...ids];
   }
 
   private async currentAccessToken(portalId: string): Promise<string> {

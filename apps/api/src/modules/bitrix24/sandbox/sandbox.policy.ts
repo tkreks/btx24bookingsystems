@@ -12,6 +12,9 @@ export interface SandboxConfig {
 }
 
 type P = Record<string, unknown>;
+
+/** Контакты сделок песочницы (читаются из Битрикс24); правка разрешена только им. */
+export type SandboxContactsResolver = (dealIds: number[]) => Promise<number[]>;
 const lc = (v: unknown) => String(v ?? '').toLowerCase();
 
 /**
@@ -27,6 +30,7 @@ export class SandboxWritePolicy implements WritePolicy {
     private readonly prisma: PrismaService,
     private readonly portal: Portal,
     private readonly cfg: SandboxConfig,
+    private readonly contactsOf: SandboxContactsResolver = async () => [],
   ) {
     this.from = cfg.bookingsFrom ? zonedTimeToUtc(cfg.bookingsFrom, '00:00', portal.timezone).getTime() / 1000 : null;
     this.to = cfg.bookingsTo ? zonedTimeToUtc(cfg.bookingsTo, '00:00', portal.timezone).getTime() / 1000 : null;
@@ -39,7 +43,11 @@ export class SandboxWritePolicy implements WritePolicy {
       case 'crm.deal.productrows.set':
         return this.deal(params.id);
       case 'crm.item.update':
+        if (Number(params.entityTypeId) === 3) return this.contact(params.id);
         return Number(params.entityTypeId) === 2 && this.deal(params.id);
+      // Правка контакта сделки песочницы (решение владельца): например, очистка e-mail «wazzup».
+      case 'crm.contact.update':
+        return this.contact(params.id);
       case 'crm.timeline.comment.add':
         return lc(fields.ENTITY_TYPE) === 'deal' && this.deal(fields.ENTITY_ID);
       case 'bizproc.workflow.start': {
@@ -80,6 +88,11 @@ export class SandboxWritePolicy implements WritePolicy {
 
   private deal(id: unknown): boolean {
     return /^\d+$/.test(String(id ?? '')) && this.cfg.dealIds.includes(Number(id));
+  }
+
+  private async contact(id: unknown): Promise<boolean> {
+    if (!/^\d+$/.test(String(id ?? '')) || !this.cfg.dealIds.length) return false;
+    return (await this.contactsOf(this.cfg.dealIds)).includes(Number(id));
   }
 
   private inRange(period: unknown): boolean {

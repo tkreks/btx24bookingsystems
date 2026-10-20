@@ -22,7 +22,7 @@ function setup(owned: number[] = []) {
       }),
     },
   } as unknown as PrismaService;
-  return { policy: new SandboxWritePolicy(prisma, portal, cfg), rows };
+  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? [140] : [])), rows };
 }
 
 describe('SandboxWritePolicy', () => {
@@ -36,8 +36,16 @@ describe('SandboxWritePolicy', () => {
     await expect(policy.allows('bizproc.workflow.start', { TEMPLATE_ID: 1, DOCUMENT_ID: ['crm', 'CCrmDocumentDeal', 'DEAL_678'] })).resolves.toBe(true);
     await expect(policy.allows('bizproc.workflow.start', { TEMPLATE_ID: 1, DOCUMENT_ID: ['crm', 'CCrmDocumentDeal', 'DEAL_6780'] })).resolves.toBe(false);
     await expect(policy.allows('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: 678, MESSAGE: 'x' })).resolves.toBe(true);
-    await expect(policy.allows('crm.contact.update', { id: 140 })).resolves.toBe(false);
     await expect(policy.allows('crm.deal.delete', { id: 678 })).resolves.toBe(false);
+    await expect(policy.allows('crm.item.delete', { entityTypeId: 2, id: 678 })).resolves.toBe(false);
+  });
+
+  it('allows editing only the contact of the sandbox deal, never deleting it', async () => {
+    const { policy } = setup();
+    await expect(policy.allows('crm.contact.update', { id: 140, fields: { EMAIL: [] } })).resolves.toBe(true);
+    await expect(policy.allows('crm.item.update', { entityTypeId: 3, id: 140 })).resolves.toBe(true);
+    await expect(policy.allows('crm.contact.update', { id: 141 })).resolves.toBe(false);
+    await expect(policy.allows('crm.contact.delete', { id: 140 })).resolves.toBe(false);
   });
 
   it('allows creating bookings only inside the period', async () => {
