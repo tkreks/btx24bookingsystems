@@ -434,3 +434,24 @@ main.loading {
     margin-bottom: 8px;
   }
 }
+
+.group-select {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  max-width: 60vw;
+}
+
+.pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #075985;
+  font-size: 13px;
+  font-weight: 700;
+}

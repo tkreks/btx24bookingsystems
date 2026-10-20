@@ -1,5 +1,6 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Get, Query, UseGuards } from '@nestjs/common';
 import { isIsoDate, todayIn, type CalendarDay } from '@btx24/shared';
+import { AccessService } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { CalendarService } from './calendar.service.js';
@@ -7,13 +8,26 @@ import { CalendarService } from './calendar.service.js';
 @Controller('calendar')
 @UseGuards(B24AuthGuard)
 export class CalendarController {
-  constructor(private readonly calendar: CalendarService) {}
+  constructor(
+    private readonly calendar: CalendarService,
+    private readonly access: AccessService,
+  ) {}
 
-  /** `GET /api/calendar?date=YYYY-MM-DD` (по умолчанию — сегодня в поясе портала). */
+  /**
+   * `GET /api/calendar?date=YYYY-MM-DD&groupId=…` — день по ресурсам группы (по умолчанию —
+   * первая доступная группа). Администратор приложения без групп видит все ресурсы портала.
+   */
   @Get()
-  day(@B24User() user: B24UserContext, @Query('date') date?: string): Promise<CalendarDay> {
+  async day(@B24User() user: B24UserContext, @Query('date') date?: string, @Query('groupId') groupId?: string): Promise<CalendarDay> {
     const day = date ?? todayIn(user.portal.timezone);
     if (!isIsoDate(day)) throw new BadRequestException({ code: 'INVALID_DATE', message: 'date должен быть в формате YYYY-MM-DD' });
-    return this.calendar.day(user, day);
+
+    const access = await this.access.resolve(user);
+    const group = this.access.pick(access, groupId, 'calendar.view');
+    if (!group) {
+      if (access.isAppAdmin && !groupId && access.groups.length === 0) return this.calendar.day(user, day, null, true);
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: groupId ? 'Нет доступа к этой группе' : 'Вы не состоите ни в одной группе приложения — обратитесь к администратору' });
+    }
+    return this.calendar.day(user, day, group.group.resourceIds, group.permissions.includes('booking.details'));
   }
 }

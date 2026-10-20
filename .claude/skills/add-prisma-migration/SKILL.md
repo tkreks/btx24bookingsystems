@@ -15,6 +15,9 @@ description: Step-by-step procedure for changing the MariaDB schema in btx24book
    - имена моделей PascalCase, полей camelCase; `@@map`, только если есть причина.
 3. Создай миграцию, не применяя её: `cd apps/api && npx prisma migrate dev --create-only --name <snake_case>`
    (нужен `DATABASE_URL` на стенд/локальную БД).
+   ⚠ Prisma называет миграцию по часам сервера (UTC). Имя должно сортироваться **после**
+   последней миграции в `prisma/migrations` — иначе переименуй каталог (например,
+   `20261021000200_<name>`), пока миграция не применена.
 4. Допиши в `migration.sql` то, что Prisma не выражает, с комментарием «зачем», например:
    ```sql
    -- Ключ идемпотентности уникален в рамках портала (повтор запроса не создаёт вторую операцию).

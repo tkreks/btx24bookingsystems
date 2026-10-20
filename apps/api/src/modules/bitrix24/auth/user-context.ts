@@ -7,6 +7,8 @@ export interface B24UserContext {
   userId: number;
   userName: string;
   isAdmin: boolean;
+  /** Прямые отделы сотрудника (UF_DEPARTMENT из user.current). */
+  departmentIds: number[];
   /** REST-клиент на токене пользователя — видит только то, что видит он сам. */
   client: Bitrix24RestClient;
 }
