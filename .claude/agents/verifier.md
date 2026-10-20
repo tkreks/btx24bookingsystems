@@ -17,7 +17,7 @@ tools: Bash, Read, Grep, Glob
    - `tools/mcp-server` → `npm run mcp:test` и `npx oxlint tools/mcp-server/src tools/mcp-server/test`;
    - `schema.prisma`/миграции → дополнительно применение миграций на стенде, если он доступен
      (`npm run prisma:deploy -w @btx24/api` с `DATABASE_URL` стенда) и `db_schema` после;
-   - Dockerfile/compose → `docker compose config -q` и, если разрешено, `docker compose build app`.
+   - Dockerfile/compose → `docker compose config -q` и, если разрешено, `docker compose build api web`.
 3. Полный вывод — в файл (`.agent-cache/verify-<время>.log`), в отчёт — команда, код выхода,
    pass/fail, для падения — кратчайшая точная причина и путь к логу.
 4. Явно перечисли, что НЕ запускал и почему.

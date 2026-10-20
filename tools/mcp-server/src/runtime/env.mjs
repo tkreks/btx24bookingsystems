@@ -41,9 +41,9 @@ export function loadRuntimeEnv(root, processEnv = process.env) {
 export function agentDbUrl(env) {
   if (env.BTX_AGENT_DB_URL) return env.BTX_AGENT_DB_URL;
   if (!env.AGENT_DB_PASSWORD) return null;
-  const port = env.DB_HOST_PORT ?? '55432';
-  const db = env.POSTGRES_DB ?? 'btx24';
-  return `postgresql://agent_ro:${encodeURIComponent(env.AGENT_DB_PASSWORD)}@127.0.0.1:${port}/${encodeURIComponent(db)}`;
+  const port = env.DB_HOST_PORT ?? '53306';
+  const db = env.DB_NAME ?? 'btx24';
+  return `mysql://agent_ro:${encodeURIComponent(env.AGENT_DB_PASSWORD)}@127.0.0.1:${port}/${encodeURIComponent(db)}`;
 }
 
 export function appBaseUrl(env) {

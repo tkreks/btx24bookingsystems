@@ -21,7 +21,7 @@ src/
   server.mjs        MCP-адаптер (stdio)
   cli.mjs           CLI-адаптер
   repo/             fileset, индексатор (TS/Nest/Prisma/SQL/MD), поиск
-  runtime/          .env, docker compose, PostgreSQL (read-only)
+  runtime/          .env, docker compose, MariaDB (read-only)
 domain-aliases.json RU→EN глоссарий для поиска
 test/               vitest: безопасность, SQL-guard, ядро, протокол MCP
 ```

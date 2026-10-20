@@ -43,7 +43,7 @@ describe('MCP protocol', () => {
   });
 
   it('rejects a write query before touching the database', async () => {
-    const raw = await client.callTool({ name: 'db_query', arguments: { sql: 'DELETE FROM "Booking"' } });
+    const raw = await client.callTool({ name: 'db_query', arguments: { sql: 'DELETE FROM `Portal`' } });
     expect(parse(raw).code).toBe('NOT_READ_ONLY');
   });
 });

@@ -103,7 +103,7 @@ describe('module context, task state, overview', () => {
 describe('runtime env', () => {
   it('parses dotenv and builds the agent_ro URL', () => {
     const env = parseDotenv('# c\nAGENT_DB_PASSWORD="p@ss word"\nDB_HOST_PORT=6000 # port\n');
-    expect(agentDbUrl(env)).toBe('postgresql://agent_ro:p%40ss%20word@127.0.0.1:6000/btx24');
+    expect(agentDbUrl(env)).toBe('mysql://agent_ro:p%40ss%20word@127.0.0.1:6000/btx24');
   });
 
   it('db tools report DB_NOT_CONFIGURED instead of throwing when no password is set', async () => {

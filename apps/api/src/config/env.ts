@@ -12,8 +12,6 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   /** Публичный HTTPS-адрес приложения — его указывают в настройках приложения Битрикс24. */
   APP_BASE_URL: optionalString(z.string().url()),
-  /** Каталог собранного apps/web; если не задан — статика не раздаётся (dev-режим через Vite). */
-  WEB_DIST_DIR: optionalString(z.string()),
 });
 
 export type Env = z.infer<typeof envSchema>;

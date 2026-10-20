@@ -10,6 +10,6 @@ export default defineConfig({
     // `prisma generate`, tsc and unit tests never open a connection, so they must not require
     // DATABASE_URL. Commands that do connect (`migrate dev/deploy`) get the real value from the
     // environment or apps/api/.env.
-    url: process.env.DATABASE_URL ?? 'postgresql://placeholder:placeholder@localhost:5432/placeholder',
+    url: process.env.DATABASE_URL ?? 'mysql://placeholder:placeholder@localhost:3306/placeholder',
   },
 });
