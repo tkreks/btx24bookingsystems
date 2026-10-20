@@ -3,6 +3,10 @@
     "btx-dev": {
       "command": "node",
       "args": ["tools/mcp-server/src/server.mjs"]
+    },
+    "bitrix24-docs": {
+      "type": "http",
+      "url": "https://mcp-dev.bitrix24.com/mcp"
     }
   }
 }
