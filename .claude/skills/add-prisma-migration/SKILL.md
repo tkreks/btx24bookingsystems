@@ -18,6 +18,11 @@ description: Step-by-step procedure for changing the MariaDB schema in btx24book
    ⚠ Prisma называет миграцию по часам сервера (UTC). Имя должно сортироваться **после**
    последней миграции в `prisma/migrations` — иначе переименуй каталог (например,
    `20261021000200_<name>`), пока миграция не применена.
+   ⚠ Если `migrate dev` отказывается в неинтерактивном режиме (предупреждения об индексах),
+   сгенерируй SQL: `npx prisma migrate diff --from-migrations prisma/migrations --to-schema
+   prisma/schema.prisma --script` и положи в `prisma/migrations/<имя>/migration.sql`.
+   ⚠ MariaDB хранит `JSON` как `LONGTEXT`, поэтому diff каждый раз добавляет `MODIFY \`…\` JSON`
+   для уже существующих Json-колонок — **удаляй эти строки**, они не относятся к изменению.
 4. Допиши в `migration.sql` то, что Prisma не выражает, с комментарием «зачем», например:
    ```sql
    -- Ключ идемпотентности уникален в рамках портала (повтор запроса не создаёт вторую операцию).

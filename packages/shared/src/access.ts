@@ -58,6 +58,41 @@ export interface GroupMemberDto {
   role: GroupRole;
 }
 
+/** Поле сделки в форме брони (из прототипа: обязательность, «два в строку», где показывать). */
+export interface DealFieldConfig {
+  name: string;
+  title?: string;
+  required: boolean;
+  inlineNext: boolean;
+  showCreate: boolean;
+  showView: boolean;
+  showList: boolean;
+}
+
+export interface PaymentStepConfig {
+  stageId: string;
+  moveStage: boolean;
+  templateId: string;
+}
+
+/** Настройки направления без отдельных колонок (`WorkGroup.options`). */
+export interface GroupOptionsDto {
+  dealFields: DealFieldConfig[];
+  productSectionIds: string[];
+  /** resourceId → товары по умолчанию. */
+  resourceDefaults: Record<string, { productId: number; quantity: number }[]>;
+  views: { desktop: '' | 'calendar' | 'list' | 'availability'; mobile: '' | 'calendar' | 'list' | 'availability' };
+  payments: {
+    prepayment: PaymentStepConfig;
+    surcharge: PaymentStepConfig;
+    timeoutMinutes: number;
+    successStageId: string;
+    failStageId: string;
+    successTemplateId: string;
+    failTemplateId: string;
+  };
+}
+
 export interface GroupSettingsDto {
   name: string;
   dealCategoryId: number | null;
@@ -72,6 +107,8 @@ export interface GroupSettingsDto {
   techWindowMinutes: number;
   features: GroupFeature[];
   members: GroupMemberDto[];
+  /** Не передано при сохранении — сохранённые настройки не меняются. */
+  options?: GroupOptionsDto | null;
 }
 
 export interface GroupDto extends GroupSettingsDto {
@@ -96,5 +133,7 @@ export interface AppSettingsDto {
   dialogMetadataEnabled: boolean;
   /** Сбор текстов сообщений (персональные данные клиентов) — отдельный переключатель. */
   dialogTextsEnabled: boolean;
+  /** Удалять у контакта e-mail с «wazzup» перед запуском оплаты. */
+  removeWazzupEmail: boolean;
   admins: { kind: MemberKind; bitrixId: number }[];
 }

@@ -15,3 +15,7 @@ apps/api/src/generated/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Данные прототипа (содержат пароли) — только для импорта, не коммитить
+booking_local_*.json
+/import/
