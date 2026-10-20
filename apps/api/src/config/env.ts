@@ -36,15 +36,32 @@ export const envSchema = z.object({
     .enum(['true', 'false', '1', '0'])
     .default('true')
     .transform((v) => v === 'true' || v === '1'),
+  /**
+   * Песочница записи при B24_READ_ONLY=true (решение владельца): изменения разрешены только по
+   * этим сделкам и для броней в периоде [FROM, TO) — даты в поясе портала. Пусто — выключена.
+   */
+  B24_SANDBOX_DEAL_IDS: z
+    .string()
+    .default('')
+    .refine((v) => /^(\d+(,\d+)*)?$/.test(v.replace(/\s/g, '')), 'comma-separated deal ids'),
+  B24_SANDBOX_BOOKINGS_FROM: optionalString(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  B24_SANDBOX_BOOKINGS_TO: optionalString(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
   /** Лимит REST-запросов к одному порталу: устойчивая скорость и всплеск. */
   B24_RATE_PER_SEC: z.coerce.number().positive().default(2),
   B24_RATE_BURST: z.coerce.number().int().positive().default(10),
 });
 
-export type Env = z.infer<typeof envSchema>;
+const withSandbox = envSchema.transform((e) => {
+  const dealIds = e.B24_SANDBOX_DEAL_IDS.replace(/\s/g, '').split(',').filter(Boolean).map(Number);
+  const range = e.B24_SANDBOX_BOOKINGS_FROM && e.B24_SANDBOX_BOOKINGS_TO ? { bookingsFrom: e.B24_SANDBOX_BOOKINGS_FROM, bookingsTo: e.B24_SANDBOX_BOOKINGS_TO } : { bookingsFrom: null, bookingsTo: null };
+  const B24_SANDBOX = dealIds.length || range.bookingsFrom ? { dealIds, ...range } : null;
+  return { ...e, B24_SANDBOX };
+});
+
+export type Env = z.infer<typeof withSandbox>;
 
 export function validateEnv(raw: Record<string, unknown>): Env {
-  const parsed = envSchema.safeParse(raw);
+  const parsed = withSandbox.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid environment: ${issues}`);

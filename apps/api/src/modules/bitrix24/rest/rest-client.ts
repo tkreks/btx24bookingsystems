@@ -10,6 +10,15 @@ export interface AccessProvider {
   refresh(expiredToken: string): Promise<string>;
 }
 
+/**
+ * Исключения из режима только чтения (песочница). `allows` — разрешён ли изменяющий вызов с этими
+ * параметрами; `recorded` — после успешного вызова (журнал созданного).
+ */
+export interface WritePolicy {
+  allows(method: string, params: Record<string, unknown>): Promise<boolean>;
+  recorded(method: string, params: Record<string, unknown>, result: unknown): Promise<void>;
+}
+
 export interface RestResponse<T = unknown> {
   result: T;
   total?: number;
@@ -42,6 +51,8 @@ export interface RestClientOptions {
   timeoutMs?: number;
   /** Отклонять изменяющие методы (B24_READ_ONLY). */
   readOnly?: boolean;
+  /** Точечные исключения из readOnly (песочница записи). */
+  writePolicy?: WritePolicy;
 }
 
 const METHOD_RE = /^[a-z][a-z0-9_.]*$/i;
@@ -63,13 +74,16 @@ export class Bitrix24RestClient {
 
   async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<RestResponse<T>> {
     if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
-    this.assertAllowed(method);
+    const viaPolicy = await this.assertAllowed(method, params);
     let token = await this.opts.access.getAccessToken();
     let refreshed = false;
     for (let attempt = 0; ; attempt++) {
       await this.opts.limiter.acquire(this.opts.limiterKey);
       const body = await this.post(method, { ...params, auth: token });
-      if (!body.error) return { result: body.result as T, total: body.total, next: body.next };
+      if (!body.error) {
+        if (viaPolicy) await this.opts.writePolicy!.recorded(method, params, body.result);
+        return { result: body.result as T, total: body.total, next: body.next };
+      }
 
       const code = String(body.error);
       if (TOKEN_EXPIRED_CODES.has(code) && !refreshed) {
@@ -94,7 +108,8 @@ export class Bitrix24RestClient {
     if (entries.length > BATCH_MAX && entries.some(([, c]) => JSON.stringify(c.params ?? {}).includes('$result['))) {
       throw new Bitrix24Error('BATCH_TOO_LARGE', `Batch with $result references cannot exceed ${BATCH_MAX} commands`);
     }
-    for (const [, c] of entries) this.assertAllowed(c.method);
+    // Запись внутри batch песочница не разрешает: ссылки $result между командами не проверить.
+    for (const [, c] of entries) this.assertReadable(c.method);
     const out: BatchResult = { result: {}, errors: {}, total: {}, next: {} };
     for (let i = 0; i < entries.length; i += BATCH_MAX) {
       const cmd: Record<string, string> = {};
@@ -137,8 +152,14 @@ export class Bitrix24RestClient {
     return items.slice(0, max);
   }
 
-  private assertAllowed(method: string): void {
-    if (method === 'batch') return; // команды пакета проверяются по отдельности
+  /** true — вызов разрешён только благодаря песочнице (после успеха его надо записать в журнал). */
+  private async assertAllowed(method: string, params: Record<string, unknown>): Promise<boolean> {
+    if (method === 'batch' || !this.opts.readOnly || isReadMethod(method)) return false; // команды пакета проверяет batch()
+    if (this.opts.writePolicy && (await this.opts.writePolicy.allows(method, params))) return true;
+    throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);
+  }
+
+  private assertReadable(method: string): void {
     if (this.opts.readOnly && !isReadMethod(method)) {
       throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);
     }

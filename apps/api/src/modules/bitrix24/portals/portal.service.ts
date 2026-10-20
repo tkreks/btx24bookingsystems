@@ -5,7 +5,8 @@ import { SecretBox, sha256Hex } from '../crypto/secret-box.js';
 import { OAuthClient, type TokenSet, trustedOAuthHost } from '../oauth/oauth.client.js';
 import { Bitrix24Error, REAUTH_CODES } from '../rest/errors.js';
 import { RateLimiter } from '../rest/rate-limiter.js';
-import { Bitrix24RestClient, type AccessProvider } from '../rest/rest-client.js';
+import { Bitrix24RestClient, type AccessProvider, type WritePolicy } from '../rest/rest-client.js';
+import { SandboxWritePolicy } from '../sandbox/sandbox.policy.js';
 import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from '../bitrix24.tokens.js';
 
 /** Обновляем access-токен заранее, чтобы запрос не упёрся в `expired_token`. */
@@ -73,18 +74,25 @@ export class PortalService {
       getAccessToken: () => this.currentAccessToken(portal.id),
       refresh: (expired) => this.refreshTokens(portal.id, expired),
     };
-    return new Bitrix24RestClient({ clientEndpoint: portal.clientEndpoint, access, limiter: this.limiter, limiterKey: portal.memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly });
+    return new Bitrix24RestClient({ clientEndpoint: portal.clientEndpoint, access, limiter: this.limiter, limiterKey: portal.memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly, writePolicy: this.policyFor(portal) });
   }
 
-  /** Клиент на произвольном токене (например, сразу после установки — до сохранения портала). */
-  clientWithToken(clientEndpoint: string, memberId: string, accessToken: string): Bitrix24RestClient {
+  /**
+   * Клиент на произвольном токене: токен пользователя (передаётся `portal` — действует песочница)
+   * или токен сразу после установки, до сохранения портала.
+   */
+  clientWithToken(clientEndpoint: string, memberId: string, accessToken: string, portal?: Portal): Bitrix24RestClient {
     const access: AccessProvider = {
       getAccessToken: async () => accessToken,
       refresh: async () => {
         throw new Bitrix24Error('expired_token', 'Token cannot be refreshed in this context');
       },
     };
-    return new Bitrix24RestClient({ clientEndpoint, access, limiter: this.limiter, limiterKey: memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly });
+    return new Bitrix24RestClient({ clientEndpoint, access, limiter: this.limiter, limiterKey: memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly, writePolicy: portal ? this.policyFor(portal) : undefined });
+  }
+
+  private policyFor(portal: Portal): WritePolicy | undefined {
+    return this.config.readOnly && this.config.sandbox ? new SandboxWritePolicy(this.prisma, portal, this.config.sandbox) : undefined;
   }
 
   private async currentAccessToken(portalId: string): Promise<string> {

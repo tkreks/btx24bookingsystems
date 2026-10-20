@@ -42,6 +42,7 @@ model Portal {
   admins               AppAdmin[]
   settings             PortalSettings?
   externalUsers        ExternalUser[]
+  sandboxBookings      SandboxBooking[]
 }
 
 enum PortalStatus {
@@ -199,4 +200,17 @@ model ExternalUserGroup {
   group          WorkGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@id([externalUserId, groupId])
+}
+
+/// Брони, созданные в песочнице записи (B24_SANDBOX_*): только их можно менять/удалять, и
+/// только их удаляет уборка. Реальные брони песочнице недоступны.
+model SandboxBooking {
+  id        String    @id @default(cuid())
+  portalId  String
+  portal    Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  bookingId Int
+  createdAt DateTime  @default(now()) @db.DateTime(3)
+  deletedAt DateTime? @db.DateTime(3)
+
+  @@unique([portalId, bookingId])
 }
