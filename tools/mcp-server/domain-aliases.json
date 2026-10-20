@@ -1,0 +1,244 @@
+{
+  "$comment": "RU/EN глоссарий предметной области для поиска. Ключ — нормализованный токен запроса, значение — токены, которыми он дополняется. Добавляйте термины вместе с появлением доменов.",
+  "бронь": [
+    "booking",
+    "reservation"
+  ],
+  "брони": [
+    "booking",
+    "reservation"
+  ],
+  "бронирование": [
+    "booking",
+    "reservation"
+  ],
+  "бронирования": [
+    "booking",
+    "reservation"
+  ],
+  "ресурс": [
+    "resource"
+  ],
+  "ресурсы": [
+    "resource"
+  ],
+  "переговорка": [
+    "resource",
+    "room"
+  ],
+  "комната": [
+    "room",
+    "resource"
+  ],
+  "слот": [
+    "slot",
+    "availability"
+  ],
+  "слоты": [
+    "slot",
+    "availability"
+  ],
+  "расписание": [
+    "schedule",
+    "availability",
+    "working"
+  ],
+  "доступность": [
+    "availability",
+    "slot"
+  ],
+  "услуга": [
+    "service",
+    "offering"
+  ],
+  "сотрудник": [
+    "employee",
+    "user",
+    "staff"
+  ],
+  "пользователь": [
+    "user"
+  ],
+  "клиент": [
+    "client",
+    "customer",
+    "contact"
+  ],
+  "портал": [
+    "portal",
+    "b24",
+    "bitrix"
+  ],
+  "битрикс": [
+    "bitrix",
+    "b24",
+    "portal"
+  ],
+  "битрикс24": [
+    "bitrix",
+    "b24",
+    "portal"
+  ],
+  "установка": [
+    "install",
+    "installation",
+    "oauth"
+  ],
+  "токен": [
+    "token",
+    "oauth",
+    "auth"
+  ],
+  "авторизация": [
+    "auth",
+    "oauth",
+    "guard"
+  ],
+  "права": [
+    "permission",
+    "role",
+    "access"
+  ],
+  "встройка": [
+    "placement",
+    "embed"
+  ],
+  "событие": [
+    "event",
+    "handler"
+  ],
+  "уведомление": [
+    "notification",
+    "notify"
+  ],
+  "оплата": [
+    "payment"
+  ],
+  "отмена": [
+    "cancel",
+    "cancellation"
+  ],
+  "часовой": [
+    "timezone",
+    "tz"
+  ],
+  "пояс": [
+    "timezone",
+    "tz"
+  ],
+  "миграция": [
+    "migration",
+    "prisma"
+  ],
+  "схема": [
+    "schema",
+    "prisma",
+    "model"
+  ],
+  "здоровье": [
+    "health"
+  ],
+  "эндпоинт": [
+    "endpoint",
+    "controller"
+  ],
+  "контроллер": [
+    "controller"
+  ],
+  "сервис": [
+    "service"
+  ],
+  "группа": [
+    "group",
+    "resource"
+  ],
+  "группы": [
+    "group",
+    "resource"
+  ],
+  "техокно": [
+    "tech",
+    "window"
+  ],
+  "тех": [
+    "tech",
+    "window"
+  ],
+  "окно": [
+    "window",
+    "tech"
+  ],
+  "сделка": [
+    "deal",
+    "crm"
+  ],
+  "сделки": [
+    "deal",
+    "crm"
+  ],
+  "воронка": [
+    "category",
+    "deal"
+  ],
+  "канбан": [
+    "category",
+    "kanban"
+  ],
+  "стадия": [
+    "stage",
+    "status"
+  ],
+  "предоплата": [
+    "prepayment",
+    "payment"
+  ],
+  "доплата": [
+    "surcharge",
+    "payment"
+  ],
+  "бп": [
+    "bizproc",
+    "workflow"
+  ],
+  "технолог": [
+    "technologist",
+    "role"
+  ],
+  "просмотр": [
+    "viewer",
+    "view"
+  ],
+  "товар": [
+    "product",
+    "productrows"
+  ],
+  "товары": [
+    "product",
+    "productrows"
+  ],
+  "каталог": [
+    "product",
+    "section",
+    "catalog"
+  ],
+  "баня": [
+    "resource"
+  ],
+  "домик": [
+    "resource"
+  ],
+  "заезд": [
+    "checkin",
+    "interval"
+  ],
+  "выезд": [
+    "checkout",
+    "interval"
+  ],
+  "настройки": [
+    "settings"
+  ],
+  "встройки": [
+    "placement"
+  ]
+}

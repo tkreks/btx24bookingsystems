@@ -1,0 +1,12 @@
+// Единственный файл схемы БД (PostgreSQL). Модели добавляются по доменам, каждый домен —
+// отдельным блоком с комментарием `// ---------- <Домен> ----------`.
+// Правила изменения схемы: AGENTS.md → «База данных и миграции», skill add-prisma-migration.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

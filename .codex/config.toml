@@ -1,0 +1,4 @@
+# Codex: тот же MCP-сервер, что и в .mcp.json для Claude Code.
+[mcp_servers.btx-dev]
+command = "node"
+args = ["tools/mcp-server/src/server.mjs"]

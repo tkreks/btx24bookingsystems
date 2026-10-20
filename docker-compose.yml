@@ -1,0 +1,50 @@
+# Тестовый/локальный стенд: БД (PostgreSQL) + приложение (api + web в одном контейнере).
+# Запуск: cp .env.example .env && (заполнить пароли) && docker compose up -d --build
+name: btx24booking
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-btx24}
+      POSTGRES_USER: ${POSTGRES_USER:-btx24}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Пароль read-only роли agent_ro для MCP-сервера (db_schema / db_query).
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:-}
+      TZ: UTC
+    volumes:
+      # Начиная с PostgreSQL 18 образ хранит данные в /var/lib/postgresql/<major>/docker.
+      - db-data:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Только localhost: доступ для разработки на хосте и для MCP-сервера, не наружу.
+      - "127.0.0.1:${DB_HOST_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: btx24booking-app:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: UTC
+      DATABASE_URL: postgresql://${POSTGRES_USER:-btx24}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-btx24}?schema=public
+      APP_BASE_URL: ${APP_BASE_URL:-}
+    ports:
+      # Публичный HTTPS-адрес для Битрикс24 даёт reverse proxy (например, Nginx Proxy Manager)
+      # → http://<host>:APP_HOST_PORT.
+      - "${APP_HOST_BIND:-0.0.0.0}:${APP_HOST_PORT:-3080}:3000"
+
+volumes:
+  db-data:

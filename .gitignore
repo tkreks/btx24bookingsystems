@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+apps/api/src/generated/
+.env
+.env.*
+!.env.example
+.agent/
+.agent-cache/
+.claude/settings.local.json
+.claude/worktrees/
+*.log
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

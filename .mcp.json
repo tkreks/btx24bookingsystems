@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "btx-dev": {
+      "command": "node",
+      "args": ["tools/mcp-server/src/server.mjs"]
+    }
+  }
+}

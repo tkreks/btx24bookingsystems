@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+apps/api/src/generated
+.git
+.env
+.env.*
+!.env.example
+.agent
+.agent-cache
+.claude
+.codex
+docs
+tools/**
+!tools/*/package.json
