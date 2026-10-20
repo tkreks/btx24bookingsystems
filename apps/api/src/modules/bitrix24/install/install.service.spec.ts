@@ -46,6 +46,12 @@ describe('InstallService', () => {
     expect(portals).toHaveLength(1);
   });
 
+  it('still installs in read-only mode (only app registration calls are made)', async () => {
+    const { install, portals } = setup({ readOnly: true });
+    await expect(install.install(request)).resolves.toMatchObject({ memberId: MEMBER });
+    expect(portals).toHaveLength(1);
+  });
+
   it('requires the mandatory install fields', async () => {
     const { install } = setup();
     await expect(install.install({ DOMAIN: 'x' })).rejects.toMatchObject({ code: 'BAD_INSTALL_REQUEST' });

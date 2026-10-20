@@ -27,6 +27,14 @@ export const envSchema = z.object({
     .string()
     .default('oauth.bitrix.info')
     .transform((v) => v.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)),
+  /**
+   * Только чтение данных портала: изменяющие методы REST отклоняются до запроса. По умолчанию
+   * включено — изменения на боевом портале разрешаются явно (`B24_READ_ONLY=false`).
+   */
+  B24_READ_ONLY: z
+    .enum(['true', 'false', '1', '0'])
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
   /** Лимит REST-запросов к одному порталу: устойчивая скорость и всплеск. */
   B24_RATE_PER_SEC: z.coerce.number().positive().default(2),
   B24_RATE_BURST: z.coerce.number().int().positive().default(10),

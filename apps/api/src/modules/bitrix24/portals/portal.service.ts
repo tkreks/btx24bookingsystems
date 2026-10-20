@@ -68,7 +68,7 @@ export class PortalService {
       getAccessToken: () => this.currentAccessToken(portal.id),
       refresh: (expired) => this.refreshTokens(portal.id, expired),
     };
-    return new Bitrix24RestClient({ clientEndpoint: portal.clientEndpoint, access, limiter: this.limiter, limiterKey: portal.memberId, fetch: this.fetchImpl });
+    return new Bitrix24RestClient({ clientEndpoint: portal.clientEndpoint, access, limiter: this.limiter, limiterKey: portal.memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly });
   }
 
   /** Клиент на произвольном токене (например, сразу после установки — до сохранения портала). */
@@ -79,7 +79,7 @@ export class PortalService {
         throw new Bitrix24Error('expired_token', 'Token cannot be refreshed in this context');
       },
     };
-    return new Bitrix24RestClient({ clientEndpoint, access, limiter: this.limiter, limiterKey: memberId, fetch: this.fetchImpl });
+    return new Bitrix24RestClient({ clientEndpoint, access, limiter: this.limiter, limiterKey: memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly });
   }
 
   private async currentAccessToken(portalId: string): Promise<string> {

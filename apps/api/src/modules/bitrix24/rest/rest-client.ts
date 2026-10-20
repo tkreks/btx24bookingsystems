@@ -1,6 +1,7 @@
 import { encodeParams } from './encode-params.js';
 import { Bitrix24Error, RATE_LIMIT_CODES, TOKEN_EXPIRED_CODES } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
+import { isReadMethod } from './read-only.js';
 
 /** Источник access-токена. Для токенов приложения умеет обновлять, для токена пользователя — нет. */
 export interface AccessProvider {
@@ -39,6 +40,8 @@ export interface RestClientOptions {
   maxRateLimitRetries?: number;
   retryDelayMs?: number;
   timeoutMs?: number;
+  /** Отклонять изменяющие методы (B24_READ_ONLY). */
+  readOnly?: boolean;
 }
 
 const METHOD_RE = /^[a-z][a-z0-9_.]*$/i;
@@ -60,6 +63,7 @@ export class Bitrix24RestClient {
 
   async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<RestResponse<T>> {
     if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
+    this.assertAllowed(method);
     let token = await this.opts.access.getAccessToken();
     let refreshed = false;
     for (let attempt = 0; ; attempt++) {
@@ -90,6 +94,7 @@ export class Bitrix24RestClient {
     if (entries.length > BATCH_MAX && entries.some(([, c]) => JSON.stringify(c.params ?? {}).includes('$result['))) {
       throw new Bitrix24Error('BATCH_TOO_LARGE', `Batch with $result references cannot exceed ${BATCH_MAX} commands`);
     }
+    for (const [, c] of entries) this.assertAllowed(c.method);
     const out: BatchResult = { result: {}, errors: {}, total: {}, next: {} };
     for (let i = 0; i < entries.length; i += BATCH_MAX) {
       const cmd: Record<string, string> = {};
@@ -130,6 +135,13 @@ export class Bitrix24RestClient {
       start = res.next;
     }
     return items.slice(0, max);
+  }
+
+  private assertAllowed(method: string): void {
+    if (method === 'batch') return; // команды пакета проверяются по отдельности
+    if (this.opts.readOnly && !isReadMethod(method)) {
+      throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);
+    }
   }
 
   private async post(method: string, payload: Record<string, unknown>) {
