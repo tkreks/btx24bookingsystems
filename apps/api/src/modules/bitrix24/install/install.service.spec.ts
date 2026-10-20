@@ -14,6 +14,7 @@ describe('InstallService', () => {
     await expect(install.install(request)).resolves.toEqual({ memberId: MEMBER, domain: 'portal.example.ru' });
     expect(b24.oauthCalls[0].searchParams.get('refresh_token')).toBe('frame-refresh');
     expect(portals[0].status).toBe('ACTIVE');
+    expect(portals[0].scope).toBe('crm,booking,placement,user');
     const bind = b24.restCalls.find((c) => c.method === 'event.bind')!;
     expect(bind.body).toMatchObject({ event: 'ONAPPUNINSTALL', handler: 'https://app.example.ru/api/b24/events' });
   });

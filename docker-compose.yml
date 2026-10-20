@@ -11,7 +11,7 @@ x-api-env: &api-env
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
   B24_CLIENT_ID: ${B24_CLIENT_ID:-}
   B24_CLIENT_SECRET: ${B24_CLIENT_SECRET:-}
-  B24_TRUSTED_OAUTH_HOSTS: ${B24_TRUSTED_OAUTH_HOSTS:-oauth.bitrix.info}
+  B24_TRUSTED_OAUTH_HOSTS: ${B24_TRUSTED_OAUTH_HOSTS:-oauth.bitrix.info,oauth.bitrix24.tech}
   # Только чтение данных портала, пока изменения не разрешены владельцем явно.
   B24_READ_ONLY: ${B24_READ_ONLY:-true}
 

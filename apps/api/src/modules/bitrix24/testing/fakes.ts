@@ -56,7 +56,7 @@ export function fakeBitrix(): FakeBitrix {
   const fb: FakeBitrix = {
     oauthCalls: [],
     restCalls: [],
-    rest: { 'user.admin': { result: true }, 'event.bind': { result: true } },
+    rest: { 'user.admin': { result: true }, 'event.bind': { result: true }, scope: { result: ['crm', 'booking', 'placement', 'user'] } },
     oauth: () => {
       n++;
       return {

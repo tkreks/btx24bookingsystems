@@ -67,7 +67,10 @@ export class InstallService {
     if (admin.result !== true) throw new Bitrix24Error('NOT_ADMIN', 'Only a Bitrix24 administrator can install the application', 403);
 
     const portal = await this.portals.saveInstallation(tokens, APPLICATION_TOKEN);
-    await this.bindEvents(this.portals.clientFor(portal));
+    const appClient = this.portals.clientFor(portal);
+    const scope = await appClient.call<string[]>('scope');
+    if (Array.isArray(scope.result)) await this.portals.updateScope(portal.id, scope.result);
+    await this.bindEvents(appClient);
     this.logger.log(`installed on ${portal.domain} (${portal.memberId})`);
     return { memberId: portal.memberId, domain: portal.domain };
   }

@@ -54,6 +54,11 @@ export class PortalService {
     return this.prisma.portal.upsert({ where: { memberId: tokens.memberId }, create: { memberId: tokens.memberId, ...data }, update: data });
   }
 
+  /** Фактические права приложения (ответ `oauth/token` для локальных приложений даёт лишь `app`). */
+  async updateScope(portalId: string, scope: string[]): Promise<void> {
+    await this.prisma.portal.update({ where: { id: portalId }, data: { scope: scope.join(',').slice(0, 1000) } });
+  }
+
   /** Удаление приложения с портала: токены стираем сразу, данные портала оставляем. */
   async markUninstalled(portalId: string): Promise<void> {
     await this.prisma.portal.update({

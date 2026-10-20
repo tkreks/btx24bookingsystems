@@ -29,14 +29,21 @@ export class InstallController {
   @Post('install')
   @HttpCode(200)
   async handle(@Query() query: InstallRequest, @Body() body: InstallRequest & InstallEvent, @Res() res: Response) {
-    const isEvent = String(body?.event ?? '').toUpperCase() === 'ONAPPINSTALL';
+    const event = String(body?.event ?? '').toUpperCase();
+    const isEvent = event === 'ONAPPINSTALL';
+    // Битрикс24 сам привязывает к адресу установки и другие события (ONAPPUSERREADY) — им здесь нечего делать.
+    if (event && !isEvent) {
+      res.json({ ok: true, ignored: event });
+      return;
+    }
     try {
       const { domain } = await this.install.install(normalizeInstallRequest({ ...query, ...body }));
       if (isEvent) res.json({ ok: true });
       else res.type('html').send(installPage(true, `Приложение установлено на портал ${domain}.`));
     } catch (err) {
       const known = err instanceof Bitrix24Error;
-      this.logger.warn(`install failed: ${known ? err.code : (err as Error).message} (fields: ${presentKeys({ ...query, ...body })})`);
+      // Сообщения Bitrix24Error формируем сами или берём error_description — секретов в них нет.
+      this.logger.warn(`install failed: ${known ? `${err.code}: ${err.message}` : (err as Error).message} (fields: ${presentKeys({ ...query, ...body })})`);
       const status = known && err.code === 'NOT_ADMIN' ? 403 : known ? 400 : 500;
       if (isEvent) {
         res.status(status).json({ ok: false });
@@ -61,7 +68,7 @@ export class InstallController {
         const { domain } = await this.install.install(normalizeInstallRequest({ ...query, ...body }));
         this.logger.log(`registered ${domain} on first open`);
       } catch (err) {
-        this.logger.warn(`first-open registration skipped: ${err instanceof Bitrix24Error ? err.code : (err as Error).message}`);
+        this.logger.warn(`first-open registration skipped: ${err instanceof Bitrix24Error ? `${err.code}: ${err.message}` : (err as Error).message}`);
       }
     }
     const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';

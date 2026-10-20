@@ -21,8 +21,10 @@
   по явному разрешению владельца.
 - **Доверяем только серверу авторизации.** POST установки подделываем, поэтому `member_id`,
   `client_endpoint`, токены и `user_id` берутся из ответа `oauth/token` (нужен `client_secret`).
-  `SERVER_ENDPOINT` принимается только из `B24_TRUSTED_OAUTH_HOSTS` (облако — `oauth.bitrix.info`,
-  для «коробки» — домен портала).
+  `SERVER_ENDPOINT` принимается только из `B24_TRUSTED_OAUTH_HOSTS`: облако — `oauth.bitrix.info`,
+  российское облако (`*.bitrix24.ru`) — `oauth.bitrix24.tech` (проверено 2026-10-21: сертификат
+  `*.bitrix24.tech`, ответы идентичны `oauth.bitrix.info`), «коробка» — домен портала. Новый хост
+  добавлять только после такой же проверки: на него уходит `client_secret`.
 - **Установить может только администратор** (`user.admin === true`).
 - **Секреты:** access/refresh-токены — AES-256-GCM (`ENCRYPTION_KEY`), `application_token` — только
   sha256. Токены из `auth` входящих событий в журнал не пишутся. Смена `ENCRYPTION_KEY` делает

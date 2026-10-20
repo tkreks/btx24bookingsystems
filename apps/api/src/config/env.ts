@@ -20,12 +20,13 @@ export const envSchema = z.object({
   B24_CLIENT_ID: optionalString(z.string()),
   B24_CLIENT_SECRET: optionalString(z.string()),
   /**
-   * Хосты серверов авторизации, которым доверяем (через запятую). Облако — oauth.bitrix.info;
-   * для «коробки» сервер авторизации — сам портал, его домен добавляется сюда явно.
+   * Хосты серверов авторизации, которым доверяем (через запятую): облако — oauth.bitrix.info,
+   * российское облако (*.bitrix24.ru) — oauth.bitrix24.tech; для «коробки» сервер авторизации —
+   * сам портал, его домен добавляется сюда явно.
    */
   B24_TRUSTED_OAUTH_HOSTS: z
     .string()
-    .default('oauth.bitrix.info')
+    .default('oauth.bitrix.info,oauth.bitrix24.tech')
     .transform((v) => v.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)),
   /**
    * Только чтение данных портала: изменяющие методы REST отклоняются до запроса. По умолчанию

@@ -29,6 +29,8 @@
 - `access_token` живёт 1 час, `refresh_token` — **180 дней**. Обновление:
   `GET https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=…&client_secret=…&refresh_token=…`
   (в ответе — доверенные `member_id`, `client_endpoint`, `server_endpoint`, `scope`, `user_id`).
+  Для российского облака (`*.bitrix24.ru`) сервер авторизации — **`oauth.bitrix24.tech`**: портал
+  присылает его в `SERVER_ENDPOINT`.
   Refresh-токен **меняется** при каждом обмене — старый больше не действует.
 - При открытии во фрейме портал присылает POST с `AUTH_ID`, `REFRESH_ID`, `SERVER_ENDPOINT`,
   `APPLICATION_TOKEN`, `APPLICATION_SCOPE`, `member_id`, `PLACEMENT`; в query — `DOMAIN`, `LANG`,
@@ -40,8 +42,10 @@
 1. Битрикс24 → Разработчикам → Другое → **Локальное приложение**, тип «Серверное, с интерфейсом».
 2. Путь вашего обработчика: `https://testapp.1-app.ru/`
 3. Путь для первоначальной установки: `https://testapp.1-app.ru/api/b24/install`
-4. Права (scope): `crm`, `booking`, `placement`, `user`, `bizproc`, `im` (уточняется по мере
-   появления функций; изменение прав требует переустановки).
+4. Права (scope): `crm`, `booking`, `placement`, `user`, `bizproc`, `imopenlines`, `messageservice`
+   (так настроено на `admiral-club` 2026-10-21; `im` добавим, когда понадобятся сообщения в чат.
+   Изменение прав требует переустановки). Фактические права приложение запрашивает методом `scope`
+   при установке и хранит в `Portal.scope`.
 5. Сохранить → получить `client_id` и `client_secret` → записать в `.env` сервера
    (`B24_CLIENT_ID`, `B24_CLIENT_SECRET`) → `docker compose up -d api worker`.
 6. Открыть приложение из портала под администратором — выполнится установка. Опция «Приложение
