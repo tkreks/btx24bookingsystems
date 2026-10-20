@@ -11,5 +11,7 @@ export default defineConfig({
     // DATABASE_URL. Commands that do connect (`migrate dev/deploy`) get the real value from the
     // environment or apps/api/.env.
     url: process.env.DATABASE_URL ?? 'mysql://placeholder:placeholder@localhost:3306/placeholder',
+    // Только для `prisma migrate dev`: отдельная база <db>_shadow (docker/db/init/05-shadow-db.sh).
+    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL,
   },
 });

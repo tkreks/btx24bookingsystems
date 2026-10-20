@@ -26,11 +26,26 @@
    сразу.
 
 ## Авторизация и токены
-- `access_token` живёт около часа, `refresh_token` — около 28 дней **(проверить)**; обновление
-  через `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=…&client_secret=…&refresh_token=…`.
-- Токены храним зашифрованными (ключ — переменная окружения), обновляем в одном месте
-  (клиент модуля `bitrix24`), с защитой от параллельного refresh.
-- Каждое входящее событие проверяем по `application_token`, сохранённому при установке.
+- `access_token` живёт 1 час, `refresh_token` — **180 дней**. Обновление:
+  `GET https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=…&client_secret=…&refresh_token=…`
+  (в ответе — доверенные `member_id`, `client_endpoint`, `server_endpoint`, `scope`, `user_id`).
+  Refresh-токен **меняется** при каждом обмене — старый больше не действует.
+- При открытии во фрейме портал присылает POST с `AUTH_ID`, `REFRESH_ID`, `SERVER_ENDPOINT`,
+  `APPLICATION_TOKEN`, `APPLICATION_SCOPE`, `member_id`, `PLACEMENT`; в query — `DOMAIN`, `LANG`,
+  `APP_SID`. `status` — справочно, доверенный — только через `app.info` на сервере авторизации.
+- Каждое входящее событие проверяем по `auth.application_token`, сохранённому при установке.
+- Реализация — модуль `apps/api/src/modules/bitrix24` (см. его `MODULE.md`).
+
+## Подключение приложения на портале (локальное приложение)
+1. Битрикс24 → Разработчикам → Другое → **Локальное приложение**, тип «Серверное, с интерфейсом».
+2. Путь вашего обработчика: `https://testapp.1-app.ru/`
+3. Путь для первоначальной установки: `https://testapp.1-app.ru/api/b24/install`
+4. Права (scope): `crm`, `booking`, `placement`, `user`, `bizproc`, `im` (уточняется по мере
+   появления функций; изменение прав требует переустановки).
+5. Сохранить → получить `client_id` и `client_secret` → записать в `.env` сервера
+   (`B24_CLIENT_ID`, `B24_CLIENT_SECRET`) → `docker compose up -d api worker`.
+6. Открыть приложение из портала под администратором — выполнится установка.
+   Проверка: `npm run mcp:cli -- db_query '{"sql":"SELECT domain, status, installedAt FROM `Portal`"}'`.
 
 ## Вызовы REST
 - Лимит запросов на приложение/портал (порядка 2 запросов/с с «ведром» на всплески)

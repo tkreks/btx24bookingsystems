@@ -8,6 +8,10 @@ x-api-env: &api-env
   TZ: UTC
   DATABASE_URL: mysql://${DB_USER:-btx24}:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:3306/${DB_NAME:-btx24}
   APP_BASE_URL: ${APP_BASE_URL:-}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
+  B24_CLIENT_ID: ${B24_CLIENT_ID:-}
+  B24_CLIENT_SECRET: ${B24_CLIENT_SECRET:-}
+  B24_TRUSTED_OAUTH_HOSTS: ${B24_TRUSTED_OAUTH_HOSTS:-oauth.bitrix.info}
 
 services:
   db:

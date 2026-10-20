@@ -12,6 +12,24 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   /** Публичный HTTPS-адрес приложения — его указывают в настройках приложения Битрикс24. */
   APP_BASE_URL: optionalString(z.string().url()),
+  /** Ключ шифрования токенов порталов: 32 байта в base64 (`openssl rand -base64 32`). */
+  ENCRYPTION_KEY: z
+    .string()
+    .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be 32 bytes encoded as base64'),
+  /** client_id / client_secret локального приложения (форма приложения на портале). */
+  B24_CLIENT_ID: optionalString(z.string()),
+  B24_CLIENT_SECRET: optionalString(z.string()),
+  /**
+   * Хосты серверов авторизации, которым доверяем (через запятую). Облако — oauth.bitrix.info;
+   * для «коробки» сервер авторизации — сам портал, его домен добавляется сюда явно.
+   */
+  B24_TRUSTED_OAUTH_HOSTS: z
+    .string()
+    .default('oauth.bitrix.info')
+    .transform((v) => v.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)),
+  /** Лимит REST-запросов к одному порталу: устойчивая скорость и всплеск. */
+  B24_RATE_PER_SEC: z.coerce.number().positive().default(2),
+  B24_RATE_BURST: z.coerce.number().int().positive().default(10),
 });
 
 export type Env = z.infer<typeof envSchema>;

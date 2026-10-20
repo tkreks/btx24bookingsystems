@@ -10,3 +10,59 @@ generator client {
 datasource db {
   provider = "mysql"
 }
+
+// ---------- Bitrix24: порталы и входящие события ----------
+
+/// Установка приложения на портал Битрикс24 (тенант). Токены — только в зашифрованном виде.
+model Portal {
+  id                   String       @id @default(cuid())
+  /// Неизменный идентификатор портала (не зависит от смены домена).
+  memberId             String       @unique @db.VarChar(64)
+  domain               String       @db.VarChar(255)
+  /// База REST портала, например https://portal.bitrix24.ru/rest/ (из ответа сервера авторизации).
+  clientEndpoint       String       @db.VarChar(255)
+  /// REST сервера авторизации (облако — https://oauth.bitrix.info/rest/, «коробка» — сам портал).
+  serverEndpoint       String       @db.VarChar(255)
+  /// sha256(application_token) — проверка подлинности входящих событий.
+  applicationTokenHash String?      @db.Char(64)
+  accessTokenEnc       String?      @db.Text
+  refreshTokenEnc      String?      @db.Text
+  accessExpiresAt      DateTime?    @db.DateTime(3)
+  scope                String       @default("") @db.VarChar(1000)
+  /// Часовой пояс портала для расчёта периодов и отображения.
+  timezone             String       @default("Europe/Moscow") @db.VarChar(64)
+  status               PortalStatus @default(ACTIVE)
+  installedByUserId    Int?
+  installedAt          DateTime     @default(now()) @db.DateTime(3)
+  uninstalledAt        DateTime?    @db.DateTime(3)
+  createdAt            DateTime     @default(now()) @db.DateTime(3)
+  updatedAt            DateTime     @updatedAt @db.DateTime(3)
+  events               Bitrix24Event[]
+}
+
+enum PortalStatus {
+  ACTIVE
+  UNINSTALLED
+}
+
+/// Входящее событие Битрикс24: сначала сохраняем, потом обрабатываем (повторная доставка возможна).
+model Bitrix24Event {
+  id          String      @id @default(cuid())
+  portalId    String
+  portal      Portal      @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  event       String      @db.VarChar(100)
+  payload     Json
+  status      EventStatus @default(PENDING)
+  error       String?     @db.Text
+  receivedAt  DateTime    @default(now()) @db.DateTime(3)
+  processedAt DateTime?   @db.DateTime(3)
+
+  @@index([status, receivedAt])
+  @@index([portalId, event])
+}
+
+enum EventStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
