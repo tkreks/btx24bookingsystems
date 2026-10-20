@@ -64,6 +64,20 @@ describe('CalendarService', () => {
     expect(listCalls.length).toBeGreaterThan(1);
   });
 
+  it('limits the day to the group resources', async () => {
+    const { client } = fakeClient(() => [booking(1, 0, 60, [1]), booking(2, 0, 60, [2])], { links: { 1: 10, 2: 20 } });
+    const day = await new CalendarService().day(user(client), '2026-10-21', [2]);
+    expect(day.resources.map((r) => r.id)).toEqual([2]);
+    expect(day.bookings.map((b) => b.id)).toEqual([2]);
+  });
+
+  it('returns occupancy only without booking.details (no names, deals or extra REST calls)', async () => {
+    const { client } = fakeClient(() => [booking(1, 0, 60)], { links: { 1: 10 }, deals: [{ ID: '10', TITLE: 'Секрет' }] });
+    const day = await new CalendarService().day(user(client), '2026-10-21', null, false);
+    expect(day.bookings[0]).toMatchObject({ name: 'Занято', description: null, dealId: null, deal: null });
+    expect(client.batch).not.toHaveBeenCalled();
+  });
+
   it('does not query deals when there are no links', async () => {
     const { client } = fakeClient(() => [booking(1, 0, 60)]);
     await new CalendarService().day(user(client), '2026-10-21');

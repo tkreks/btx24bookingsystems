@@ -13,7 +13,6 @@ import { PlacementsController } from './placements/placements.controller.js';
 import { PlacementsService } from './placements/placements.service.js';
 import { PortalService } from './portals/portal.service.js';
 import { RateLimiter } from './rest/rate-limiter.js';
-import { SessionController } from './session/session.controller.js';
 import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js';
 
 /**
@@ -21,7 +20,7 @@ import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js
  * Доменные модули получают клиент через PortalService.clientFor(portal), а не ходят в портал сами.
  */
 @Module({
-  controllers: [InstallController, EventsController, PlacementsController, SessionController],
+  controllers: [InstallController, EventsController, PlacementsController],
   providers: [
     { provide: B24_FETCH, useValue: globalThis.fetch.bind(globalThis) },
     {
@@ -51,6 +50,6 @@ import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js
     UserTokenVerifier,
     B24AuthGuard,
   ],
-  exports: [PortalService, UserTokenVerifier, B24AuthGuard],
+  exports: [PortalService, UserTokenVerifier, B24AuthGuard, B24_CONFIG],
 })
 export class Bitrix24Module {}

@@ -38,6 +38,9 @@ model Portal {
   createdAt            DateTime     @default(now()) @db.DateTime(3)
   updatedAt            DateTime     @updatedAt @db.DateTime(3)
   events               Bitrix24Event[]
+  groups               WorkGroup[]
+  admins               AppAdmin[]
+  settings             PortalSettings?
 }
 
 enum PortalStatus {
@@ -65,4 +68,91 @@ enum EventStatus {
   PENDING
   PROCESSED
   FAILED
+}
+
+// ---------- Группы, роли, настройки приложения (ADR 0005) ----------
+
+enum MemberKind {
+  USER
+  DEPARTMENT
+}
+
+enum GroupRole {
+  VIEWER
+  TECHNOLOGIST
+  MANAGER
+  GROUP_ADMIN
+}
+
+enum BookingMode {
+  duration
+  interval
+}
+
+/// Рабочее направление портала: воронка + ресурсы + настройки + люди с ролями.
+model WorkGroup {
+  id                String              @id @default(cuid())
+  portalId          String
+  portal            Portal              @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  name              String              @db.VarChar(100)
+  sort              Int                 @default(0)
+  /// Воронка сделок направления (CATEGORY_ID); null — без привязки.
+  dealCategoryId    Int?
+  bookingMode       BookingMode         @default(duration)
+  durationMinutes   Int                 @default(60)
+  checkInTime       String              @default("14:00") @db.Char(5)
+  checkOutTime      String              @default("12:00") @db.Char(5)
+  defaultNights     Int                 @default(1)
+  techWindowMinutes Int                 @default(0)
+  /// Включённые функции группы (GROUP_FEATURES из @btx24/shared).
+  features          Json
+  archivedAt        DateTime?           @db.DateTime(3)
+  createdAt         DateTime            @default(now()) @db.DateTime(3)
+  updatedAt         DateTime            @updatedAt @db.DateTime(3)
+  resources         WorkGroupResource[]
+  members           WorkGroupMember[]
+
+  @@index([portalId, archivedAt])
+}
+
+/// Ресурс модуля бронирования Битрикс24 в группе. Один ресурс может входить в несколько групп.
+model WorkGroupResource {
+  groupId    String
+  group      WorkGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  resourceId Int
+
+  @@id([groupId, resourceId])
+}
+
+/// Участник группы: сотрудник или отдел Битрикс24 (с вложенными отделами).
+model WorkGroupMember {
+  id       String     @id @default(cuid())
+  groupId  String
+  group    WorkGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  kind     MemberKind
+  bitrixId Int
+  role     GroupRole
+
+  @@unique([groupId, kind, bitrixId])
+}
+
+/// Администраторы приложения (помимо администраторов портала, которые имеют доступ всегда).
+model AppAdmin {
+  id       String     @id @default(cuid())
+  portalId String
+  portal   Portal     @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  kind     MemberKind
+  bitrixId Int
+
+  @@unique([portalId, kind, bitrixId])
+}
+
+/// Настройки приложения на портале. Сбор данных диалогов — по умолчанию выключен.
+model PortalSettings {
+  portalId              String   @id
+  portal                Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dialogMetadataEnabled Boolean  @default(false)
+  dialogTextsEnabled    Boolean  @default(false)
+  updatedByUserId       Int?
+  updatedAt             DateTime @updatedAt @db.DateTime(3)
 }

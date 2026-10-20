@@ -22,32 +22,45 @@ interface RawBooking {
  */
 @Injectable()
 export class CalendarService {
-  async day(user: B24UserContext, date: string): Promise<CalendarDay> {
+  /**
+   * @param resourceIds ресурсы группы; null — все ресурсы портала (администратор без групп).
+   * @param withDetails false — только занятость: без названий, описаний и сделок (роль «технолог»).
+   */
+  async day(user: B24UserContext, date: string, resourceIds: number[] | null = null, withDetails = true): Promise<CalendarDay> {
     const timezone = user.portal.timezone;
     const { start, end } = zonedDayRange(date, timezone);
     const client = user.client;
 
-    const [resources, raw] = await Promise.all([this.resources(client), this.bookings(client, toSec(start), toSec(end))]);
+    const allowed = resourceIds ? new Set(resourceIds) : null;
+    const [allResources, allBookings] = await Promise.all([this.resources(client), this.bookings(client, toSec(start), toSec(end))]);
+    const resources = allowed ? allResources.filter((r) => allowed.has(r.id)) : allResources;
+    const raw = allowed ? allBookings.filter((b) => (b.resourceIds ?? []).some((id) => allowed.has(Number(id)))) : allBookings;
+    if (!withDetails) return { date, timezone, resources, bookings: raw.map((b) => this.toBooking(b, null, null)).map(occupancyOnly).sort(byStart) };
+
     const dealIds = await this.dealLinks(client, raw.map((b) => b.id));
     const deals = await this.deals(client, [...new Set(dealIds.values())]);
 
-    const bookings: CalendarBooking[] = raw
+    const bookings = raw
       .map((b) => {
         const dealId = dealIds.get(b.id) ?? null;
-        return {
-          id: Number(b.id),
-          name: b.name ?? '',
-          description: b.description ?? null,
-          resourceIds: (b.resourceIds ?? []).map(Number),
-          start: new Date(Number(b.datePeriod?.from?.timestamp ?? 0) * 1000).toISOString(),
-          end: new Date(Number(b.datePeriod?.to?.timestamp ?? 0) * 1000).toISOString(),
-          dealId,
-          deal: dealId ? (deals.get(dealId) ?? null) : null,
-        };
+        return this.toBooking(b, dealId, dealId ? (deals.get(dealId) ?? null) : null);
       })
-      .sort((a, b) => a.start.localeCompare(b.start) || a.id - b.id);
+      .sort(byStart);
 
     return { date, timezone, resources, bookings };
+  }
+
+  private toBooking(b: RawBooking, dealId: number | null, deal: CalendarDeal | null): CalendarBooking {
+    return {
+      id: Number(b.id),
+      name: b.name ?? '',
+      description: b.description ?? null,
+      resourceIds: (b.resourceIds ?? []).map(Number),
+      start: new Date(Number(b.datePeriod?.from?.timestamp ?? 0) * 1000).toISOString(),
+      end: new Date(Number(b.datePeriod?.to?.timestamp ?? 0) * 1000).toISOString(),
+      dealId,
+      deal,
+    };
   }
 
   private async resources(client: Bitrix24RestClient): Promise<CalendarResource[]> {
@@ -108,3 +121,6 @@ export class CalendarService {
 }
 
 const toSec = (d: Date) => Math.floor(d.getTime() / 1000);
+const byStart = (a: CalendarBooking, b: CalendarBooking) => a.start.localeCompare(b.start) || a.id - b.id;
+/** Без права booking.details: видна только занятость ресурса. */
+const occupancyOnly = (b: CalendarBooking): CalendarBooking => ({ ...b, name: 'Занято', description: null, dealId: null, deal: null });
