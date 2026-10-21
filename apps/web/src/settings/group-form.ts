@@ -1,4 +1,6 @@
 import {
+  DEFAULT_CLIENT_MESSAGE,
+  DEFAULT_FAIL_MESSAGE,
   GROUP_FEATURES,
   type DealFieldConfig,
   type GroupDto,
@@ -46,14 +48,11 @@ export function defaultOptions(): GroupOptionsDto {
       failTemplateId: '',
       prepaymentAmount: 0,
       clientMessage: DEFAULT_CLIENT_MESSAGE,
+      failMessage: DEFAULT_FAIL_MESSAGE,
     },
   };
 }
 
-/** Текст по умолчанию для сообщения клиенту со ссылкой на оплату (правится в настройках группы). */
-export const DEFAULT_CLIENT_MESSAGE =
-  'Здравствуйте! Для подтверждения брони внесите предоплату {amount} по ссылке: {link}\n' +
-  'Оплатить нужно в течение {minutes} минут (до {deadline}), иначе бронь будет снята.';
 
 /** Новое поле сделки — как в прототипе: видно при создании и в карточке, в списке — нет. */
 export function newDealField(name: string): DealFieldConfig {
@@ -81,3 +80,5 @@ export function setResourceDefaults(
   else delete next[String(resourceId)];
   return next;
 }
+
+export { DEFAULT_CLIENT_MESSAGE, DEFAULT_FAIL_MESSAGE };

@@ -1,6 +1,8 @@
 // Роли и права в группах (ADR 0005). Источник правды и для api (проверка), и для web (скрытие
 // недоступного). Право в группе = права роли ∩ функции, включённые в группе.
 
+import type { BookingTypeRule } from './client-messages.js';
+
 export const PERMISSIONS = [
   'calendar.view', // видеть календарь ресурсов группы
   'booking.details', // видеть данные броней и сделок (без него — только занятость/тех. окна)
@@ -105,6 +107,8 @@ export interface GroupOptionsDto {
   /** resourceId → товары по умолчанию. */
   resourceDefaults: Record<string, { productId: number; quantity: number }[]>;
   views: { desktop: CalendarViewSetting; mobile: CalendarViewSetting };
+  /** Типы брони по товарам и подтверждение клиенту для каждого (замена БП 270). */
+  bookingTypes?: BookingTypeRule[];
   payments: {
     prepayment: PaymentStepConfig;
     surcharge: PaymentStepConfig;
@@ -120,6 +124,8 @@ export interface GroupOptionsDto {
      * {deadline} — до какого времени оплатить, {minutes} — сколько минут на оплату.
      */
     clientMessage?: string;
+    /** Сообщение клиенту, когда бронь снята из-за неоплаты в срок; пусто — не отправлять. */
+    failMessage?: string;
   };
 }
 

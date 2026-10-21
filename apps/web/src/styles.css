@@ -1174,6 +1174,177 @@ main.loading {
   font-size: 12px;
 }
 
+/* ---------- сообщения клиенту и имена ресурсов ---------- */
+
+.resource-name-list {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-name-list label {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.resource-name-list label.archived > span:first-child {
+  color: var(--muted);
+}
+
+.resource-name-list input,
+.bp-import input,
+.message-steps textarea {
+  font: inherit;
+  font-size: 16px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.bp-import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.bp-import label {
+  display: grid;
+  gap: 4px;
+}
+
+.bp-import input {
+  width: 110px;
+}
+
+.booking-type {
+  margin-bottom: 12px;
+}
+
+.booking-type-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.row-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.row-actions button {
+  padding: 2px 9px;
+}
+
+.message-steps {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.message-steps li {
+  display: grid;
+  gap: 6px;
+}
+
+.message-steps textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.step-files-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-files-row .pill button {
+  border: 0;
+  background: none;
+  padding: 0 0 0 6px;
+}
+
+.message-preview {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f4f7fc;
+}
+
+.message-preview .cv-bubble {
+  max-width: 100%;
+  background: #e5efff;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.message-preview .cv-bubble-text {
+  white-space: pre-wrap;
+}
+
+.variables-help code {
+  font-size: 12px;
+}
+
+.disk-picker {
+  max-width: 560px;
+}
+
+.disk-picker header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.disk-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-bottom: 8px;
+}
+
+.disk-path button + button::before {
+  content: '› ';
+  color: var(--muted);
+}
+
+.disk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 55dvh;
+  overflow-y: auto;
+}
+
+.disk-list button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-weight: 500;
+  padding: 9px 10px;
+}
+
+.disk-list button:hover {
+  background: #eef4ff;
+}
+
+@media (max-width: 560px) {
+  .resource-name-list label {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* ---------- уведомления о бронях ---------- */
 
 .alert-list {

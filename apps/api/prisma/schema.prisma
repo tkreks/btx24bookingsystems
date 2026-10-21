@@ -396,6 +396,8 @@ model Resource {
   portal     Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
   resourceId Int
   name       String    @db.VarChar(255)
+  /// Имя для клиента в сообщениях («Дом знахаря»); null — как в Битрикс24. Ведёт приложение.
+  clientName String?   @db.VarChar(255)
   archivedAt DateTime? @db.DateTime(3)
   syncedAt   DateTime  @db.DateTime(3)
 

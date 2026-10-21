@@ -13,7 +13,15 @@ const READ_VERBS = new Set(['list', 'get', 'fields', 'current', 'admin', 'info']
 const APP_SYSTEM_METHODS = new Set(['event.bind', 'event.unbind', 'event.get', 'placement.bind', 'placement.unbind', 'placement.get', 'app.info', 'scope', 'methods', 'profile']);
 
 /** Чтения с нестандартным именем: ищут, ничего не меняя. Добавлять поимённо, не по глаголу. */
-const READ_METHODS = new Set(['user.search']);
+const READ_METHODS = new Set([
+  'user.search',
+  // поиск клиента по номеру телефона (чаты по телефону)
+  'crm.duplicate.findbycomm',
+  // обзор Диска — выбор файлов для сообщений клиенту
+  'disk.storage.getlist',
+  'disk.storage.getchildren',
+  'disk.folder.getchildren',
+]);
 
 export function isReadMethod(method: string): boolean {
   const m = method.toLowerCase();

@@ -11,6 +11,7 @@ import {
 import { apiDelete, apiPost, apiPut } from '../api.js';
 import { MembersEditor } from './MembersEditor.js';
 import { CatalogSection, DealFieldsSection, PaymentsSection, ResourcesSection, Section } from './GroupOptions.js';
+import { BookingTypesSection } from './BookingTypesSection.js';
 import { defaultOptions, groupSettings, newGroup } from './group-form.js';
 import { useGroupReferences } from './references.js';
 
@@ -218,6 +219,11 @@ export function GroupForm({
           </div>
           <p className="muted">Тех. окно предупреждает о пересечении, но не запрещает бронирование.</p>
         </Section>
+
+        <BookingTypesSection
+          rules={options.bookingTypes ?? []}
+          onChange={(bookingTypes) => updateOptions({ bookingTypes })}
+        />
 
         <PaymentsSection
           payments={options.payments}

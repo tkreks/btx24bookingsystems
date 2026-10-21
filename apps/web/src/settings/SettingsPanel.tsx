@@ -5,12 +5,14 @@ import { fitFrame } from '../b24.js';
 import { PlacementSettings } from '../calendar/AdminPanel.js';
 import { BookingSyncSettings } from '../bookings/BookingSyncSettings.js';
 import { AppSettingsForm } from './AppSettingsForm.js';
+import { ResourceNames } from './ResourceNames.js';
 import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
 
-type Tab = 'groups' | 'app' | 'passwords' | 'placements';
+type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'groups', label: 'Группы' },
+  { key: 'resources', label: 'Ресурсы' },
   { key: 'app', label: 'Приложение' },
   { key: 'passwords', label: 'Прямая ссылка' },
   { key: 'placements', label: 'Встройки' },
@@ -264,6 +266,7 @@ export function SettingsPanel({
             <ExternalPasswords onDirty={markDirty} onBusy={markBusy} />
           </fieldset>
         )}
+        {tab === 'resources' && <ResourceNames />}
         {tab === 'placements' && <PlacementSettings />}
       </div>
     </div>

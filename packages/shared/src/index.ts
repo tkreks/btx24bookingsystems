@@ -8,3 +8,4 @@ export * from './time.js';
 export * from './group-admin.js';
 export * from './openlines.js';
 export * from './bookings.js';
+export * from './client-messages.js';

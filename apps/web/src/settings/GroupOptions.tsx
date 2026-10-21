@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { CatalogDto, DealFieldInfo, DealStageItem, GroupOptionsDto, NamedBitrixItem } from '@btx24/shared';
-import { DEFAULT_CLIENT_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
+import { DEFAULT_CLIENT_MESSAGE, DEFAULT_FAIL_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
 import { CatalogSections, sectionSummary } from './CatalogSections.js';
 
 type Ref<T> = { data: T | null; error: string };
@@ -127,10 +127,18 @@ export function PaymentsSection({
           onChange={(e) => onChange({ ...payments, clientMessage: e.target.value })}
         />
         <span className="muted">
-          Переменные: {'{link}'} — ссылка на оплату, {'{amount}'} — сумма, {'{minutes}'} — минут на оплату,{' '}
-          {'{deadline}'} — оплатить до. Файлы (согласие и др.) с Диска Битрикс24 — после выдачи приложению права
-          «Диск».
+          Переменные: {'{link}'} — ссылка на оплату, {'{prepayment}'} — сумма предоплаты, {'{client_name}'}, {'{house}'}, {'{date_start}'}, {'{minutes}'} — минут на оплату,{' '}
+          {'{deadline}'} — оплатить до. Подтверждение после оплаты — в блоке «Типы брони и сообщения клиенту».
         </span>
+      </label>
+      <label className="settings-block">
+        Сообщение клиенту, если бронь снята из-за неоплаты (пусто — не отправлять)
+        <textarea
+          rows={3}
+          maxLength={4000}
+          value={payments.failMessage ?? DEFAULT_FAIL_MESSAGE}
+          onChange={(e) => onChange({ ...payments, failMessage: e.target.value })}
+        />
       </label>
       <h4>Действия после оплаты</h4>
       <div className="settings-grid">
