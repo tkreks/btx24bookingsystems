@@ -48,6 +48,8 @@ export function DashboardPage({
   const [alertCount, setAlertCount] = useState<number | null>(null);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
+  // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
+  const [callsFunnel, setCallsFunnel] = useState<number | null>(null);
 
   useEffect(() => {
     if (!bookingAlerts) return;
@@ -63,7 +65,8 @@ export function DashboardPage({
 
   useEffect(() => {
     let active = true;
-    apiGet<DashboardDto>(`/dashboard?from=${range.from}&to=${range.to}&callsScope=${callsScope}`).then(
+    const funnel = callsFunnel === null ? '' : `&callsFunnel=${callsFunnel}`;
+    apiGet<DashboardDto>(`/dashboard?from=${range.from}&to=${range.to}&callsScope=${callsScope}${funnel}`).then(
       (dto) => {
         if (active) {
           setData(dto);
@@ -75,7 +78,7 @@ export function DashboardPage({
     return () => {
       active = false;
     };
-  }, [range, callsScope]);
+  }, [range, callsScope, callsFunnel]);
 
   const choose = (p: PeriodPreset) => {
     setPreset(p);
@@ -84,7 +87,14 @@ export function DashboardPage({
   };
   const draftError = periodError(draft.from, draft.to);
 
-  const d = data?.from === range.from && data.to === range.to && data.callsScope === callsScope ? data : null;
+  const d =
+    data?.from === range.from &&
+    data.to === range.to &&
+    data.callsScope === callsScope &&
+    (callsFunnel === null || data.callsFunnel === callsFunnel)
+      ? data
+      : null;
+  const funnels = data?.callFunnels ?? [];
   const n = (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v));
 
   return (
@@ -187,7 +197,22 @@ export function DashboardPage({
 
       <section className="day-panel calls-panel">
         <div className="day-header">
-          <b>Звонки</b>
+          <b>Звонки — клиенты</b>
+          {funnels.length > 1 && (
+            <label className="calls-funnel">
+              Повторные по воронке{' '}
+              <select
+                value={callsFunnel ?? data?.callsFunnel ?? ''}
+                onChange={(e) => setCallsFunnel(Number(e.target.value))}
+              >
+                {funnels.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="segmented period-presets" role="group" aria-label="Чьи звонки">
             {(['all', 'mine'] as const).map((s) => (
               <button key={s} className={callsScope === s ? 'active' : ''} onClick={() => setCallsScope(s)}>
@@ -214,8 +239,10 @@ export function DashboardPage({
           </div>
         )}
         <p className="muted dash-note">
-          Упущенные — пропущенные входящие, после которых клиенту не перезвонили и он сам не дозвонился. «Не дозвонились»
-          на исходящих станет видно после выдачи приложению права «Телефония».
+          Считаются клиенты, а не звонки: несколько звонков от клиента и ему — один клиент. Повторный — есть выигранная
+          сделка в воронке {funnels.find((f) => f.id === d?.callsFunnel)?.name ?? 'группы'}, закрытая до его первого
+          звонка в периоде. Упущенный — после пропущенного не перезвонили и он сам не дозвонился («не дозвонились» на
+          исходящих станет видно после выдачи приложению права «Телефония»).
         </p>
       </section>
       {callsOpen && (
@@ -224,6 +251,7 @@ export function DashboardPage({
           from={range.from}
           to={range.to}
           scope={callsScope}
+          funnel={d?.callsFunnel ?? null}
           timezone={tz}
           onClose={() => setCallsOpen(null)}
         />

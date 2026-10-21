@@ -17,6 +17,7 @@ export function CallsModal({
   from,
   to,
   scope,
+  funnel,
   timezone,
   onClose,
 }: {
@@ -24,6 +25,7 @@ export function CallsModal({
   from: string;
   to: string;
   scope: CallScope;
+  funnel: number | null;
   timezone: string;
   onClose: () => void;
 }) {
@@ -32,7 +34,9 @@ export function CallsModal({
 
   useEffect(() => {
     let active = true;
-    apiGet<CallListDto>(`/dashboard/calls?kind=${kind}&from=${from}&to=${to}&scope=${scope}`).then(
+    apiGet<CallListDto>(
+      `/dashboard/calls?kind=${kind}&from=${from}&to=${to}&scope=${scope}${funnel === null ? '' : `&funnel=${funnel}`}`,
+    ).then(
       (d) => active && setData(d),
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить звонки'),
     );
@@ -42,7 +46,7 @@ export function CallsModal({
       active = false;
       document.removeEventListener('keydown', esc);
     };
-  }, [kind, from, to, scope, onClose]);
+  }, [kind, from, to, scope, funnel, onClose]);
 
   const deals = new Set(data?.items.filter((i) => i.dealId).map((i) => i.dealId));
 
@@ -51,11 +55,11 @@ export function CallsModal({
       <div className="sheet calls-modal" role="dialog" aria-modal="true" aria-label={CALL_KIND_LABELS[kind]} onClick={(e) => e.stopPropagation()}>
         <header>
           <h3>
-            {CALL_KIND_LABELS[kind]} звонки
+            {CALL_KIND_LABELS[kind]}
             {data && (
               <span className="muted">
                 {' '}
-                · {data.items.length}, сделок: {deals.size}
+                · клиентов: {data.items.length}, сделок: {deals.size}
               </span>
             )}
           </h3>
@@ -64,7 +68,7 @@ export function CallsModal({
           </button>
         </header>
         {kind === 'lost' && (
-          <p className="muted">Пропущенные входящие, после которых клиенту не перезвонили и он сам не дозвонился. Один клиент — одна строка.</p>
+          <p className="muted">Пропущенные входящие, после которых клиенту не перезвонили и он сам не дозвонился.</p>
         )}
         {error && (
           <div className="notice error" role="alert">
@@ -78,10 +82,20 @@ export function CallsModal({
           {data?.items.map((c) => {
             const o = OWNER[c.owner.typeId];
             return (
-              <li key={c.activityId}>
-                <span className="muted">{fmtDateTime(c.at, timezone)}</span>
-                <span className={`pill${c.missed ? ' waiting' : ''}`}>{c.missed ? 'пропущен' : 'отвечен'}</span>
+              <li key={c.clientKey}>
+                {c.contact ? (
+                  <button className="link call-client" onClick={() => openCrm('contact', c.contact!.id)}>
+                    {c.contact.name ?? `Контакт #${c.contact.id}`}
+                  </button>
+                ) : (
+                  <span className="call-client">Без контакта</span>
+                )}
                 <span className="call-phone">{c.phone ?? '—'}</span>
+                <span className={`pill${c.repeat ? '' : ' muted-pill'}`}>{c.repeat ? 'повторный' : 'новый'}</span>
+                <span className="muted">
+                  входящих: {c.incomingCount} · последний {fmtDateTime(c.at, timezone)}
+                  {c.missed ? ' (пропущен)' : ''}
+                </span>
                 {o ? (
                   <button className="link" onClick={() => openCrm(o.type, c.owner.id)}>
                     {c.owner.title ?? `${o.label} #${c.owner.id}`}

@@ -24,13 +24,18 @@ import type {
   SendResultDto,
   StoredFileDto,
 } from '@btx24/shared';
-import { AccessService } from '../access/access.service.js';
+import { AccessService, type UserAccess } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { ChatsService } from './chats.service.js';
 import { DashboardService } from './dashboard.service.js';
 import { FilesService, MAX_FILE_BYTES, type UploadedFile as Upload } from './files.service.js';
 import { TemplatesService } from './templates.service.js';
+
+/** Воронки групп пользователя (уникальные, в порядке групп). */
+function funnelsOf(a: UserAccess): number[] {
+  return [...new Set(a.groups.map((g) => g.group.dealCategoryId).filter((x): x is number => x !== null))];
+}
 
 /**
  * Открытые линии. Право — `openlines.read` / `openlines.send` хотя бы в одной группе (или
@@ -53,11 +58,17 @@ export class OpenlinesController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('callsScope') callsScope?: string,
+    @Query('callsFunnel') callsFunnel?: string,
   ): Promise<DashboardDto> {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.get(user, { from, to, callsScope }, await this.can(user, 'openlines.read'));
+    return this.dashboard.get(
+      user,
+      { from, to, callsScope, callsFunnel },
+      await this.can(user, 'openlines.read'),
+      funnelsOf(a),
+    );
   }
 
   /** Звонки выбранного вида за период (окно «сделки» на дашборде). */
@@ -66,7 +77,7 @@ export class OpenlinesController {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.callList(user, query);
+    return this.dashboard.callList(user, query, funnelsOf(a));
   }
 
   @Get('openlines/chats')

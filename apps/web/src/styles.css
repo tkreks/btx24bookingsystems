@@ -1223,6 +1223,26 @@ main.loading {
   font-variant-numeric: tabular-nums;
 }
 
+.call-client {
+  font-weight: 600;
+}
+
+.calls-funnel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.calls-funnel select {
+  font: inherit;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+
 /* ---------- сообщения клиенту и имена ресурсов ---------- */
 
 .resource-name-list {

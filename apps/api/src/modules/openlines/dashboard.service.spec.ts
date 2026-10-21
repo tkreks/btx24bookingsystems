@@ -64,22 +64,48 @@ describe('DashboardService', () => {
     });
   });
 
-  it('call list: lost calls with deal and contact titles, mine scope', async () => {
+  it('calls by client: new vs repeat by won deals in the chosen funnel before the first call', async () => {
+    const comm = (phone: string, contact: number) => [{ VALUE: phone, ENTITY_TYPE_ID: '3', ENTITY_ID: String(contact) }];
     const calls = [
-      { ID: '1', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '1', START_TIME: '2026-10-21T08:00:00Z', RESPONSIBLE_ID: '7', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: [{ VALUE: '+79851234567' }] },
-      { ID: '2', OWNER_TYPE_ID: '3', OWNER_ID: '140', DIRECTION: '1', START_TIME: '2026-10-21T09:00:00Z', RESPONSIBLE_ID: '8', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: [{ VALUE: '+79850000000' }] },
+      // контакт 140: три входящих (один пропущен) и два исходящих — один клиент, повторный
+      { ID: '1', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '1', START_TIME: '2026-10-21T08:00:00Z', RESPONSIBLE_ID: '7', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: comm('+79851234567', 140) },
+      { ID: '2', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '2', START_TIME: '2026-10-21T08:10:00Z', RESPONSIBLE_ID: '7', SETTINGS: [], COMMUNICATIONS: comm('+79851234567', 140) },
+      { ID: '3', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '1', START_TIME: '2026-10-21T09:00:00Z', RESPONSIBLE_ID: '7', SETTINGS: [], COMMUNICATIONS: comm('+79851234567', 140) },
+      { ID: '4', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '1', START_TIME: '2026-10-21T09:30:00Z', RESPONSIBLE_ID: '7', SETTINGS: [], COMMUNICATIONS: comm('+79851234567', 140) },
+      { ID: '5', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '2', START_TIME: '2026-10-21T10:00:00Z', RESPONSIBLE_ID: '7', SETTINGS: [], COMMUNICATIONS: comm('+79851234567', 140) },
+      // контакт 150: пропущенный, не перезвонили — новый, упущенный (выигранная сделка — после звонка)
+      { ID: '6', OWNER_TYPE_ID: '3', OWNER_ID: '150', DIRECTION: '1', START_TIME: '2026-10-21T11:00:00Z', RESPONSIBLE_ID: '8', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: comm('+79850000000', 150) },
     ];
-    const listAll = vi.fn(async () => calls);
-    const batch = vi.fn(async () => ({ result: { t2: [{ ID: '678', TITLE: 'Баня, Иванов' }], t3: [{ ID: '140', NAME: 'Анна', LAST_NAME: null }] } }));
-    const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call: vi.fn(), listAll, batch } } as unknown as B24UserContext;
+    const dealFilters: Record<string, unknown>[] = [];
+    const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) => {
+      if (method === 'crm.activity.list') return calls;
+      if (method === 'crm.deal.list') {
+        dealFilters.push(params?.filter ?? {});
+        return [
+          { CONTACT_ID: '140', CLOSEDATE: '2026-09-01T00:00:00+03:00' },
+          { CONTACT_ID: '150', CLOSEDATE: '2026-10-21T20:00:00+03:00' },
+        ];
+      }
+      if (method === 'crm.contact.list') return [{ ID: '140', NAME: 'Анна', LAST_NAME: 'И.' }, { ID: '150', NAME: 'Олег', LAST_NAME: null }];
+      return [];
+    });
+    const call = vi.fn(async () => ({ result: { categories: [{ id: 0, name: 'БК Алатырь' }, { id: 14, name: 'Домики и беседки' }] } }));
+    const batch = vi.fn(async () => ({ result: { t2: [{ ID: '678', TITLE: 'Баня, Иванов' }], t3: [{ ID: '150', NAME: 'Олег' }] } }));
+    const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call, listAll, batch } } as unknown as B24UserContext;
     const svc = new DashboardService({} as ChatsService, emptyJournal);
-    const all = await svc.callList(user, { kind: 'lost', from: '2026-10-21', to: '2026-10-21' });
-    expect(all.items.map((i) => [i.activityId, i.owner.title, i.dealId])).toEqual([
-      [2, 'Анна', null],
-      [1, 'Баня, Иванов', 678],
-    ]);
-    const mine = await svc.callList(user, { kind: 'lost', from: '2026-10-21', to: '2026-10-21', scope: 'mine' });
-    expect(mine.items.map((i) => i.activityId)).toEqual([1]);
+    const d = await svc.get(user, { from: '2026-10-21', to: '2026-10-21' }, false, [0, 14]);
+    expect(d.calls).toEqual({ incoming: 2, new: 1, repeat: 1, answered: 1, missed: 2, lost: 1 });
+    expect(d.callsFunnel).toBe(0);
+    expect(dealFilters[0]).toMatchObject({ CATEGORY_ID: 0, STAGE_SEMANTIC_ID: 'S' });
+    expect([...(dealFilters[0]['@CONTACT_ID'] as number[])].sort()).toEqual([140, 150]);
+    expect(d.callFunnels).toEqual([{ id: 0, name: 'БК Алатырь' }, { id: 14, name: 'Домики и беседки' }]);
+
+    const lost = await svc.callList(user, { kind: 'lost', from: '2026-10-21', to: '2026-10-21' }, [0, 14]);
+    expect(lost.items.map((i) => [i.clientKey, i.activityId, i.contact?.name, i.repeat, i.incomingCount])).toEqual([['contact:150', 6, 'Олег', false, 1]]);
+    const repeat = await svc.callList(user, { kind: 'repeat', from: '2026-10-21', to: '2026-10-21' }, [0, 14]);
+    expect(repeat.items.map((i) => [i.clientKey, i.incomingCount, i.owner.title, i.dealId])).toEqual([['contact:140', 3, 'Баня, Иванов', 678]]);
+    const mine = await svc.callList(user, { kind: 'incoming', from: '2026-10-21', to: '2026-10-21', scope: 'mine' }, [0, 14]);
+    expect(mine.items.map((i) => i.clientKey)).toEqual(['contact:140']);
     await expect(svc.callList(user, { kind: 'all' })).rejects.toMatchObject({ status: 400 });
   });
 
@@ -144,7 +170,7 @@ describe('DashboardService', () => {
       client: { call, listAll },
     } as unknown as B24UserContext;
     const d = await new DashboardService({} as ChatsService, emptyJournal).get(user, {}, false);
-    expect(d).toMatchObject({ chats: null, contacts: null, calls: { incoming: 0, lost: 0 }, callsScope: 'all', bookings: { created: 0 } });
+    expect(d).toMatchObject({ chats: null, contacts: null, calls: { incoming: 0, new: 0, repeat: 0, lost: 0 }, callsScope: 'all', callsFunnel: null, callFunnels: [], bookings: { created: 0 } });
     expect(call).not.toHaveBeenCalled();
     expect(listAll).toHaveBeenCalledWith('crm.activity.list', expect.objectContaining({ filter: expect.objectContaining({ PROVIDER_ID: 'VOXIMPLANT_CALL' }) }), expect.anything());
     await expect(new DashboardService({} as ChatsService, emptyJournal).get(user, { from: 'x' }, false)).rejects.toMatchObject({

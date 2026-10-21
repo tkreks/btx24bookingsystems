@@ -4,6 +4,7 @@ import {
   DASHBOARD_MAX_DAYS,
   type CallKind,
   type CallListDto,
+  type CallFunnelDto,
   type CallScope,
   isIsoDate,
   todayIn,
@@ -15,7 +16,7 @@ import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingJournalService } from '../bookings/booking-journal.service.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { classifyCalls, isMissed, type CallActivity } from './call-stats.js';
+import { callClients, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
 
 /** CRM: OWNER_TYPE_ID дела → тип элемента. */
@@ -44,69 +45,163 @@ export class DashboardService {
 
   async get(
     user: B24UserContext,
-    query: { from?: unknown; to?: unknown; callsScope?: unknown },
+    query: { from?: unknown; to?: unknown; callsScope?: unknown; callsFunnel?: unknown },
     openlines: boolean,
+    /** Воронки групп пользователя — для «повторных» клиентов. */
+    funnelIds: number[] = [],
   ): Promise<DashboardDto> {
     const { from, to, start, end } = parsePeriod(user.portal.timezone, query);
     const callsScope = parseScope(query.callsScope);
-    const [bookings, calls, chats] = await Promise.all([
+    const callsFunnel = pickFunnel(query.callsFunnel, funnelIds);
+    const [bookings, calls, callFunnels, chats] = await Promise.all([
       this.bookings(user, start, end),
-      this.callCounts(user, start, end, callsScope),
+      this.callCounts(user, start, end, callsScope, callsFunnel),
+      this.funnelNames(user, funnelIds),
       openlines
         ? Promise.all([this.chats.list(user, { scope: 'mine' }), this.unreadMessages(user), this.contacts(user, start, end)])
         : null,
     ]);
-    if (!chats) return { from, to, chats: null, contacts: null, calls, callsScope, bookings };
+    const callInfo = { calls, callsScope, callsFunnel, callFunnels };
+    if (!chats) return { from, to, chats: null, contacts: null, ...callInfo, bookings };
     const [mine, unread, contacts] = chats;
     return {
       from,
       to,
       chats: { waitingReply: mine.items.filter((c) => c.waitingReply).length, unreadMessages: unread },
       contacts,
-      calls,
-      callsScope,
+      ...callInfo,
       bookings,
     };
   }
 
-  /** Звонки выбранного вида за период — для окна со сделками. */
-  async callList(user: B24UserContext, query: { from?: unknown; to?: unknown; kind?: unknown; scope?: unknown }): Promise<CallListDto> {
+  /** Клиенты выбранного вида звонков за период — для окна со сделками. */
+  async callList(
+    user: B24UserContext,
+    query: { from?: unknown; to?: unknown; kind?: unknown; scope?: unknown; funnel?: unknown },
+    funnelIds: number[] = [],
+  ): Promise<CallListDto> {
     const { start, end } = parsePeriod(user.portal.timezone, query);
     const kind = query.kind as CallKind;
     if (!CALL_KINDS.includes(kind))
-      throw new BadRequestException({ code: 'INVALID_KIND', message: 'kind: incoming, answered, missed или lost' });
+      throw new BadRequestException({ code: 'INVALID_KIND', message: 'kind: incoming, new, repeat, answered, missed или lost' });
     const { rows, truncated } = await this.fetchCalls(user, start);
-    const list = classifyCalls(rows, start, end, parseScope(query.scope) === 'mine' ? user.userId : null)[kind];
-    const titles = await this.ownerTitles(user, list);
+    const clients = callClients(rows, start, end, parseScope(query.scope) === 'mine' ? user.userId : null);
+    const repeat = await this.repeatClients(user, clients, pickFunnel(query.funnel, funnelIds));
+    const chosen = clients.filter((c) => matches(c, kind, repeat));
+    // Звонок для строки: для пропущенных/упущенных — последний пропущенный, для отвеченных — отвеченный.
+    const shown = chosen.map((c) => ({
+      c,
+      call:
+        (kind === 'missed' || kind === 'lost'
+          ? c.incoming.find(isMissed)
+          : kind === 'answered'
+            ? c.incoming.find((x) => !isMissed(x))
+            : undefined) ?? c.incoming[0],
+    }));
+    const [titles, contacts] = await Promise.all([
+      this.ownerTitles(user, shown.map((x) => x.call)),
+      this.contactNames(user, chosen.map((c) => c.contactId).filter((x): x is number => x !== null)),
+    ]);
     return {
       kind,
       truncated,
-      items: list.map((c) => ({
-        activityId: Number(c.ID),
-        at: new Date(c.START_TIME).toISOString(),
-        missed: isMissed(c),
-        phone: c.COMMUNICATIONS?.[0]?.VALUE ?? null,
+      items: shown.map(({ c, call }) => ({
+        clientKey: c.key,
+        activityId: Number(call.ID),
+        at: new Date(call.START_TIME).toISOString(),
+        missed: isMissed(call),
+        phone: call.COMMUNICATIONS?.[0]?.VALUE ?? null,
+        incomingCount: c.incoming.length,
+        repeat: repeat.has(c.key),
+        contact: c.contactId ? { id: c.contactId, name: contacts.get(c.contactId) ?? null } : null,
         owner: {
-          typeId: Number(c.OWNER_TYPE_ID),
-          id: Number(c.OWNER_ID),
-          title: titles.get(`${c.OWNER_TYPE_ID}:${c.OWNER_ID}`) ?? null,
+          typeId: Number(call.OWNER_TYPE_ID),
+          id: Number(call.OWNER_ID),
+          title: titles.get(`${call.OWNER_TYPE_ID}:${call.OWNER_ID}`) ?? null,
         },
-        dealId: Number(c.OWNER_TYPE_ID) === 2 ? Number(c.OWNER_ID) : null,
-        responsibleId: Number(c.RESPONSIBLE_ID) || null,
+        dealId: Number(call.OWNER_TYPE_ID) === 2 ? Number(call.OWNER_ID) : null,
+        responsibleId: Number(call.RESPONSIBLE_ID) || null,
       })),
     };
   }
 
-  /** Счётчики звонков; нет доступа к делам CRM — null (дашборд работает без них). */
-  private async callCounts(user: B24UserContext, start: Date, end: Date, scope: CallScope): Promise<DashboardDto['calls']> {
+  /** Клиенты по видам; нет доступа к делам CRM — null (дашборд работает без них). */
+  private async callCounts(
+    user: B24UserContext,
+    start: Date,
+    end: Date,
+    scope: CallScope,
+    funnel: number | null,
+  ): Promise<DashboardDto['calls']> {
     try {
       const { rows } = await this.fetchCalls(user, start);
-      const r = classifyCalls(rows, start, end, scope === 'mine' ? user.userId : null);
-      return Object.fromEntries(CALL_KINDS.map((k) => [k, r[k].length])) as Record<CallKind, number>;
+      const clients = callClients(rows, start, end, scope === 'mine' ? user.userId : null);
+      const repeat = await this.repeatClients(user, clients, funnel);
+      return Object.fromEntries(CALL_KINDS.map((k) => [k, clients.filter((c) => matches(c, k, repeat)).length])) as Record<
+        CallKind,
+        number
+      >;
     } catch (err) {
       if (err instanceof Bitrix24Error) return null;
       throw err;
     }
+  }
+
+  /**
+   * Повторные клиенты: у контакта есть **выигранная** сделка (`STAGE_SEMANTIC_ID = S`) в выбранной
+   * воронке, закрытая раньше его первого звонка в периоде. Без контакта или воронки — новый.
+   */
+  private async repeatClients(user: B24UserContext, clients: CallClient[], funnel: number | null): Promise<Set<string>> {
+    const out = new Set<string>();
+    const contactIds = [...new Set(clients.map((c) => c.contactId).filter((x): x is number => x !== null))];
+    if (funnel === null || !contactIds.length) return out;
+    const won: { CONTACT_ID: string | null; CLOSEDATE: string | null }[] = [];
+    for (let i = 0; i < contactIds.length; i += CONTACT_CHUNK)
+      won.push(
+        ...(await user.client.listAll<{ CONTACT_ID: string | null; CLOSEDATE: string | null }>(
+          'crm.deal.list',
+          {
+            filter: { '@CONTACT_ID': contactIds.slice(i, i + CONTACT_CHUNK), CATEGORY_ID: funnel, STAGE_SEMANTIC_ID: 'S' },
+            select: ['ID', 'CONTACT_ID', 'CLOSEDATE'],
+          },
+          { max: 2000 },
+        )),
+      );
+    for (const c of clients) {
+      if (!c.contactId) continue;
+      if (won.some((d) => Number(d.CONTACT_ID) === c.contactId && (!d.CLOSEDATE || Date.parse(d.CLOSEDATE) < c.firstIncomingAt)))
+        out.add(c.key);
+    }
+    return out;
+  }
+
+  /** Названия воронок групп пользователя (`crm.category.list`, кэш на портал). */
+  private readonly funnelCache = new Map<string, { names: Map<number, string>; expiresAt: number }>();
+  private async funnelNames(user: B24UserContext, ids: number[]): Promise<CallFunnelDto[]> {
+    if (!ids.length) return [];
+    let hit = this.funnelCache.get(user.portal.id);
+    if (!hit || hit.expiresAt < Date.now()) {
+      try {
+        const res = await user.client.call<{ categories?: { id: number; name: string }[] }>('crm.category.list', { entityTypeId: 2 });
+        hit = { names: new Map((res.result?.categories ?? []).map((c) => [Number(c.id), c.name])), expiresAt: Date.now() + 10 * 60_000 };
+        this.funnelCache.set(user.portal.id, hit);
+      } catch {
+        hit = { names: new Map(), expiresAt: 0 };
+      }
+    }
+    return ids.map((id) => ({ id, name: hit!.names.get(id) ?? `Воронка ${id}` }));
+  }
+
+  private async contactNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    const unique = [...new Set(ids)].slice(0, 200);
+    if (!unique.length) return out;
+    const rows = await user.client.listAll<{ ID: string; NAME?: string | null; LAST_NAME?: string | null }>('crm.contact.list', {
+      filter: { '@ID': unique },
+      select: ['ID', 'NAME', 'LAST_NAME'],
+    });
+    for (const r of rows) out.set(Number(r.ID), [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `Контакт #${r.ID}`);
+    return out;
   }
 
   /** Звонки телефонии с начала периода по сейчас — токеном пользователя (его права в CRM). */
@@ -243,6 +338,32 @@ export class DashboardService {
 }
 
 const parseScope = (v: unknown): CallScope => (v === 'mine' ? 'mine' : 'all');
+/** Контактов в одном запросе сделок. */
+const CONTACT_CHUNK = 50;
+
+/** Выбранная воронка, если она среди воронок групп пользователя; иначе — первая из них. */
+function pickFunnel(v: unknown, ids: number[]): number | null {
+  const n = Number(v);
+  if (v !== undefined && v !== '' && ids.includes(n)) return n;
+  return ids[0] ?? null;
+}
+
+function matches(c: CallClient, kind: CallKind, repeat: Set<string>): boolean {
+  switch (kind) {
+    case 'incoming':
+      return true;
+    case 'repeat':
+      return repeat.has(c.key);
+    case 'new':
+      return !repeat.has(c.key);
+    case 'answered':
+      return c.answered;
+    case 'missed':
+      return c.missed;
+    case 'lost':
+      return c.lost;
+  }
+}
 
 /**
  * Период дашборда: дни `[from, to]` включительно в поясе портала (по умолчанию — сегодня) →

@@ -139,18 +139,27 @@ export interface DashboardDto {
   chats: { waitingReply: number; unreadMessages: number } | null;
   /** С кем общались в открытых линиях за период (уникальные элементы CRM). */
   contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
-  /** Звонки за период (телефония Битрикс24); null — нет доступа к делам CRM. */
+  /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
   calls: Record<CallKind, number> | null;
   callsScope: CallScope;
+  /** Воронка для «повторных» и доступные воронки (из групп пользователя). */
+  callsFunnel: number | null;
+  callFunnels: CallFunnelDto[];
   /** Свои брони из журнала приложения: созданные за период (клиентские — со сделками) и отменённые за период. */
   bookings: { created: number; cancelled: number; deals: DashboardBookingRow[]; cancelledList: DashboardBookingRow[] };
 }
 
-/** Звонки на дашборде: входящие, отвеченные, пропущенные, упущенные (не перезвонили). */
-export const CALL_KINDS = ['incoming', 'answered', 'missed', 'lost'] as const;
+/**
+ * Звонки на дашборде — **по клиентам**, не по звонкам: клиент, позвонивший 3 раза, которому
+ * перезвонили 2 раза, — один клиент. Входящие делятся на новых и повторных (есть выигранная
+ * сделка в выбранной воронке, закрытая до его первого звонка в периоде).
+ */
+export const CALL_KINDS = ['incoming', 'new', 'repeat', 'answered', 'missed', 'lost'] as const;
 export type CallKind = (typeof CALL_KINDS)[number];
 export const CALL_KIND_LABELS: Record<CallKind, string> = {
   incoming: 'Входящие',
+  new: 'Уникальные',
+  repeat: 'Повторные',
   answered: 'Отвеченные',
   missed: 'Пропущенные',
   lost: 'Упущенные',
@@ -159,19 +168,31 @@ export const CALL_KIND_LABELS: Record<CallKind, string> = {
 /** Чьи звонки: свои (ответственный — я) или все, что видно по правам CRM. */
 export type CallScope = 'mine' | 'all';
 
+/** Воронка сделок для проверки «повторный клиент». */
+export interface CallFunnelDto {
+  id: number;
+  name: string;
+}
+
+/** Клиент в окне звонков: последний подходящий звонок и сколько было звонков в периоде. */
 export interface CallRowDto {
+  /** Ключ клиента: контакт или номер. */
+  clientKey: string;
   activityId: number;
   at: string;
   missed: boolean;
   phone: string | null;
+  /** Входящих от клиента в периоде. */
+  incomingCount: number;
+  repeat: boolean;
+  contact: { id: number; name: string | null } | null;
   /** Элемент CRM, к которому привязан звонок. */
   owner: { typeId: number; id: number; title: string | null };
-  /** Сделка звонка (если звонок привязан к сделке). */
   dealId: number | null;
   responsibleId: number | null;
 }
 
-/** `GET /api/dashboard/calls?kind=&from=&to=&scope=` — звонки выбранного вида для окна со сделками. */
+/** `GET /api/dashboard/calls?kind=&from=&to=&scope=&funnel=` — клиенты выбранного вида. */
 export interface CallListDto {
   kind: CallKind;
   items: CallRowDto[];

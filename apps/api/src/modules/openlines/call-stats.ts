@@ -1,5 +1,3 @@
-import type { CallKind } from '@btx24/shared';
-
 /** Звонок из дел CRM (`crm.activity.list`, PROVIDER_ID = VOXIMPLANT_CALL). */
 export interface CallActivity {
   ID: string;
@@ -10,57 +8,78 @@ export interface CallActivity {
   START_TIME: string;
   RESPONSIBLE_ID: string;
   SETTINGS?: { MISSED_CALL?: boolean } | unknown[];
-  COMMUNICATIONS?: { VALUE?: string }[];
+  COMMUNICATIONS?: { VALUE?: string; ENTITY_TYPE_ID?: string | number; ENTITY_ID?: string | number }[];
 }
 
 export const isMissed = (c: CallActivity) =>
   !Array.isArray(c.SETTINGS) && (c.SETTINGS as { MISSED_CALL?: boolean } | undefined)?.MISSED_CALL === true;
 const incoming = (c: CallActivity) => String(c.DIRECTION) === '1';
+const t = (c: CallActivity) => Date.parse(c.START_TIME);
 
-/** Клиент звонка: последние 10 цифр номера, без номера — элемент CRM. */
-export function clientKey(c: CallActivity): string {
-  const digits = String(c.COMMUNICATIONS?.[0]?.VALUE ?? '').replace(/\D/g, '');
-  return digits.length >= 10 ? digits.slice(-10) : `crm:${c.OWNER_TYPE_ID}:${c.OWNER_ID}`;
+/** Контакт звонка (CRM, тип 3) — если есть. */
+export function contactOf(c: CallActivity): number | null {
+  const m = c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3 && Number(x.ENTITY_ID) > 0);
+  return m ? Number(m.ENTITY_ID) : null;
 }
 
 /**
- * Звонки периода по видам. `calls` — все звонки с начала периода по сейчас (перезвон мог быть
- * позже периода и другим сотрудником). Учитываются входящие периода, при `responsibleId` — свои.
- * - пропущенный — входящий с признаком `MISSED_CALL`; отвеченный — входящий без него;
- * - упущенный — клиент (по номеру), чей последний пропущенный входящий в периоде не сменился
- *   позже ни отвеченным входящим, ни исходящим ему. Один клиент — один упущенный.
+ * Клиент звонка: контакт CRM; без контакта — последние 10 цифр номера; без номера — элемент
+ * CRM, к которому привязан звонок. Звонки с одного номера и на него — один клиент.
+ */
+export function clientKey(c: CallActivity): string {
+  const contact = contactOf(c);
+  if (contact) return `contact:${contact}`;
+  const digits = String(c.COMMUNICATIONS?.[0]?.VALUE ?? '').replace(/\D/g, '');
+  return digits.length >= 10 ? `phone:${digits.slice(-10)}` : `crm:${c.OWNER_TYPE_ID}:${c.OWNER_ID}`;
+}
+
+/** Клиент периода: его входящие и признаки. */
+export interface CallClient {
+  key: string;
+  contactId: number | null;
+  /** Входящие периода, новые сверху. */
+  incoming: CallActivity[];
+  firstIncomingAt: number;
+  answered: boolean;
+  missed: boolean;
+  /** Последний пропущенный не сменился ни отвеченным входящим, ни исходящим (после него). */
+  lost: boolean;
+}
+
+/**
+ * Клиенты, звонившие в периоде (входящие; при `responsibleId` — свои). `calls` — все звонки с
+ * начала периода по сейчас: перезвон мог быть позже периода и другим сотрудником.
  * Ограничение: «не дозвонились» на исходящем по делам CRM не видно (нужна статистика телефонии,
  * право `telephony`) — любой исходящий после пропущенного считается попыткой перезвонить.
  */
-export function classifyCalls(
-  calls: CallActivity[],
-  start: Date,
-  end: Date,
-  responsibleId: number | null,
-): Record<CallKind, CallActivity[]> {
-  const t = (c: CallActivity) => Date.parse(c.START_TIME);
-  const inPeriod = calls.filter(
-    (c) =>
-      incoming(c) &&
-      t(c) >= start.getTime() &&
-      t(c) < end.getTime() &&
-      (responsibleId === null || Number(c.RESPONSIBLE_ID) === responsibleId),
-  );
-  const missed = inPeriod.filter(isMissed);
-  // Последний пропущенный каждого клиента.
-  const lastMissed = new Map<string, CallActivity>();
-  for (const c of missed) {
-    const k = clientKey(c);
-    const prev = lastMissed.get(k);
-    if (!prev || t(c) > t(prev)) lastMissed.set(k, c);
+export function callClients(calls: CallActivity[], start: Date, end: Date, responsibleId: number | null): CallClient[] {
+  const byKey = new Map<string, CallClient>();
+  for (const c of calls) {
+    if (!incoming(c) || t(c) < start.getTime() || t(c) >= end.getTime()) continue;
+    if (responsibleId !== null && Number(c.RESPONSIBLE_ID) !== responsibleId) continue;
+    const key = clientKey(c);
+    const cl = byKey.get(key) ?? {
+      key,
+      contactId: contactOf(c),
+      incoming: [],
+      firstIncomingAt: t(c),
+      answered: false,
+      missed: false,
+      lost: false,
+    };
+    cl.incoming.push(c);
+    cl.firstIncomingAt = Math.min(cl.firstIncomingAt, t(c));
+    if (isMissed(c)) cl.missed = true;
+    else cl.answered = true;
+    byKey.set(key, cl);
   }
-  const contacted = (m: CallActivity) =>
-    calls.some((c) => clientKey(c) === clientKey(m) && t(c) > t(m) && (!incoming(c) || !isMissed(c)));
-  const byTime = (a: CallActivity, b: CallActivity) => t(b) - t(a);
-  return {
-    incoming: [...inPeriod].sort(byTime),
-    answered: inPeriod.filter((c) => !isMissed(c)).sort(byTime),
-    missed: [...missed].sort(byTime),
-    lost: [...lastMissed.values()].filter((m) => !contacted(m)).sort(byTime),
-  };
+  const all = [...calls];
+  for (const cl of byKey.values()) {
+    cl.incoming.sort((a, b) => t(b) - t(a));
+    const lastMissed = cl.incoming.find(isMissed);
+    cl.lost =
+      !!lastMissed &&
+      !all.some((c) => clientKey(c) === cl.key && t(c) > t(lastMissed) && (!incoming(c) || !isMissed(c)));
+  }
+  return [...byKey.values()].sort((a, b) => t(b.incoming[0]) - t(a.incoming[0]));
 }
