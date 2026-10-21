@@ -1,5 +1,15 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import type { AppSettingsDto, EmployeeDto, ExternalUserSummaryDto, GroupDirectoryDto, GroupDto, MyGroupDto } from '@btx24/shared';
+import type {
+  AppSettingsDto,
+  CatalogDto,
+  DealFieldInfo,
+  DealStageItem,
+  EmployeeDto,
+  ExternalUserSummaryDto,
+  GroupDirectoryDto,
+  GroupDto,
+  MyGroupDto,
+} from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
@@ -39,6 +49,21 @@ export class GroupsAdminController {
   @Get('employees')
   employees(@B24User() user: B24UserContext, @Query() query: unknown): Promise<EmployeeDto[]> {
     return this.directory.employees(user, query);
+  }
+
+  @Get('deal-fields')
+  dealFields(@B24User() user: B24UserContext): Promise<DealFieldInfo[]> {
+    return this.directory.dealFields(user);
+  }
+
+  @Get('deal-stages')
+  dealStages(@B24User() user: B24UserContext, @Query() query: unknown): Promise<DealStageItem[]> {
+    return this.directory.dealStages(user, query);
+  }
+
+  @Get('catalog')
+  catalog(@B24User() user: B24UserContext): Promise<CatalogDto> {
+    return this.directory.catalog(user);
   }
 
   @Get('external-users')

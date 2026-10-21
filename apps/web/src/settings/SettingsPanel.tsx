@@ -215,7 +215,8 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     <div>
                       <strong>{g.name}</strong>
                       <p className="muted">
-                        Ресурсов: {g.resourceIds.length} · Участников: {g.members.length}
+                        Ресурсов: {g.resourceIds.length} · Полей: {g.options?.dealFields.length ?? 0} · Участников:{' '}
+                        {g.members.length}
                       </p>
                       {g.members.length === 0 && (
                         <span className="muted">Доступна только администраторам приложения</span>

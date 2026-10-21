@@ -882,3 +882,142 @@ main.loading {
     display: none;
   }
 }
+
+/* ---------- блок настроек группы (как в прототипе) ---------- */
+
+.settings-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  margin: 12px 0;
+}
+
+.settings-card > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-card > summary::after {
+  content: 'Развернуть';
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.settings-card[open] > summary::after {
+  content: 'Свернуть';
+}
+
+.settings-card-body {
+  padding: 0 14px 12px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0 14px;
+}
+
+.settings-grid .wide {
+  grid-column: span 2;
+}
+
+.settings-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.settings-subcard {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.settings-form h4 {
+  margin: 14px 0 0;
+  font-size: 14px;
+}
+
+.resource-settings,
+.deal-field-rows,
+.catalog-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.resource-settings > li,
+.deal-field-rows > li {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 0 8px;
+}
+
+.settings-form .resource-settings .check,
+.settings-form .deal-field-rows .check,
+.settings-form .catalog-tree .check {
+  margin: 6px 0;
+}
+
+.default-products {
+  display: grid;
+  gap: 6px;
+  padding-left: 26px;
+  justify-items: start;
+}
+
+.default-product {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px auto;
+  gap: 6px;
+  width: 100%;
+  align-items: center;
+}
+
+.deal-field-rows > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.deal-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.settings-form .deal-field-actions .check {
+  margin: 0;
+}
+
+.catalog-tree ul ul {
+  padding-left: 22px;
+}
+
+.catalog-tree summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+@media (max-width: 760px) {
+  .settings-grid .wide {
+    grid-column: auto;
+  }
+  .default-products {
+    padding-left: 0;
+  }
+}

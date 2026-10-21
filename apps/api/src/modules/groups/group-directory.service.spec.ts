@@ -126,3 +126,68 @@ describe('GroupDirectoryService.employees', () => {
     },
   );
 });
+
+describe('GroupDirectoryService references', () => {
+  const svc = new GroupDirectoryService({} as PrismaService);
+  const ctx = (client: object) => ({ portal: { id: 'p1' }, client }) as unknown as B24UserContext;
+
+  it('lists deal fields with human labels', async () => {
+    const call = vi.fn(async () => ({
+      result: {
+        UF_CRM_1: { type: 'double', formLabel: 'Количество гостей', title: 'UF_CRM_1' },
+        TITLE: { type: 'string', title: 'Название', isReadOnly: false },
+        ID: { type: 'integer', title: 'ID', isReadOnly: true },
+      },
+    }));
+    expect(await svc.dealFields(ctx({ call }))).toEqual([
+      { code: 'UF_CRM_1', label: 'Количество гостей', type: 'double', multiple: false, readOnly: false },
+      { code: 'TITLE', label: 'Название', type: 'string', multiple: false, readOnly: false },
+      { code: 'ID', label: 'ID', type: 'integer', multiple: false, readOnly: true },
+    ]);
+  });
+
+  it.each([
+    [0, 'DEAL_STAGE'],
+    [14, 'DEAL_STAGE_14'],
+  ])('reads stages of funnel %i from %s in order', async (categoryId, entity) => {
+    const listAll = vi.fn(async () => [
+      { STATUS_ID: 'WON', NAME: 'Успех', SORT: '60', SEMANTICS: 'S' },
+      { STATUS_ID: 'NEW', NAME: 'Новая', SORT: '10', SEMANTICS: null },
+    ]);
+    expect(await svc.dealStages(ctx({ listAll }), { categoryId: String(categoryId) })).toEqual([
+      { id: 'NEW', name: 'Новая', semantics: '' },
+      { id: 'WON', name: 'Успех', semantics: 'S' },
+    ]);
+    expect(listAll).toHaveBeenCalledWith('crm.status.list', { filter: { ENTITY_ID: entity }, order: { SORT: 'ASC' } });
+  });
+
+  it('rejects a missing or invalid funnel', async () => {
+    await expect(svc.dealStages(ctx({}), {})).rejects.toMatchObject({ status: 400 });
+    await expect(svc.dealStages(ctx({}), { categoryId: '-1' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('maps catalog sections and active products', async () => {
+    const listAll = vi.fn(async (method: string) =>
+      method === 'crm.productsection.list'
+        ? [
+            { ID: '5', NAME: 'Баня', SECTION_ID: null },
+            { ID: '7', NAME: 'Веники', SECTION_ID: '5' },
+          ]
+        : [
+            { ID: '30', NAME: 'Веник дубовый', PRICE: '500.00', CURRENCY_ID: 'RUB', SECTION_ID: '7' },
+            { ID: '31', NAME: 'Чай', PRICE: '', SECTION_ID: null },
+          ],
+    );
+    expect(await svc.catalog(ctx({ listAll }))).toEqual({
+      sections: [
+        { id: '5', name: 'Баня', parentId: null },
+        { id: '7', name: 'Веники', parentId: '5' },
+      ],
+      products: [
+        { id: 30, name: 'Веник дубовый', price: 500, currency: 'RUB', sectionId: '7' },
+        { id: 31, name: 'Чай', price: null, currency: null, sectionId: null },
+      ],
+    });
+    expect(listAll).toHaveBeenCalledWith('crm.product.list', expect.objectContaining({ filter: { ACTIVE: 'Y' } }));
+  });
+});

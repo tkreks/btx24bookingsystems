@@ -30,3 +30,24 @@ export interface ChangeExternalPasswordDto {
   password: string;
 }
 export type AdminMemberDto = { kind: MemberKind; bitrixId: number };
+
+/** Поле сделки для настройки группы (`GET /api/admin/deal-fields`, из `crm.deal.fields`). */
+export interface DealFieldInfo {
+  code: string;
+  label: string;
+  type: string;
+  multiple: boolean;
+  readOnly: boolean;
+}
+/** Стадия воронки (`GET /api/admin/deal-stages?categoryId=`). */
+export interface DealStageItem {
+  id: string;
+  name: string;
+  /** '' — в работе, 'S' — успех, 'F' — провал. */
+  semantics: string;
+}
+/** Товарный каталог (`GET /api/admin/catalog`): разделы и активные товары. */
+export interface CatalogDto {
+  sections: { id: string; name: string; parentId: string | null }[];
+  products: { id: number; name: string; price: number | null; currency: string | null; sectionId: string | null }[];
+}
