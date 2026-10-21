@@ -1257,39 +1257,49 @@ main.loading {
 }
 
 .client-bookings {
-  flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
-  border-bottom: 1px solid #edf0f6;
-  background: #fafcff;
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
 }
 
-.cb-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  border: 0;
-  background: transparent;
-  padding: 4px 0;
-  font-weight: 500;
+.cb-client {
+  justify-self: start;
+  font-size: 14px;
+  font-weight: 650;
   text-align: left;
 }
 
-.cb-title {
-  font-weight: 700;
+.cb-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  font-size: 12.5px;
+  color: #5c6a80;
 }
 
-.cb-next {
-  font-size: 13px;
+.cb-stat {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: #5c6a80;
+  padding: 0;
+}
+
+.cb-stat b {
+  color: var(--c-ink, #172238);
+}
+
+.cb-stat + .cb-stat::before {
+  content: '';
 }
 
 .cb-create {
-  margin-left: auto;
-  border-radius: 11px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  border-radius: 9px;
+  color: #205add;
+  border-color: rgba(50, 105, 246, 0.35);
+  background: #eef4ff;
 }
 
 .cb-list {
@@ -1328,7 +1338,30 @@ main.loading {
 }
 
 .cb-created {
-  margin: 0 24px;
+  margin: 4px 0 0;
+}
+
+.cv-sep {
+  color: #bec7d5;
+}
+
+.cv-deal {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.cv-actions .cv-open {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.cv-head .cv-contact-line {
+  align-items: flex-start;
+}
+
+.cv-head .cv-contact-info {
+  padding-top: 2px;
 }
 
 .field-map {
@@ -1352,14 +1385,6 @@ main.loading {
   border-radius: 10px;
 }
 
-@media (max-width: 850px) {
-  .client-bookings {
-    padding: 8px 12px;
-  }
-  .cb-create {
-    margin-left: 0;
-  }
-}
 
 /* ---------- рабочий день ---------- */
 

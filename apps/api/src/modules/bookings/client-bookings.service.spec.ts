@@ -9,6 +9,7 @@ const bk = (id: number, from: string, to: string) => ({ id, resourceIds: [10], d
 describe('ClientBookingsService', () => {
   it('past / now / future from client bookings and from deal fields; open deals for a new booking', async () => {
     const call = vi.fn(async (method: string) => {
+      if (method === 'crm.contact.get') return { result: { NAME: 'Анна', LAST_NAME: 'Иванова' } };
       if (method === 'booking.v1.booking.list')
         return { result: { booking: [bk(1, '2026-10-01T10:00:00Z', '2026-10-01T12:00:00Z'), bk(2, '2026-10-25T10:00:00Z', '2026-10-25T12:00:00Z')] } };
       throw new Error(method);
@@ -31,6 +32,8 @@ describe('ClientBookingsService', () => {
     const user = { portal: { id: 'p1' }, client: { call, listAll, batch } } as unknown as B24UserContext;
     const r = await new ClientBookingsService(prisma, fieldMap).forContact(user, 140, [], new Date('2026-10-21T10:00:00Z'));
     expect(r.past).toBe(2);
+    expect(r.contact).toEqual({ id: 140, name: 'Анна Иванова' });
+    expect(r.won).toEqual({ count: 2, avgCheck: 40000, currency: null });
     expect(r.upcoming.map((b) => [b.bookingId, b.when, b.dealId])).toEqual([
       [3, 'now', 701],
       [2, 'future', null],
@@ -46,7 +49,7 @@ describe('ClientBookingsService', () => {
 describe('ClientBookingsService recent', () => {
   it('keeps past bookings of the requested deal beyond the last five', async () => {
     const many = Array.from({ length: 7 }, (_, i) => ({ id: i + 1, resourceIds: [10], datePeriod: { from: { timestamp: Date.parse(`2026-0${i + 1}-01T10:00:00Z`) / 1000 }, to: { timestamp: Date.parse(`2026-0${i + 1}-01T12:00:00Z`) / 1000 } } }));
-    const call = vi.fn(async () => ({ result: { booking: many } }));
+    const call = vi.fn(async (method: string) => (method === 'crm.contact.get' ? { result: {} } : { result: { booking: many } }));
     const listAll = vi.fn(async () => []);
     const batch = vi.fn(async (cmds: Record<string, unknown>) => ({
       result: Object.fromEntries(Object.keys(cmds).map((k) => [k, { externalData: k === 'b1' ? [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '678' }] : [] }])),

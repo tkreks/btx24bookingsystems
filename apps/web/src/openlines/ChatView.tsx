@@ -141,32 +141,36 @@ export function ChatView({
     );
 
   const crm = chat.crm;
-  const links: [string, 'deal' | 'contact' | 'lead', number | null][] = [
-    ['Сделка', 'deal', crm.dealId],
-    ['Контакт', 'contact', crm.contactId],
-    ['Лид', 'lead', crm.leadId],
-  ];
   return (
     <main className="chat-view">
       <ChatHeader
         chatId={chat.chatId}
         title={chat.title}
-        subtitle={<Channel connector={chat.connector} />}
+        subtitle={
+          <>
+            <Channel connector={chat.connector} />
+            {crm.dealId && (
+              <>
+                <span className="cv-sep">|</span>
+                <button className="link cv-deal" onClick={() => openCrm('deal', crm.dealId!)}>
+                  Сделка #{crm.dealId}
+                </button>
+              </>
+            )}
+          </>
+        }
         onBack={onBack}
-        tags={links
-          .filter(([, , id]) => id)
-          .map(([label, type, id]) => (
-            <button key={type} className="cv-tag" onClick={() => openCrm(type, id!)}>
-              {label} #{id}
-            </button>
-          ))}
+        details={bookings}
       >
-        <button className="cv-crm-btn" onClick={() => openMessenger(chat.chatId)} title="Открыть диалог в мессенджере Битрикс24">
-          В Битрикс24 <Icon name="external" size={16} />
+        <button
+          className="cl-btn cv-open"
+          onClick={() => openMessenger(chat.chatId)}
+          title="Открыть диалог в Битрикс24"
+          aria-label="Открыть диалог в Битрикс24"
+        >
+          <Icon name="external" size={15} />
         </button>
       </ChatHeader>
-
-      {bookings}
 
       <div className="cv-conversation" ref={list} aria-live="polite" aria-label="История сообщений">
         {chat.hasMore && (
@@ -265,15 +269,17 @@ function ChatHeader({
   chatId,
   title,
   subtitle,
-  tags,
+  details,
   onBack,
   children,
 }: {
   chatId: number;
   title: string;
   subtitle?: ReactNode;
-  tags?: ReactNode[];
+  /** Под каналом: клиент, его статистика и брони. */
+  details?: ReactNode;
   onBack: () => void;
+  /** Маленькие кнопки в правом верхнем углу. */
   children?: ReactNode;
 }) {
   return (
@@ -286,10 +292,10 @@ function ChatHeader({
         <div className="cv-contact-info">
           <div className="cv-contact-name">{title}</div>
           {subtitle && <div className="cv-contact-sub">{subtitle}</div>}
+          {details}
         </div>
         <div className="cv-actions">{children}</div>
       </div>
-      {tags && tags.length > 0 && <div className="cv-tags">{tags}</div>}
     </header>
   );
 }

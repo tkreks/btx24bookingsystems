@@ -131,6 +131,10 @@ export interface ClientBookingDto {
 
 export interface ClientBookingsDto {
   contactId: number | null;
+  /** Клиент (контакт CRM): имя, если записано. */
+  contact: { id: number; name: string | null } | null;
+  /** Выигранные сделки клиента (только успешные, не в работе): сколько и средний чек. */
+  won: { count: number; avgCheck: number | null; currency: string | null };
   past: number;
   /** Текущие и будущие — ближайшие сверху. */
   upcoming: ClientBookingDto[];

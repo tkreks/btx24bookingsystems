@@ -24,8 +24,8 @@ export class ClientBookingsService {
   async forContact(user: B24UserContext, contactId: number | null, extraDealIds: number[] = [], now = new Date()): Promise<ClientBookingsDto> {
     const map = await this.fieldMap.get(user.portal.id);
     const ufSelect = [map.bookingId, map.bookingStart, map.bookingEnd].filter((x): x is string => !!x);
-    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', ...ufSelect];
-    const [byClient, contactDeals, extraDeals] = await Promise.all([
+    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CURRENCY_ID', ...ufSelect];
+    const [byClient, contactDeals, extraDeals, contact] = await Promise.all([
       contactId
         ? user.client
             .call<{ booking?: RawBooking[] }>('booking.v1.booking.list', {
@@ -40,6 +40,12 @@ export class ClientBookingsService {
       extraDealIds.length
         ? user.client.listAll<Deal>('crm.deal.list', { filter: { '@ID': extraDealIds }, select })
         : Promise.resolve([] as Deal[]),
+      contactId
+        ? user.client
+            .call<{ NAME?: string | null; SECOND_NAME?: string | null; LAST_NAME?: string | null }>('crm.contact.get', { id: contactId })
+            .then((r) => [r.result?.NAME, r.result?.SECOND_NAME, r.result?.LAST_NAME].filter((x) => x && x.trim()).join(' ') || null)
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
     const deals = new Map<number, Deal>([...contactDeals, ...extraDeals].map((d) => [Number(d.ID), d]));
     const links = await dealLinks(user.client, byClient.map((b) => Number(b.id)));
@@ -91,8 +97,17 @@ export class ClientBookingsService {
     }
     const upcoming = items.filter((i) => i.when !== 'past').sort((a, b) => a.start.localeCompare(b.start));
     const past = items.filter((i) => i.when === 'past').sort((a, b) => b.start.localeCompare(a.start));
+    // Выигранные сделки клиента (только успешные): сколько и средний чек.
+    const won = contactDeals.filter((d) => d.STAGE_SEMANTIC_ID === 'S');
+    const sums = won.map((d) => Number(d.OPPORTUNITY)).filter((x) => Number.isFinite(x) && x > 0);
     return {
       contactId,
+      contact: contactId ? { id: contactId, name: contact } : null,
+      won: {
+        count: won.length,
+        avgCheck: sums.length ? Math.round(sums.reduce((a, b) => a + b, 0) / sums.length) : null,
+        currency: won.find((d) => d.CURRENCY_ID)?.CURRENCY_ID ?? null,
+      },
       past: past.length,
       upcoming,
       // Последние прошлые + все прошлые брони запрошенных сделок (встройке нужна дата именно её брони).
