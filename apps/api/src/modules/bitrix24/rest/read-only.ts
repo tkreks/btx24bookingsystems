@@ -12,9 +12,12 @@ const READ_VERBS = new Set(['list', 'get', 'fields', 'current', 'admin', 'info']
  */
 const APP_SYSTEM_METHODS = new Set(['event.bind', 'event.unbind', 'event.get', 'placement.bind', 'placement.unbind', 'placement.get', 'app.info', 'scope', 'methods', 'profile']);
 
+/** Чтения с нестандартным именем: ищут, ничего не меняя. Добавлять поимённо, не по глаголу. */
+const READ_METHODS = new Set(['user.search']);
+
 export function isReadMethod(method: string): boolean {
   const m = method.toLowerCase();
-  if (APP_SYSTEM_METHODS.has(m)) return true;
+  if (APP_SYSTEM_METHODS.has(m) || READ_METHODS.has(m)) return true;
   const verb = m.slice(m.lastIndexOf('.') + 1);
   return READ_VERBS.has(verb);
 }

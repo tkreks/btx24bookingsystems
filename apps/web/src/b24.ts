@@ -14,6 +14,7 @@ interface Bx24 {
   placement: { info(): { placement: string; options: Record<string, unknown> } };
   fitWindow(cb?: () => void): void;
   openPath?(path: string): void;
+  selectUsers?(cb: (users: { id: string; name: string }[]) => void): void;
 }
 
 declare global {
@@ -55,7 +56,11 @@ export function refreshAuth(): Promise<{ token: string; memberId: string }> {
   return new Promise((resolve, reject) => {
     const sdk = window.BX24;
     if (!sdk) return reject(new Error('BX24 SDK недоступен'));
-    sdk.refreshAuth((a) => (a?.access_token ? resolve({ token: a.access_token, memberId: a.member_id }) : reject(new Error('Не удалось обновить авторизацию'))));
+    sdk.refreshAuth((a) =>
+      a?.access_token
+        ? resolve({ token: a.access_token, memberId: a.member_id })
+        : reject(new Error('Не удалось обновить авторизацию')),
+    );
   });
 }
 
@@ -64,7 +69,8 @@ export function placementContext(): PlacementContext {
     const info = window.BX24?.placement.info();
     const placement = info?.placement || 'DEFAULT';
     const raw = info?.options?.ID ?? info?.options?.ENTITY_ID;
-    const dealId = placement.startsWith('CRM_DEAL') && raw !== undefined && /^\d+$/.test(String(raw)) ? Number(raw) : null;
+    const dealId =
+      placement.startsWith('CRM_DEAL') && raw !== undefined && /^\d+$/.test(String(raw)) ? Number(raw) : null;
     return { placement, dealId };
   } catch {
     return { placement: 'DEFAULT', dealId: null };
@@ -78,4 +84,15 @@ export function fitFrame(): void {
   } catch {
     /* вне фрейма — нечего подгонять */
   }
+}
+
+/** Диалог может закрыться без callback — не блокируем форму ожиданием Promise. */
+export function selectEmployees(onSelect: (users: { id: number; name: string }[]) => void): void {
+  const sdk = window.BX24;
+  if (!sdk?.selectUsers) throw new Error('Выбор сотрудников доступен только в Битрикс24');
+  sdk.selectUsers((users) =>
+    onSelect(
+      users.map((u) => ({ id: Number(u.id), name: u.name })).filter((u) => Number.isSafeInteger(u.id) && u.id > 0),
+    ),
+  );
 }

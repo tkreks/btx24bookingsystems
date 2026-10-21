@@ -52,8 +52,12 @@ export class AccessService {
         out.push({ group, role: 'APP_ADMIN', permissions: [...PERMISSIONS].filter((p) => effectivePermissions('GROUP_ADMIN', features).includes(p)) });
         continue;
       }
-      let role: GroupRole | null = null;
-      for (const m of members) if (matches(m)) role = higherRole(role, m.role as GroupRole);
+      // Личная роль важнее роли отдела: так отделу можно дать «Менеджера», а отдельному
+      // сотруднику — только «Просмотр». Среди отделов — старшая роль.
+      const personal = members.find((m) => m.kind === 'USER' && m.bitrixId === user.userId);
+      let role: GroupRole | null = personal ? (personal.role as GroupRole) : null;
+      if (!personal)
+        for (const m of members) if (m.kind === 'DEPARTMENT' && matches(m)) role = higherRole(role, m.role as GroupRole);
       if (role) out.push({ group, role, permissions: effectivePermissions(role, features) });
     }
     return { isAppAdmin, groups: out };

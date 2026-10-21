@@ -35,8 +35,16 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.ok) return (await res.json()) as T;
+  if (res.ok) return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
   const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
   if (res.status === 401 && err.code === 'TOKEN_EXPIRED' && !retried) return request<T>(method, path, body, true);
   throw new ApiRequestError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? `Ошибка ${res.status}`);
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return request<T>('PUT', path, body);
+}
+
+export async function apiDelete(path: string): Promise<void> {
+  return request<void>('DELETE', path);
 }
