@@ -7,6 +7,7 @@ import { Bitrix24Module } from './modules/bitrix24/bitrix24.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { GroupsModule } from './modules/groups/groups.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { OpenlinesModule } from './modules/openlines/openlines.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { HealthModule } from './modules/health/health.module.js';
     CalendarModule,
     GroupsModule,
     HealthModule,
+    OpenlinesModule,
   ],
 })
 export class AppModule {}

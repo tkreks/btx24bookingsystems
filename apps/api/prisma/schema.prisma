@@ -43,6 +43,8 @@ model Portal {
   settings             PortalSettings?
   externalUsers        ExternalUser[]
   sandboxBookings      SandboxBooking[]
+  messageTemplates     MessageTemplate[]
+  storedFiles          StoredFile[]
 }
 
 enum PortalStatus {
@@ -213,4 +215,38 @@ model SandboxBooking {
   deletedAt DateTime? @db.DateTime(3)
 
   @@unique([portalId, bookingId])
+}
+
+// ---------- Открытые линии ----------
+
+/// Личный шаблон сообщений менеджера: цепочка шагов (текст + вложения), отправляется по порядку.
+/// Видит и меняет только автор (`ownerUserId` — ID сотрудника Битрикс24).
+model MessageTemplate {
+  id          String   @id @default(cuid())
+  portalId    String
+  portal      Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ownerUserId Int
+  name        String   @db.VarChar(100)
+  /// `[{ text, fileIds }]` в порядке отправки (`TemplateStepDto` в @btx24/shared).
+  steps       Json
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @db.DateTime(3)
+
+  @@index([portalId, ownerUserId])
+}
+
+/// Файл вложения для отправки в чат (из шаблона или разовый). Хранится в БД, до 10 МБ: отдаётся
+/// в Битрикс24 через im.v2.File.upload. Доступен только автору.
+model StoredFile {
+  id          String   @id @default(cuid())
+  portalId    String
+  portal      Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ownerUserId Int
+  name        String   @db.VarChar(255)
+  mime        String   @db.VarChar(150)
+  size        Int
+  data        Bytes    @db.LongBlob
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  @@index([portalId, ownerUserId])
 }

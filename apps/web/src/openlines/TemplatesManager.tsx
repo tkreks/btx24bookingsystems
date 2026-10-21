@@ -1,0 +1,154 @@
+import { useState } from 'react';
+import type { MessageTemplateDto, SaveTemplateDto } from '@btx24/shared';
+import { apiDelete, apiPost, apiPut } from '../api.js';
+import { isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
+import { StepsEditor } from './StepsEditor.js';
+
+type Editing = { id: string | null; name: string; steps: ChainStep[] };
+
+/** Личные шаблоны менеджера: название + цепочка сообщений с вложениями. */
+export function TemplatesManager({
+  templates,
+  onChanged,
+  onClose,
+  initial,
+}: {
+  templates: MessageTemplateDto[];
+  onChanged: (templates: MessageTemplateDto[]) => void;
+  onClose: () => void;
+  /** Открыть сразу на создании шаблона из текущей цепочки. */
+  initial?: ChainStep[];
+}) {
+  const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial } : null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    if (!editing) return;
+    const body: SaveTemplateDto = { name: editing.name, steps: toSteps(editing.steps) };
+    setBusy(true);
+    setError('');
+    try {
+      const saved = editing.id
+        ? await apiPut<MessageTemplateDto>(`/openlines/templates/${editing.id}`, body)
+        : await apiPost<MessageTemplateDto>('/openlines/templates', body);
+      onChanged(
+        [...templates.filter((t) => t.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+      );
+      setEditing(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить шаблон');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (t: MessageTemplateDto) => {
+    if (!confirm(`Удалить шаблон «${t.name}»?`)) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/openlines/templates/${t.id}`);
+      onChanged(templates.filter((x) => x.id !== t.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить шаблон');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div
+        className="sheet templates-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="templates-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header>
+          <h2 id="templates-title">{editing ? (editing.id ? 'Шаблон' : 'Новый шаблон') : 'Мои шаблоны'}</h2>
+          <button aria-label="Закрыть шаблоны" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        {error && (
+          <div className="notice error" role="alert">
+            {error}
+          </div>
+        )}
+        {editing ? (
+          <form
+            className="settings-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <label>
+              Название
+              <input
+                required
+                maxLength={100}
+                value={editing.name}
+                placeholder="Например: Приветствие и прайс"
+                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              />
+            </label>
+            <p className="muted">Сообщения уйдут по порядку. К каждому можно приложить файлы (до 10 МБ).</p>
+            <StepsEditor
+              steps={editing.steps}
+              disabled={busy}
+              onChange={(steps) => setEditing({ ...editing, steps })}
+            />
+            <div className="form-actions">
+              <button
+                className="primary"
+                type="submit"
+                disabled={busy || !editing.name.trim() || editing.steps.every(isEmpty)}
+              >
+                {busy ? 'Сохранение…' : 'Сохранить шаблон'}
+              </button>
+              <button type="button" onClick={() => setEditing(null)}>
+                Отмена
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div className="form-actions">
+              <button className="primary" onClick={() => setEditing({ id: null, name: '', steps: [newStep()] })}>
+                Создать шаблон
+              </button>
+            </div>
+            {!templates.length && (
+              <p className="muted">Шаблонов пока нет. Создайте цепочку сообщений, которую часто отправляете.</p>
+            )}
+            <ul className="settings-groups">
+              {templates.map((t) => (
+                <li key={t.id}>
+                  <div>
+                    <strong>{t.name}</strong>
+                    <p className="muted">
+                      Сообщений: {t.steps.length} · Вложений: {t.steps.reduce((n, s) => n + s.files.length, 0)}
+                    </p>
+                  </div>
+                  <span className="form-actions">
+                    <button
+                      onClick={() =>
+                        setEditing({ id: t.id, name: t.name, steps: t.steps.map((s) => newStep(s.text, s.files)) })
+                      }
+                    >
+                      Изменить
+                    </button>
+                    <button className="danger" disabled={busy} onClick={() => void remove(t)}>
+                      Удалить
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
