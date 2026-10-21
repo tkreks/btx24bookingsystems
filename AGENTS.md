@@ -91,6 +91,7 @@ npm workspaces, Node 24, TypeScript, ESM везде.
 - Долгая задача → чекпоинт `.agent/tasks/<id>.md` по `docs/agents/TASK_TEMPLATE.md`.
 
 ## Где что лежит
+- `docs/agents/HANDOFF.md` — **начинать отсюда**: текущее состояние, стенд, портал, MCP, что дальше.
 - `docs/prototype/node-red-v3.md` — разбор рабочего прототипа (маршруты, настройки, правила,
   известные проблемы). Поведение переносим осознанно, проблемы из §7 — не переносим.
 - `docs/agents/WORKFLOW.md` — порядок работы над задачей; `MCP_SERVER.md` — инструменты.

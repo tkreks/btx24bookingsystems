@@ -30,7 +30,7 @@ export class UserTokenVerifier {
   async verify(memberId: string, token: string): Promise<B24UserContext> {
     const portal = await this.portals.findActiveByMemberId(memberId);
     if (!portal) throw new AuthError('PORTAL_NOT_INSTALLED', 'Приложение не установлено на этом портале');
-    const client = this.portals.clientWithToken(portal.clientEndpoint, portal.memberId, token);
+    const client = this.portals.clientWithToken(portal.clientEndpoint, portal.memberId, token, portal);
 
     const key = sha256Hex(`${memberId}:${token}`);
     const hit = this.cache.get(key);

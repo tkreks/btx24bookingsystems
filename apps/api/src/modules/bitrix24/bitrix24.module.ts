@@ -30,6 +30,7 @@ import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js
         appBaseUrl: c.get('APP_BASE_URL', { infer: true }),
         trustedOAuthHosts: c.get('B24_TRUSTED_OAUTH_HOSTS', { infer: true }),
         readOnly: c.get('B24_READ_ONLY', { infer: true }),
+        sandbox: c.get('B24_SANDBOX', { infer: true }),
       }),
     },
     { provide: SecretBox, inject: [ConfigService], useFactory: (c: ConfigService<Env, true>) => new SecretBox(c.get('ENCRYPTION_KEY', { infer: true })) },

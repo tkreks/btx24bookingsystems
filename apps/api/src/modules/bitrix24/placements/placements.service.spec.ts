@@ -18,7 +18,7 @@ function client(bound: { placement: string; handler: string }[]) {
 }
 
 describe('PlacementsService', () => {
-  const svc = new PlacementsService({ appBaseUrl: 'https://app.example.ru', trustedOAuthHosts: [], readOnly: true });
+  const svc = new PlacementsService({ appBaseUrl: 'https://app.example.ru', trustedOAuthHosts: [], readOnly: true, sandbox: null });
 
   it('reports which placements point at our handler', async () => {
     const { c } = client([{ placement: 'CRM_DEAL_DETAIL_TAB', handler: 'https://app.example.ru/' }, { placement: 'LEFT_MENU', handler: 'https://old.example/booking-local/app' }]);
