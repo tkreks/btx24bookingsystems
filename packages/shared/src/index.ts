@@ -5,3 +5,4 @@ export * from './calendar.js';
 export * from './health.js';
 export * from './session.js';
 export * from './time.js';
+export * from './group-admin.js';

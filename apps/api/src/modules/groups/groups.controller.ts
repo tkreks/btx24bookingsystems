@@ -1,9 +1,11 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, UseGuards } from '@nestjs/common';
-import type { AppSettingsDto, GroupDto, MyGroupDto } from '@btx24/shared';
+import type { AppSettingsDto, ExternalUserSummaryDto, GroupDirectoryDto, GroupDto, MyGroupDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { GroupDirectoryService } from './group-directory.service.js';
+import { ExternalPasswordsService } from './external-passwords.service.js';
 import { GroupsService } from './groups.service.js';
 
 /** Группы текущего пользователя: что он видит и может. */
@@ -23,7 +25,27 @@ export class MyGroupsController {
 @Controller('admin')
 @UseGuards(B24AuthGuard, AppAdminGuard)
 export class GroupsAdminController {
-  constructor(private readonly groups: GroupsService) {}
+  constructor(
+    private readonly groups: GroupsService,
+    private readonly directory: GroupDirectoryService,
+    private readonly passwords: ExternalPasswordsService,
+  ) {}
+
+  @Get('group-directory')
+  references(@B24User() user: B24UserContext): Promise<GroupDirectoryDto> {
+    return this.directory.get(user);
+  }
+
+  @Get('external-users')
+  externalUsers(@B24User() user: B24UserContext): Promise<ExternalUserSummaryDto[]> {
+    return this.passwords.list(user.portal.id);
+  }
+
+  @Put('external-users/:id/password')
+  @HttpCode(204)
+  changePassword(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<void> {
+    return this.passwords.change(user.portal.id, id, body);
+  }
 
   @Get('groups')
   list(@B24User() user: B24UserContext): Promise<GroupDto[]> {

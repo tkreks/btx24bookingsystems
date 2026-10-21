@@ -3,7 +3,7 @@ import { todayIn, type CalendarBooking, type CalendarDay, type MyGroupDto, type 
 import { apiGet, ApiRequestError } from '../api.js';
 import { fitFrame, type PlacementContext } from '../b24.js';
 import { fmtDayTitle, shiftDate } from '../format.js';
-import { AdminPanel } from './AdminPanel.js';
+import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { BookingDetails } from './BookingDetails.js';
 import { DayGrid } from './DayGrid.js';
 import { DayList } from './DayList.js';
@@ -44,10 +44,26 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
   const [resp, setResp] = useState<{ key: string; day: CalendarDay | null; error: string | null } | null>(null);
   const [selected, setSelected] = useState<CalendarBooking | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [settingsRevision, setSettingsRevision] = useState(0);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<MyGroupDto[]>('/groups').then(setGroups, () => setGroups([]));
-  }, []);
+    let active = true;
+    apiGet<MyGroupDto[]>('/groups').then(
+      (value) => {
+        if (active) {
+          setGroups(value);
+          setGroupsError(null);
+        }
+      },
+      (e) => {
+        if (active) setGroupsError(e instanceof Error ? e.message : 'Не удалось загрузить группы');
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [settingsRevision]);
 
   // Сохранённая группа могла пропасть (исключили, архивировали) — берём первую доступную.
   const activeGroup = groups?.find((g) => g.id === groupId) ?? groups?.[0] ?? null;
@@ -61,7 +77,13 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
     let cancelled = false;
     apiGet<CalendarDay>(`/calendar?${query}`).then(
       (d) => !cancelled && setResp({ key: query, day: d, error: null }),
-      (e) => !cancelled && setResp((prev) => ({ key: query, day: prev?.day ?? null, error: e instanceof ApiRequestError ? e.message : 'Не удалось загрузить календарь' })),
+      (e) =>
+        !cancelled &&
+        setResp((prev) => ({
+          key: query,
+          day: prev?.day ?? null,
+          error: e instanceof ApiRequestError ? e.message : 'Не удалось загрузить календарь',
+        })),
     );
     return () => {
       cancelled = true;
@@ -88,7 +110,10 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
     }
   };
 
-  const dealBookings = useMemo(() => (placement.dealId && day ? day.bookings.filter((b) => b.dealId === placement.dealId).length : 0), [placement.dealId, day]);
+  const dealBookings = useMemo(
+    () => (placement.dealId && day ? day.bookings.filter((b) => b.dealId === placement.dealId).length : 0),
+    [placement.dealId, day],
+  );
 
   return (
     <div className="page">
@@ -96,9 +121,16 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
         <div className="toolbar-title">
           <h1>Бронирование</h1>
           {groups && groups.length > 1 && (
-            <select className="group-select" value={activeGroup?.id ?? ''} onChange={(e) => chooseGroup(e.target.value)} aria-label="Группа">
+            <select
+              className="group-select"
+              value={activeGroup?.id ?? ''}
+              onChange={(e) => chooseGroup(e.target.value)}
+              aria-label="Группа"
+            >
               {groups.map((g) => (
-                <option key={g.id} value={g.id}>{g.name}</option>
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
               ))}
             </select>
           )}
@@ -106,34 +138,65 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
           <span className="muted">{fmtDayTitle(date, tz)}</span>
         </div>
         <div className="toolbar-controls">
-          <button aria-label="Предыдущий день" onClick={() => setDate(shiftDate(date, -1))}>‹</button>
-          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Дата" />
-          <button aria-label="Следующий день" onClick={() => setDate(shiftDate(date, 1))}>›</button>
+          <button aria-label="Предыдущий день" onClick={() => setDate(shiftDate(date, -1))}>
+            ‹
+          </button>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => e.target.value && setDate(e.target.value)}
+            aria-label="Дата"
+          />
+          <button aria-label="Следующий день" onClick={() => setDate(shiftDate(date, 1))}>
+            ›
+          </button>
           <button onClick={() => setDate(todayIn(tz))}>Сегодня</button>
           <div className="segmented" role="group" aria-label="Вид">
-            <button className={view === 'grid' ? 'active' : ''} onClick={() => switchView('grid')}>Сетка</button>
-            <button className={view === 'list' ? 'active' : ''} onClick={() => switchView('list')}>Список</button>
+            <button className={view === 'grid' ? 'active' : ''} onClick={() => switchView('grid')}>
+              Сетка
+            </button>
+            <button className={view === 'list' ? 'active' : ''} onClick={() => switchView('list')}>
+              Список
+            </button>
           </div>
-          {session.canManageApp && <button aria-label="Настройки" onClick={() => setAdminOpen(true)}>⚙</button>}
+          {session.canManageApp && (
+            <button aria-label="Настройки" onClick={() => setAdminOpen(true)}>
+              ⚙
+            </button>
+          )}
         </div>
       </header>
 
       {session.readOnly && <div className="notice">Режим просмотра: изменения в Битрикс24 пока отключены.</div>}
-      {groups && groups.length === 0 && session.canManageApp && <div className="notice">Группы ещё не настроены — показаны все ресурсы портала.</div>}
+      {groups && groups.length === 0 && session.canManageApp && (
+        <div className="notice">Группы ещё не настроены — показаны все ресурсы портала.</div>
+      )}
       {placement.dealId && (
         <div className="notice deal">
           Сделка #{placement.dealId}: {dealBookings ? `броней на эту дату — ${dealBookings}` : 'на эту дату броней нет'}
         </div>
       )}
+      {groupsError && (
+        <div className="notice error" role="alert">
+          {groupsError}
+        </div>
+      )}
       {error && <div className="notice error">{error}</div>}
 
       <main className={loading ? 'loading' : ''}>
-        {day && (view === 'grid' ? <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} /> : <DayList day={day} highlightDealId={placement.dealId} onSelect={setSelected} />)}
+        {day &&
+          (view === 'grid' ? (
+            <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} />
+          ) : (
+            <DayList day={day} highlightDealId={placement.dealId} onSelect={setSelected} />
+          ))}
         {!day && loading && <div className="muted pad">Загрузка броней…</div>}
       </main>
 
       {selected && day && <BookingDetails booking={selected} day={day} onClose={() => setSelected(null)} />}
-      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
+      {adminOpen && (
+        <SettingsPanel onClose={() => setAdminOpen(false)} onChanged={() => setSettingsRevision((n) => n + 1)} />
+      )}
     </div>
   );
 }

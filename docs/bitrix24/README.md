@@ -7,6 +7,7 @@
 сервер документации, без авторизации, доступа к порталу не даёт).
 
 ## Тип приложения
+
 - Начинаем с **локального приложения** на тестовом портале (Разработчикам → Другое →
   Локальное приложение): задаются URL обработчика и URL установки, выдаются `client_id`
   (`application id`) и `client_secret`. Публикация в Маркет — отдельный этап.
@@ -14,6 +15,7 @@
   (`APP_BASE_URL`).
 
 ## Жизненный цикл
+
 1. **Установка.** Портал открывает URL установки (POST с параметрами авторизации и
    `member_id`, `DOMAIN`). Сохраняем портал и токены, регистрируем встройки (`placement.bind`) и
    обработчики событий (`event.bind`), затем фронтенд вызывает `BX24.installFinish()`.
@@ -26,6 +28,7 @@
    сразу.
 
 ## Авторизация и токены
+
 - `access_token` живёт 1 час, `refresh_token` — **180 дней**. Обновление:
   `GET https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=…&client_secret=…&refresh_token=…`
   (в ответе — доверенные `member_id`, `client_endpoint`, `server_endpoint`, `scope`, `user_id`).
@@ -39,6 +42,7 @@
 - Реализация — модуль `apps/api/src/modules/bitrix24` (см. его `MODULE.md`).
 
 ## Подключение приложения на портале (локальное приложение)
+
 1. Битрикс24 → Разработчикам → Другое → **Локальное приложение**, тип «Серверное, с интерфейсом».
 2. Путь вашего обработчика: `https://testapp.1-app.ru/`
 3. Путь для первоначальной установки: `https://testapp.1-app.ru/api/b24/install`
@@ -54,6 +58,7 @@
    Проверка: `npm run mcp:cli -- db_query '{"sql":"SELECT domain, status, installedAt FROM `Portal`"}'`.
 
 ## Вызовы REST
+
 - Лимит запросов на приложение/портал (порядка 2 запросов/с с «ведром» на всплески)
   **(проверить актуальные цифры)** → очередь в клиенте, `batch` (до 50 команд), обработка
   `QUERY_LIMIT_EXCEEDED`.
@@ -62,6 +67,7 @@
 - Списки постраничные (`start`, шаг 50).
 
 ## Фронтенд в iframe
+
 - JS SDK: классический `BX24` (`//api.bitrix24.com/api/v1/`) или npm-пакет
   `@bitrix24/b24jssdk` (выбрать при реализации, зафиксировать ADR).
 - `BX24.fitWindow()`/`resizeWindow` — высота iframe; `BX24.placement.info()` — контекст встройки.
@@ -69,10 +75,33 @@
   обходиться без cookie-сессии (токен из параметров запуска).
 
 ## Модуль бронирования Битрикс24
+
 Прототип использует `booking.v1.resource.list`, `booking.v1.booking.{list,get,add,update,delete}`,
 `booking.v1.booking.externalData.{set,list}` (связь брони со сделкой). Детали и ограничения —
 `docs/prototype/node-red-v3.md` §4–6, решение — ADR 0003.
 
 ## Открытые вопросы
+
 - Какие встройки нужны: левое меню, вкладка карточки CRM, календарь.
 - Синхронизация броней с календарём пользователя (`calendar.event.*`).
+
+### Справочники экрана настроек групп
+
+Проверено через официальный MCP `bitrix24-docs`:
+
+- [`BX24.selectUsers`](https://apidocs.bitrix24.com/sdk/bx24-js-sdk/system-dialogues/bx24-select-users.html)
+  открывает стандартный выбор сотрудников без дополнительного scope; callback получает массив
+  `{ id: string, name: string }`. При закрытии без выбора callback может не прийти — форму
+  нельзя блокировать ожиданием. Повторный вызов не сохраняет выделение.
+- [`crm.category.list`](https://apidocs.bitrix24.com/api-reference/crm/universal/category/crm-category-list.html)
+  для сделок принимает `entityTypeId: 2`, список — `result.categories`, основная воронка имеет
+  id `0` (это не отсутствие привязки).
+- [`booking.v1.resource.list`](https://apidocs.bitrix24.com/api-reference/booking/resource/booking-v1-resource-list.html)
+  возвращает `result.resource`, поддерживает `start` (страница 50); `total` всегда `0`,
+  ориентируемся на `next`, а не `total`.
+- [`department.get`](https://apidocs.bitrix24.com/api-reference/departments/department-get.html)
+  требует scope `department`. Экран не запрашивает расширение прав автоматически: без scope
+  показывает ограничение и сохраняет имеющиеся назначения отделов.
+- [`user.get`](https://apidocs.bitrix24.com/api-reference/user/user-get.html) принимает
+  массив id в `FILTER.ID`. Для подписей сохранённых участников запрашиваем только сотрудников
+  из групп и списка администраторов текущего портала; в ответ нашего API идут только id и имя.
