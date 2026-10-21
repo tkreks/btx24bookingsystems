@@ -62,7 +62,7 @@
 `/home/ai/.cache/ms-playwright`, `PLAYWRIGHT_BROWSERS_PATH`), приложение — `vite preview` в `apps/web`.
 
 ## Проверено вживую
-- установка через `ONAPPINSTALL`, права `crm,booking,placement,user,bizproc,imopenlines,messageservice,im,department`;
+- установка через `ONAPPINSTALL`, права `crm,booking,placement,user,bizproc,imopenlines,messageservice,im,department,disk,timeman` (disk и timeman — переустановка 2026-10-21 вечером);
 - календарь (30 ресурсов, брони со сделками), группа сужает календарь, чужая группа → 403;
 - песочница: бронь 2020 создана/связана со сделкой 678/удалена; чужие записи блокируются;
 - аннулирование ссылки на оплату: удаление неоплаченной оплаты `8674` счёта 5152 → ссылка

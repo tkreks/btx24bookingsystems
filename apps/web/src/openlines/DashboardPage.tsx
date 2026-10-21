@@ -14,6 +14,7 @@ import { apiGet } from '../api.js';
 import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
+import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallsModal } from './CallsModal.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
@@ -114,6 +115,8 @@ export function DashboardPage({
           <h1>Мой дашборд</h1>
           <span className="muted">{session.user.name}</span>
         </div>
+        <div className="toolbar-controls">
+        <WorkdayButton timezone={tz} />
         {onSettings && (
           <button
             className="settings-button"
@@ -123,6 +126,7 @@ export function DashboardPage({
             <span aria-hidden="true">⚙</span> Настройки
           </button>
         )}
+        </div>
       </header>
       {askCode && (
         <TempAccessDialog

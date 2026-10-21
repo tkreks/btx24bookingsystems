@@ -84,6 +84,12 @@ export class SandboxWritePolicy implements WritePolicy {
         return (await this.isAlertChat(chatOf(params.DIALOG_ID))) || this.related('chatIds', chatOf(params.DIALOG_ID));
       case 'im.message.update':
         return this.isAlertMessage(params.MESSAGE_ID);
+      // Свой рабочий день (запрос владельца 2026-10-21): только без USER_ID — токеном самого
+      // сотрудника, чужой день так не изменить.
+      case 'timeman.open':
+      case 'timeman.pause':
+      case 'timeman.close':
+        return params.USER_ID === undefined;
       case 'im.v2.file.upload':
         return this.related('chatIds', chatOf(params.dialogId));
       case 'booking.v1.booking.add':

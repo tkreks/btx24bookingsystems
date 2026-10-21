@@ -9,6 +9,7 @@ import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { GroupsModule } from './modules/groups/groups.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { OpenlinesModule } from './modules/openlines/openlines.module.js';
+import { WorkdayModule } from './modules/workday/workday.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { OpenlinesModule } from './modules/openlines/openlines.module.js';
     GroupsModule,
     HealthModule,
     OpenlinesModule,
+    WorkdayModule,
   ],
 })
 export class AppModule {}

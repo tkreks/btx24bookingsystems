@@ -14,6 +14,7 @@ import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
+import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { BookingDetails } from './BookingDetails.js';
 import { DayAvailability } from './DayAvailability.js';
 import { DayGrid } from './DayGrid.js';
@@ -261,6 +262,7 @@ export function CalendarPage({
           >
             {VIEW_ICONS[nextView(view)]} <span className="view-toggle-text">{VIEW_TITLES[nextView(view)]}</span>
           </button>
+          <WorkdayButton timezone={tz} />
           <button
             className="home-button"
             aria-label="Мой дашборд"

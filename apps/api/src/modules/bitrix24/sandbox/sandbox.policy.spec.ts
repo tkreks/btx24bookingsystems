@@ -69,6 +69,13 @@ describe('SandboxWritePolicy', () => {
     await expect(policy.allows('im.message.update', { MESSAGE_ID: 9002, MESSAGE: 'x' })).resolves.toBe(false);
   });
 
+  it('allows only own workday actions (no USER_ID)', async () => {
+    const { policy } = setup();
+    await expect(policy.allows('timeman.open', {})).resolves.toBe(true);
+    await expect(policy.allows('timeman.close', { TIME: 'x', REPORT: 'y' })).resolves.toBe(true);
+    await expect(policy.allows('timeman.pause', { USER_ID: 9 })).resolves.toBe(false);
+  });
+
   it('allows editing only the contact of the sandbox deal, never deleting it', async () => {
     const { policy } = setup();
     await expect(policy.allows('crm.contact.update', { id: 140, fields: { EMAIL: [] } })).resolves.toBe(true);

@@ -21,6 +21,8 @@ const READ_METHODS = new Set([
   'disk.storage.getlist',
   'disk.storage.getchildren',
   'disk.folder.getchildren',
+  // статус своего рабочего дня
+  'timeman.status',
 ]);
 
 export function isReadMethod(method: string): boolean {

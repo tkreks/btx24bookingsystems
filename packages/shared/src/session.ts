@@ -36,3 +36,20 @@ export interface SettingsCodeDto {
   usedAt: string | null;
   revokedAt: string | null;
 }
+
+/** Рабочий день сотрудника в Битрикс24 (учёт рабочего времени, `timeman.*`). */
+export type WorkdayStatus = 'OPENED' | 'PAUSED' | 'CLOSED' | 'EXPIRED';
+
+export interface WorkdayDto {
+  /** false — учёт времени недоступен приложению (нет права `timeman` или выключен на портале). */
+  available: boolean;
+  reason: string | null;
+  status: WorkdayStatus | null;
+  timeStart: string | null;
+  /** Отработано, HH:MM:SS. */
+  duration: string | null;
+  /** Перерывы, HH:MM:SS. */
+  timeLeaks: string | null;
+}
+
+export type WorkdayAction = 'open' | 'pause' | 'close';
