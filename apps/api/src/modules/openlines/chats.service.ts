@@ -49,9 +49,10 @@ interface ImMessages {
   files?: ImFile[];
 }
 
-/** Сессия для сводки: из дела CRM или из индекса. */
+/** Сессия для сводки: из дела CRM, из индекса или найденный по CRM чат (тогда `chatId`). */
 interface SessionRef {
   sessionId: number;
+  chatId?: number;
   responsibleId: number | null;
   completed: boolean;
   /** Дата из индекса — ключ сортировки (живая дата важнее, если новее). */
@@ -59,6 +60,8 @@ interface SessionRef {
 }
 
 const HISTORY_LIMIT = 50;
+/** Сколько найденных по номеру контактов / лидов / компаний каждого типа разбираем. */
+const PHONE_MATCHES = 10;
 const PAGE = 50;
 /** Сообщений на чат в сводке: среди них ищем последнее от клиента или оператора. */
 const SUMMARY_MESSAGES = 20;
@@ -142,7 +145,7 @@ export class ChatsService {
       Object.fromEntries(
         sessions.map((s) => [
           `s${s.sessionId}`,
-          { method: 'imopenlines.dialog.get', params: { SESSION_ID: s.sessionId } },
+          { method: 'imopenlines.dialog.get', params: s.chatId ? { CHAT_ID: s.chatId } : { SESSION_ID: s.sessionId } },
         ]),
       ),
     );
@@ -152,6 +155,7 @@ export class ChatsService {
       .filter((x): x is { s: SessionRef; d: ImDialog } => Boolean(x.d?.id));
     const unique = [...new Map(pairs.map((x) => [x.d.id, x])).values()];
     if (!unique.length) return [];
+    const phones = await this.phonesOf(user, unique.map(({ d }) => crmLinksOf(d.entity_data_2)));
     const msgs = await user.client.batch(
       Object.fromEntries(
         unique.map(({ d }) => [
@@ -186,10 +190,87 @@ export class ChatsService {
         joined: isMember(d.role),
         sessionClosed,
         crm: crmLinksOf(d.entity_data_2),
+        phones: phonesFor(crmLinksOf(d.entity_data_2), phones),
       };
       return { summary, sortKey };
     });
     return summaries.sort((a, b) => b.sortKey - a.sortKey).map((x) => x.summary);
+  }
+
+  /**
+   * Поиск чатов по номеру телефона клиента по всему порталу: CRM ищет контакты, лиды и компании
+   * с этим номером (`crm.duplicate.findbycomm`, права пользователя), затем — их чаты открытых линий.
+   */
+  async searchByPhone(user: B24UserContext, query: unknown): Promise<ChatListDto> {
+    const q = String((query as { q?: unknown } | null)?.q ?? '');
+    const variants = phoneVariants(q);
+    if (!variants.length)
+      throw new BadRequestException({ code: 'INVALID_PHONE', message: 'Введите номер телефона полностью (не меньше 10 цифр)' });
+    const found = await user.client.call<Partial<Record<'LEAD' | 'CONTACT' | 'COMPANY', number[]>>>('crm.duplicate.findbycomm', {
+      type: 'PHONE',
+      values: variants,
+    });
+    const entities = (['CONTACT', 'LEAD', 'COMPANY'] as const).flatMap((type) =>
+      (found.result?.[type] ?? []).slice(0, PHONE_MATCHES).map((id) => ({ type, id: Number(id) })),
+    );
+    if (!entities.length) return { items: [], nextOffset: null, exactOrder: true };
+    const chats = await user.client.batch(
+      Object.fromEntries(
+        entities.map((e) => [
+          `${e.type}${e.id}`,
+          { method: 'imopenlines.crm.chat.get', params: { CRM_ENTITY_TYPE: e.type.toLowerCase(), CRM_ENTITY: e.id, ACTIVE_ONLY: 'N' } },
+        ]),
+      ),
+    );
+    const chatIds = [
+      ...new Set(
+        entities.flatMap((e) =>
+          ((chats.result[`${e.type}${e.id}`] as { CHAT_ID?: string | number }[] | undefined) ?? []).map((c) => Number(c.CHAT_ID)),
+        ),
+      ),
+    ].filter((id) => id > 0);
+    const indexed = await this.index.byChat(user.portal.id, chatIds);
+    const items = await this.summaries(
+      user,
+      chatIds.slice(0, PAGE).map((chatId) => {
+        const r = indexed.get(chatId);
+        return {
+          chatId,
+          sessionId: r?.sessionId ?? 0,
+          responsibleId: r?.responsibleId ?? null,
+          completed: r?.completed ?? false,
+          indexedAt: r?.lastMessageAt ?? null,
+        };
+      }),
+    );
+    return { items, nextOffset: null, exactOrder: true };
+  }
+
+  /** Телефоны привязанных контактов, лидов и компаний — одним пакетом, правами пользователя. */
+  private async phonesOf(user: B24UserContext, links: ChatSummary['crm'][]): Promise<Map<string, string[]>> {
+    const ids = {
+      contact: [...new Set(links.map((l) => l.contactId).filter((x): x is number => !!x))],
+      lead: [...new Set(links.map((l) => l.leadId).filter((x): x is number => !!x))],
+      company: [...new Set(links.map((l) => l.companyId).filter((x): x is number => !!x))],
+    };
+    const commands = Object.fromEntries(
+      (Object.keys(ids) as (keyof typeof ids)[])
+        .filter((k) => ids[k].length)
+        .map((k) => [k, { method: `crm.${k}.list`, params: { filter: { '@ID': ids[k] }, select: ['ID', 'PHONE'] } }]),
+    );
+    const out = new Map<string, string[]>();
+    if (!Object.keys(commands).length) return out;
+    try {
+      const res = await user.client.batch(commands);
+      for (const k of Object.keys(commands)) {
+        for (const row of (res.result[k] as { ID: string; PHONE?: { VALUE?: string }[] }[] | undefined) ?? [])
+          out.set(`${k}:${row.ID}`, (row.PHONE ?? []).map((p) => String(p.VALUE ?? '')).filter(Boolean));
+      }
+    } catch (err) {
+      // Телефоны — только для поиска: без них список всё равно показываем.
+      if (!(err instanceof Bitrix24Error)) throw err;
+    }
+    return out;
   }
 
   async history(user: B24UserContext, chatId: number, query: unknown, canSendRight: boolean): Promise<ChatHistoryDto> {
@@ -307,3 +388,28 @@ export class ChatsService {
 
 /** Роль пользователя в чате: `guest` — видит, но не участник (нужно «Присоединиться»). */
 const isMember = (role: string | undefined) => Boolean(role) && !['guest', 'none'].includes(String(role).toLowerCase());
+
+function phonesFor(l: ChatSummary['crm'], phones: Map<string, string[]>): string[] {
+  return [
+    ...new Set([
+      ...(l.contactId ? (phones.get(`contact:${l.contactId}`) ?? []) : []),
+      ...(l.leadId ? (phones.get(`lead:${l.leadId}`) ?? []) : []),
+      ...(l.companyId ? (phones.get(`company:${l.companyId}`) ?? []) : []),
+    ]),
+  ];
+}
+
+/**
+ * Варианты записи номера для поиска в CRM: «8 (985) 123-45-67», «+7985…», «985…» →
+ * +79851234567, 89851234567, 79851234567. Меньше 10 цифр — не номер.
+ */
+export function phoneVariants(q: string): string[] {
+  const digits = q.replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 15) return [];
+  if (digits.length === 10) return [`+7${digits}`, `8${digits}`, `7${digits}`];
+  if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) {
+    const rest = digits.slice(1);
+    return [`+7${rest}`, `8${rest}`, `7${rest}`];
+  }
+  return [`+${digits}`, digits];
+}

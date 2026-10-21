@@ -1,17 +1,33 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatListDto, ChatScope, ChatSummary, MessageTemplateDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { ChatView } from './ChatView.js';
-import { AUTHOR_PREFIX, connectorLabel, shortTime } from './format.js';
+import {
+  avatarTone,
+  CHAT_SORTS,
+  chatsCount,
+  initials,
+  isFullPhone,
+  visibleChats,
+  type ChatSort,
+  type ChatTab,
+} from './chat-list.js';
+import { Channel } from './Channel.js';
+import { AUTHOR_PREFIX, shortTime } from './format.js';
+import { Icon } from './icons.js';
 
 const SCOPES: { key: ChatScope; label: string }[] = [
   { key: 'mine', label: 'Мои' },
   { key: 'department', label: 'Отдел' },
   { key: 'all', label: 'Все доступные' },
 ];
+const TABS: { key: ChatTab; label: string }[] = [
+  { key: 'all', label: 'Все' },
+  { key: 'waiting', label: 'Ждут ответа' },
+  { key: 'answered', label: 'Отвечены' },
+];
 /** Список чатов обновляем раз в 30 секунд, пока страница открыта. */
 const POLL_MS = 30_000;
-
 /** Чаты открытых линий: сверху — с самыми новыми сообщениями. Клик — открыть диалог. */
 export function ChatsPage({
   timezone,
@@ -26,8 +42,12 @@ export function ChatsPage({
   initialWaiting?: boolean;
   onClose: () => void;
 }) {
-  const [scope, setScope] = useState<ChatScope>('mine');
-  const [waitingOnly, setWaitingOnly] = useState(initialWaiting);
+  // По умолчанию — все доступные чаты и все статусы (решение владельца).
+  const [scope, setScope] = useState<ChatScope>('all');
+  const [tab, setTab] = useState<ChatTab>(initialWaiting ? 'waiting' : 'all');
+  const [sort, setSort] = useState<ChatSort>('recent');
+  const [query, setQuery] = useState('');
+  const [menu, setMenu] = useState(false);
   const [list, setList] = useState<{
     scope: ChatScope;
     items: ChatSummary[];
@@ -38,6 +58,27 @@ export function ChatsPage({
   const [loadingMore, setLoadingMore] = useState(false);
   const [openId, setOpenId] = useState<number | null>(initialChatId ?? null);
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Полный номер телефона — поиск по всему порталу (CRM → чаты клиента), а не только в загруженных.
+  const [phoneHits, setPhoneHits] = useState<{ q: string; items: ChatSummary[] | null; error: string } | null>(null);
+  const fullPhone = isFullPhone(query);
+
+  useEffect(() => {
+    if (!fullPhone) return;
+    let active = true;
+    const q = query.trim();
+    const timer = setTimeout(() => {
+      setPhoneHits({ q, items: null, error: '' });
+      apiGet<ChatListDto>(`/openlines/chats/search?q=${encodeURIComponent(q)}`).then(
+        (r) => active && setPhoneHits({ q, items: r.items, error: '' }),
+        (e) => active && setPhoneHits({ q, items: [], error: e instanceof Error ? e.message : 'Поиск не удался' }),
+      );
+    }, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [query, fullPhone]);
 
   const refresh = useCallback(async () => {
     try {
@@ -86,6 +127,20 @@ export function ChatsPage({
     };
   }, [canSend]);
 
+  // Меню закрывается кликом мимо и по Esc.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !menuRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [menu]);
+
   const more = async () => {
     if (!list?.nextOffset) return;
     setLoadingMore(true);
@@ -106,79 +161,155 @@ export function ChatsPage({
   };
 
   const current = list?.scope === scope ? list : null;
-  const items = (current?.items ?? []).filter((c) => !waitingOnly || c.waitingReply);
-  const waiting = (current?.items ?? []).filter((c) => c.waitingReply).length;
+  const all = current?.items ?? [];
+  const waiting = all.filter((c) => c.waitingReply).length;
+  const counts: Record<ChatTab, number> = { all: all.length, waiting, answered: all.length - waiting };
+  const hits = fullPhone && phoneHits?.q === query.trim() ? phoneHits : null;
+  // По номеру: найденные по всему порталу + совпавшие среди загруженных (без повторов).
+  // Найденные сервером уже совпали по номеру — их фильтруем только по вкладке.
+  const local = visibleChats(all, tab, query, sort);
+  const items = fullPhone
+    ? [
+        ...visibleChats(hits?.items ?? [], tab, '', sort),
+        ...local.filter((c) => !hits?.items?.some((h) => h.chatId === c.chatId)),
+      ]
+    : local;
 
   return (
     <div className={`chats-page${openId ? ' has-open' : ''}`}>
-      <section className="chat-list-pane">
-        <header className="chat-list-header">
-          <button aria-label="Назад" onClick={onClose}>
-            ‹
-          </button>
-          <h1>Чаты</h1>
-          <button aria-label="Обновить" title="Обновить" onClick={() => void refresh()}>
-            ↻
-          </button>
-        </header>
-        <div className="segmented" role="group" aria-label="Чьи чаты">
-          {SCOPES.map((s) => (
-            <button key={s.key} className={scope === s.key ? 'active' : ''} onClick={() => setScope(s.key)}>
-              {s.label}
+      <aside className="cl-panel" aria-label="Список чатов">
+        <div className="cl-top">
+          <div className="cl-title-row">
+            <button className="cl-btn" aria-label="Назад" title="Назад" onClick={onClose}>
+              <Icon name="back" size={21} />
             </button>
-          ))}
-        </div>
-        <label className="check waiting-filter">
-          <input type="checkbox" checked={waitingOnly} onChange={(e) => setWaitingOnly(e.target.checked)} />
-          Только ждущие ответа{current ? ` (${waiting})` : ''}
-        </label>
-        {current && !current.exactOrder && (
-          <p className="muted order-hint">
-            Порядок приблизительный. Точная сортировка по последнему сообщению, как в списке диалогов Битрикс24, — после
-            включения «Сбор метаданных диалогов» в ⚙ → «Приложение».
-          </p>
-        )}
-        {error && (
-          <div className="notice error" role="alert">
-            {error}
-          </div>
-        )}
-        {!current && !error && <p className="muted pad">Загрузка чатов…</p>}
-        {current && !items.length && (
-          <p className="muted pad">{waitingOnly ? 'Ждущих ответа чатов нет.' : 'Чатов нет.'}</p>
-        )}
-        <ul className="chat-list">
-          {items.map((c) => (
-            <li key={c.chatId}>
+            <div className="cl-heading">
+              <div className="cl-heading-line">
+                <h1>Чаты</h1>
+                {waiting > 0 && (
+                  <span className="cl-count" title="Ждут ответа">
+                    {waiting}
+                  </span>
+                )}
+              </div>
+              <p className="cl-caption">
+                {current?.exactOrder === false ? 'Порядок приблизительный' : 'Сначала новые сообщения'}
+              </p>
+            </div>
+            <button className="cl-btn" aria-label="Обновить" title="Обновить" onClick={() => void refresh()}>
+              <Icon name="refresh" />
+            </button>
+            <div className="cl-menu-wrap" ref={menuRef}>
               <button
-                className={`chat-item${openId === c.chatId ? ' active' : ''}`}
-                onClick={() => setOpenId(c.chatId)}
+                className={`cl-btn${menu ? ' active' : ''}`}
+                aria-label="Сортировка"
+                aria-expanded={menu}
+                title="Сортировка"
+                onClick={() => setMenu(!menu)}
               >
-                <span className="chat-item-top">
-                  <strong>{c.title}</strong>
-                  <span className="muted">{c.lastMessage ? shortTime(c.lastMessage.date, timezone) : ''}</span>
-                </span>
-                <span className="chat-item-preview">
-                  {c.lastMessage
-                    ? `${AUTHOR_PREFIX[c.lastMessage.author]}${c.lastMessage.preview || (c.lastMessage.hasFiles ? '📎 Файл' : '')}`
-                    : 'Нет сообщений'}
-                </span>
-                <span className="chat-item-tags">
-                  <span className="pill">{connectorLabel(c.connector)}</span>
-                  {c.waitingReply && <span className="pill waiting">ждёт ответа</span>}
-                  {!c.joined && <span className="pill muted-pill">не участвую</span>}
-                  {c.sessionClosed && <span className="pill muted-pill">закрыт</span>}
+                <Icon name="filter" size={21} />
+              </button>
+              {menu && (
+                <div className="cl-menu" role="menu">
+                  <div className="cl-menu-label">Сортировка</div>
+                  {CHAT_SORTS.map((s) => (
+                    <button
+                      key={s.key}
+                      role="menuitemradio"
+                      aria-checked={sort === s.key}
+                      className={`cl-menu-item${sort === s.key ? ' active' : ''}`}
+                      onClick={() => {
+                        setSort(s.key);
+                        setMenu(false);
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <label className="cl-search">
+            <Icon name="search" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Имя, телефон, канал, сообщение…"
+              aria-label="Поиск чатов"
+              autoComplete="off"
+            />
+            {query && (
+              <button className="cl-search-clear" aria-label="Очистить поиск" onClick={() => setQuery('')}>
+                <Icon name="close" size={16} />
+              </button>
+            )}
+          </label>
+
+          <div className="cl-scope" role="group" aria-label="Чьи чаты">
+            {SCOPES.map((s) => (
+              <button
+                key={s.key}
+                className={scope === s.key ? 'active' : ''}
+                aria-pressed={scope === s.key}
+                onClick={() => setScope(s.key)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <nav className="cl-tabs" aria-label="Фильтр по статусу">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                className={`cl-tab${tab === t.key ? ' active' : ''}`}
+                aria-pressed={tab === t.key}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+                <span className={`cl-tab-counter${t.key === 'waiting' && counts.waiting ? ' alert' : ''}`}>
+                  {current ? counts[t.key] : '…'}
                 </span>
               </button>
-            </li>
+            ))}
+          </nav>
+          <div className="cl-list-caption">
+            <span>{fullPhone ? (hits?.items ? 'Найдено по номеру' : 'Ищем по номеру…') : 'Переписки'}</span>
+            <span>{current ? chatsCount(items.length) : ''}</span>
+          </div>
+        </div>
+
+        <div className="cl-list" role="list" aria-label="Чаты">
+          {error && (
+            <div className="notice error" role="alert">
+              {error}
+            </div>
+          )}
+          {hits?.error && (
+            <div className="notice error" role="alert">
+              {hits.error}
+            </div>
+          )}
+          {!current && !error && <p className="cl-empty">Загрузка чатов…</p>}
+          {current && !items.length && (
+            <div className="cl-empty">
+              <strong>{query || tab !== 'all' ? 'Чаты не найдены' : 'Чатов нет'}</strong>
+              {(query || tab !== 'all') && <p>Попробуйте изменить запрос или фильтр</p>}
+              {scope !== 'all' && <p>Чаты коллег — во вкладке «Все доступные».</p>}
+            </div>
+          )}
+          {items.map((c) => (
+            <ChatCard key={c.chatId} c={c} active={openId === c.chatId} timezone={timezone} onOpen={() => setOpenId(c.chatId)} />
           ))}
-        </ul>
-        {current?.nextOffset !== null && current && (
-          <button className="link more" disabled={loadingMore} onClick={() => void more()}>
-            {loadingMore ? 'Загрузка…' : 'Показать ещё'}
-          </button>
-        )}
-      </section>
+          {current?.nextOffset !== null && current && (
+            <button className="link more" disabled={loadingMore} onClick={() => void more()}>
+              {loadingMore ? 'Загрузка…' : 'Показать ещё'}
+            </button>
+          )}
+        </div>
+      </aside>
       {openId ? (
         <ChatView
           key={openId}
@@ -190,8 +321,45 @@ export function ChatsPage({
           onChanged={() => void refresh()}
         />
       ) : (
-        <section className="chat-view empty-chat muted">Выберите чат слева</section>
+        <main className="chat-view empty-chat">Выберите чат слева</main>
       )}
     </div>
+  );
+}
+
+function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boolean; timezone: string; onOpen: () => void }) {
+  const last = c.lastMessage;
+  const incoming = last?.author === 'client';
+  return (
+    <button className={`cl-card${active ? ' selected' : ''}`} role="listitem" aria-current={active} onClick={onOpen}>
+      <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(c.title)}</span>
+      <span className="cl-card-body">
+        <span className="cl-card-heading">
+          <span className="cl-card-name">{c.title}</span>
+          <time className="cl-card-time">{last ? shortTime(last.date, timezone) : ''}</time>
+        </span>
+        <span className="cl-card-meta">
+          <Channel connector={c.connector} />
+          {last && (last.author === 'client' || last.author === 'employee') && (
+            <span className={`cl-direction${incoming ? ' in' : ''}`}>
+              <Icon name={incoming ? 'in' : 'out'} size={14} /> {incoming ? 'Вх.' : 'Исх.'}
+            </span>
+          )}
+        </span>
+        <span className="cl-card-bottom">
+          <span className="cl-preview">
+            {last ? `${AUTHOR_PREFIX[last.author]}${last.preview || (last.hasFiles ? '📎 Файл' : '')}` : 'Нет сообщений'}
+          </span>
+          {c.sessionClosed ? (
+            <span className="cl-status closed">Закрыт</span>
+          ) : (
+            <span className={`cl-status ${c.waitingReply ? 'waiting' : 'answered'}`}>
+              {c.waitingReply ? 'Ждёт ответ' : 'Отвечен'}
+            </span>
+          )}
+        </span>
+        {!c.joined && <span className="cl-not-joined">Вы не участник</span>}
+      </span>
+    </button>
   );
 }

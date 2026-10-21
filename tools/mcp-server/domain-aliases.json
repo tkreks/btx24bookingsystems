@@ -240,5 +240,36 @@
   ],
   "встройки": [
     "placement"
+  ],
+  "уведомления": [
+    "alert",
+    "BookingAlert"
+  ],
+  "расхождение": [
+    "discrepancy",
+    "reconcile"
+  ],
+  "расхождения": [
+    "discrepancy",
+    "reconcile"
+  ],
+  "сверка": [
+    "reconcile",
+    "sync",
+    "BookingSync"
+  ],
+  "синхронизация": [
+    "sync",
+    "reconcile"
+  ],
+  "аудит": [
+    "history",
+    "BookingHistory",
+    "journal"
+  ],
+  "журнал": [
+    "journal",
+    "BookingJournal",
+    "history"
   ]
 }

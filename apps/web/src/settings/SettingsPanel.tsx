@@ -3,6 +3,7 @@ import type { AppSettingsDto, GroupDirectoryDto, GroupDto } from '@btx24/shared'
 import { apiGet } from '../api.js';
 import { fitFrame } from '../b24.js';
 import { PlacementSettings } from '../calendar/AdminPanel.js';
+import { BookingSyncSettings } from '../bookings/BookingSyncSettings.js';
 import { AppSettingsForm } from './AppSettingsForm.js';
 import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
@@ -14,7 +15,15 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'passwords', label: 'Прямая ссылка' },
   { key: 'placements', label: 'Встройки' },
 ];
-export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+export function SettingsPanel({
+  onClose,
+  onChanged,
+  timezone,
+}: {
+  onClose: () => void;
+  onChanged: () => void;
+  timezone: string;
+}) {
   const [tab, setTab] = useState<Tab>('groups');
   const [groups, setGroups] = useState<GroupDto[] | null>(null);
   const [settings, setSettings] = useState<AppSettingsDto | null>(null);
@@ -249,6 +258,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
             }}
           />
         )}
+        {tab === 'app' && <BookingSyncSettings timezone={timezone} />}
         {tab === 'passwords' && (
           <fieldset className="password-settings" disabled={busy}>
             <ExternalPasswords onDirty={markDirty} onBusy={markBusy} />

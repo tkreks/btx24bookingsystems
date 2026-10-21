@@ -46,6 +46,9 @@ model Portal {
   messageTemplates     MessageTemplate[]
   storedFiles          StoredFile[]
   openlineChats        OpenlineChat[]
+  bookingRecords       BookingRecord[]
+  resources            Resource[]
+  bookingAlerts        BookingAlert[]
 }
 
 enum PortalStatus {
@@ -167,6 +170,15 @@ model PortalSettings {
   dialogTextsEnabled    Boolean  @default(false)
   /// Перед запуском оплаты удалять у контакта e-mail с «wazzup» (платёжный сервис отклоняет).
   removeWazzupEmail     Boolean  @default(false)
+  /// Чат Битрикс24 для уведомлений о бронях (новая бронь мимо приложения, расхождения).
+  alertChatId           Int?
+  /// Сверка броней с Битрикс24: на сколько дней вперёд от сегодня.
+  syncHorizonDays       Int      @default(180)
+  /// Первая полная сверка прошла: существующие брони приняты без уведомлений.
+  bookingSyncBaselineAt DateTime? @db.DateTime(3)
+  /// Последняя сверка броней и её ошибка (для экрана настроек).
+  bookingSyncAt         DateTime? @db.DateTime(3)
+  bookingSyncError      String?   @db.VarChar(500)
   updatedByUserId       Int?
   updatedAt             DateTime @updatedAt @db.DateTime(3)
 }
@@ -274,4 +286,161 @@ model OpenlineChat {
   @@unique([portalId, chatId])
   @@index([portalId, lastMessageAt])
   @@index([portalId, responsibleId, lastMessageAt])
+}
+
+// ---------- Журнал броней ----------
+
+enum BookingKind {
+  /// Клиентская бронь, привязана к сделке.
+  client
+  /// Служебная блокировка ресурса, без сделки.
+  service
+}
+
+enum BookingStatus {
+  active
+  cancelled
+}
+
+enum BookingCancelReason {
+  /// Оплата не поступила за `paymentTimeoutMinutes` (снимает worker).
+  payment_timeout
+  /// Отменил сотрудник.
+  manual
+  /// Брони больше нет в Битрикс24 (удалили в портале), решение принято по уведомлению.
+  removed_in_bitrix
+}
+
+/// Откуда бронь: создана приложением или найдена в Битрикс24 (онлайн-запись, вручную в портале).
+enum BookingSource {
+  app
+  bitrix
+}
+
+/// Кто выполнил действие с бронью.
+enum BookingActorKind {
+  /// Сотрудник Битрикс24 (через приложение).
+  user
+  /// Автоматизация приложения (worker): неоплата, сверка.
+  system
+  /// Изменение в самом Битрикс24 — автор неизвестен (события не сообщают, кто).
+  bitrix
+}
+
+/// Запись приложения о брони, созданной через него (ADR 0006): то, чего у брони в Битрикс24 нет —
+/// тип, статус, автор, причина отмены. Время и ресурсы — снимок на момент создания (после отмены
+/// брони в Битрикс24 уже нет); истина о слотах — модуль бронирования Битрикс24 (ADR 0003).
+model BookingRecord {
+  id                String               @id @default(cuid())
+  portalId          String
+  portal            Portal               @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  /// ID брони в Битрикс24 (`booking.v1.booking`).
+  bookingId         Int
+  source            BookingSource        @default(app)
+  /// Название брони в Битрикс24 (снимок).
+  title             String?              @db.VarChar(255)
+  kind              BookingKind
+  dealId            Int?
+  groupId           String?              @db.VarChar(191)
+  /// ID ресурсов Битрикс24 (снимок).
+  resourceIds       Json
+  startsAt          DateTime             @db.DateTime(3)
+  endsAt            DateTime             @db.DateTime(3)
+  status            BookingStatus        @default(active)
+  cancelReason      BookingCancelReason?
+  /// Сотрудник Битрикс24, создавший бронь; null — бронь найдена в Битрикс24 (автор неизвестен).
+  createdByUserId   Int?
+  createdAt         DateTime             @default(now()) @db.DateTime(3)
+  cancelledAt       DateTime?            @db.DateTime(3)
+  /// null — отменила система (неоплата).
+  cancelledByUserId Int?
+  /// Последняя сверка, на которой бронь была в Битрикс24 в ожидаемом виде.
+  syncedAt          DateTime?            @db.DateTime(3)
+  history           BookingHistory[]
+
+  @@unique([portalId, bookingId])
+  @@index([portalId, createdByUserId, createdAt])
+  @@index([portalId, createdByUserId, cancelledAt])
+}
+
+/// История брони (аудит): только добавление — UPDATE/DELETE запрещены триггерами БД.
+model BookingHistory {
+  id        String           @id @default(cuid())
+  recordId  String
+  record    BookingRecord    @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  /// `created` | `imported` | `changed_in_bitrix` | `removed_in_bitrix` | `cancelled` | …
+  action    String           @db.VarChar(32)
+  actorKind BookingActorKind @default(user)
+  /// Сотрудник Битрикс24 (для `user`); null — система или Битрикс24.
+  userId    Int?
+  /// Подпись для людей: имя сотрудника, «Система: автоматизация — …», «Битрикс24».
+  actorName String?          @db.VarChar(255)
+  /// Откуда пришло действие: `app` | `reconcile` | `worker` | `event`.
+  via       String           @default("app") @db.VarChar(16)
+  /// Состояние до и после (время, ресурсы, сделка) — что именно изменилось.
+  before    Json?
+  after     Json?
+  details   Json?
+  at        DateTime         @default(now()) @db.DateTime(3)
+
+  @@index([recordId, at])
+}
+
+// ---------- Синхронизация с Битрикс24 ----------
+
+/// Зеркало ресурсов модуля бронирования Битрикс24 (`booking.v1.resource`). Удалённый в портале
+/// ресурс не удаляется, а архивируется — на него ссылаются брони и история.
+model Resource {
+  id         String    @id @default(cuid())
+  portalId   String
+  portal     Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  resourceId Int
+  name       String    @db.VarChar(255)
+  archivedAt DateTime? @db.DateTime(3)
+  syncedAt   DateTime  @db.DateTime(3)
+
+  @@unique([portalId, resourceId])
+}
+
+enum BookingAlertKind {
+  /// Новая бронь в Битрикс24, созданная не через приложение.
+  new_booking
+  /// Бронь приложения в Битрикс24 не совпадает с ожидаемой (время, ресурсы, сделка, удалена).
+  discrepancy
+}
+
+enum BookingAlertStatus {
+  new
+  viewed
+  resolved
+  ignored
+}
+
+/// Уведомление о брони: уходит в чат уведомлений, статус меняют сотрудники в приложении.
+model BookingAlert {
+  id             String             @id @default(cuid())
+  portalId       String
+  portal         Portal             @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  kind           BookingAlertKind
+  /// Что не совпало: `missing`, `time`, `resources`, `deal` (через запятую); у новой брони — null.
+  problem        String?            @db.VarChar(64)
+  bookingId      Int
+  dealId         Int?
+  /// Как в приложении и как в Битрикс24 на момент обнаружения.
+  expected       Json?
+  actual         Json?
+  /// Одинаковое расхождение не порождает второе уведомление.
+  fingerprint    String             @db.VarChar(191)
+  status         BookingAlertStatus @default(new)
+  statusByUserId Int?
+  statusByName   String?            @db.VarChar(255)
+  statusAt       DateTime?          @db.DateTime(3)
+  /// Сообщение в чате уведомлений (для обновления статуса в нём); null — не отправлено.
+  chatId         Int?
+  messageId      Int?
+  sendError      String?            @db.VarChar(500)
+  createdAt      DateTime           @default(now()) @db.DateTime(3)
+
+  @@unique([portalId, fingerprint])
+  @@index([portalId, status, createdAt])
 }

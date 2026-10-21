@@ -31,7 +31,8 @@ description: Step-by-step procedure for changing the MariaDB schema in btx24book
    ALTER TABLE `ResourceGroup` ADD CONSTRAINT `ResourceGroup_tech_window_range`
      CHECK (`techWindowMinutes` BETWEEN 0 AND 1440);
    ```
-   Брони в нашей БД не храним (ADR 0003) — не добавляй таблицу броней «для надёжности».
+   Брони в нашей БД не храним (ADR 0003) — не добавляй таблицу броней «для надёжности»; статус,
+   автор и история броней приложения — уже в журнале `BookingRecord` (ADR 0006).
 5. Примени: `npx prisma migrate dev` (локально) и проверь `db_schema({ table })` — ограничения
    на месте. `npm run prisma:generate`.
 6. Нарушение ограничения в сервисе → `ConflictException` (Prisma `P2002` для unique; MariaDB

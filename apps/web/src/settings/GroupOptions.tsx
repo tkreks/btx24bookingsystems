@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { CatalogDto, DealFieldInfo, DealStageItem, GroupOptionsDto, NamedBitrixItem } from '@btx24/shared';
-import { move, newDealField, setResourceDefaults } from './group-form.js';
+import { DEFAULT_CLIENT_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
 import { CatalogSections, sectionSummary } from './CatalogSections.js';
 
 type Ref<T> = { data: T | null; error: string };
@@ -103,6 +103,35 @@ export function PaymentsSection({
         {step('prepayment', 'Предоплата')}
         {step('surcharge', 'Доплата')}
       </div>
+      <h4>Предоплата и сообщение клиенту</h4>
+      <div className="settings-grid">
+        <label>
+          Предоплата, ₽
+          <input
+            type="number"
+            min={0}
+            max={10000000}
+            step={100}
+            value={payments.prepaymentAmount ?? 0}
+            onChange={(e) => onChange({ ...payments, prepaymentAmount: Math.max(0, Number(e.target.value)) })}
+          />
+          <span className="muted">0 — сумма из поля сделки «ручная сумма предоплаты»</span>
+        </label>
+      </div>
+      <label className="settings-block">
+        Сообщение клиенту со ссылкой на оплату
+        <textarea
+          rows={4}
+          maxLength={4000}
+          value={payments.clientMessage ?? DEFAULT_CLIENT_MESSAGE}
+          onChange={(e) => onChange({ ...payments, clientMessage: e.target.value })}
+        />
+        <span className="muted">
+          Переменные: {'{link}'} — ссылка на оплату, {'{amount}'} — сумма, {'{minutes}'} — минут на оплату,{' '}
+          {'{deadline}'} — оплатить до. Файлы (согласие и др.) с Диска Битрикс24 — после выдачи приложению права
+          «Диск».
+        </span>
+      </label>
       <h4>Действия после оплаты</h4>
       <div className="settings-grid">
         <label>
@@ -130,8 +159,8 @@ export function PaymentsSection({
         />
       </div>
       <p className="muted">
-        Без бизнес-процессов: ссылку, смену стадии и снятие брони при неоплате выполняет приложение. Шаблоны сообщений
-        настраиваются вместе с отправкой ссылок.
+        Без бизнес-процессов: ссылку, сообщение клиенту, смену стадии при оплате и снятие брони при неоплате выполняет
+        приложение. Правила свои у каждой группы (воронки): например, у «БК Алатырь» — 25 000 ₽ и 90 минут.
       </p>
     </Section>
   );

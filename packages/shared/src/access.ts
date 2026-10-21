@@ -113,6 +113,13 @@ export interface GroupOptionsDto {
     failStageId: string;
     successTemplateId: string;
     failTemplateId: string;
+    /** Фиксированная предоплата, ₽; 0 — сумма из поля сделки «ручная сумма предоплаты». */
+    prepaymentAmount?: number;
+    /**
+     * Сообщение клиенту со ссылкой на оплату. Переменные: {link} — ссылка, {amount} — сумма,
+     * {deadline} — до какого времени оплатить, {minutes} — сколько минут на оплату.
+     */
+    clientMessage?: string;
   };
 }
 

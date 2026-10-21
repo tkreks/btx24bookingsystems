@@ -20,9 +20,13 @@ export interface SandboxRelations {
   invoiceIds: number[];
   /** Оплаты сделок и их счетов (crm.item.payment). */
   paymentIds: number[];
+  /** Чаты открытых линий, привязанные к сделкам (`imopenlines.crm.chat.get`). */
+  chatIds: number[];
 }
 export type SandboxRelationsResolver = (dealIds: number[]) => Promise<SandboxRelations>;
 const lc = (v: unknown) => String(v ?? '').toLowerCase();
+/** `chat123` → 123; личный диалог (ID пользователя) — не чат, null. */
+const chatOf = (dialogId: unknown) => /^chat(\d+)$/.exec(String(dialogId ?? ''))?.[1] ?? null;
 
 /**
  * Разрешает изменяющий вызов в режиме только чтения, если он целиком внутри песочницы.
@@ -37,7 +41,7 @@ export class SandboxWritePolicy implements WritePolicy {
     private readonly prisma: PrismaService,
     private readonly portal: Portal,
     private readonly cfg: SandboxConfig,
-    private readonly relationsOf: SandboxRelationsResolver = async () => ({ contactIds: [], invoiceIds: [], paymentIds: [] }),
+    private readonly relationsOf: SandboxRelationsResolver = async () => ({ contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] }),
   ) {
     this.from = cfg.bookingsFrom ? zonedTimeToUtc(cfg.bookingsFrom, '00:00', portal.timezone).getTime() / 1000 : null;
     this.to = cfg.bookingsTo ? zonedTimeToUtc(cfg.bookingsTo, '00:00', portal.timezone).getTime() / 1000 : null;
@@ -69,6 +73,19 @@ export class SandboxWritePolicy implements WritePolicy {
       }
       case 'imopenlines.crm.message.add':
         return lc(params.CRM_ENTITY_TYPE) === 'deal' && this.deal(params.CRM_ENTITY);
+      // Чат открытой линии сделки песочницы (решение владельца): войти, писать, отправлять файлы.
+      case 'imopenlines.session.join':
+        return this.related('chatIds', params.CHAT_ID);
+      // Чат уведомлений о бронях (решение владельца 2026-10-21: «создай новый чат»): создать один
+      // раз, писать и обновлять только сообщения уведомлений.
+      case 'im.chat.add':
+        return !(await this.alertChatId());
+      case 'im.message.add':
+        return (await this.isAlertChat(chatOf(params.DIALOG_ID))) || this.related('chatIds', chatOf(params.DIALOG_ID));
+      case 'im.message.update':
+        return this.isAlertMessage(params.MESSAGE_ID);
+      case 'im.v2.file.upload':
+        return this.related('chatIds', chatOf(params.dialogId));
       case 'booking.v1.booking.add':
         return this.inRange(fields.datePeriod);
       case 'booking.v1.booking.update':
@@ -96,6 +113,22 @@ export class SandboxWritePolicy implements WritePolicy {
     } else if (m === 'booking.v1.booking.delete') {
       await this.prisma.sandboxBooking.updateMany({ where: { portalId: this.portal.id, bookingId: Number(params.id) }, data: { deletedAt: new Date() } });
     }
+  }
+
+  private async alertChatId(): Promise<number | null> {
+    const s = await this.prisma.portalSettings.findUnique({ where: { portalId: this.portal.id } });
+    return s?.alertChatId ?? null;
+  }
+
+  private async isAlertChat(chatId: string | null): Promise<boolean> {
+    const id = await this.alertChatId();
+    return chatId !== null && id !== null && Number(chatId) === id;
+  }
+
+  private async isAlertMessage(messageId: unknown): Promise<boolean> {
+    if (!/^\d+$/.test(String(messageId ?? ''))) return false;
+    const row = await this.prisma.bookingAlert.findFirst({ where: { portalId: this.portal.id, messageId: Number(messageId) } });
+    return !!row;
   }
 
   private deal(id: unknown): boolean {

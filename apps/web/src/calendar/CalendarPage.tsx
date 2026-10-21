@@ -11,6 +11,7 @@ import { apiGet, ApiRequestError } from '../api.js';
 import { fitFrame, type PlacementContext } from '../b24.js';
 import { fmtDayTitle, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
+import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { BookingDetails } from './BookingDetails.js';
@@ -56,9 +57,16 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   // Экран приложения. Состояние календаря (дата, вид) живёт здесь и не теряется при переходах.
+  // Ссылка из чата уведомлений (`?alert=<id>`) открывает сразу «Уведомления о бронях».
   const [screen, setScreen] = useState<
-    { name: 'calendar' } | { name: 'dashboard' } | { name: 'chats'; chatId?: number; waiting?: boolean }
-  >({ name: 'calendar' });
+    | { name: 'calendar' }
+    | { name: 'dashboard' }
+    | { name: 'chats'; chatId?: number; waiting?: boolean }
+    | { name: 'alerts'; alertId?: string | null }
+  >(() => {
+    const alertId = new URLSearchParams(window.location.search).get('alert');
+    return alertId ? { name: 'alerts', alertId } : { name: 'calendar' };
+  });
 
   useEffect(() => {
     let active = true;
@@ -145,6 +153,22 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
   const permissions = new Set(groups?.flatMap((g) => g.permissions) ?? []);
   const openlinesRead = session.canManageApp || permissions.has('openlines.read');
   const openlinesSend = session.canManageApp || permissions.has('openlines.send');
+  const bookingsView = session.canManageApp || permissions.has('booking.details');
+
+  if (screen.name === 'alerts')
+    return (
+      <BookingAlertsPage
+        timezone={tz}
+        focusId={screen.alertId}
+        canEdit={session.canManageApp || permissions.has('booking.edit')}
+        canCancel={session.canManageApp || permissions.has('booking.cancel')}
+        onBack={() => setScreen({ name: 'dashboard' })}
+        onOpenDay={(d) => {
+          setDate(d);
+          setScreen({ name: 'calendar' });
+        }}
+      />
+    );
 
   if (screen.name === 'dashboard')
     return (
@@ -153,6 +177,8 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
         openlines={openlinesRead}
         onBack={() => setScreen({ name: 'calendar' })}
         onChats={(o) => setScreen({ name: 'chats', ...o })}
+        bookingAlerts={bookingsView}
+        onAlerts={() => setScreen({ name: 'alerts' })}
       />
     );
   if (screen.name === 'chats')
@@ -271,7 +297,11 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
 
       {selected && day && <BookingDetails booking={selected} day={day} onClose={() => setSelected(null)} />}
       {adminOpen && (
-        <SettingsPanel onClose={() => setAdminOpen(false)} onChanged={() => setSettingsRevision((n) => n + 1)} />
+        <SettingsPanel
+          timezone={tz}
+          onClose={() => setAdminOpen(false)}
+          onChanged={() => setSettingsRevision((n) => n + 1)}
+        />
       )}
     </div>
   );

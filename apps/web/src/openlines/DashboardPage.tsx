@@ -1,38 +1,65 @@
 import { useEffect, useState } from 'react';
-import type { ChatListDto, DashboardDto, DashboardPeriod, SessionInfo } from '@btx24/shared';
+import {
+  todayIn,
+  type BookingAlertListDto,
+  type DashboardBookingRow,
+  type DashboardDto,
+  type SessionInfo,
+} from '@btx24/shared';
 import { apiGet } from '../api.js';
-import { AUTHOR_PREFIX, connectorLabel, shortTime } from './format.js';
+import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
+import { dayKey } from './chat-list.js';
+import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
-const PERIODS: { key: DashboardPeriod; label: string }[] = [
-  { key: 'today', label: 'Сегодня' },
-  { key: '7d', label: '7 дней' },
-  { key: '30d', label: '30 дней' },
-];
+const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
+  payment_timeout: 'не оплачена в срок',
+  manual: 'отменена вручную',
+  removed_in_bitrix: 'удалена в Битрикс24',
+};
 
-/** Дашборд менеджера: его показатели в рамках его прав; вход в чаты. */
+/** Дашборд менеджера: его показатели за выбранный период в рамках его прав; вход в чаты. */
 export function DashboardPage({
   session,
   openlines,
   onBack,
   onChats,
+  bookingAlerts = false,
+  onAlerts,
 }: {
   session: SessionInfo;
   openlines: boolean;
   onBack: () => void;
   onChats: (opts: { chatId?: number; waiting?: boolean }) => void;
+  /** Видны ли уведомления о бронях (право `booking.details`). */
+  bookingAlerts?: boolean;
+  onAlerts?: () => void;
 }) {
-  const [period, setPeriod] = useState<DashboardPeriod>('today');
-  const [data, setData] = useState<{ period: DashboardPeriod; dto: DashboardDto } | null>(null);
-  const [recent, setRecent] = useState<ChatListDto | null>(null);
-  const [error, setError] = useState('');
   const tz = session.portal.timezone;
+  const [preset, setPreset] = useState<PeriodPreset>('today');
+  const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
+  const [draft, setDraft] = useState(range);
+  const [data, setData] = useState<DashboardDto | null>(null);
+  const [error, setError] = useState('');
+  const [alertCount, setAlertCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!bookingAlerts) return;
+    let active = true;
+    apiGet<BookingAlertListDto>('/booking-alerts?status=new').then(
+      (l) => active && setAlertCount(l.counts.new),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [bookingAlerts]);
 
   useEffect(() => {
     let active = true;
-    apiGet<DashboardDto>(`/dashboard?period=${period}`).then(
+    apiGet<DashboardDto>(`/dashboard?from=${range.from}&to=${range.to}`).then(
       (dto) => {
         if (active) {
-          setData({ period, dto });
+          setData(dto);
           setError('');
         }
       },
@@ -41,21 +68,16 @@ export function DashboardPage({
     return () => {
       active = false;
     };
-  }, [period]);
+  }, [range]);
 
-  useEffect(() => {
-    if (!openlines) return;
-    let active = true;
-    apiGet<ChatListDto>('/openlines/chats?scope=mine').then(
-      (l) => active && setRecent(l),
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [openlines]);
+  const choose = (p: PeriodPreset) => {
+    setPreset(p);
+    if (p !== 'custom') setRange(presetRange(p, todayIn(tz)));
+    else setDraft(range);
+  };
+  const draftError = periodError(draft.from, draft.to);
 
-  const d = data?.period === period ? data.dto : null;
+  const d = data?.from === range.from && data.to === range.to ? data : null;
   const n = (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v));
 
   return (
@@ -68,14 +90,37 @@ export function DashboardPage({
           <h1>Мой дашборд</h1>
           <span className="muted">{session.user.name}</span>
         </div>
-        <div className="segmented" role="group" aria-label="Период">
-          {PERIODS.map((p) => (
-            <button key={p.key} className={period === p.key ? 'active' : ''} onClick={() => setPeriod(p.key)}>
+      </header>
+
+      <div className="period-bar">
+        <div className="segmented period-presets" role="group" aria-label="Период">
+          {PERIOD_PRESETS.map((p) => (
+            <button key={p.key} className={preset === p.key ? 'active' : ''} onClick={() => choose(p.key)}>
               {p.label}
             </button>
           ))}
         </div>
-      </header>
+        {preset === 'custom' && (
+          <form
+            className="period-custom"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!draftError) setRange(draft);
+            }}
+          >
+            <label>
+              с <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
+            </label>
+            <label>
+              по <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
+            </label>
+            <button className="primary" type="submit" disabled={!!draftError}>
+              Показать
+            </button>
+            {draftError && <span className="muted">{draftError}</span>}
+          </form>
+        )}
+      </div>
 
       {error && (
         <div className="notice error" role="alert">
@@ -86,10 +131,13 @@ export function DashboardPage({
       <div className={`tiles${d ? '' : ' loading'}`}>
         {openlines && (
           <>
-            <button className="tile accent" onClick={() => onChats({ waiting: true })}>
+            <div className="tile accent">
               <span className="tile-value">{n(d?.chats?.waitingReply)}</span>
               <span className="tile-label">Чатов ждут ответа</span>
-            </button>
+              <button className="primary tile-action" onClick={() => onChats({})}>
+                Открыть чаты
+              </button>
+            </div>
             <div className="tile">
               <span className="tile-value">{n(d?.chats?.unreadMessages)}</span>
               <span className="tile-label">Непрочитанных сообщений</span>
@@ -108,55 +156,113 @@ export function DashboardPage({
             </div>
           </>
         )}
-        <div className="tile" title="Считается по броням, созданным через приложение">
+        {bookingAlerts && (
+          <div className={`tile${alertCount ? ' accent' : ''}`}>
+            <span className="tile-value">{n(alertCount)}</span>
+            <span className="tile-label">Новых уведомлений о бронях</span>
+            <button className="tile-action" onClick={onAlerts}>
+              Открыть уведомления
+            </button>
+          </div>
+        )}
+        <div className="tile" title="Брони, созданные вами через приложение">
           <span className="tile-value">{n(d?.bookings.created)}</span>
           <span className="tile-label">Создано броней</span>
         </div>
-        <div className="tile" title="Считается по отменам через приложение">
+        <div className="tile" title="Ваши брони, отменённые за период">
           <span className="tile-value">{n(d?.bookings.cancelled)}</span>
           <span className="tile-label">Отменено броней</span>
         </div>
       </div>
-      {d && d.bookings.created === null && (
-        <p className="muted">
-          Брони начнут учитываться, когда их создание и отмена заработают в приложении: в Битрикс24 у брони нет автора и
-          даты создания.
-        </p>
-      )}
-
-      {openlines ? (
-        <section className="day-panel">
-          <div className="day-header">
-            <b>Чаты</b>
-            <button className="primary" onClick={() => onChats({})}>
-              Открыть чаты
-            </button>
-          </div>
-          {!recent && <p className="muted">Загрузка…</p>}
-          <ul className="chat-list">
-            {recent?.items.slice(0, 5).map((c) => (
-              <li key={c.chatId}>
-                <button className="chat-item" onClick={() => onChats({ chatId: c.chatId })}>
-                  <span className="chat-item-top">
-                    <strong>{c.title}</strong>
-                    <span className="muted">{c.lastMessage ? shortTime(c.lastMessage.date, tz) : ''}</span>
-                  </span>
-                  <span className="chat-item-preview">
-                    {c.lastMessage ? `${AUTHOR_PREFIX[c.lastMessage.author]}${c.lastMessage.preview}` : 'Нет сообщений'}
-                  </span>
-                  <span className="chat-item-tags">
-                    <span className="pill">{connectorLabel(c.connector)}</span>
-                    {c.waitingReply && <span className="pill waiting">ждёт ответа</span>}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {recent && !recent.items.length && <p className="muted">Своих диалогов пока нет.</p>}
-        </section>
-      ) : (
+      {!openlines && (
         <p className="notice">Открытые линии недоступны: в ваших группах не включено право на них.</p>
       )}
+
+      <div className="dash-lists">
+        <BookingList
+          title="Сделки с бронью"
+          empty="За период вы не создавали броней со сделками."
+          rows={d?.bookings.deals}
+          tz={tz}
+          variant="created"
+        />
+        <BookingList
+          title="Отменённые брони"
+          empty="Отменённых броней за период нет."
+          rows={d?.bookings.cancelledList}
+          tz={tz}
+          variant="cancelled"
+        />
+      </div>
+      <p className="muted dash-note">Учитываются брони, созданные через приложение.</p>
     </div>
+  );
+}
+
+/** «23.10, 14:00–16:00»; на несколько дней — «23.10, 14:00 – 25.10, 12:00». */
+function bookingRange(start: string, end: string, tz: string): string {
+  return dayKey(start, tz) === dayKey(end, tz)
+    ? `${fmtDateTime(start, tz)}–${fmtTime(end, tz)}`
+    : `${fmtDateTime(start, tz)} – ${fmtDateTime(end, tz)}`;
+}
+
+function BookingList({
+  title,
+  empty,
+  rows,
+  tz,
+  variant,
+}: {
+  title: string;
+  empty: string;
+  rows: DashboardBookingRow[] | undefined;
+  tz: string;
+  variant: 'created' | 'cancelled';
+}) {
+  const openDeal = (id: number) => window.BX24?.openPath?.(`/crm/deal/details/${id}/`);
+  return (
+    <section className="day-panel dash-list">
+      <div className="day-header">
+        <b>{title}</b>
+        {rows && <span className="pill">{rows.length}</span>}
+      </div>
+      {!rows && <p className="muted">Загрузка…</p>}
+      {rows && !rows.length && <p className="muted">{empty}</p>}
+      <ul className="booking-rows">
+        {rows?.map((r) => (
+          <li key={r.bookingId} className="booking-row">
+            <div className="booking-row-main">
+              {r.dealId ? (
+                <button className="link" onClick={() => openDeal(r.dealId!)}>
+                  {r.deal?.title || `Сделка #${r.dealId}`}
+                </button>
+              ) : (
+                <span>Служебная бронь</span>
+              )}
+              {r.deal && <span className="muted">{fmtMoney(r.deal.opportunity, r.deal.currency)}</span>}
+            </div>
+            <div className="booking-row-meta">
+              <span>{bookingRange(r.start, r.end, tz)}</span>
+              <span className="muted">{r.resources.join(', ')}</span>
+            </div>
+            <div className="booking-row-tags">
+              {variant === 'cancelled' && r.cancelReason ? (
+                <>
+                  <span className={`pill${r.cancelReason === 'payment_timeout' ? ' waiting' : ' muted-pill'}`}>
+                    {CANCEL_REASON[r.cancelReason]}
+                  </span>
+                  {r.cancelledAt && <span className="muted">отменена {fmtDateTime(r.cancelledAt, tz)}</span>}
+                </>
+              ) : (
+                <>
+                  {r.status === 'cancelled' && <span className="pill muted-pill">отменена</span>}
+                  <span className="muted">создана {fmtDateTime(r.createdAt, tz)}</span>
+                </>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

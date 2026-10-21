@@ -35,7 +35,11 @@
   брони с датами в 2020 году). При `B24_READ_ONLY=true` изменяющий вызов проходит, только если
   `SandboxWritePolicy` узнаёт его целиком: действия по сделкам из списка (кроме удаления);
   правка контактов этих сделок, их смарт-счетов (`crm.item.update` entityTypeId 31) и
-  удаление/правка оплат (`crm.item.payment.*`) — принадлежность читается из Битрикс24 (кэш 1 мин); `booking.add` — период
+  удаление/правка оплат (`crm.item.payment.*`); в чатах открытых линий этих сделок
+  (`imopenlines.crm.chat.get`, решение владельца 2026-10-21) — вход `imopenlines.session.join`,
+  `im.message.add` и `im.v2.File.upload` только в `chat<ID>` такого чата — принадлежность читается из Битрикс24 (кэш 1 мин);
+  чат уведомлений о бронях (ADR 0007): `im.chat.add` — только пока `PortalSettings.alertChatId` пуст,
+  `im.message.add` — только в него, `im.message.update` — только сообщения из `BookingAlert`; `booking.add` — период
   внутри [FROM, TO); изменение/удаление/связи — только броней из журнала `SandboxBooking`
   (созданных песочницей). Всё нераспознанное и любая запись внутри `batch` — `READ_ONLY_MODE`.
   Уборка: `node dist/scripts/sandbox-cleanup.js --member <id> [--apply]` — удаляет только брони журнала.

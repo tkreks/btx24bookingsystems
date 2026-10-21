@@ -47,17 +47,28 @@ export class OpenlinesController {
   ) {}
 
   @Get('dashboard')
-  async summary(@B24User() user: B24UserContext, @Query('period') period?: string): Promise<DashboardDto> {
+  async summary(
+    @B24User() user: B24UserContext,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<DashboardDto> {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.get(user, period, await this.can(user, 'openlines.read'));
+    return this.dashboard.get(user, { from, to }, await this.can(user, 'openlines.read'));
   }
 
   @Get('openlines/chats')
   async list(@B24User() user: B24UserContext, @Query() query: unknown): Promise<ChatListDto> {
     await this.require(user, 'openlines.read');
     return this.chats.list(user, query);
+  }
+
+  /** Поиск по номеру телефона клиента по всему порталу (`?q=`). */
+  @Get('openlines/chats/search')
+  async search(@B24User() user: B24UserContext, @Query() query: unknown): Promise<ChatListDto> {
+    await this.require(user, 'openlines.read');
+    return this.chats.searchByPhone(user, query);
   }
 
   @Get('openlines/chats/:chatId/messages')

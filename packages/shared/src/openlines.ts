@@ -28,6 +28,8 @@ export interface ChatSummary {
   joined: boolean;
   sessionClosed: boolean;
   crm: ChatCrmLinks;
+  /** Телефоны клиента из привязанных контакта / лида / компании (для поиска; не сохраняются). */
+  phones: string[];
 }
 
 export interface ChatListDto {
@@ -110,17 +112,33 @@ export interface SendResultDto {
   error: { step: number; code: string; message: string } | null;
 }
 
-export const DASHBOARD_PERIODS = ['today', '7d', '30d'] as const;
-export type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number];
+/** Самый длинный период дашборда, дней. */
+export const DASHBOARD_MAX_DAYS = 92;
+
+/** Бронь из журнала приложения (создана через приложение) — строка списков дашборда. */
+export interface DashboardBookingRow {
+  bookingId: number;
+  dealId: number | null;
+  /** null — сделка недоступна пользователю в CRM (или служебная бронь). */
+  deal: { title: string; opportunity: number | null; currency: string | null } | null;
+  resources: string[];
+  /** Начало и конец брони (UTC, ISO). */
+  start: string;
+  end: string;
+  status: 'active' | 'cancelled';
+  cancelReason: 'payment_timeout' | 'manual' | 'removed_in_bitrix' | null;
+  createdAt: string;
+  cancelledAt: string | null;
+}
 
 export interface DashboardDto {
-  period: DashboardPeriod;
-  /** Начало периода (UTC, ISO) в часовом поясе портала. */
+  /** Период — дни `[from, to]` включительно (YYYY-MM-DD) в часовом поясе портала. */
   from: string;
-  /** null — нет права на открытые линии ни в одной группе. */
+  to: string;
+  /** null — нет права на открытые линии ни в одной группе. Счётчики «сейчас», не за период. */
   chats: { waitingReply: number; unreadMessages: number } | null;
   /** С кем общались в открытых линиях за период (уникальные элементы CRM). */
   contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
-  /** null — пока не считается: брони через приложение ещё не создаются и не отменяются. */
-  bookings: { created: number | null; cancelled: number | null };
+  /** Свои брони из журнала приложения: созданные за период (клиентские — со сделками) и отменённые за период. */
+  bookings: { created: number; cancelled: number; deals: DashboardBookingRow[]; cancelledList: DashboardBookingRow[] };
 }

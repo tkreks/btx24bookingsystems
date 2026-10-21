@@ -10,20 +10,9 @@ import {
 } from '@btx24/shared';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
+import { dealLinks, listBookings, listResources, type RawBooking } from '../bookings/bitrix-bookings.js';
 import { bookingFields, type DealFieldMeta } from './deal-fields.js';
 
-/** booking.v1.booking.list отдаёт не больше 50 записей и не умеет страницы. */
-const LIST_LIMIT = 50;
-/** Мельче не делим: столько броней на одном отрезке — уже аномалия, отдаём что есть. */
-const MIN_SPLIT_SECONDS = 15 * 60;
-
-interface RawBooking {
-  id: number;
-  name?: string | null;
-  description?: string | null;
-  resourceIds?: number[];
-  datePeriod?: { from?: { timestamp?: number }; to?: { timestamp?: number } };
-}
 
 /** Что показывать: ресурсы группы, права и настройки направления. */
 export interface DayScope {
@@ -134,52 +123,16 @@ export class CalendarService {
   }
 
   private async resources(client: Bitrix24RestClient): Promise<CalendarResource[]> {
-    const list = await client.listAll<{ id: number; name?: string }>(
-      'booking.v1.resource.list',
-      {},
-      {
-        pick: (r) => ((r as { resource?: unknown[] })?.resource ?? []) as { id: number; name?: string }[],
-      },
-    );
-    return list
-      .map((r) => ({ id: Number(r.id), name: r.name || `Ресурс ${r.id}` }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    return (await listResources(client)).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   }
 
-  /**
-   * Брони, пересекающие [from, to). Если пришло ровно 50 — список мог обрезаться: делим отрезок
-   * пополам и собираем заново (вместо 24 почасовых запросов прототипа).
-   */
-  async bookings(client: Bitrix24RestClient, from: number, to: number): Promise<RawBooking[]> {
-    const res = await client.call<{ booking?: RawBooking[] }>('booking.v1.booking.list', {
-      filter: { within: { dateFrom: from, dateTo: to } },
-    });
-    const list = res.result?.booking ?? [];
-    if (list.length < LIST_LIMIT || to - from <= MIN_SPLIT_SECONDS) return list;
-    const mid = from + Math.floor((to - from) / 2);
-    const [left, right] = await Promise.all([this.bookings(client, from, mid), this.bookings(client, mid, to)]);
-    const byId = new Map<number, RawBooking>();
-    for (const b of [...left, ...right]) byId.set(Number(b.id), b);
-    return [...byId.values()];
+  /** Брони, пересекающие [from, to), — общий читатель модуля бронирования. */
+  bookings(client: Bitrix24RestClient, from: number, to: number): Promise<RawBooking[]> {
+    return listBookings(client, from, to);
   }
 
-  /** bookingId → dealId по связям externalData (crm / DEAL). */
-  private async dealLinks(client: Bitrix24RestClient, bookingIds: number[]): Promise<Map<number, number>> {
-    const links = new Map<number, number>();
-    if (!bookingIds.length) return links;
-    const commands = Object.fromEntries(
-      bookingIds.map((id) => [`b${id}`, { method: 'booking.v1.booking.externalData.list', params: { bookingId: id } }]),
-    );
-    const res = await client.batch(commands);
-    for (const id of bookingIds) {
-      const raw = res.result[`b${id}`] as
-        { externalData?: { moduleId?: string; entityTypeId?: string; value?: string }[] } | undefined;
-      const deal = (raw?.externalData ?? []).find(
-        (x) => x.moduleId === 'crm' && String(x.entityTypeId).toUpperCase() === 'DEAL',
-      );
-      if (deal?.value && /^\d+$/.test(deal.value)) links.set(id, Number(deal.value));
-    }
-    return links;
+  private dealLinks(client: Bitrix24RestClient, bookingIds: number[]): Promise<Map<number, number>> {
+    return dealLinks(client, bookingIds);
   }
 
   private async deals(

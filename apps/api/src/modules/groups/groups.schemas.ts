@@ -37,6 +37,8 @@ export const groupOptionsSchema = z
         failStageId: z.string().max(100),
         successTemplateId: z.string().max(50),
         failTemplateId: z.string().max(50),
+        prepaymentAmount: z.number().min(0).max(10_000_000).optional(),
+        clientMessage: z.string().max(4000).optional(),
       })
       .strict(),
   })

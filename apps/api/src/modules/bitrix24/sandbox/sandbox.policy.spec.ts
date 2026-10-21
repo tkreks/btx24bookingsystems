@@ -10,9 +10,13 @@ const cfg = { dealIds: [678], bookingsFrom: '2020-01-01', bookingsTo: '2021-01-0
 const in2020 = { from: { timestamp: 1590994800, timezone: 'Europe/Moscow' }, to: { timestamp: 1591002000, timezone: 'Europe/Moscow' } };
 const in2026 = { from: { timestamp: 1780300800 }, to: { timestamp: 1780308000 } };
 
-function setup(owned: number[] = []) {
+function setup(owned: number[] = [], alertChatId: number | null = null) {
   const rows = new Map(owned.map((id) => [id, { bookingId: id, deletedAt: null as Date | null }]));
   const prisma = {
+    portalSettings: { findUnique: vi.fn(async () => (alertChatId ? { alertChatId } : null)) },
+    bookingAlert: {
+      findFirst: vi.fn(async ({ where }: { where: { messageId: number } }) => (where.messageId === 9001 ? { id: 'a1' } : null)),
+    },
     sandboxBooking: {
       findUnique: vi.fn(async ({ where }: { where: { portalId_bookingId: { bookingId: number } } }) => rows.get(where.portalId_bookingId.bookingId) ?? null),
       create: vi.fn(async ({ data }: { data: { bookingId: number } }) => rows.set(data.bookingId, { bookingId: data.bookingId, deletedAt: null })),
@@ -22,8 +26,8 @@ function setup(owned: number[] = []) {
       }),
     },
   } as unknown as PrismaService;
-  const relations = { contactIds: [140], invoiceIds: [5152], paymentIds: [8672, 8674] };
-  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [] })), rows };
+  const relations = { contactIds: [140], invoiceIds: [5152], paymentIds: [8672, 8674], chatIds: [3301] };
+  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] })), rows };
 }
 
 describe('SandboxWritePolicy', () => {
@@ -39,6 +43,30 @@ describe('SandboxWritePolicy', () => {
     await expect(policy.allows('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: 678, MESSAGE: 'x' })).resolves.toBe(true);
     await expect(policy.allows('crm.deal.delete', { id: 678 })).resolves.toBe(false);
     await expect(policy.allows('crm.item.delete', { entityTypeId: 2, id: 678 })).resolves.toBe(false);
+  });
+
+  it('allows joining and writing only in open-lines chats of the sandbox deal', async () => {
+    const { policy } = setup();
+    await expect(policy.allows('imopenlines.session.join', { CHAT_ID: 3301 })).resolves.toBe(true);
+    await expect(policy.allows('imopenlines.session.join', { CHAT_ID: 3302 })).resolves.toBe(false);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: 'chat3301', MESSAGE: 'x' })).resolves.toBe(true);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: 'chat3302', MESSAGE: 'x' })).resolves.toBe(false);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: '3301', MESSAGE: 'x' })).resolves.toBe(false);
+    await expect(policy.allows('im.v2.File.upload', { dialogId: 'chat3301', fields: {} })).resolves.toBe(true);
+    await expect(policy.allows('im.v2.File.upload', { dialogId: 'chat1', fields: {} })).resolves.toBe(false);
+    await expect(policy.allows('im.message.delete', { MESSAGE_ID: 1 })).resolves.toBe(false);
+  });
+
+  it('allows creating the alert chat once and writing only there', async () => {
+    const fresh = setup();
+    await expect(fresh.policy.allows('im.chat.add', { TITLE: 'Брони' })).resolves.toBe(true);
+    await expect(fresh.policy.allows('im.message.add', { DIALOG_ID: 'chat777', MESSAGE: 'x' })).resolves.toBe(false);
+    const { policy } = setup([], 777);
+    await expect(policy.allows('im.chat.add', { TITLE: 'Ещё один' })).resolves.toBe(false);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: 'chat777', MESSAGE: 'x' })).resolves.toBe(true);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: 'chat778', MESSAGE: 'x' })).resolves.toBe(false);
+    await expect(policy.allows('im.message.update', { MESSAGE_ID: 9001, MESSAGE: 'x' })).resolves.toBe(true);
+    await expect(policy.allows('im.message.update', { MESSAGE_ID: 9002, MESSAGE: 'x' })).resolves.toBe(false);
   });
 
   it('allows editing only the contact of the sandbox deal, never deleting it', async () => {

@@ -91,7 +91,7 @@ export class PortalService {
     return new Bitrix24RestClient({ clientEndpoint, access, limiter: this.limiter, limiterKey: memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly, writePolicy: portal ? this.policyFor(portal) : undefined });
   }
 
-  /** portalId → связанные объекты сделок песочницы (кэш 1 мин): контакты, счета, оплаты меняются. */
+  /** portalId → связанные объекты сделок песочницы (кэш 1 мин): контакты, счета, оплаты, чаты меняются. */
   private readonly sandboxRelations = new Map<string, { value: SandboxRelations; expiresAt: number }>();
 
   private policyFor(portal: Portal): WritePolicy | undefined {
@@ -99,7 +99,7 @@ export class PortalService {
     return new SandboxWritePolicy(this.prisma, portal, this.config.sandbox, (dealIds) => this.relationsOfDeals(portal, dealIds));
   }
 
-  /** Контакты, счета и оплаты сделок — только чтением, токеном приложения. */
+  /** Контакты, счета, оплаты и чаты открытых линий сделок — только чтением, токеном приложения. */
   private async relationsOfDeals(portal: Portal, dealIds: number[]): Promise<SandboxRelations> {
     const hit = this.sandboxRelations.get(portal.id);
     if (hit && hit.expiresAt > Date.now()) return hit.value;
@@ -114,6 +114,7 @@ export class PortalService {
     const contacts = new Set<number>();
     const invoices = new Set<number>();
     const payments = new Set<number>();
+    const chats = new Set<number>();
     const paymentsOf = async (entityTypeId: number, entityId: number) => {
       const res = await reader.call<{ id?: number }[]>('crm.item.payment.list', { entityTypeId, entityId });
       for (const p of Array.isArray(res.result) ? res.result : []) if (Number(p.id) > 0) payments.add(Number(p.id));
@@ -124,9 +125,11 @@ export class PortalService {
       const inv = await reader.listAll<{ id: number }>('crm.item.list', { entityTypeId: 31, filter: { parentId2: id }, select: ['id'] }, { pick: (r) => ((r as { items?: { id: number }[] })?.items ?? []) });
       for (const i of inv) invoices.add(Number(i.id));
       await paymentsOf(2, id);
+      const ol = await reader.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: id, ACTIVE_ONLY: 'N' });
+      for (const c of Array.isArray(ol.result) ? ol.result : []) if (Number(c.CHAT_ID) > 0) chats.add(Number(c.CHAT_ID));
     }
     for (const inv of invoices) await paymentsOf(31, inv);
-    const value = { contactIds: [...contacts], invoiceIds: [...invoices], paymentIds: [...payments] };
+    const value = { contactIds: [...contacts], invoiceIds: [...invoices], paymentIds: [...payments], chatIds: [...chats] };
     this.sandboxRelations.set(portal.id, { value, expiresAt: Date.now() + 60_000 });
     return value;
   }

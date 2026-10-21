@@ -239,3 +239,45 @@ describe('ChatsService.list with the metadata index', () => {
     expect(res.nextOffset).toBeNull();
   });
 });
+
+describe('ChatsService phone search', () => {
+  it('normalizes Russian numbers into CRM search variants', async () => {
+    const { phoneVariants } = await import('./chats.service.js');
+    expect(phoneVariants('8 (985) 123-45-67')).toEqual(['+79851234567', '89851234567', '79851234567']);
+    expect(phoneVariants('+7 985 123 45 67')).toEqual(['+79851234567', '89851234567', '79851234567']);
+    expect(phoneVariants('9851234567')).toEqual(['+79851234567', '89851234567', '79851234567']);
+    expect(phoneVariants('12345')).toEqual([]);
+  });
+
+  it('finds CRM items by phone, then their open-line chats, with phones in summaries', async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === 'crm.duplicate.findbycomm') return { result: { CONTACT: [140], LEAD: [5] } };
+      throw new Error(method);
+    });
+    const batch = vi.fn(async (cmds: Record<string, { method: string; params: Record<string, unknown> }>) => {
+      const keys = Object.keys(cmds);
+      if (keys[0] === 'CONTACT140')
+        return { result: { CONTACT140: [{ CHAT_ID: '50580' }], LEAD5: [{ CHAT_ID: '50580' }, { CHAT_ID: '61' }] }, errors: {} };
+      if (cmds[keys[0]].method === 'imopenlines.dialog.get')
+        return {
+          result: Object.fromEntries(
+            keys.map((k) => [k, { id: Number(cmds[k].params.CHAT_ID), name: 'Клиент', role: 'guest', entity_id: 'wz_telegram|1|x|50', entity_data_2: 'LEAD|0|COMPANY|0|CONTACT|140|DEAL|0' }]),
+          ),
+          errors: {},
+        };
+      if (keys.includes('contact')) return { result: { contact: [{ ID: '140', PHONE: [{ VALUE: '+79851234567' }] }] }, errors: {} };
+      return { result: {}, errors: {} };
+    });
+    const index = {
+      byChat: vi.fn(async () => new Map([[50580, { sessionId: 19292, responsibleId: 236, completed: false, lastMessageAt: new Date('2026-10-21T18:29:43Z') }]])),
+    } as unknown as OpenlineIndexService;
+    const user = { portal: { id: 'p1' }, userId: 7, client: { call, batch, listAll: vi.fn() } } as unknown as B24UserContext;
+    const res = await new ChatsService({} as FilesService, index).searchByPhone(user, { q: '8 985 123-45-67' });
+    expect(call).toHaveBeenCalledWith('crm.duplicate.findbycomm', { type: 'PHONE', values: ['+79851234567', '89851234567', '79851234567'] });
+    expect(res.items.map((c) => [c.chatId, c.sessionId, c.joined, c.phones])).toEqual([
+      [50580, 19292, false, ['+79851234567']],
+      [61, 0, false, ['+79851234567']],
+    ]);
+    await expect(new ChatsService({} as FilesService, index).searchByPhone(user, { q: '123' })).rejects.toMatchObject({ status: 400 });
+  });
+});

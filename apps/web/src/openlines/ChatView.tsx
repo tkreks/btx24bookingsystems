@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChatHistoryDto, ChatMessageDto, MessageTemplateDto, SendResultDto } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
 import { openCrm, openMessenger } from '../b24.js';
-import { fmtDateTime } from '../format.js';
+import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
-import { connectorLabel, fileSize } from './format.js';
+import { avatarTone, dayKey, initials } from './chat-list.js';
+import { Channel } from './Channel.js';
+import { fileSize } from './format.js';
+import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
 
@@ -122,8 +125,8 @@ export function ChatView({
 
   if (!chat)
     return (
-      <section className="chat-view">
-        <ChatHeader title="Чат" onBack={onBack} />
+      <main className="chat-view">
+        <ChatHeader chatId={chatId} title="Чат" onBack={onBack} />
         {loadError ? (
           <div className="notice error" role="alert">
             {loadError}
@@ -131,42 +134,51 @@ export function ChatView({
         ) : (
           <p className="muted pad">Загрузка сообщений…</p>
         )}
-      </section>
+      </main>
     );
 
   const crm = chat.crm;
+  const links: [string, 'deal' | 'contact' | 'lead', number | null][] = [
+    ['Сделка', 'deal', crm.dealId],
+    ['Контакт', 'contact', crm.contactId],
+    ['Лид', 'lead', crm.leadId],
+  ];
   return (
-    <section className="chat-view">
-      <ChatHeader title={chat.title} subtitle={connectorLabel(chat.connector)} onBack={onBack}>
-        {crm.dealId && (
-          <button className="link" onClick={() => openCrm('deal', crm.dealId!)}>
-            Сделка #{crm.dealId}
-          </button>
-        )}
-        {crm.contactId && (
-          <button className="link" onClick={() => openCrm('contact', crm.contactId!)}>
-            Контакт #{crm.contactId}
-          </button>
-        )}
-        {crm.leadId && (
-          <button className="link" onClick={() => openCrm('lead', crm.leadId!)}>
-            Лид #{crm.leadId}
-          </button>
-        )}
-        <button onClick={() => openMessenger(chat.chatId)} title="Открыть диалог в мессенджере Битрикс24">
-          В Битрикс24
+    <main className="chat-view">
+      <ChatHeader
+        chatId={chat.chatId}
+        title={chat.title}
+        subtitle={<Channel connector={chat.connector} />}
+        onBack={onBack}
+        tags={links
+          .filter(([, , id]) => id)
+          .map(([label, type, id]) => (
+            <button key={type} className="cv-tag" onClick={() => openCrm(type, id!)}>
+              {label} #{id}
+            </button>
+          ))}
+      >
+        <button className="cv-crm-btn" onClick={() => openMessenger(chat.chatId)} title="Открыть диалог в мессенджере Битрикс24">
+          В Битрикс24 <Icon name="external" size={16} />
         </button>
       </ChatHeader>
 
-      <div className="chat-messages" ref={list} aria-live="polite">
+      <div className="cv-conversation" ref={list} aria-live="polite" aria-label="История сообщений">
         {chat.hasMore && (
           <button className="link older" onClick={() => void older()}>
             Показать более ранние
           </button>
         )}
-        {chat.messages.map((m) => (
-          <Message key={m.id} m={m} timezone={timezone} />
-        ))}
+        {chat.messages.map((m, i) => {
+          const day = dayKey(m.date, timezone);
+          const newDay = i === 0 || dayKey(chat.messages[i - 1].date, timezone) !== day;
+          return (
+            <Fragment key={m.id}>
+              {newDay && <div className="cv-date">{fmtDayTitle(day, timezone)}</div>}
+              <Message m={m} chatId={chat.chatId} title={chat.title} timezone={timezone} />
+            </Fragment>
+          );
+        })}
       </div>
 
       {(error || loadError) && (
@@ -190,7 +202,7 @@ export function ChatView({
       ) : !chat.canSend ? (
         <p className="muted pad">Нет права отправлять сообщения в открытые линии (настраивается в группе).</p>
       ) : (
-        <div className="composer">
+        <div className="composer cv-composer">
           <div className="composer-tools">
             <select
               aria-label="Шаблон"
@@ -240,53 +252,70 @@ export function ChatView({
           onClose={() => setTemplatesOpen(null)}
         />
       )}
-    </section>
+    </main>
   );
 }
 
 function ChatHeader({
+  chatId,
   title,
   subtitle,
+  tags,
   onBack,
   children,
 }: {
+  chatId: number;
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
+  tags?: ReactNode[];
   onBack: () => void;
   children?: ReactNode;
 }) {
   return (
-    <header className="chat-header">
-      <button className="chat-back" aria-label="К списку чатов" onClick={onBack}>
-        ‹
-      </button>
-      <div className="chat-title">
-        <strong>{title}</strong>
-        {subtitle && <span className="muted">{subtitle}</span>}
+    <header className="cv-head">
+      <div className="cv-contact-line">
+        <button className="cl-btn chat-back" aria-label="К списку чатов" title="К чатам" onClick={onBack}>
+          <Icon name="back" />
+        </button>
+        <span className={`avatar large a${avatarTone(chatId)}`}>{initials(title)}</span>
+        <div className="cv-contact-info">
+          <div className="cv-contact-name">{title}</div>
+          {subtitle && <div className="cv-contact-sub">{subtitle}</div>}
+        </div>
+        <div className="cv-actions">{children}</div>
       </div>
-      <div className="chat-header-actions">{children}</div>
+      {tags && tags.length > 0 && <div className="cv-tags">{tags}</div>}
     </header>
   );
 }
 
-function Message({ m, timezone }: { m: ChatMessageDto; timezone: string }) {
+function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: number; title: string; timezone: string }) {
   if (m.author.kind === 'system')
     return (
-      <div className="msg system">
-        {m.text} <span className="muted">{fmtDateTime(m.date, timezone)}</span>
+      <div className="cv-system">
+        {m.text} <span className="muted">{fmtTime(m.date, timezone)}</span>
       </div>
     );
+  const incoming = m.author.kind === 'client';
   return (
-    <div className={`msg ${m.author.kind === 'client' ? 'in' : 'out'}`}>
-      <div className="msg-author">{m.author.name}</div>
-      {m.text && <div className="msg-text">{m.text}</div>}
-      {m.files.map((f) => (
-        <a key={f.id} className="msg-file" href={f.url ?? undefined} target="_blank" rel="noreferrer">
-          {f.type === 'image' && f.previewUrl ? <img src={f.previewUrl} alt={f.name} loading="lazy" /> : '📎'} {f.name}{' '}
-          <span className="muted">{fileSize(f.size)}</span>
-        </a>
-      ))}
-      <div className="msg-time">{fmtDateTime(m.date, timezone)}</div>
+    <div className={`cv-row${incoming ? '' : ' out'}`}>
+      {incoming && <span className={`cv-msg-avatar a${avatarTone(chatId)}`}>{initials(m.author.name || title)}</span>}
+      <div className="cv-bubble">
+        <div className="cv-bubble-meta">
+          <strong>{m.author.name}</strong>
+          <time dateTime={m.date} title={fmtDateTime(m.date, timezone)}>
+            {fmtTime(m.date, timezone)}
+          </time>
+        </div>
+        {m.text && <div className="cv-bubble-text">{m.text}</div>}
+        {m.files.map((f) => (
+          <a key={f.id} className="msg-file" href={f.url ?? undefined} target="_blank" rel="noreferrer">
+            {f.type === 'image' && f.previewUrl ? <img src={f.previewUrl} alt={f.name} loading="lazy" /> : <Icon name="clip" size={14} />}{' '}
+            {f.name} <span className="muted">{fileSize(f.size)}</span>
+          </a>
+        ))}
+      </div>
+      {!incoming && <span className="cv-msg-avatar agent">{initials(m.author.name || 'Оператор')}</span>}
     </div>
   );
 }

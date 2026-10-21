@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Portal } from '../../generated/prisma/client.js';
+import type { OpenlineChat, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { connectorOf, lastMeaningful, type ImMessage, type ImUser } from './chat-parsing.js';
@@ -53,6 +53,13 @@ export class OpenlineIndexService {
   }
 
   /** Страница индекса: сначала свежие сообщения; `responsible` — фильтр по ответственному. */
+  /** Строки индекса по ID чатов (для найденных не через индекс чатов). */
+  async byChat(portalId: string, chatIds: number[]) {
+    if (!chatIds.length) return new Map<number, OpenlineChat>();
+    const rows = await this.prisma.openlineChat.findMany({ where: { portalId, chatId: { in: chatIds } } });
+    return new Map(rows.map((r) => [r.chatId, r]));
+  }
+
   async page(portalId: string, responsible: number[] | null, offset: number, take: number): Promise<IndexedSession[]> {
     const rows = await this.prisma.openlineChat.findMany({
       where: { portalId, lastMessageAt: { not: null }, ...(responsible ? { responsibleId: { in: responsible } } : {}) },
