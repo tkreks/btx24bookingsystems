@@ -34,7 +34,7 @@ describe('DashboardService', () => {
       })),
     } as unknown as ChatsService;
     const call = vi.fn(async () => ({ result: { items: [{ counter: 3 }, { counter: 54 }, {}] } }));
-    const listAll = vi.fn(async (_method: string, _params?: unknown) => [
+    const listAll = vi.fn(async (_method: string, params?: { filter?: { PROVIDER_ID?: string } }) => params?.filter?.PROVIDER_ID === 'VOXIMPLANT_CALL' ? [] : [
       { OWNER_TYPE_ID: '1', OWNER_ID: '5' },
       { OWNER_TYPE_ID: '1', OWNER_ID: '5' },
       { OWNER_TYPE_ID: '3', OWNER_ID: '140' },
@@ -54,7 +54,7 @@ describe('DashboardService', () => {
       contacts: { leads: 1, contacts: 1, deals: 1, companies: 0 },
       bookings: { created: 0, cancelled: 0, deals: [], cancelledList: [] },
     });
-    expect(listAll.mock.calls[0][1]).toMatchObject({
+    expect(listAll.mock.calls.find((c) => (c[1] as { filter: { PROVIDER_ID: string } }).filter.PROVIDER_ID === 'IMOPENLINES_SESSION')?.[1]).toMatchObject({
       filter: {
         RESPONSIBLE_ID: 7,
         PROVIDER_ID: 'IMOPENLINES_SESSION',
@@ -62,6 +62,25 @@ describe('DashboardService', () => {
         '<LAST_UPDATED': '2026-10-21T21:00:00.000Z',
       },
     });
+  });
+
+  it('call list: lost calls with deal and contact titles, mine scope', async () => {
+    const calls = [
+      { ID: '1', OWNER_TYPE_ID: '2', OWNER_ID: '678', DIRECTION: '1', START_TIME: '2026-10-21T08:00:00Z', RESPONSIBLE_ID: '7', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: [{ VALUE: '+79851234567' }] },
+      { ID: '2', OWNER_TYPE_ID: '3', OWNER_ID: '140', DIRECTION: '1', START_TIME: '2026-10-21T09:00:00Z', RESPONSIBLE_ID: '8', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: [{ VALUE: '+79850000000' }] },
+    ];
+    const listAll = vi.fn(async () => calls);
+    const batch = vi.fn(async () => ({ result: { t2: [{ ID: '678', TITLE: 'Баня, Иванов' }], t3: [{ ID: '140', NAME: 'Анна', LAST_NAME: null }] } }));
+    const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call: vi.fn(), listAll, batch } } as unknown as B24UserContext;
+    const svc = new DashboardService({} as ChatsService, emptyJournal);
+    const all = await svc.callList(user, { kind: 'lost', from: '2026-10-21', to: '2026-10-21' });
+    expect(all.items.map((i) => [i.activityId, i.owner.title, i.dealId])).toEqual([
+      [2, 'Анна', null],
+      [1, 'Баня, Иванов', 678],
+    ]);
+    const mine = await svc.callList(user, { kind: 'lost', from: '2026-10-21', to: '2026-10-21', scope: 'mine' });
+    expect(mine.items.map((i) => i.activityId)).toEqual([1]);
+    await expect(svc.callList(user, { kind: 'all' })).rejects.toMatchObject({ status: 400 });
   });
 
   it('lists own bookings with deal and resource names; inaccessible deal → null', async () => {
@@ -116,16 +135,18 @@ describe('DashboardService', () => {
     });
   });
 
-  it('without open lines rights returns no chat data and makes no REST calls', async () => {
+  it('without open lines rights returns no chat data and asks Bitrix24 only for calls', async () => {
     const call = vi.fn();
+    const listAll = vi.fn(async () => []);
     const user = {
       portal: { id: 'p1', timezone: 'Europe/Moscow' },
       userId: 7,
-      client: { call, listAll: call },
+      client: { call, listAll },
     } as unknown as B24UserContext;
     const d = await new DashboardService({} as ChatsService, emptyJournal).get(user, {}, false);
-    expect(d).toMatchObject({ chats: null, contacts: null, bookings: { created: 0 } });
+    expect(d).toMatchObject({ chats: null, contacts: null, calls: { incoming: 0, lost: 0 }, callsScope: 'all', bookings: { created: 0 } });
     expect(call).not.toHaveBeenCalled();
+    expect(listAll).toHaveBeenCalledWith('crm.activity.list', expect.objectContaining({ filter: expect.objectContaining({ PROVIDER_ID: 'VOXIMPLANT_CALL' }) }), expect.anything());
     await expect(new DashboardService({} as ChatsService, emptyJournal).get(user, { from: 'x' }, false)).rejects.toMatchObject({
       status: 400,
     });

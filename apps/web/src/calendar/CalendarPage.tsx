@@ -65,7 +65,9 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
     | { name: 'alerts'; alertId?: string | null }
   >(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
-    return alertId ? { name: 'alerts', alertId } : { name: 'calendar' };
+    if (alertId) return { name: 'alerts', alertId };
+    // Открыли не из сделки — сначала дашборд; из карточки сделки — календарь (решение владельца).
+    return placement.dealId ? { name: 'calendar' } : { name: 'dashboard' };
   });
 
   useEffect(() => {

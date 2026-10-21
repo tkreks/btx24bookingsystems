@@ -139,6 +139,42 @@ export interface DashboardDto {
   chats: { waitingReply: number; unreadMessages: number } | null;
   /** С кем общались в открытых линиях за период (уникальные элементы CRM). */
   contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
+  /** Звонки за период (телефония Битрикс24); null — нет доступа к делам CRM. */
+  calls: Record<CallKind, number> | null;
+  callsScope: CallScope;
   /** Свои брони из журнала приложения: созданные за период (клиентские — со сделками) и отменённые за период. */
   bookings: { created: number; cancelled: number; deals: DashboardBookingRow[]; cancelledList: DashboardBookingRow[] };
+}
+
+/** Звонки на дашборде: входящие, отвеченные, пропущенные, упущенные (не перезвонили). */
+export const CALL_KINDS = ['incoming', 'answered', 'missed', 'lost'] as const;
+export type CallKind = (typeof CALL_KINDS)[number];
+export const CALL_KIND_LABELS: Record<CallKind, string> = {
+  incoming: 'Входящие',
+  answered: 'Отвеченные',
+  missed: 'Пропущенные',
+  lost: 'Упущенные',
+};
+
+/** Чьи звонки: свои (ответственный — я) или все, что видно по правам CRM. */
+export type CallScope = 'mine' | 'all';
+
+export interface CallRowDto {
+  activityId: number;
+  at: string;
+  missed: boolean;
+  phone: string | null;
+  /** Элемент CRM, к которому привязан звонок. */
+  owner: { typeId: number; id: number; title: string | null };
+  /** Сделка звонка (если звонок привязан к сделке). */
+  dealId: number | null;
+  responsibleId: number | null;
+}
+
+/** `GET /api/dashboard/calls?kind=&from=&to=&scope=` — звонки выбранного вида для окна со сделками. */
+export interface CallListDto {
+  kind: CallKind;
+  items: CallRowDto[];
+  /** Обрезано по лимиту выборки (очень много звонков за период). */
+  truncated: boolean;
 }

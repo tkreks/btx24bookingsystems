@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  CallListDto,
   ChatHistoryDto,
   ChatListDto,
   DashboardDto,
@@ -51,11 +52,21 @@ export class OpenlinesController {
     @B24User() user: B24UserContext,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('callsScope') callsScope?: string,
   ): Promise<DashboardDto> {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.get(user, { from, to }, await this.can(user, 'openlines.read'));
+    return this.dashboard.get(user, { from, to, callsScope }, await this.can(user, 'openlines.read'));
+  }
+
+  /** Звонки выбранного вида за период (окно «сделки» на дашборде). */
+  @Get('dashboard/calls')
+  async calls(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<CallListDto> {
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
+    return this.dashboard.callList(user, query);
   }
 
   @Get('openlines/chats')

@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   todayIn,
+  CALL_KINDS,
+  CALL_KIND_LABELS,
   type BookingAlertListDto,
+  type CallKind,
+  type CallScope,
   type DashboardBookingRow,
   type DashboardDto,
   type SessionInfo,
@@ -9,6 +13,7 @@ import {
 import { apiGet } from '../api.js';
 import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
+import { CallsModal } from './CallsModal.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
@@ -41,6 +46,8 @@ export function DashboardPage({
   const [data, setData] = useState<DashboardDto | null>(null);
   const [error, setError] = useState('');
   const [alertCount, setAlertCount] = useState<number | null>(null);
+  const [callsScope, setCallsScope] = useState<CallScope>('all');
+  const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
 
   useEffect(() => {
     if (!bookingAlerts) return;
@@ -56,7 +63,7 @@ export function DashboardPage({
 
   useEffect(() => {
     let active = true;
-    apiGet<DashboardDto>(`/dashboard?from=${range.from}&to=${range.to}`).then(
+    apiGet<DashboardDto>(`/dashboard?from=${range.from}&to=${range.to}&callsScope=${callsScope}`).then(
       (dto) => {
         if (active) {
           setData(dto);
@@ -68,7 +75,7 @@ export function DashboardPage({
     return () => {
       active = false;
     };
-  }, [range]);
+  }, [range, callsScope]);
 
   const choose = (p: PeriodPreset) => {
     setPreset(p);
@@ -77,7 +84,7 @@ export function DashboardPage({
   };
   const draftError = periodError(draft.from, draft.to);
 
-  const d = data?.from === range.from && data.to === range.to ? data : null;
+  const d = data?.from === range.from && data.to === range.to && data.callsScope === callsScope ? data : null;
   const n = (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v));
 
   return (
@@ -176,6 +183,50 @@ export function DashboardPage({
       </div>
       {!openlines && (
         <p className="notice">Открытые линии недоступны: в ваших группах не включено право на них.</p>
+      )}
+
+      <section className="day-panel calls-panel">
+        <div className="day-header">
+          <b>Звонки</b>
+          <div className="segmented period-presets" role="group" aria-label="Чьи звонки">
+            {(['all', 'mine'] as const).map((s) => (
+              <button key={s} className={callsScope === s ? 'active' : ''} onClick={() => setCallsScope(s)}>
+                {s === 'all' ? 'Все' : 'Мои'}
+              </button>
+            ))}
+          </div>
+        </div>
+        {d && d.calls === null ? (
+          <p className="muted">Статистика звонков недоступна: нет доступа к делам CRM.</p>
+        ) : (
+          <div className={`tiles call-tiles${d ? '' : ' loading'}`}>
+            {CALL_KINDS.map((k) => (
+              <button
+                key={k}
+                className={`tile${k === 'lost' && d?.calls?.lost ? ' accent' : ''}`}
+                disabled={!d}
+                onClick={() => setCallsOpen(k)}
+              >
+                <span className="tile-value">{n(d?.calls?.[k])}</span>
+                <span className="tile-label">{CALL_KIND_LABELS[k]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="muted dash-note">
+          Упущенные — пропущенные входящие, после которых клиенту не перезвонили и он сам не дозвонился. «Не дозвонились»
+          на исходящих станет видно после выдачи приложению права «Телефония».
+        </p>
+      </section>
+      {callsOpen && (
+        <CallsModal
+          kind={callsOpen}
+          from={range.from}
+          to={range.to}
+          scope={callsScope}
+          timezone={tz}
+          onClose={() => setCallsOpen(null)}
+        />
       )}
 
       <div className="dash-lists">
