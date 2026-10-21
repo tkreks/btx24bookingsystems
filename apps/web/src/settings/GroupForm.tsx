@@ -1,14 +1,18 @@
 import { useState, type FormEvent } from 'react';
 import {
   GROUP_FEATURES,
+  type CalendarViewSetting,
   type GroupDto,
   type GroupFeature,
   type GroupDirectoryDto,
+  type GroupOptionsDto,
   type GroupSettingsDto,
 } from '@btx24/shared';
 import { apiDelete, apiPost, apiPut } from '../api.js';
 import { MembersEditor } from './MembersEditor.js';
-import { groupSettings, newGroup } from './group-form.js';
+import { CatalogSection, DealFieldsSection, PaymentsSection, ResourcesSection, Section } from './GroupOptions.js';
+import { defaultOptions, groupSettings, newGroup } from './group-form.js';
+import { useGroupReferences } from './references.js';
 
 const FEATURES: Record<GroupFeature, string> = {
   'booking.details': 'Данные броней и сделок',
@@ -19,6 +23,15 @@ const FEATURES: Record<GroupFeature, string> = {
   'openlines.read': 'Чтение открытых линий',
   'openlines.send': 'Отправка сообщений в открытые линии',
 };
+
+const VIEW_OPTIONS: { value: CalendarViewSetting; label: string }[] = [
+  { value: '', label: 'Авто' },
+  { value: 'calendar', label: 'Календарь' },
+  { value: 'list', label: 'Список' },
+  { value: 'availability', label: 'Доступность' },
+];
+
+/** Настройки группы — блоки как в прототипе («Настройка групп»), плюс участники и функции. */
 export function GroupForm({
   group,
   directory,
@@ -37,8 +50,14 @@ export function GroupForm({
   const [draft, setDraft] = useState<GroupSettingsDto>(() => (group ? groupSettings(group) : newGroup()));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const refs = useGroupReferences(draft.dealCategoryId);
+  const options = draft.options ?? defaultOptions();
   const update = (patch: Partial<GroupSettingsDto>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
+    onDirty(true);
+  };
+  const updateOptions = (patch: Partial<GroupOptionsDto>) => {
+    setDraft((prev) => ({ ...prev, options: { ...(prev.options ?? defaultOptions()), ...patch } }));
     onDirty(true);
   };
   const save = async (e: FormEvent) => {
@@ -75,147 +94,162 @@ export function GroupForm({
     }
   };
   const missingResources = draft.resourceIds.filter((id) => !directory?.resources.some((r) => r.id === id));
+  const resources = [
+    ...(directory?.resources ?? []),
+    ...missingResources.map((id) => ({ id, name: `Ресурс #${id} (нет в справочнике)` })),
+  ];
+  const view = (key: 'desktop' | 'mobile', label: string) => (
+    <label>
+      {label}
+      <select
+        value={options.views[key]}
+        onChange={(e) => updateOptions({ views: { ...options.views, [key]: e.target.value as CalendarViewSetting } })}
+      >
+        {VIEW_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
   return (
     <form onSubmit={save} className="settings-form">
-      <h3>{group ? 'Настройки группы' : 'Новая группа'}</h3>
+      <h3>{group ? `Группа «${group.name}»` : 'Новая группа'}</h3>
       {error && (
         <div className="notice error" role="alert">
           {error}
         </div>
       )}
       <fieldset disabled={busy}>
-        <label>
-          Название
-          <input required maxLength={100} value={draft.name} onChange={(e) => update({ name: e.target.value })} />
-        </label>
-        <label>
-          Воронка сделок
-          <select
-            value={draft.dealCategoryId ?? ''}
-            onChange={(e) => update({ dealCategoryId: e.target.value === '' ? null : Number(e.target.value) })}
-          >
-            <option value="">Без привязки</option>
-            {draft.dealCategoryId !== null && !directory?.categories.some((c) => c.id === draft.dealCategoryId) && (
-              <option value={draft.dealCategoryId}>Воронка #{draft.dealCategoryId} (нет в справочнике)</option>
-            )}
-            {directory?.categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <fieldset>
-          <legend>Ресурсы</legend>
-          {!directory && <p className="muted">Справочник недоступен. Сохранённые ресурсы остаются выбранными.</p>}
-          <div className="checkbox-grid">
-            {[
-              ...(directory?.resources ?? []),
-              ...missingResources.map((id) => ({ id, name: `Ресурс #${id} (нет в справочнике)` })),
-            ].map((r) => (
-              <label className="check" key={r.id}>
+        <Section title="Основные настройки">
+          <div className="settings-grid">
+            <label className="wide">
+              Название группы
+              <input required maxLength={100} value={draft.name} onChange={(e) => update({ name: e.target.value })} />
+            </label>
+            <label className="wide">
+              Канбан сделки
+              <select
+                value={draft.dealCategoryId ?? ''}
+                onChange={(e) => update({ dealCategoryId: e.target.value === '' ? null : Number(e.target.value) })}
+              >
+                <option value="">Не привязывать</option>
+                {draft.dealCategoryId !== null && !directory?.categories.some((c) => c.id === draft.dealCategoryId) && (
+                  <option value={draft.dealCategoryId}>Воронка #{draft.dealCategoryId} (нет в справочнике)</option>
+                )}
+                {directory?.categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Тип расчёта времени
+              <select
+                value={draft.bookingMode}
+                onChange={(e) => update({ bookingMode: e.target.value as GroupSettingsDto['bookingMode'] })}
+              >
+                <option value="duration">+ часы от клика</option>
+                <option value="interval">Интервал заезд/выезд</option>
+              </select>
+            </label>
+            {draft.bookingMode === 'duration' ? (
+              <label>
+                Минимум часов
                 <input
-                  type="checkbox"
-                  checked={draft.resourceIds.includes(r.id)}
-                  onChange={(e) =>
-                    update({
-                      resourceIds: e.target.checked
-                        ? [...draft.resourceIds, r.id]
-                        : draft.resourceIds.filter((id) => id !== r.id),
-                    })
-                  }
+                  type="number"
+                  required
+                  min={0.5}
+                  max={168}
+                  step={0.5}
+                  value={draft.durationMinutes / 60}
+                  onChange={(e) => update({ durationMinutes: Math.round(Number(e.target.value) * 60) })}
                 />
-                {r.name}
               </label>
-            ))}
-          </div>
-        </fieldset>
-        <label>
-          Режим бронирования
-          <select
-            value={draft.bookingMode}
-            onChange={(e) => update({ bookingMode: e.target.value as GroupSettingsDto['bookingMode'] })}
-          >
-            <option value="duration">Часы от клика</option>
-            <option value="interval">Заезд / выезд</option>
-          </select>
-        </label>
-        {draft.bookingMode === 'duration' ? (
-          <label>
-            Минимальная длительность, минут
-            <input
-              type="number"
-              required
-              min={1}
-              max={10080}
-              value={draft.durationMinutes}
-              onChange={(e) => update({ durationMinutes: Number(e.target.value) })}
-            />
-          </label>
-        ) : (
-          <div className="form-columns">
+            ) : (
+              <>
+                <label>
+                  Заезд
+                  <input
+                    type="time"
+                    required
+                    value={draft.checkInTime}
+                    onChange={(e) => update({ checkInTime: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Выезд
+                  <input
+                    type="time"
+                    required
+                    value={draft.checkOutTime}
+                    onChange={(e) => update({ checkOutTime: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Минимум дней
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={365}
+                    value={draft.defaultNights}
+                    onChange={(e) => update({ defaultNights: Number(e.target.value) })}
+                  />
+                </label>
+              </>
+            )}
             <label>
-              Заезд
-              <input
-                type="time"
-                required
-                value={draft.checkInTime}
-                onChange={(e) => update({ checkInTime: e.target.value })}
-              />
-            </label>
-            <label>
-              Выезд
-              <input
-                type="time"
-                required
-                value={draft.checkOutTime}
-                onChange={(e) => update({ checkOutTime: e.target.value })}
-              />
-            </label>
-            <label>
-              Ночей по умолчанию
+              Тех. окно, минут
               <input
                 type="number"
                 required
                 min={0}
-                max={365}
-                value={draft.defaultNights}
-                onChange={(e) => update({ defaultNights: Number(e.target.value) })}
+                max={1440}
+                step={5}
+                value={draft.techWindowMinutes}
+                onChange={(e) => update({ techWindowMinutes: Number(e.target.value) })}
               />
             </label>
+            {view('desktop', 'Вид на ПК')}
+            {view('mobile', 'Вид на телефоне')}
           </div>
+          <p className="muted">Тех. окно предупреждает о пересечении, но не запрещает бронирование.</p>
+        </Section>
+
+        <PaymentsSection
+          payments={options.payments}
+          stages={refs.stages}
+          onChange={(payments) => updateOptions({ payments })}
+        />
+
+        <ResourcesSection
+          resources={resources}
+          resourceIds={draft.resourceIds}
+          defaults={options.resourceDefaults}
+          catalog={refs.catalog}
+          onResources={(resourceIds) => update({ resourceIds })}
+          onDefaults={(resourceDefaults) => updateOptions({ resourceDefaults })}
+        />
+        {!directory && (
+          <p className="muted">Справочник ресурсов недоступен. Сохранённые ресурсы остаются выбранными.</p>
         )}
-        <label>
-          Техническое окно, минут
-          <input
-            type="number"
-            required
-            min={0}
-            max={1440}
-            value={draft.techWindowMinutes}
-            onChange={(e) => update({ techWindowMinutes: Number(e.target.value) })}
-          />
-        </label>
-        <p className="muted">Техническое окно предупреждает о пересечении, но не запрещает бронирование.</p>
-        <fieldset>
-          <legend>Функции группы</legend>
-          {GROUP_FEATURES.map((f) => (
-            <label className="check" key={f}>
-              <input
-                type="checkbox"
-                checked={draft.features.includes(f)}
-                onChange={(e) =>
-                  update({
-                    features: e.target.checked ? [...draft.features, f] : draft.features.filter((item) => item !== f),
-                  })
-                }
-              />
-              {FEATURES[f]}
-            </label>
-          ))}
-        </fieldset>
-        <fieldset>
-          <legend>Участники и роли</legend>
+
+        <CatalogSection
+          selected={options.productSectionIds}
+          catalog={refs.catalog}
+          onChange={(productSectionIds) => updateOptions({ productSectionIds })}
+        />
+
+        <DealFieldsSection
+          fields={options.dealFields}
+          available={refs.fields}
+          onChange={(dealFields) => updateOptions({ dealFields })}
+        />
+
+        <Section title="Участники и роли" hint={`участников: ${draft.members.length}`}>
           {directory && !directory.departmentsAvailable && (
             <p className="notice">
               Список отделов недоступен. Добавьте сотрудников поимённо. Без права department учитываются только прямые
@@ -230,10 +264,28 @@ export function GroupForm({
             onChange={(members) => update({ members })}
           />
           <p className="muted">
-            Роль ограничена включёнными функциями группы. Технолог видит только занятость. Без участников группа
-            доступна только администраторам приложения.
+            Роль ограничена включёнными функциями группы. Без участников группа доступна только администраторам
+            приложения.
           </p>
-        </fieldset>
+        </Section>
+
+        <Section title="Функции группы" open={false}>
+          {GROUP_FEATURES.map((f) => (
+            <label className="check" key={f}>
+              <input
+                type="checkbox"
+                checked={draft.features.includes(f)}
+                onChange={(e) =>
+                  update({
+                    features: e.target.checked ? [...draft.features, f] : draft.features.filter((item) => item !== f),
+                  })
+                }
+              />
+              {FEATURES[f]}
+            </label>
+          ))}
+        </Section>
+
         <div className="form-actions">
           <button className="primary" type="submit">
             {busy ? 'Сохранение…' : 'Сохранить группу'}

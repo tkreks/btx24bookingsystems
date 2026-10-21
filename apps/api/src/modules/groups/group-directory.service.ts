@@ -1,5 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import type { DepartmentItem, EmployeeDto, GroupDirectoryDto, NamedBitrixItem } from '@btx24/shared';
+import type {
+  CatalogDto,
+  DealFieldInfo,
+  DealStageItem,
+  DepartmentItem,
+  EmployeeDto,
+  GroupDirectoryDto,
+  NamedBitrixItem,
+} from '@btx24/shared';
 import { z } from 'zod';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -101,6 +109,86 @@ export class GroupDirectoryService {
       }))
       .filter((u) => Number.isSafeInteger(u.id) && u.id > 0)
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  }
+
+  /** Поля сделки для блока «Поля сделки» группы: код, подпись, тип. */
+  async dealFields(user: B24UserContext): Promise<DealFieldInfo[]> {
+    type Meta = {
+      type?: string;
+      isMultiple?: boolean;
+      isReadOnly?: boolean;
+      title?: string;
+      formLabel?: string;
+      listLabel?: string;
+    };
+    const res = await user.client.call<Record<string, Meta>>('crm.deal.fields');
+    return Object.entries(res.result ?? {})
+      .map(([code, m]) => ({
+        code,
+        label: m.formLabel || m.listLabel || m.title || code,
+        type: m.type ?? 'string',
+        multiple: Boolean(m.isMultiple),
+        readOnly: Boolean(m.isReadOnly),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  }
+
+  /** Стадии воронки по порядку: общая воронка — `DEAL_STAGE`, остальные — `DEAL_STAGE_<id>`. */
+  async dealStages(user: B24UserContext, query: unknown): Promise<DealStageItem[]> {
+    const parsed = z.object({ categoryId: z.coerce.number().int().nonnegative() }).strict().safeParse(query);
+    if (!parsed.success)
+      throw new BadRequestException({ code: 'INVALID_CATEGORY', message: 'Укажите воронку (categoryId)' });
+    const { categoryId } = parsed.data;
+    const rows = await user.client.listAll<{
+      STATUS_ID: string;
+      NAME: string;
+      SORT?: string;
+      SEMANTICS?: string | null;
+    }>('crm.status.list', {
+      filter: { ENTITY_ID: categoryId === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${categoryId}` },
+      order: { SORT: 'ASC' },
+    });
+    return rows
+      .sort((a, b) => Number(a.SORT ?? 0) - Number(b.SORT ?? 0))
+      .map((r) => ({ id: r.STATUS_ID, name: r.NAME, semantics: r.SEMANTICS ?? '' }));
+  }
+
+  /**
+   * Каталог для товаров по умолчанию и разделов группы. `crm.product*` устарели, но работают с
+   * правом `crm` (у `catalog.*` — отдельное право, которого у приложения нет); так делал прототип.
+   */
+  async catalog(user: B24UserContext): Promise<CatalogDto> {
+    const [sections, products] = await Promise.all([
+      user.client.listAll<{ ID: string; NAME: string; SECTION_ID?: string | null }>('crm.productsection.list', {
+        select: ['ID', 'NAME', 'SECTION_ID'],
+        order: { NAME: 'ASC' },
+      }),
+      user.client.listAll<{
+        ID: string;
+        NAME: string;
+        PRICE?: string | null;
+        CURRENCY_ID?: string | null;
+        SECTION_ID?: string | null;
+      }>('crm.product.list', {
+        select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'SECTION_ID'],
+        filter: { ACTIVE: 'Y' },
+        order: { NAME: 'ASC' },
+      }),
+    ]);
+    return {
+      sections: sections.map((s) => ({
+        id: String(s.ID),
+        name: s.NAME,
+        parentId: s.SECTION_ID ? String(s.SECTION_ID) : null,
+      })),
+      products: products.map((p) => ({
+        id: Number(p.ID),
+        name: p.NAME,
+        price: p.PRICE === null || p.PRICE === undefined || p.PRICE === '' ? null : Number(p.PRICE),
+        currency: p.CURRENCY_ID ?? null,
+        sectionId: p.SECTION_ID ? String(p.SECTION_ID) : null,
+      })),
+    };
   }
 
   private async departments(user: B24UserContext) {
