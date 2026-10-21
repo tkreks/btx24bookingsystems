@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, UseGuards } from '@nestjs/common';
-import type { AppSettingsDto, ExternalUserSummaryDto, GroupDirectoryDto, GroupDto, MyGroupDto } from '@btx24/shared';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import type { AppSettingsDto, EmployeeDto, ExternalUserSummaryDto, GroupDirectoryDto, GroupDto, MyGroupDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
@@ -34,6 +34,11 @@ export class GroupsAdminController {
   @Get('group-directory')
   references(@B24User() user: B24UserContext): Promise<GroupDirectoryDto> {
     return this.directory.get(user);
+  }
+
+  @Get('employees')
+  employees(@B24User() user: B24UserContext, @Query() query: unknown): Promise<EmployeeDto[]> {
+    return this.directory.employees(user, query);
   }
 
   @Get('external-users')

@@ -9,6 +9,11 @@ function setup(departmentError?: Error) {
       if (departmentError) throw departmentError;
       return [{ ID: '7', NAME: 'Отдел' }];
     }
+    if (method === 'user.get')
+      return [
+        { ID: '12', NAME: 'Яна', LAST_NAME: 'Ушакова', WORK_POSITION: 'Администратор', UF_DEPARTMENT: [7, 9] },
+        { ID: '5', NAME: 'Анна', LAST_NAME: 'Белова', UF_DEPARTMENT: 7 },
+      ];
     if (method === 'booking.v1.resource.list') return options!.pick!({ resource: [{ id: '30', name: 'Баня' }] });
     if (method === 'crm.category.list')
       return options!.pick!({
@@ -19,12 +24,19 @@ function setup(departmentError?: Error) {
       });
     throw new Error(method);
   });
-  const user = { portal: { id: 'p1' }, client: { listAll } } as unknown as B24UserContext;
+  const call = vi.fn(async () => ({
+    result: [
+      { ID: '3', NAME: 'Иван', LAST_NAME: 'Петров', WORK_POSITION: 'Менеджер', UF_DEPARTMENT: [7], ACTIVE: true },
+      { ID: '4', NAME: 'Уволен', ACTIVE: false, USER_TYPE: 'employee' },
+      { ID: '6', NAME: 'Гость', ACTIVE: true, USER_TYPE: 'extranet' },
+    ],
+  }));
+  const user = { portal: { id: 'p1' }, client: { listAll, call } } as unknown as B24UserContext;
   const prisma = {
     workGroupMember: { findMany: vi.fn(async () => []) },
     appAdmin: { findMany: vi.fn(async () => []) },
   } as unknown as PrismaService;
-  return { service: new GroupDirectoryService(prisma), user, listAll, prisma };
+  return { service: new GroupDirectoryService(prisma), user, listAll, call, prisma };
 }
 
 describe('GroupDirectoryService', () => {
@@ -37,7 +49,7 @@ describe('GroupDirectoryService', () => {
         { id: 14, name: 'Бани' },
         { id: 0, name: 'Основная' },
       ],
-      departments: [{ id: 7, name: 'Отдел' }],
+      departments: [{ id: 7, name: 'Отдел', parentId: null }],
       departmentsAvailable: true,
     });
     expect(listAll).toHaveBeenCalledWith('crm.category.list', { entityTypeId: 2 }, expect.anything());
@@ -88,4 +100,29 @@ it('looks up only saved employee memberships in the authenticated portal and exp
     select: { bitrixId: true },
   });
   expect(listAll).toHaveBeenCalledWith('user.get', { FILTER: { ID: [42] } });
+});
+
+describe('GroupDirectoryService.employees', () => {
+  it('searches active employees by name, position or department name', async () => {
+    const { service, user, call } = setup();
+    expect(await service.employees(user, { q: ' Пет ' })).toEqual([
+      { id: 3, name: 'Иван Петров', position: 'Менеджер', departmentIds: [7] },
+    ]);
+    expect(call).toHaveBeenCalledWith('user.search', { FILTER: { FIND: 'Пет' } });
+  });
+  it('lists the active employees of a department', async () => {
+    const { service, user, listAll } = setup();
+    expect(await service.employees(user, { departmentId: '7' })).toEqual([
+      { id: 5, name: 'Анна Белова', position: '', departmentIds: [7] },
+      { id: 12, name: 'Яна Ушакова', position: 'Администратор', departmentIds: [7, 9] },
+    ]);
+    expect(listAll).toHaveBeenCalledWith('user.get', { FILTER: { UF_DEPARTMENT: 7, ACTIVE: true } });
+  });
+  it.each([{}, { q: 'a' }, { q: 'Иван', departmentId: 7 }, { departmentId: 'x' }, { q: 'Иван', extra: 1 }])(
+    'rejects %o',
+    async (query) => {
+      const { service, user } = setup();
+      await expect(service.employees(user, query)).rejects.toMatchObject({ status: 400 });
+    },
+  );
 });

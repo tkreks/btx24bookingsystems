@@ -37,13 +37,25 @@ describe('AccessService', () => {
     expect((await svc.resolve(user())).groups).toEqual([]);
   });
 
-  it('matches department members including parent departments, and takes the higher role', async () => {
+  it('matches department members including parent departments, and takes the higher department role', async () => {
     const { svc, user } = setup({
-      groups: [group('g1', [{ kind: 'DEPARTMENT', bitrixId: 1, role: 'VIEWER' }, { kind: 'USER', bitrixId: 10, role: 'MANAGER' }]), group('g2', [{ kind: 'DEPARTMENT', bitrixId: 1, role: 'VIEWER' }])],
+      groups: [group('g1', [{ kind: 'DEPARTMENT', bitrixId: 1, role: 'VIEWER' }, { kind: 'DEPARTMENT', bitrixId: 5, role: 'MANAGER' }]), group('g2', [{ kind: 'DEPARTMENT', bitrixId: 1, role: 'VIEWER' }])],
       departments: [{ ID: '1', PARENT: null }, { ID: '5', PARENT: '1' }, { ID: '7', PARENT: '5' }],
     });
     const a = await svc.resolve(user({ departmentIds: [7] }));
     expect(a.groups.map((g) => [g.group.id, g.role])).toEqual([['g1', 'MANAGER'], ['g2', 'VIEWER']]);
+  });
+
+  it('a personal role overrides department roles in both directions', async () => {
+    const { svc, user } = setup({
+      groups: [
+        group('up', [{ kind: 'DEPARTMENT', bitrixId: 7, role: 'VIEWER' }, { kind: 'USER', bitrixId: 10, role: 'MANAGER' }]),
+        group('down', [{ kind: 'DEPARTMENT', bitrixId: 7, role: 'MANAGER' }, { kind: 'USER', bitrixId: 10, role: 'VIEWER' }]),
+      ],
+      departments: [{ ID: '7', PARENT: null }],
+    });
+    const a = await svc.resolve(user({ departmentIds: [7] }));
+    expect(a.groups.map((g) => [g.group.id, g.role])).toEqual([['up', 'MANAGER'], ['down', 'VIEWER']]);
   });
 
   it('falls back to direct departments when department.get is not allowed', async () => {

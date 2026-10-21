@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { AppSettingsDto, NamedBitrixItem } from '@btx24/shared';
+import type { AppSettingsDto, DepartmentItem, NamedBitrixItem } from '@btx24/shared';
 import { apiPut } from '../api.js';
 import { MembersEditor } from './MembersEditor.js';
 
@@ -12,7 +12,7 @@ export function AppSettingsForm({
   onBusy,
 }: {
   settings: AppSettingsDto;
-  departments: NamedBitrixItem[];
+  departments: DepartmentItem[];
   users: NamedBitrixItem[];
   onSaved: (s: AppSettingsDto) => void;
   onDirty: (dirty: boolean) => void;

@@ -17,7 +17,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const ROLES = ['VIEWER', 'TECHNOLOGIST', 'MANAGER', 'GROUP_ADMIN'] as const;
 export type GroupRole = (typeof ROLES)[number];
 
-/** Порядок старшинства: при нескольких совпадениях (сам + отдел) берётся старшая роль. */
+/** Порядок старшинства: из ролей отделов берётся старшая (личная роль важнее отделов). */
 export const ROLE_RANK: Record<GroupRole, number> = { TECHNOLOGIST: 0, VIEWER: 1, MANAGER: 2, GROUP_ADMIN: 3 };
 
 export const ROLE_PERMISSIONS: Record<GroupRole, readonly Permission[]> = {

@@ -3,7 +3,7 @@ import { Bitrix24RestClient } from './rest-client.js';
 import { RateLimiter } from './rate-limiter.js';
 
 describe('isReadMethod', () => {
-  it.each(['booking.v1.booking.list', 'booking.v1.booking.get', 'booking.v1.booking.externalData.list', 'crm.deal.fields', 'crm.deal.productrows.get', 'crm.deal.userfield.list', 'bizproc.workflow.template.list', 'user.admin', 'user.current', 'app.info', 'event.bind', 'placement.bind'])(
+  it.each(['booking.v1.booking.list', 'booking.v1.booking.get', 'booking.v1.booking.externalData.list', 'crm.deal.fields', 'crm.deal.productrows.get', 'crm.deal.userfield.list', 'bizproc.workflow.template.list', 'user.admin', 'user.current', 'user.search', 'app.info', 'event.bind', 'placement.bind'])(
     'treats %s as allowed',
     (m) => expect(isReadMethod(m)).toBe(true),
   );
