@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatListDto, ChatScope, ChatSummary, MessageTemplateDto } from '@btx24/shared';
+import {
+  todayIn,
+  type ChatListDto,
+  type ChatScope,
+  type ChatSummary,
+  type ClientBookingsDto,
+  type CreateBookingResultDto,
+  type MessageTemplateDto,
+  type MyGroupDto,
+} from '@btx24/shared';
+import { BookingForm } from '../bookings/BookingForm.js';
+import { ClientBookings } from '../bookings/ClientBookings.js';
 import { apiGet } from '../api.js';
 import { ChatView } from './ChatView.js';
 import {
@@ -35,12 +46,20 @@ export function ChatsPage({
   initialChatId,
   initialWaiting = false,
   onClose,
+  groups = [],
+  readOnly = false,
+  onOpenDay,
 }: {
   timezone: string;
   canSend: boolean;
   initialChatId?: number | null;
   initialWaiting?: boolean;
   onClose: () => void;
+  /** Группы пользователя — для формы брони. */
+  groups?: MyGroupDto[];
+  readOnly?: boolean;
+  /** Открыть день в календаре. */
+  onOpenDay?: (date: string) => void;
 }) {
   // По умолчанию — все доступные чаты и все статусы (решение владельца).
   const [scope, setScope] = useState<ChatScope>('all');
@@ -59,6 +78,10 @@ export function ChatsPage({
   const [openId, setOpenId] = useState<number | null>(initialChatId ?? null);
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [form, setForm] = useState<{ chatId: number; data: ClientBookingsDto | null } | null>(null);
+  const [created, setCreated] = useState<CreateBookingResultDto | null>(null);
+  const [bookingsRev, setBookingsRev] = useState(0);
+  const canCreate = groups.some((g) => g.permissions.includes('booking.create'));
   // Полный номер телефона — поиск по всему порталу (CRM → чаты клиента), а не только в загруженных.
   const [phoneHits, setPhoneHits] = useState<{ q: string; items: ChatSummary[] | null; error: string } | null>(null);
   const fullPhone = isFullPhone(query);
@@ -301,7 +324,11 @@ export function ChatsPage({
             </div>
           )}
           {items.map((c) => (
-            <ChatCard key={c.chatId} c={c} active={openId === c.chatId} timezone={timezone} onOpen={() => setOpenId(c.chatId)} />
+            <ChatCard key={c.chatId} c={c} active={openId === c.chatId} timezone={timezone} onOpen={() => {
+              setOpenId(c.chatId);
+              setCreated(null);
+            }}
+          />
           ))}
           {current?.nextOffset !== null && current && (
             <button className="link more" disabled={loadingMore} onClick={() => void more()}>
@@ -319,9 +346,46 @@ export function ChatsPage({
           onTemplates={setTemplates}
           onBack={() => setOpenId(null)}
           onChanged={() => void refresh()}
+          bookings={
+            <>
+              <ClientBookings
+                chatId={openId}
+                timezone={timezone}
+                canCreate={canCreate}
+                revision={bookingsRev}
+                onOpenDay={onOpenDay}
+                onCreate={(data) => setForm({ chatId: openId, data })}
+              />
+              {created && (
+                <p className="notice cb-created">
+                  Бронь #{created.bookingId} создана{created.dealId ? ` в сделке #${created.dealId}` : ''}.
+                  {created.warnings.length > 0 && ` ${created.warnings.join(' ')}`}
+                </p>
+              )}
+            </>
+          }
         />
       ) : (
         <main className="chat-view empty-chat">Выберите чат слева</main>
+      )}
+      {form && (
+        <BookingForm
+          groups={groups}
+          timezone={timezone}
+          readOnly={readOnly}
+          context={{
+            date: todayIn(timezone),
+            contactId: form.data?.contactId ?? null,
+            clientName: items.find((c) => c.chatId === form.chatId)?.title ?? all.find((c) => c.chatId === form.chatId)?.title ?? null,
+            openDeals: form.data?.openDeals ?? [],
+          }}
+          onClose={() => setForm(null)}
+          onDone={(r) => {
+            setForm(null);
+            setCreated(r);
+            setBookingsRev((n) => n + 1);
+          }}
+        />
       )}
     </div>
   );

@@ -5,6 +5,9 @@ import type {
   BookingHistoryDto,
   BookingStateDto,
   BookingSyncSettingsDto,
+  ClientBookingsDto,
+  CreateBookingResultDto,
+  DealFieldMapDto,
   Permission,
 } from '@btx24/shared';
 import { z } from 'zod';
@@ -14,7 +17,10 @@ import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
+import { BookingCreateService } from './booking-create.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
+import { ClientBookingsService } from './client-bookings.service.js';
+import { DealFieldMapService } from './deal-field-map.service.js';
 
 /**
  * Уведомления о бронях и история броней. Видеть — право `booking.details` хотя бы в одной группе;
@@ -27,6 +33,8 @@ export class BookingsController {
     private readonly access: AccessService,
     private readonly alerts: BookingAlertsService,
     private readonly journal: BookingJournalService,
+    private readonly creator: BookingCreateService,
+    private readonly clients: ClientBookingsService,
   ) {}
 
   @Get('booking-alerts')
@@ -46,6 +54,26 @@ export class BookingsController {
     const resolution = (body as { resolution?: unknown } | null)?.resolution;
     await this.require(user, resolution === 'cancel_booking' ? 'booking.cancel' : 'booking.edit');
     return this.alerts.resolve(user, id, body);
+  }
+
+  /** Создать бронь (сага). Право `booking.create` в группе проверяет сервис. */
+  @Post('bookings')
+  create(@B24User() user: B24UserContext, @Body() body: unknown): Promise<CreateBookingResultDto> {
+    return this.creator.create(user, body);
+  }
+
+  /** Брони сделки и её клиента — встройка в карточку сделки, дата календаря. */
+  @Get('deals/:dealId/bookings')
+  async dealBookings(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<ClientBookingsDto> {
+    await this.require(user, 'calendar.view');
+    return this.clients.forDeal(user, dealId);
+  }
+
+  /** Брони клиента чата открытой линии. */
+  @Get('openlines/chats/:chatId/bookings')
+  async chatBookings(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<ClientBookingsDto> {
+    await this.require(user, 'openlines.read');
+    return this.clients.forChat(user, chatId);
   }
 
   /** История брони (аудит): кто, что, как и когда. */
@@ -87,7 +115,27 @@ const syncSettingsSchema = z.object({ syncHorizonDays: z.number().int().min(7).m
 @Controller('admin/booking-sync')
 @UseGuards(B24AuthGuard, AppAdminGuard)
 export class BookingSyncAdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fieldMap: DealFieldMapService,
+  ) {}
+
+  /** Системные поля сделки: роль → код поля. */
+  @Get('deal-fields')
+  dealFields(@B24User() user: B24UserContext): Promise<DealFieldMapDto> {
+    return this.fieldMap.get(user.portal.id);
+  }
+
+  @Put('deal-fields')
+  saveDealFields(@B24User() user: B24UserContext, @Body() body: unknown): Promise<DealFieldMapDto> {
+    return this.fieldMap.save(user.portal.id, user.userId, body);
+  }
+
+  /** Найти поля по названиям — без сохранения. */
+  @Get('deal-fields/detect')
+  detectDealFields(@B24User() user: B24UserContext): Promise<DealFieldMapDto> {
+    return this.fieldMap.detect(user);
+  }
 
   @Get()
   async get(@B24User() user: B24UserContext): Promise<BookingSyncSettingsDto> {

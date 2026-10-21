@@ -162,6 +162,11 @@ export interface MyGroupDto {
   dealCategoryId: number | null;
   bookingMode: BookingMode;
   techWindowMinutes: number;
+  /** Для формы брони: длительность по умолчанию (duration) и заезд/выезд (interval). */
+  durationMinutes: number;
+  checkInTime: string;
+  checkOutTime: string;
+  defaultNights: number;
   /** Вид календаря по умолчанию на ПК и на телефоне ('' — авто). */
   views: GroupOptionsDto['views'];
 }

@@ -4,6 +4,7 @@ import { apiGet } from '../api.js';
 import { fitFrame } from '../b24.js';
 import { PlacementSettings } from '../calendar/AdminPanel.js';
 import { BookingSyncSettings } from '../bookings/BookingSyncSettings.js';
+import { DealFieldMapSettings } from '../bookings/DealFieldMapSettings.js';
 import { AppSettingsForm } from './AppSettingsForm.js';
 import { ResourceNames } from './ResourceNames.js';
 import { SettingsCodes } from './SettingsCodes.js';
@@ -272,6 +273,7 @@ export function SettingsPanel({
           />
         )}
         {tab === 'app' && <BookingSyncSettings timezone={timezone} />}
+        {tab === 'app' && <DealFieldMapSettings />}
         {tab === 'app' && !temporary && <SettingsCodes timezone={timezone} />}
         {tab === 'passwords' && (
           <fieldset className="password-settings" disabled={busy}>

@@ -22,6 +22,7 @@ export function ChatView({
   onTemplates,
   onBack,
   onChanged,
+  bookings,
 }: {
   chatId: number;
   timezone: string;
@@ -30,6 +31,8 @@ export function ChatView({
   onBack: () => void;
   /** Что-то отправили/присоединились — список чатов стоит обновить. */
   onChanged: () => void;
+  /** Брони клиента и «Создать бронирование» (рендерит страница чатов — у неё группы). */
+  bookings?: ReactNode;
 }) {
   const [chat, setChat] = useState<ChatHistoryDto | null>(null);
   const [error, setError] = useState('');
@@ -162,6 +165,8 @@ export function ChatView({
           В Битрикс24 <Icon name="external" size={16} />
         </button>
       </ChatHeader>
+
+      {bookings}
 
       <div className="cv-conversation" ref={list} aria-live="polite" aria-label="История сообщений">
         {chat.hasMore && (

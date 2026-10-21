@@ -48,6 +48,7 @@ model Portal {
   openlineChats        OpenlineChat[]
   bookingRecords       BookingRecord[]
   settingsAccessCodes  SettingsAccessCode[]
+  bookingOperations    BookingOperation[]
   resources            Resource[]
   bookingAlerts        BookingAlert[]
 }
@@ -180,6 +181,8 @@ model PortalSettings {
   /// Последняя сверка броней и её ошибка (для экрана настроек).
   bookingSyncAt         DateTime? @db.DateTime(3)
   bookingSyncError      String?   @db.VarChar(500)
+  /// Системные поля сделки портала: роль → код поля (`DealFieldMapDto` в @btx24/shared).
+  dealFieldMap          Json?
   updatedByUserId       Int?
   updatedAt             DateTime @updatedAt @db.DateTime(3)
 }
@@ -312,6 +315,20 @@ enum BookingCancelReason {
   removed_in_bitrix
 }
 
+/// Сценарий оплаты брони (ADR 0008).
+enum BookingPaymentMode {
+  /// Предоплата по ссылке, таймер, доплата.
+  prepayment
+  /// Предоплата наличными на месте — без ссылки и таймера.
+  cash_on_site
+  /// Без предоплаты: оплата после визита.
+  postpay
+  /// Бесплатно.
+  free
+  /// Оплачено сертификатом.
+  certificate
+}
+
 /// Откуда бронь: создана приложением или найдена в Битрикс24 (онлайн-запись, вручную в портале).
 enum BookingSource {
   app
@@ -348,6 +365,8 @@ model BookingRecord {
   startsAt          DateTime             @db.DateTime(3)
   endsAt            DateTime             @db.DateTime(3)
   status            BookingStatus        @default(active)
+  /// Как оплачивается (ADR 0008); null — бронь не из приложения.
+  paymentMode       BookingPaymentMode?
   cancelReason      BookingCancelReason?
   /// Сотрудник Битрикс24, создавший бронь; null — бронь найдена в Битрикс24 (автор неизвестен).
   createdByUserId   Int?
@@ -467,4 +486,27 @@ model SettingsAccessCode {
 
   @@unique([portalId, codeHash])
   @@index([portalId, usedByUserId, expiresAt])
+}
+
+/// Журнал операции создания брони (сага «сделка → бронь → связь → поля → товары»): шаги, результат
+/// и ошибка. Ключ идемпотентности: повтор той же заявки не создаёт вторую бронь.
+model BookingOperation {
+  id             String   @id @default(cuid())
+  portalId       String
+  portal         Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  idempotencyKey String   @db.VarChar(64)
+  userId         Int
+  /// `running` | `done` | `failed`.
+  status         String   @db.VarChar(16)
+  /// Пройденные шаги и компенсация — по порядку.
+  steps          Json
+  bookingId      Int?
+  dealId         Int?
+  error          String?  @db.VarChar(1000)
+  request        Json
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
+
+  @@unique([portalId, idempotencyKey])
+  @@index([portalId, createdAt])
 }

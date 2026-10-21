@@ -90,6 +90,10 @@ export class AccessService {
       dealCategoryId: g.group.dealCategoryId,
       bookingMode: g.group.bookingMode,
       techWindowMinutes: g.group.techWindowMinutes,
+      durationMinutes: g.group.durationMinutes,
+      checkInTime: g.group.checkInTime,
+      checkOutTime: g.group.checkOutTime,
+      defaultNights: g.group.defaultNights,
       views: (g.group.options as GroupOptionsDto | null)?.views ?? { desktop: '', mobile: '' },
     };
   }

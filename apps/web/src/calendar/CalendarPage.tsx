@@ -4,6 +4,8 @@ import {
   type CalendarBooking,
   type CalendarDay,
   type CalendarView,
+  type ClientBookingDto,
+  type ClientBookingsDto,
   type MyGroupDto,
   type SessionInfo,
 } from '@btx24/shared';
@@ -12,6 +14,8 @@ import { fitFrame, type PlacementContext } from '../b24.js';
 import { fmtDayTitle, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
+import { BookingForm } from '../bookings/BookingForm.js';
+import { dayKey } from '../openlines/chat-list.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
@@ -63,6 +67,9 @@ export function CalendarPage({
   const [resp, setResp] = useState<{ key: string; day: CalendarDay | null; error: string | null } | null>(null);
   const [selected, setSelected] = useState<CalendarBooking | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [bookingForm, setBookingForm] = useState(false);
+  const [createdNote, setCreatedNote] = useState('');
+  const [dealBookingsInfo, setDealBookings] = useState<ClientBookingsDto | null>(null);
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   // Экран приложения. Состояние календаря (дата, вид) живёт здесь и не теряется при переходах.
@@ -143,6 +150,26 @@ export function CalendarPage({
     }
   };
 
+  // Встройка в сделку: календарь открывается на дате брони этой сделки (ближайшей предстоящей,
+  // иначе последней), а не на сегодня.
+  useEffect(() => {
+    if (!placement.dealId) return;
+    let active = true;
+    apiGet<ClientBookingsDto>(`/deals/${placement.dealId}/bookings`).then(
+      (r) => {
+        if (!active) return;
+        const own = (list: ClientBookingDto[]) => list.find((b) => b.dealId === placement.dealId);
+        const b = own(r.upcoming) ?? own(r.recent);
+        if (b) setDate(dayKey(b.start, tz));
+        setDealBookings(r);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [placement.dealId, tz]);
+
   useEffect(() => fitFrame(), [day, view, selected, adminOpen, screen]);
 
   const switchView = (v: CalendarView) => {
@@ -216,6 +243,12 @@ export function CalendarPage({
         initialChatId={screen.chatId}
         initialWaiting={screen.waiting}
         onClose={() => setScreen({ name: 'dashboard' })}
+        groups={groups ?? []}
+        readOnly={session.readOnly}
+        onOpenDay={(d) => {
+          setDate(d);
+          setScreen({ name: 'calendar' });
+        }}
       />
     );
 
@@ -262,6 +295,11 @@ export function CalendarPage({
           >
             {VIEW_ICONS[nextView(view)]} <span className="view-toggle-text">{VIEW_TITLES[nextView(view)]}</span>
           </button>
+          {(session.canManageApp || permissions.has('booking.create')) && (
+            <button className="primary" onClick={() => setBookingForm(true)}>
+              + Бронь
+            </button>
+          )}
           <WorkdayButton timezone={tz} />
           <button
             className="home-button"
@@ -318,7 +356,30 @@ export function CalendarPage({
         {!day && loading && <div className="muted pad">Загрузка броней…</div>}
       </main>
 
+      {createdNote && <div className="notice">{createdNote}</div>}
       {selected && day && <BookingDetails booking={selected} day={day} onClose={() => setSelected(null)} />}
+      {bookingForm && (
+        <BookingForm
+          groups={groups ?? []}
+          timezone={tz}
+          readOnly={session.readOnly}
+          context={{
+            date,
+            groupId: activeGroup?.id ?? null,
+            dealId: placement.dealId,
+            contactId: dealBookingsInfo?.contactId ?? null,
+            openDeals: dealBookingsInfo?.openDeals.filter((d) => d.id !== placement.dealId) ?? [],
+          }}
+          onClose={() => setBookingForm(false)}
+          onDone={(r) => {
+            setBookingForm(false);
+            setCreatedNote(
+              `Бронь #${r.bookingId} создана${r.dealId ? ` в сделке #${r.dealId}` : ''}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
+            );
+            setSettingsRevision((n) => n + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

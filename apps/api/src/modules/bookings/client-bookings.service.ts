@@ -1,0 +1,125 @@
+import { Injectable } from '@nestjs/common';
+import type { ClientBookingDto, ClientBookingsDto } from '@btx24/shared';
+import { PrismaService } from '../../prisma/prisma.service.js';
+import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { dealLinks, type RawBooking } from './bitrix-bookings.js';
+import { DealFieldMapService } from './deal-field-map.service.js';
+
+type Deal = Record<string, string | null>;
+const RECENT = 5;
+const MAX_DEALS = 200;
+
+/**
+ * Брони клиента (контакт чата) или сделки — правами пользователя: модуль бронирования по клиенту
+ * (`booking.v1.booking.list`, фильтр `client`) + сделки клиента (поля «ID бронирования» и даты брони
+ * из системных полей — так видны и брони, у которых клиент не указан, и уже удалённые).
+ */
+@Injectable()
+export class ClientBookingsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fieldMap: DealFieldMapService,
+  ) {}
+
+  async forContact(user: B24UserContext, contactId: number | null, extraDealIds: number[] = [], now = new Date()): Promise<ClientBookingsDto> {
+    const map = await this.fieldMap.get(user.portal.id);
+    const ufSelect = [map.bookingId, map.bookingStart, map.bookingEnd].filter((x): x is string => !!x);
+    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', ...ufSelect];
+    const [byClient, contactDeals, extraDeals] = await Promise.all([
+      contactId
+        ? user.client
+            .call<{ booking?: RawBooking[] }>('booking.v1.booking.list', {
+              filter: { client: { entities: [{ code: 'CONTACT', module: 'crm', id: String(contactId) }] } },
+              order: { dateFrom: 'DESC' },
+            })
+            .then((r) => r.result?.booking ?? [])
+        : Promise.resolve([] as RawBooking[]),
+      contactId
+        ? user.client.listAll<Deal>('crm.deal.list', { filter: { CONTACT_ID: contactId }, select, order: { ID: 'DESC' } }, { max: MAX_DEALS })
+        : Promise.resolve([] as Deal[]),
+      extraDealIds.length
+        ? user.client.listAll<Deal>('crm.deal.list', { filter: { '@ID': extraDealIds }, select })
+        : Promise.resolve([] as Deal[]),
+    ]);
+    const deals = new Map<number, Deal>([...contactDeals, ...extraDeals].map((d) => [Number(d.ID), d]));
+    const links = await dealLinks(user.client, byClient.map((b) => Number(b.id)));
+
+    // Брони из полей сделок, которых нет среди броней клиента, — подтянуть из модуля (или по датам полей).
+    const known = new Set(byClient.map((b) => Number(b.id)));
+    const fromDeals = [...deals.values()]
+      .map((d) => ({ d, id: map.bookingId ? Number(d[map.bookingId]) : NaN }))
+      .filter((x) => Number.isInteger(x.id) && x.id > 0 && !known.has(x.id));
+    const fetched = fromDeals.length
+      ? await user.client.batch(
+          Object.fromEntries(fromDeals.map((x) => [`b${x.id}`, { method: 'booking.v1.booking.get', params: { id: x.id } }])),
+        )
+      : { result: {} as Record<string, unknown> };
+
+    const resources = new Map(
+      (await this.prisma.resource.findMany({ where: { portalId: user.portal.id } })).map((r) => [r.resourceId, r.name]),
+    );
+    const item = (start: number, end: number, bookingId: number | null, resourceIds: number[], dealId: number | null): ClientBookingDto => {
+      const d = dealId ? deals.get(dealId) : undefined;
+      return {
+        bookingId,
+        dealId,
+        deal: d
+          ? {
+              title: d.TITLE ?? `Сделка #${dealId}`,
+              stageSemantic: (d.STAGE_SEMANTIC_ID as 'P' | 'S' | 'F' | null) ?? null,
+              opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
+            }
+          : null,
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+        resources: resourceIds.map((id) => resources.get(id) ?? `Ресурс ${id}`),
+        when: end <= now.getTime() ? 'past' : start <= now.getTime() ? 'now' : 'future',
+      };
+    };
+    const sec = (b: RawBooking, k: 'from' | 'to') => Number(b.datePeriod?.[k]?.timestamp ?? 0) * 1000;
+    const items: ClientBookingDto[] = byClient.map((b) =>
+      item(sec(b, 'from'), sec(b, 'to'), Number(b.id), (b.resourceIds ?? []).map(Number), links.get(Number(b.id)) ?? null),
+    );
+    for (const { d, id } of fromDeals) {
+      const b = (fetched.result[`b${id}`] as { booking?: RawBooking } | undefined)?.booking;
+      if (b) items.push(item(sec(b, 'from'), sec(b, 'to'), id, (b.resourceIds ?? []).map(Number), Number(d.ID)));
+      else {
+        const s = map.bookingStart ? Date.parse(String(d[map.bookingStart] ?? '')) : NaN;
+        const e = map.bookingEnd ? Date.parse(String(d[map.bookingEnd] ?? '')) : NaN;
+        if (Number.isFinite(s) && Number.isFinite(e)) items.push(item(s, e, null, [], Number(d.ID)));
+      }
+    }
+    const upcoming = items.filter((i) => i.when !== 'past').sort((a, b) => a.start.localeCompare(b.start));
+    const past = items.filter((i) => i.when === 'past').sort((a, b) => b.start.localeCompare(a.start));
+    return {
+      contactId,
+      past: past.length,
+      upcoming,
+      // Последние прошлые + все прошлые брони запрошенных сделок (встройке нужна дата именно её брони).
+      recent: past.filter((b, i) => i < RECENT || (b.dealId !== null && extraDealIds.includes(b.dealId))),
+      openDeals: [...deals.values()]
+        .filter((d) => d.STAGE_SEMANTIC_ID === 'P')
+        .map((d) => ({ id: Number(d.ID), title: d.TITLE ?? `Сделка #${d.ID}`, categoryId: d.CATEGORY_ID === null ? null : Number(d.CATEGORY_ID) })),
+    };
+  }
+
+  /** Брони клиента из чата открытой линии (контакт и сделка чата). */
+  async forChat(user: B24UserContext, chatId: number): Promise<ClientBookingsDto> {
+    const d = (await user.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId })).result;
+    const parts = String(d?.entity_data_2 ?? '').split('|');
+    const get = (t: string) => {
+      const i = parts.indexOf(t);
+      const n = i >= 0 ? Number(parts[i + 1]) : 0;
+      return n > 0 ? n : null;
+    };
+    const dealId = get('DEAL');
+    return this.forContact(user, get('CONTACT'), dealId ? [dealId] : []);
+  }
+
+  /** Брони сделки и её клиента (встройка в карточку сделки). */
+  async forDeal(user: B24UserContext, dealId: number): Promise<ClientBookingsDto> {
+    const d = (await user.client.call<{ CONTACT_ID?: string | null }>('crm.deal.get', { id: dealId })).result;
+    const contactId = Number(d?.CONTACT_ID) > 0 ? Number(d!.CONTACT_ID) : null;
+    return this.forContact(user, contactId, [dealId]);
+  }
+}

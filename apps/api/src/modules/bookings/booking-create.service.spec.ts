@@ -1,0 +1,147 @@
+import { BookingCreateService, dateRu, timeRu, zonedIso } from './booking-create.service.js';
+import { detectFieldMap, type DealFieldMapService } from './deal-field-map.service.js';
+import type { BookingJournalService } from './booking-journal.service.js';
+import type { AccessService } from '../access/access.service.js';
+import type { PrismaService } from '../../prisma/prisma.service.js';
+import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { Bitrix24Error } from '../bitrix24/rest/errors.js';
+
+const group = {
+  id: 'g1',
+  resourceIds: [10, 11],
+  dealCategoryId: 0,
+  options: { bookingTypes: [{ id: 'programs', title: 'Программы', keywords: ['Алатырь'], dealTypeValue: '86', program: '@keyword', confirmation: [] }] },
+};
+const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
+
+function setup(o: { fail?: string; can?: boolean; prevOp?: Record<string, unknown> } = {}) {
+  const ops: Record<string, unknown>[] = [];
+  const prisma = {
+    bookingOperation: {
+      findUnique: vi.fn(async () => o.prevOp ?? null),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const r = { id: 'op1', ...data };
+        ops.push(r);
+        return r;
+      }),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(ops[0], data)),
+    },
+  } as unknown as PrismaService;
+  const access = {
+    resolve: vi.fn(async () => ({})),
+    pick: vi.fn(() => (o.can === false ? null : { group })),
+  } as unknown as AccessService;
+  const journal = { recordCreated: vi.fn(async () => ({})) };
+  const fieldMap = { get: vi.fn(async () => map) } as unknown as DealFieldMapService;
+  const calls: [string, Record<string, unknown>][] = [];
+  const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+    calls.push([method, params]);
+    if (o.fail === method) throw new Bitrix24Error(method === 'booking.v1.booking.add' ? '1018' : 'ERR', `${method} failed`);
+    if (method === 'crm.deal.add') return { result: 900 };
+    if (method === 'booking.v1.booking.add') return { result: 555 };
+    return { result: true };
+  });
+  const listAll = vi.fn(async () => [{ NAME: 'Программа «Алатырь» 4 часа' }]);
+  const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call, listAll } } as unknown as B24UserContext;
+  const svc = new BookingCreateService(prisma, access, journal as unknown as BookingJournalService, fieldMap);
+  return { svc, user, calls, journal, ops };
+}
+
+const body = (over: Record<string, unknown> = {}) => ({
+  idempotencyKey: 'key-12345678',
+  groupId: 'g1',
+  kind: 'client',
+  resourceIds: [10],
+  start: '2020-06-01T11:00:00.000Z',
+  end: '2020-06-01T15:00:00.000Z',
+  dealId: 678,
+  contactId: 140,
+  guests: 4,
+  comment: 'Именинник',
+  products: [{ productId: 31, quantity: 1, price: 45000 }],
+  paymentMode: 'prepayment',
+  ...over,
+});
+
+describe('BookingCreateService', () => {
+  it('runs the saga: booking → deal link → client → system fields (type by products) → products → journal', async () => {
+    const t = setup();
+    const r = await t.svc.create(t.user, body());
+    expect(r).toEqual({ bookingId: 555, dealId: 678, bookingType: 'Программы', warnings: [] });
+    expect(t.calls.map((c) => c[0])).toEqual([
+      'booking.v1.booking.add',
+      'booking.v1.booking.externalData.set',
+      'booking.v1.booking.client.set',
+      'crm.deal.update',
+      'crm.deal.productrows.set',
+    ]);
+    expect(t.calls[0][1]).toMatchObject({ fields: { resourceIds: [10], datePeriod: { from: { timestamp: 1591009200, timezone: 'Europe/Moscow' } } } });
+    expect(t.calls[3][1]).toEqual({
+      id: 678,
+      fields: { UF_ID: '555', UF_START: '2020-06-01T14:00:00+03:00', UF_END: '2020-06-01T18:00:00+03:00', UF_VD: '01.06.2020', UF_VT: '14:00', UF_G: 4, UF_TYPE: '86', UF_C: 'Именинник' },
+    });
+    expect(t.calls[4][1]).toEqual({ id: 678, rows: [{ PRODUCT_ID: 31, PRICE: 45000, QUANTITY: 1 }] });
+    expect(t.journal.recordCreated).toHaveBeenCalledWith('p1', expect.objectContaining({ bookingId: 555, dealId: 678, paymentMode: 'prepayment' }), { kind: 'user', userId: 7, name: 'Анна' });
+    expect(t.ops[0]).toMatchObject({ status: 'done', bookingId: 555 });
+  });
+
+  it('new deal is created in the group funnel first', async () => {
+    const t = setup();
+    const r = await t.svc.create(t.user, body({ dealId: undefined, newDeal: { title: 'Баня, Иванов', contactId: 140 } }));
+    expect(r.dealId).toBe(900);
+    expect(t.calls[0]).toEqual(['crm.deal.add', { fields: { TITLE: 'Баня, Иванов', CATEGORY_ID: 0, ASSIGNED_BY_ID: 7, CONTACT_ID: 140 } }]);
+  });
+
+  it('overlap (1018) → 409, nothing to compensate', async () => {
+    const t = setup({ fail: 'booking.v1.booking.add' });
+    await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ status: 409 });
+    expect(t.calls.map((c) => c[0])).toEqual(['booking.v1.booking.add']);
+    expect(t.ops[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('failure after the booking exists → booking deleted (slot freed), operation failed', async () => {
+    const t = setup({ fail: 'crm.deal.update' });
+    await expect(t.svc.create(t.user, body())).rejects.toThrow('crm.deal.update failed');
+    expect(t.calls.at(-1)).toEqual(['booking.v1.booking.delete', { id: 555 }]);
+    expect(t.journal.recordCreated).not.toHaveBeenCalled();
+    expect(t.ops[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('repeat with the same key returns the first result; failed → 409', async () => {
+    const done = setup({ prevOp: { status: 'done', bookingId: 555, dealId: 678 } });
+    expect(await done.svc.create(done.user, body())).toMatchObject({ bookingId: 555, warnings: [expect.stringContaining('Повтор')] });
+    expect(done.calls).toEqual([]);
+    const failed = setup({ prevOp: { status: 'failed', error: 'x' } });
+    await expect(failed.svc.create(failed.user, body())).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('validates: rights, group resources, deal required, end after start', async () => {
+    await expect(setup({ can: false }).svc.create(setup().user, body())).rejects.toMatchObject({ status: 403 });
+    const t = setup();
+    await expect(t.svc.create(t.user, body({ resourceIds: [99] }))).rejects.toMatchObject({ status: 400 });
+    await expect(t.svc.create(t.user, body({ dealId: undefined }))).rejects.toMatchObject({ status: 400 });
+    await expect(t.svc.create(t.user, body({ end: '2020-06-01T10:00:00.000Z' }))).rejects.toMatchObject({ status: 400 });
+    expect(await t.svc.create(t.user, body({ kind: 'service', dealId: undefined, products: [] }))).toMatchObject({ dealId: null });
+  });
+});
+
+describe('date helpers and field detection', () => {
+  it('formats in portal time zone', () => {
+    const d = new Date('2026-10-23T11:00:00Z');
+    expect(zonedIso(d, 'Europe/Moscow')).toBe('2026-10-23T14:00:00+03:00');
+    expect(zonedIso(d, 'UTC')).toBe('2026-10-23T11:00:00+00:00');
+    expect(dateRu(d, 'Europe/Moscow')).toBe('23.10.2026');
+    expect(timeRu(d, 'Europe/Moscow')).toBe('14:00');
+  });
+
+  it('detects system deal fields by labels', () => {
+    expect(
+      detectFieldMap({
+        UF_CRM_1: { listLabel: 'ID Бронирования' },
+        UF_CRM_2: { formLabel: 'Дата начала визита ' },
+        UF_CRM_3: { title: 'Количество  гостей' },
+        TITLE: { listLabel: 'Тип бронирования' },
+      }),
+    ).toEqual({ bookingId: 'UF_CRM_1', visitDateStart: 'UF_CRM_2', guests: 'UF_CRM_3' });
+  });
+});

@@ -94,3 +94,88 @@ export interface BookingHistoryDto {
   status: 'active' | 'cancelled';
   entries: BookingHistoryEntryDto[];
 }
+
+/**
+ * Системные поля сделки: что приложение заполняет при брони и по чему ищет прошлые брони клиента.
+ * Коды полей свои у каждого портала — настраиваются (⚙ → «Приложение»), есть автоопределение по
+ * названиям полей.
+ */
+export const DEAL_FIELD_ROLES = {
+  bookingId: 'ID Бронирования',
+  bookingStart: 'Дата и время начала бронирования',
+  bookingEnd: 'Дата и время завершения бронирования',
+  visitDateStart: 'Дата начала визита',
+  visitTimeStart: 'Время начала визита',
+  visitDateEnd: 'Дата завершения визита',
+  visitTimeEnd: 'Время завершения визита',
+  guests: 'Количество гостей',
+  bookingType: 'Тип бронирования',
+  managerComment: 'Комментарий менеджера',
+  prepayment: 'Ручная сумма предоплаты',
+  surcharge: 'Ручная сумма доплаты',
+} as const;
+export type DealFieldRole = keyof typeof DEAL_FIELD_ROLES;
+export type DealFieldMapDto = Partial<Record<DealFieldRole, string>>;
+
+/** Бронь клиента (в чате) или сделки (встройка): прошлая, текущая или будущая. */
+export interface ClientBookingDto {
+  /** null — бронь известна только по полям сделки (в модуле бронирования уже нет). */
+  bookingId: number | null;
+  dealId: number | null;
+  deal: { title: string; stageSemantic: 'P' | 'S' | 'F' | null; opportunity: number | null } | null;
+  start: string;
+  end: string;
+  resources: string[];
+  when: 'past' | 'now' | 'future';
+}
+
+export interface ClientBookingsDto {
+  contactId: number | null;
+  past: number;
+  /** Текущие и будущие — ближайшие сверху. */
+  upcoming: ClientBookingDto[];
+  /** Последние прошлые (до 5). */
+  recent: ClientBookingDto[];
+  /** Открытые сделки клиента — для привязки новой брони. */
+  openDeals: { id: number; title: string; categoryId: number | null }[];
+}
+
+/** Сценарий оплаты брони (ADR 0008). */
+export const PAYMENT_MODES = ['prepayment', 'cash_on_site', 'postpay', 'free', 'certificate'] as const;
+export type PaymentMode = (typeof PAYMENT_MODES)[number];
+export const PAYMENT_MODE_LABELS: Record<PaymentMode, string> = {
+  prepayment: 'Предоплата по ссылке',
+  cash_on_site: 'Предоплата наличными на месте',
+  postpay: 'Без предоплаты',
+  free: 'Бесплатно',
+  certificate: 'Сертификат',
+};
+
+/** `POST /api/bookings` — создать бронь (сага: сделка → бронь → связь → поля сделки → товары). */
+export interface CreateBookingDto {
+  /** Ключ идемпотентности: повтор с тем же ключом вернёт тот же результат. */
+  idempotencyKey: string;
+  groupId: string;
+  kind: 'client' | 'service';
+  resourceIds: number[];
+  /** UTC, ISO; интервал [start, end). */
+  start: string;
+  end: string;
+  /** Существующая сделка — или `newDeal` (новая в воронке группы). Служебная бронь — без сделки. */
+  dealId?: number | null;
+  newDeal?: { title: string; contactId?: number | null } | null;
+  contactId?: number | null;
+  guests?: number | null;
+  comment?: string;
+  /** Товары сделки (заменяют строки сделки, как в прототипе); цена — вручную. Пусто — не трогать. */
+  products?: { productId: number; quantity: number; price: number }[];
+  paymentMode: PaymentMode;
+}
+
+export interface CreateBookingResultDto {
+  bookingId: number;
+  dealId: number | null;
+  /** Тип брони по товарам (для сообщения клиенту); null — не определён. */
+  bookingType: string | null;
+  warnings: string[];
+}

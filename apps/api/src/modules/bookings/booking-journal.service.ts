@@ -35,6 +35,7 @@ export interface BookingCreatedInput {
   startsAt: Date;
   endsAt: Date;
   title?: string | null;
+  paymentMode?: 'prepayment' | 'cash_on_site' | 'postpay' | 'free' | 'certificate' | null;
 }
 
 export interface BookingCancelInput {
@@ -74,6 +75,21 @@ export class BookingJournalService {
     actor: Extract<BookingActor, { kind: 'user' }>,
   ): Promise<BookingRecord> {
     const existing = await this.find(portalId, input.bookingId);
+    // Сверка могла успеть принять бронь как «из Битрикс24» между её созданием и этой записью.
+    if (existing?.source === 'bitrix' && existing.createdByUserId === null) {
+      const upgraded = await this.prisma.bookingRecord.update({
+        where: { id: existing.id },
+        data: {
+          source: 'app',
+          kind: input.kind,
+          groupId: input.groupId ?? null,
+          createdByUserId: actor.userId,
+          paymentMode: input.paymentMode ?? null,
+        },
+      });
+      await this.history(existing.id, 'created', actor, { after: stateOf(upgraded), details: { paymentMode: upgraded.paymentMode, wasImported: true } });
+      return upgraded;
+    }
     if (existing) return existing;
     const record = await this.prisma.bookingRecord.create({
       data: {
@@ -88,10 +104,11 @@ export class BookingJournalService {
         startsAt: input.startsAt,
         endsAt: input.endsAt,
         createdByUserId: actor.userId,
+        paymentMode: input.paymentMode ?? null,
         syncedAt: new Date(),
       },
     });
-    await this.history(record.id, 'created', actor, { after: stateOf(record) });
+    await this.history(record.id, 'created', actor, { after: stateOf(record), details: { paymentMode: record.paymentMode } });
     return record;
   }
 
