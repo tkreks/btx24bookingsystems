@@ -6,6 +6,8 @@ import { PlacementSettings } from '../calendar/AdminPanel.js';
 import { BookingSyncSettings } from '../bookings/BookingSyncSettings.js';
 import { AppSettingsForm } from './AppSettingsForm.js';
 import { ResourceNames } from './ResourceNames.js';
+import { SettingsCodes } from './SettingsCodes.js';
+import { fmtDateTime } from '../format.js';
 import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
 
@@ -21,10 +23,13 @@ export function SettingsPanel({
   onClose,
   onChanged,
   timezone,
+  temporary = null,
 }: {
   onClose: () => void;
   onChanged: () => void;
   timezone: string;
+  /** Доступ по временному паролю — до этого времени (ISO); null — постоянный администратор. */
+  temporary?: string | null;
 }) {
   const [tab, setTab] = useState<Tab>('groups');
   const [groups, setGroups] = useState<GroupDto[] | null>(null);
@@ -246,7 +251,13 @@ export function SettingsPanel({
               </ul>
             </section>
           ))}
-        {tab === 'app' && settings && (
+        {temporary && (
+          <div className="notice">
+            Временный доступ к настройкам до {fmtDateTime(temporary, timezone)}. Список администраторов и сбор данных
+            меняют только постоянные администраторы.
+          </div>
+        )}
+        {tab === 'app' && settings && !temporary && (
           <AppSettingsForm
             settings={settings}
             users={directory?.users ?? []}
@@ -261,6 +272,7 @@ export function SettingsPanel({
           />
         )}
         {tab === 'app' && <BookingSyncSettings timezone={timezone} />}
+        {tab === 'app' && !temporary && <SettingsCodes timezone={timezone} />}
         {tab === 'passwords' && (
           <fieldset className="password-settings" disabled={busy}>
             <ExternalPasswords onDirty={markDirty} onBusy={markBusy} />

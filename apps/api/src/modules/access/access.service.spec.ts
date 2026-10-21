@@ -10,9 +10,10 @@ const group = (id: string, members: Member[], features: string[] = ['booking.det
   resources: resources.map((resourceId) => ({ groupId: id, resourceId })), members,
 });
 
-function setup(opts: { groups: ReturnType<typeof group>[]; admins?: { kind: string; bitrixId: number }[]; departments?: { ID: string; PARENT: string | null }[] | 'denied' }) {
+function setup(opts: { groups: ReturnType<typeof group>[]; admins?: { kind: string; bitrixId: number }[]; departments?: { ID: string; PARENT: string | null }[] | 'denied'; grantUntil?: Date }) {
   const prisma = {
     appAdmin: { findMany: vi.fn(async () => opts.admins ?? []) },
+    settingsAccessCode: { findFirst: vi.fn(async () => (opts.grantUntil ? { expiresAt: opts.grantUntil } : null)) },
     workGroup: { findMany: vi.fn(async () => opts.groups) },
   } as unknown as PrismaService;
   const listAll = vi.fn(async () => {
@@ -30,6 +31,16 @@ describe('AccessService', () => {
     const a = await svc.resolve(user());
     expect(a.isAppAdmin).toBe(false);
     expect(a.groups[0]).toMatchObject({ role: 'MANAGER', permissions: ['calendar.view', 'booking.details', 'booking.create'] });
+  });
+
+  it('temporary settings password makes the employee an app admin until it expires', async () => {
+    const until = new Date('2026-10-22T10:00:00Z');
+    const { svc, user } = setup({ groups: [group('g1', [])], grantUntil: until });
+    const a = await svc.resolve(user());
+    expect(a).toMatchObject({ isAppAdmin: true, tempAdminUntil: until });
+    expect(a.groups[0].role).toBe('APP_ADMIN');
+    const plain = setup({ groups: [group('g1', [])] });
+    expect(await plain.svc.resolve(plain.user())).toMatchObject({ isAppAdmin: false, tempAdminUntil: null });
   });
 
   it('hides groups the user is not a member of', async () => {

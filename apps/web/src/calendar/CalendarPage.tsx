@@ -40,7 +40,15 @@ function initialView(): CalendarView {
   return isNarrow() ? 'list' : 'calendar';
 }
 
-export function CalendarPage({ session, placement }: { session: SessionInfo; placement: PlacementContext }) {
+export function CalendarPage({
+  session: initialSession,
+  placement,
+}: {
+  session: SessionInfo;
+  placement: PlacementContext;
+}) {
+  // Сессия может обновиться без перезагрузки: доступ к настройкам по временному паролю.
+  const [session, setSession] = useState(initialSession);
   const tz = session.portal.timezone;
   const [date, setDate] = useState(() => todayIn(tz));
   const [view, setView] = useState<CalendarView>(initialView);
@@ -172,16 +180,32 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
       />
     );
 
+  // Настройки открываются только с дашборда (решение владельца): админам и по временному паролю.
   if (screen.name === 'dashboard')
     return (
-      <DashboardPage
-        session={session}
-        openlines={openlinesRead}
-        onBack={() => setScreen({ name: 'calendar' })}
-        onChats={(o) => setScreen({ name: 'chats', ...o })}
-        bookingAlerts={bookingsView}
-        onAlerts={() => setScreen({ name: 'alerts' })}
-      />
+      <>
+        <DashboardPage
+          session={session}
+          openlines={openlinesRead}
+          onBack={() => setScreen({ name: 'calendar' })}
+          onChats={(o) => setScreen({ name: 'chats', ...o })}
+          bookingAlerts={bookingsView}
+          onAlerts={() => setScreen({ name: 'alerts' })}
+          onSettings={() => setAdminOpen(true)}
+          onSession={(s) => {
+            setSession(s);
+            setSettingsRevision((n) => n + 1);
+          }}
+        />
+        {adminOpen && session.canManageApp && (
+          <SettingsPanel
+            timezone={tz}
+            temporary={session.settingsAccessUntil}
+            onClose={() => setAdminOpen(false)}
+            onChanged={() => setSettingsRevision((n) => n + 1)}
+          />
+        )}
+      </>
     );
   if (screen.name === 'chats')
     return (
@@ -257,11 +281,6 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
               <path d="M9 21v-7h6v7" />
             </svg>
           </button>
-          {session.canManageApp && (
-            <button aria-label="Настройки" onClick={() => setAdminOpen(true)}>
-              ⚙
-            </button>
-          )}
         </div>
       </header>
 
@@ -298,13 +317,6 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
       </main>
 
       {selected && day && <BookingDetails booking={selected} day={day} onClose={() => setSelected(null)} />}
-      {adminOpen && (
-        <SettingsPanel
-          timezone={tz}
-          onClose={() => setAdminOpen(false)}
-          onChanged={() => setSettingsRevision((n) => n + 1)}
-        />
-      )}
     </div>
   );
 }

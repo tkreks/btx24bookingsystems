@@ -20,6 +20,7 @@ export class SessionController {
       portal: { domain: user.portal.domain, timezone: user.portal.timezone },
       user: { id: user.userId, name: user.userName, isAdmin: user.isAdmin },
       canManageApp: access.isAppAdmin,
+      settingsAccessUntil: access.tempAdminUntil?.toISOString() ?? null,
       readOnly: this.config.readOnly,
     };
   }

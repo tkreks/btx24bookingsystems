@@ -47,6 +47,7 @@ model Portal {
   storedFiles          StoredFile[]
   openlineChats        OpenlineChat[]
   bookingRecords       BookingRecord[]
+  settingsAccessCodes  SettingsAccessCode[]
   resources            Resource[]
   bookingAlerts        BookingAlert[]
 }
@@ -445,4 +446,25 @@ model BookingAlert {
 
   @@unique([portalId, fingerprint])
   @@index([portalId, status, createdAt])
+}
+
+// ---------- Временный доступ к настройкам ----------
+
+/// Временный пароль к настройкам: создаёт администратор приложения, сотрудник вводит его и до
+/// `expiresAt` работает как администратор приложения. Одноразовый; хранится только хеш.
+model SettingsAccessCode {
+  id              String    @id @default(cuid())
+  portalId        String
+  portal          Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  /// sha256(portalId + ':' + код).
+  codeHash        String    @db.Char(64)
+  createdByUserId Int
+  createdAt       DateTime  @default(now()) @db.DateTime(3)
+  expiresAt       DateTime  @db.DateTime(3)
+  usedByUserId    Int?
+  usedAt          DateTime? @db.DateTime(3)
+  revokedAt       DateTime? @db.DateTime(3)
+
+  @@unique([portalId, codeHash])
+  @@index([portalId, usedByUserId, expiresAt])
 }

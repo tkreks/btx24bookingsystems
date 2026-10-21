@@ -13,6 +13,7 @@ import {
 import { apiGet } from '../api.js';
 import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
+import { TempAccessDialog } from '../settings/TempAccessDialog.js';
 import { CallsModal } from './CallsModal.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
@@ -30,6 +31,8 @@ export function DashboardPage({
   onChats,
   bookingAlerts = false,
   onAlerts,
+  onSettings,
+  onSession,
 }: {
   session: SessionInfo;
   openlines: boolean;
@@ -38,6 +41,9 @@ export function DashboardPage({
   /** Видны ли уведомления о бронях (право `booking.details`). */
   bookingAlerts?: boolean;
   onAlerts?: () => void;
+  /** Открыть настройки (админам; остальным — после временного пароля). */
+  onSettings?: () => void;
+  onSession?: (s: SessionInfo) => void;
 }) {
   const tz = session.portal.timezone;
   const [preset, setPreset] = useState<PeriodPreset>('today');
@@ -46,6 +52,7 @@ export function DashboardPage({
   const [data, setData] = useState<DashboardDto | null>(null);
   const [error, setError] = useState('');
   const [alertCount, setAlertCount] = useState<number | null>(null);
+  const [askCode, setAskCode] = useState(false);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
@@ -107,7 +114,26 @@ export function DashboardPage({
           <h1>Мой дашборд</h1>
           <span className="muted">{session.user.name}</span>
         </div>
+        {onSettings && (
+          <button
+            className="settings-button"
+            onClick={() => (session.canManageApp ? onSettings() : setAskCode(true))}
+            title={session.canManageApp ? 'Настройки приложения' : 'Настройки — для администраторов или по временному паролю'}
+          >
+            <span aria-hidden="true">⚙</span> Настройки
+          </button>
+        )}
       </header>
+      {askCode && (
+        <TempAccessDialog
+          onClose={() => setAskCode(false)}
+          onGranted={(s) => {
+            setAskCode(false);
+            onSession?.(s);
+            onSettings?.();
+          }}
+        />
+      )}
 
       <div className="period-bar">
         <div className="segmented period-presets" role="group" aria-label="Период">

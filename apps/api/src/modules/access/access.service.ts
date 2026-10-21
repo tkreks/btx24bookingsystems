@@ -14,7 +14,10 @@ export interface GroupAccess {
 }
 
 export interface UserAccess {
+  /** Администратор приложения: постоянный или по временному паролю (см. `tempAdminUntil`). */
   isAppAdmin: boolean;
+  /** Доступ по временному паролю — до этого момента; null — постоянный админ или не админ. */
+  tempAdminUntil: Date | null;
   groups: GroupAccess[];
 }
 
@@ -35,7 +38,15 @@ export class AccessService {
     const matches = (m: { kind: string; bitrixId: number }) => (m.kind === 'USER' ? m.bitrixId === user.userId : depts.has(m.bitrixId));
 
     const admins = await this.prisma.appAdmin.findMany({ where: { portalId: user.portal.id } });
-    const isAppAdmin = user.isAdmin || admins.some(matches);
+    const permanentAdmin = user.isAdmin || admins.some(matches);
+    // Временный пароль к настройкам: активированный этим сотрудником, не отозван и не истёк.
+    const grant = permanentAdmin
+      ? null
+      : await this.prisma.settingsAccessCode.findFirst({
+          where: { portalId: user.portal.id, usedByUserId: user.userId, revokedAt: null, expiresAt: { gt: new Date() } },
+          orderBy: { expiresAt: 'desc' },
+        });
+    const isAppAdmin = permanentAdmin || grant !== null;
 
     const groups = await this.prisma.workGroup.findMany({
       where: { portalId: user.portal.id, archivedAt: null },
@@ -60,7 +71,7 @@ export class AccessService {
         for (const m of members) if (m.kind === 'DEPARTMENT' && matches(m)) role = higherRole(role, m.role as GroupRole);
       if (role) out.push({ group, role, permissions: effectivePermissions(role, features) });
     }
-    return { isAppAdmin, groups: out };
+    return { isAppAdmin, tempAdminUntil: grant?.expiresAt ?? null, groups: out };
   }
 
   /** Группа, доступная пользователю, с нужным правом — иначе null. */

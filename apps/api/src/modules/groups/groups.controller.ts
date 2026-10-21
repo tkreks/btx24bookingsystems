@@ -12,6 +12,7 @@ import type {
 } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
+import { PermanentAdminGuard } from '../access/permanent-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { GroupDirectoryService } from './group-directory.service.js';
@@ -103,7 +104,9 @@ export class GroupsAdminController {
     return this.groups.settings(user.portal.id);
   }
 
+  /** Список администраторов меняют только постоянные администраторы (не по временному паролю). */
   @Put('settings')
+  @UseGuards(PermanentAdminGuard)
   save(@B24User() user: B24UserContext, @Body() body: unknown): Promise<AppSettingsDto> {
     return this.groups.saveSettings(user.portal.id, user.userId, body);
   }

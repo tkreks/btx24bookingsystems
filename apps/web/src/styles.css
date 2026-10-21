@@ -1174,6 +1174,63 @@ main.loading {
   font-size: 12px;
 }
 
+/* ---------- кнопка настроек и временный доступ ---------- */
+
+.settings-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 16px;
+  border-radius: 14px;
+  border-color: rgba(0, 122, 255, 0.35);
+  background: #eef4ff;
+  color: #205add;
+}
+
+.settings-button span {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.temp-access {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.temp-access input {
+  font: inherit;
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.temp-code .code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 18px;
+  letter-spacing: 0.1em;
+}
+
+.codes-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.codes-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ---------- звонки на дашборде ---------- */
 
 .calls-panel {
