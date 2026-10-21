@@ -32,18 +32,22 @@ describe('chat parsing', () => {
       'employee',
     ]);
   });
-  it('skips system messages when deciding who wrote last', () => {
-    const users = [{ id: 5, connector: true }];
+  it('skips system and bot messages when deciding who wrote last (the Bitrix24 dialog list rule)', () => {
+    const users = [
+      { id: 5, connector: true },
+      { id: 6, bot: true },
+    ];
     const got = lastMeaningful(
       [
-        { id: 3, author_id: 0, date: 'c' },
+        { id: 4, author_id: 0, date: 'd' },
+        { id: 3, author_id: 6, date: 'c' },
         { id: 2, author_id: 5, date: 'b' },
         { id: 1, author_id: 7, date: 'a' },
       ],
       users,
     );
-    expect(got).toMatchObject({ kind: 'client', message: { id: 2 } });
-    expect(lastMeaningful([{ id: 1, author_id: 0, date: 'a' }], users)).toMatchObject({ kind: 'system' });
+    expect(got).toMatchObject({ kind: 'client', human: true, message: { id: 2 } });
+    expect(lastMeaningful([{ id: 1, author_id: 0, date: 'a' }], users)).toMatchObject({ kind: 'system', human: false });
     expect(lastMeaningful([], users)).toBeNull();
   });
   it('strips messenger BB codes', () => {

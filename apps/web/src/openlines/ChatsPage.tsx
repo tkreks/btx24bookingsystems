@@ -28,7 +28,12 @@ export function ChatsPage({
 }) {
   const [scope, setScope] = useState<ChatScope>('mine');
   const [waitingOnly, setWaitingOnly] = useState(initialWaiting);
-  const [list, setList] = useState<{ scope: ChatScope; items: ChatSummary[]; nextOffset: number | null } | null>(null);
+  const [list, setList] = useState<{
+    scope: ChatScope;
+    items: ChatSummary[];
+    nextOffset: number | null;
+    exactOrder: boolean;
+  } | null>(null);
   const [error, setError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
   const [openId, setOpenId] = useState<number | null>(initialChatId ?? null);
@@ -44,8 +49,10 @@ export function ChatsPage({
         const tail = prev.items.filter((c) => !fresh.has(c.chatId));
         return {
           scope,
-          items: [...page.items, ...tail].sort(byLastMessage),
+          // Порядок задаёт сервер (как в списке диалогов Битрикс24) — не пересортировываем.
+          items: [...page.items, ...tail],
           nextOffset: prev.nextOffset ?? page.nextOffset,
+          exactOrder: page.exactOrder,
         };
       });
       setError('');
@@ -87,8 +94,9 @@ export function ChatsPage({
       const known = new Set(list.items.map((c) => c.chatId));
       setList({
         scope,
-        items: [...list.items, ...page.items.filter((c) => !known.has(c.chatId))].sort(byLastMessage),
+        items: [...list.items, ...page.items.filter((c) => !known.has(c.chatId))],
         nextOffset: page.nextOffset,
+        exactOrder: page.exactOrder,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить чаты');
@@ -124,6 +132,12 @@ export function ChatsPage({
           <input type="checkbox" checked={waitingOnly} onChange={(e) => setWaitingOnly(e.target.checked)} />
           Только ждущие ответа{current ? ` (${waiting})` : ''}
         </label>
+        {current && !current.exactOrder && (
+          <p className="muted order-hint">
+            Порядок приблизительный. Точная сортировка по последнему сообщению, как в списке диалогов Битрикс24, — после
+            включения «Сбор метаданных диалогов» в ⚙ → «Приложение».
+          </p>
+        )}
         {error && (
           <div className="notice error" role="alert">
             {error}
@@ -181,6 +195,3 @@ export function ChatsPage({
     </div>
   );
 }
-
-const byLastMessage = (a: ChatSummary, b: ChatSummary) =>
-  (b.lastMessage?.date ?? '').localeCompare(a.lastMessage?.date ?? '');

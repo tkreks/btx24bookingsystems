@@ -1,5 +1,6 @@
 import { ChatsService } from './chats.service.js';
 import type { FilesService } from './files.service.js';
+import type { OpenlineIndexService } from './openline-index.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 
@@ -18,6 +19,7 @@ function setup(
     dialogs?: Record<string, unknown>;
     messages?: Record<string, unknown>;
     next?: number;
+    indexed?: unknown[];
   } = {},
 ) {
   const call = vi.fn(async (method: string, params?: Record<string, unknown>) => {
@@ -55,7 +57,11 @@ function setup(
     departmentIds: [1],
     client: { call, batch, listAll },
   } as unknown as B24UserContext;
-  return { svc: new ChatsService(files), user, call, batch, listAll, files };
+  const index = {
+    isActive: vi.fn(async () => Boolean(opts.indexed)),
+    page: vi.fn(async () => opts.indexed ?? []),
+  } as unknown as OpenlineIndexService;
+  return { svc: new ChatsService(files, index), user, call, batch, listAll, files, index };
 }
 
 const client = { id: 50, name: 'Клиент', connector: true };
@@ -179,5 +185,57 @@ describe('ChatsService.send', () => {
   ])('rejects an invalid chain %o', async (body) => {
     const { svc, user } = setup();
     await expect(svc.send(user, 1, body)).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('ChatsService.list with the metadata index', () => {
+  it('pages by the index, checks access with the user token and keeps the Bitrix24 order', async () => {
+    const at = (h: number, m = 0) => new Date(Date.UTC(2026, 9, 21, h - 3, m));
+    const { svc, user, call, index } = setup({
+      // как в списке диалогов портала: 19248 (18:05) → 19286 (17:39) → 19216 (17:29) → 19282 (16:24)
+      indexed: [
+        { sessionId: 19248, responsibleId: 7, completed: false, lastMessageAt: at(18, 5) },
+        { sessionId: 19286, responsibleId: 7, completed: false, lastMessageAt: at(17, 39) },
+        { sessionId: 19216, responsibleId: 7, completed: false, lastMessageAt: at(17, 29) },
+        { sessionId: 19282, responsibleId: 7, completed: true, lastMessageAt: at(16, 24) },
+        { sessionId: 19999, responsibleId: 7, completed: false, lastMessageAt: at(16, 0) },
+      ],
+      dialogs: {
+        s19248: { id: 50512, role: 'member' },
+        s19286: { id: 50572, role: 'member' },
+        s19216: { id: 50462, role: 'member' },
+        s19282: { id: 50564, role: 'guest' },
+        // s19999 — нет доступа у пользователя
+      },
+      messages: {
+        // у 19286 и 19216 последним идёт системное сообщение 17:57 — оно порядок не меняет
+        c50572: {
+          messages: [
+            { id: 9, author_id: 0, date: '2026-10-21T17:57:33+03:00' },
+            { id: 8, author_id: 50, date: '2026-10-21T17:39:02+03:00' },
+          ],
+          users: [client],
+        },
+        c50462: {
+          messages: [
+            { id: 7, author_id: 0, date: '2026-10-21T17:57:32+03:00' },
+            { id: 6, author_id: 50, date: '2026-10-21T17:29:29+03:00' },
+          ],
+          users: [client],
+        },
+        c50512: { messages: [{ id: 5, author_id: 50, date: '2026-10-21T18:05:48+03:00' }], users: [client] },
+        c50564: { messages: [{ id: 4, author_id: 7, date: '2026-10-21T16:24:00+03:00' }], users: [client, op] },
+      },
+    });
+    const res = await svc.list(user, { scope: 'all' });
+    expect(index.page).toHaveBeenCalledWith('p1', null, 0, 50);
+    expect(call).not.toHaveBeenCalledWith('crm.activity.list', expect.anything());
+    expect(res.exactOrder).toBe(true);
+    expect(res.items.map((c) => c.sessionId)).toEqual([19248, 19286, 19216, 19282]);
+    expect(res.items[1]).toMatchObject({
+      waitingReply: true,
+      lastMessage: { author: 'client', date: '2026-10-21T17:39:02+03:00' },
+    });
+    expect(res.nextOffset).toBeNull();
   });
 });

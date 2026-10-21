@@ -45,6 +45,7 @@ model Portal {
   sandboxBookings      SandboxBooking[]
   messageTemplates     MessageTemplate[]
   storedFiles          StoredFile[]
+  openlineChats        OpenlineChat[]
 }
 
 enum PortalStatus {
@@ -249,4 +250,28 @@ model StoredFile {
   createdAt   DateTime @default(now()) @db.DateTime(3)
 
   @@index([portalId, ownerUserId])
+}
+
+/// Индекс диалогов открытых линий для сортировки «по дате последнего сообщения» — как в списке
+/// диалогов Битрикс24. Только метаданные: ни текстов, ни имён. Ведёт worker, пока включён «сбор
+/// метаданных диалогов» (`PortalSettings.dialogMetadataEnabled`). Видимость каждому пользователю
+/// проверяется его токеном при показе — индекс прав не даёт.
+model OpenlineChat {
+  id            String    @id @default(cuid())
+  portalId      String
+  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  chatId        Int
+  /// Последняя сессия чата (ID в списке диалогов Битрикс24).
+  sessionId     Int
+  responsibleId Int?
+  completed     Boolean
+  connector     String    @db.VarChar(64)
+  /// Последнее сообщение клиента или оператора (без системных и ботов).
+  lastMessageAt DateTime? @db.DateTime(3)
+  lastAuthor    String?   @db.VarChar(10)
+  checkedAt     DateTime  @db.DateTime(3)
+
+  @@unique([portalId, chatId])
+  @@index([portalId, lastMessageAt])
+  @@index([portalId, responsibleId, lastMessageAt])
 }

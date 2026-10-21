@@ -1404,3 +1404,8 @@ main.loading {
     max-width: 88%;
   }
 }
+
+.order-hint {
+  margin: 0 2px 6px;
+  font-size: 12px;
+}

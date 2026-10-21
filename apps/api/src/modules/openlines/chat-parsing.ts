@@ -69,17 +69,21 @@ export function preview(text: string | null | undefined, max = 160): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-/** Последнее значимое сообщение (системные — «оператор подключился» и т. п. — пропускаем). */
+/**
+ * Последнее сообщение клиента или оператора — по нему Битрикс24 считает «Дату последнего
+ * сообщения» в списке диалогов (сверено на портале): системные и сообщения ботов не считаются.
+ * Нет таких — самое свежее сообщение как есть (для превью); `human: false`.
+ */
 export function lastMeaningful(
   messages: ImMessage[],
   users: ImUser[],
-): { message: ImMessage; kind: MessageAuthorKind } | null {
+): { message: ImMessage; kind: MessageAuthorKind; human: boolean } | null {
   const sorted = [...messages].sort((a, b) => b.id - a.id);
   for (const m of sorted) {
     const kind = authorKind(m.author_id, users);
-    if (kind !== 'system') return { message: m, kind };
+    if (kind === 'client' || kind === 'employee') return { message: m, kind, human: true };
   }
-  return sorted[0] ? { message: sorted[0], kind: 'system' } : null;
+  return sorted[0] ? { message: sorted[0], kind: authorKind(sorted[0].author_id, users), human: false } : null;
 }
 
 export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): ChatMessageDto {

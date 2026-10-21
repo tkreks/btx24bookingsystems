@@ -22,6 +22,7 @@ import {
   type ImUser,
 } from './chat-parsing.js';
 import { FilesService } from './files.service.js';
+import { OpenlineIndexService } from './openline-index.service.js';
 import { stepsSchema } from './templates.service.js';
 
 /** Сессия открытой линии в CRM (`crm.activity.list`, PROVIDER_ID = IMOPENLINES_SESSION). */
@@ -48,7 +49,19 @@ interface ImMessages {
   files?: ImFile[];
 }
 
+/** Сессия для сводки: из дела CRM или из индекса. */
+interface SessionRef {
+  sessionId: number;
+  responsibleId: number | null;
+  completed: boolean;
+  /** Дата из индекса — ключ сортировки (живая дата важнее, если новее). */
+  indexedAt?: Date | null;
+}
+
 const HISTORY_LIMIT = 50;
+const PAGE = 50;
+/** Сообщений на чат в сводке: среди них ищем последнее от клиента или оператора. */
+const SUMMARY_MESSAGES = 20;
 const listQuery = z
   .object({
     scope: z.enum(['mine', 'department', 'all']).default('mine'),
@@ -66,7 +79,10 @@ const sendBody = z.object({ steps: stepsSchema }).strict();
  */
 @Injectable()
 export class ChatsService {
-  constructor(private readonly files: FilesService) {}
+  constructor(
+    private readonly files: FilesService,
+    private readonly index: OpenlineIndexService,
+  ) {}
 
   async list(user: B24UserContext, query: unknown): Promise<ChatListDto> {
     const parsed = listQuery.safeParse(query);
@@ -74,9 +90,26 @@ export class ChatsService {
       throw new BadRequestException({ code: 'INVALID_QUERY', message: 'Неверные параметры списка чатов' });
     const { scope, offset } = parsed.data;
     const responsible = await this.responsibleFilter(user, scope);
-    if (responsible && !responsible.length) return { items: [], nextOffset: null };
+    if (responsible && !responsible.length) return { items: [], nextOffset: null, exactOrder: false };
 
-    // Страница crm.activity.list — 50 записей: столько же команд влезает в один batch.
+    // Индекс (сбор метаданных включён): точный порядок по последнему сообщению, как в списке
+    // диалогов Битрикс24. Видимость всё равно проверяется токеном пользователя в summaries().
+    if (await this.index.isActive(user.portal.id)) {
+      const rows = await this.index.page(user.portal.id, responsible, offset, PAGE);
+      const items = await this.summaries(
+        user,
+        rows.map((r) => ({
+          sessionId: r.sessionId,
+          responsibleId: r.responsibleId,
+          completed: r.completed,
+          indexedAt: r.lastMessageAt,
+        })),
+      );
+      return { items, nextOffset: rows.length === PAGE ? offset + PAGE : null, exactOrder: true };
+    }
+
+    // Без индекса: дела CRM по дате изменения — порядок приблизительный (дело не обновляется
+    // на каждое сообщение). Страница — 50 записей: столько же команд влезает в один batch.
     const res = await user.client.call<SessionActivity[]>('crm.activity.list', {
       filter: { PROVIDER_ID: 'IMOPENLINES_SESSION', ...(responsible ? { RESPONSIBLE_ID: responsible } : {}) },
       order: { LAST_UPDATED: 'DESC' },
@@ -91,62 +124,72 @@ export class ChatsService {
       seen.add(key);
       return Number(a.ASSOCIATED_ENTITY_ID) > 0;
     });
-    const items = await this.summaries(user, sessions);
-    return { items, nextOffset: res.next ?? null };
+    const items = await this.summaries(
+      user,
+      sessions.map((a) => ({
+        sessionId: Number(a.ASSOCIATED_ENTITY_ID),
+        responsibleId: Number(a.RESPONSIBLE_ID) || null,
+        completed: a.COMPLETED === 'Y',
+      })),
+    );
+    return { items, nextOffset: res.next ?? null, exactOrder: false };
   }
 
   /** Сводки чатов для сессий: два пакетных запроса (диалоги, затем последние сообщения). */
-  async summaries(user: B24UserContext, sessions: SessionActivity[]): Promise<ChatSummary[]> {
+  async summaries(user: B24UserContext, sessions: SessionRef[]): Promise<ChatSummary[]> {
     if (!sessions.length) return [];
     const dialogs = await user.client.batch(
       Object.fromEntries(
         sessions.map((s) => [
-          `s${s.ASSOCIATED_ENTITY_ID}`,
-          { method: 'imopenlines.dialog.get', params: { SESSION_ID: Number(s.ASSOCIATED_ENTITY_ID) } },
+          `s${s.sessionId}`,
+          { method: 'imopenlines.dialog.get', params: { SESSION_ID: s.sessionId } },
         ]),
       ),
     );
     // Нет доступа к диалогу (ACCESS_ERROR) — такой чат пользователю не показываем.
     const pairs = sessions
-      .map((s) => ({ s, d: dialogs.result[`s${s.ASSOCIATED_ENTITY_ID}`] as ImDialog | undefined }))
-      .filter((x): x is { s: SessionActivity; d: ImDialog } => Boolean(x.d?.id));
+      .map((s) => ({ s, d: dialogs.result[`s${s.sessionId}`] as ImDialog | undefined }))
+      .filter((x): x is { s: SessionRef; d: ImDialog } => Boolean(x.d?.id));
     const unique = [...new Map(pairs.map((x) => [x.d.id, x])).values()];
     if (!unique.length) return [];
     const msgs = await user.client.batch(
       Object.fromEntries(
         unique.map(({ d }) => [
           `c${d.id}`,
-          { method: 'im.dialog.messages.get', params: { DIALOG_ID: `chat${d.id}`, LIMIT: 5 } },
+          { method: 'im.dialog.messages.get', params: { DIALOG_ID: `chat${d.id}`, LIMIT: SUMMARY_MESSAGES } },
         ]),
       ),
     );
-    return unique
-      .map(({ s, d }) => {
-        const m = (msgs.result[`c${d.id}`] ?? {}) as ImMessages;
-        const last = lastMeaningful(m.messages ?? [], m.users ?? []);
-        const sessionClosed = s.COMPLETED === 'Y';
-        return {
-          chatId: Number(d.id),
-          sessionId: Number(s.ASSOCIATED_ENTITY_ID),
-          title: d.name ?? `Чат #${d.id}`,
-          connector: connectorOf(d.entity_id),
-          responsibleId: Number(s.RESPONSIBLE_ID) || null,
-          lastMessage: last
-            ? {
-                id: Number(last.message.id),
-                date: last.message.date,
-                author: last.kind,
-                preview: preview(last.message.text),
-                hasFiles: Boolean(last.message.params?.FILE_ID?.length),
-              }
-            : null,
-          waitingReply: !sessionClosed && last?.kind === 'client',
-          joined: isMember(d.role),
-          sessionClosed,
-          crm: crmLinksOf(d.entity_data_2),
-        } satisfies ChatSummary;
-      })
-      .sort((a, b) => (b.lastMessage?.date ?? '').localeCompare(a.lastMessage?.date ?? ''));
+    const summaries = unique.map(({ s, d }) => {
+      const m = (msgs.result[`c${d.id}`] ?? {}) as ImMessages;
+      const last = lastMeaningful(m.messages ?? [], m.users ?? []);
+      const sessionClosed = s.completed;
+      // Ключ сортировки — последнее сообщение клиента или оператора (живое или из индекса).
+      const live = last?.human ? Date.parse(last.message.date) : 0;
+      const sortKey = Math.max(live, s.indexedAt?.getTime() ?? 0);
+      const summary: ChatSummary = {
+        chatId: Number(d.id),
+        sessionId: s.sessionId,
+        title: d.name ?? `Чат #${d.id}`,
+        connector: connectorOf(d.entity_id),
+        responsibleId: s.responsibleId,
+        lastMessage: last
+          ? {
+              id: Number(last.message.id),
+              date: last.message.date,
+              author: last.kind,
+              preview: preview(last.message.text),
+              hasFiles: Boolean(last.message.params?.FILE_ID?.length),
+            }
+          : null,
+        waitingReply: !sessionClosed && last?.human === true && last.kind === 'client',
+        joined: isMember(d.role),
+        sessionClosed,
+        crm: crmLinksOf(d.entity_data_2),
+      };
+      return { summary, sortKey };
+    });
+    return summaries.sort((a, b) => b.sortKey - a.sortKey).map((x) => x.summary);
   }
 
   async history(user: B24UserContext, chatId: number, query: unknown, canSendRight: boolean): Promise<ChatHistoryDto> {

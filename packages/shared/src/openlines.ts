@@ -34,6 +34,11 @@ export interface ChatListDto {
   items: ChatSummary[];
   /** Смещение следующей страницы; null — больше нет. */
   nextOffset: number | null;
+  /**
+   * true — порядок точный, по последнему сообщению клиента или оператора (индекс включён «сбором
+   * метаданных диалогов»); false — приблизительный, по дате изменения сессии в CRM.
+   */
+  exactOrder: boolean;
 }
 
 export interface ChatFileDto {
