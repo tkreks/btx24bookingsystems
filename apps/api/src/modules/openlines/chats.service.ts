@@ -21,6 +21,7 @@ import {
   type ImMessage,
   type ImUser,
 } from './chat-parsing.js';
+import { PrismaService } from '../../prisma/prisma.service.js';
 import { FilesService } from './files.service.js';
 import { OpenlineIndexService } from './openline-index.service.js';
 import { stepsSchema } from './templates.service.js';
@@ -62,6 +63,8 @@ interface SessionRef {
 const HISTORY_LIMIT = 50;
 /** Сколько найденных по номеру контактов / лидов / компаний каждого типа разбираем. */
 const PHONE_MATCHES = 10;
+/** Чатов в одной папке — больше не показываем. */
+const MAX_FOLDER_CHATS = 100;
 const PAGE = 50;
 /** Сообщений на чат в сводке: среди них ищем последнее от клиента или оператора. */
 const SUMMARY_MESSAGES = 20;
@@ -69,6 +72,8 @@ const listQuery = z
   .object({
     scope: z.enum(['mine', 'department', 'all']).default('mine'),
     offset: z.coerce.number().int().min(0).default(0),
+    /** Моя папка: только её чаты (без папки — общий список без чатов моих папок). */
+    folder: z.string().min(1).max(40).optional(),
   })
   .strict();
 const historyQuery = z.object({ beforeId: z.coerce.number().int().positive().optional() }).strict();
@@ -85,13 +90,65 @@ export class ChatsService {
   constructor(
     private readonly files: FilesService,
     private readonly index: OpenlineIndexService,
+    private readonly prisma?: PrismaService,
   ) {}
+
+  /** Мои папки: чат → папка. */
+  async myFolders(user: B24UserContext): Promise<Map<number, string>> {
+    if (!this.prisma) return new Map();
+    const items = await this.prisma.chatFolderItem.findMany({ where: { portalId: user.portal.id, ownerUserId: user.userId } });
+    return new Map(items.map((i) => [i.chatId, i.folderId]));
+  }
+
+  /** Непрочитанные по чатам открытых линий — личные счётчики мессенджера сотрудника. */
+  async unreadByChat(user: B24UserContext): Promise<Map<number, number>> {
+    try {
+      const res = await user.client.call<{ items?: { id?: string | number; chat_id?: number | string; counter?: number }[] }>(
+        'im.recent.list',
+        { ONLY_OPENLINES: 'Y', LIMIT: 200 },
+      );
+      const out = new Map<number, number>();
+      for (const i of res.result?.items ?? []) {
+        const chatId = Number(i.chat_id) || Number(String(i.id ?? '').replace(/^chat/, ''));
+        if (chatId > 0 && Number(i.counter) > 0) out.set(chatId, Number(i.counter));
+      }
+      return out;
+    } catch (err) {
+      if (err instanceof Bitrix24Error) return new Map();
+      throw err;
+    }
+  }
+
+  /** Сводки чатов по их ID (папка, поиск): порядок — по последнему сообщению. */
+  async summariesByChat(user: B24UserContext, chatIds: number[]): Promise<ChatSummary[]> {
+    const indexed = await this.index.byChat(user.portal.id, chatIds);
+    return this.summaries(
+      user,
+      chatIds.map((chatId) => {
+        const r = indexed.get(chatId);
+        return {
+          chatId,
+          sessionId: r?.sessionId ?? 0,
+          responsibleId: r?.responsibleId ?? null,
+          completed: r?.completed ?? false,
+          indexedAt: r?.lastMessageAt ?? null,
+        };
+      }),
+    );
+  }
 
   async list(user: B24UserContext, query: unknown): Promise<ChatListDto> {
     const parsed = listQuery.safeParse(query);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_QUERY', message: 'Неверные параметры списка чатов' });
-    const { scope, offset } = parsed.data;
+    const { scope, offset, folder } = parsed.data;
+    const folders = await this.myFolders(user);
+    if (folder) {
+      const chatIds = [...folders].filter(([, f]) => f === folder).map(([c]) => c);
+      return { items: await this.summariesByChat(user, chatIds.slice(0, MAX_FOLDER_CHATS)), nextOffset: null, exactOrder: true };
+    }
+    // Чаты моих папок в общем списке не показываем — они в строках папок.
+    const outside = (list: ChatSummary[]) => list.filter((c) => !folders.has(c.chatId));
     const responsible = await this.responsibleFilter(user, scope);
     if (responsible && !responsible.length) return { items: [], nextOffset: null, exactOrder: false };
 
@@ -108,7 +165,7 @@ export class ChatsService {
           indexedAt: r.lastMessageAt,
         })),
       );
-      return { items, nextOffset: rows.length === PAGE ? offset + PAGE : null, exactOrder: true };
+      return { items: outside(items), nextOffset: rows.length === PAGE ? offset + PAGE : null, exactOrder: true };
     }
 
     // Без индекса: дела CRM по дате изменения — порядок приблизительный (дело не обновляется
@@ -135,7 +192,7 @@ export class ChatsService {
         completed: a.COMPLETED === 'Y',
       })),
     );
-    return { items, nextOffset: res.next ?? null, exactOrder: false };
+    return { items: outside(items), nextOffset: res.next ?? null, exactOrder: false };
   }
 
   /** Сводки чатов для сессий: два пакетных запроса (диалоги, затем последние сообщения). */
@@ -144,18 +201,22 @@ export class ChatsService {
     const dialogs = await user.client.batch(
       Object.fromEntries(
         sessions.map((s) => [
-          `s${s.sessionId}`,
+          refKey(s),
           { method: 'imopenlines.dialog.get', params: s.chatId ? { CHAT_ID: s.chatId } : { SESSION_ID: s.sessionId } },
         ]),
       ),
     );
     // Нет доступа к диалогу (ACCESS_ERROR) — такой чат пользователю не показываем.
     const pairs = sessions
-      .map((s) => ({ s, d: dialogs.result[`s${s.sessionId}`] as ImDialog | undefined }))
+      .map((s) => ({ s, d: dialogs.result[refKey(s)] as ImDialog | undefined }))
       .filter((x): x is { s: SessionRef; d: ImDialog } => Boolean(x.d?.id));
     const unique = [...new Map(pairs.map((x) => [x.d.id, x])).values()];
     if (!unique.length) return [];
-    const phones = await this.phonesOf(user, unique.map(({ d }) => crmLinksOf(d.entity_data_2)));
+    const [phones, unread, folders] = await Promise.all([
+      this.phonesOf(user, unique.map(({ d }) => crmLinksOf(d.entity_data_2))),
+      this.unreadByChat(user),
+      this.myFolders(user),
+    ]);
     const msgs = await user.client.batch(
       Object.fromEntries(
         unique.map(({ d }) => [
@@ -191,6 +252,8 @@ export class ChatsService {
         sessionClosed,
         crm: crmLinksOf(d.entity_data_2),
         phones: phonesFor(crmLinksOf(d.entity_data_2), phones),
+        unread: unread.get(Number(d.id)) ?? 0,
+        folderId: folders.get(Number(d.id)) ?? null,
       };
       return { summary, sortKey };
     });
@@ -229,20 +292,7 @@ export class ChatsService {
         ),
       ),
     ].filter((id) => id > 0);
-    const indexed = await this.index.byChat(user.portal.id, chatIds);
-    const items = await this.summaries(
-      user,
-      chatIds.slice(0, PAGE).map((chatId) => {
-        const r = indexed.get(chatId);
-        return {
-          chatId,
-          sessionId: r?.sessionId ?? 0,
-          responsibleId: r?.responsibleId ?? null,
-          completed: r?.completed ?? false,
-          indexedAt: r?.lastMessageAt ?? null,
-        };
-      }),
-    );
+    const items = await this.summariesByChat(user, chatIds.slice(0, PAGE));
     return { items, nextOffset: null, exactOrder: true };
   }
 
@@ -388,6 +438,9 @@ export class ChatsService {
 
 /** Роль пользователя в чате: `guest` — видит, но не участник (нужно «Присоединиться»). */
 const isMember = (role: string | undefined) => Boolean(role) && !['guest', 'none'].includes(String(role).toLowerCase());
+
+/** Ключ команды пакета: найденные по ID чата — по чату (сессии может не быть), иначе по сессии. */
+const refKey = (s: SessionRef) => (s.chatId ? `c${s.chatId}` : `s${s.sessionId}`);
 
 function phonesFor(l: ChatSummary['crm'], phones: Map<string, string[]>): string[] {
   return [

@@ -14,6 +14,8 @@ const chat = (chatId: number, title: string, waitingReply: boolean, preview = ''
   sessionClosed: false,
   crm: { leadId: null, contactId: null, companyId: null, dealId: null },
   phones: chatId === 1 ? ['+7 (985) 123-45-67'] : [],
+  unread: 0,
+  folderId: null,
 });
 
 describe('chat list', () => {

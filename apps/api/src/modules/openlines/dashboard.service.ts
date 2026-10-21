@@ -15,6 +15,8 @@ import {
 import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingJournalService } from '../bookings/booking-journal.service.js';
+import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
+import { dealHappened } from '../bookings/deal-outcome.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { callClients, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
@@ -41,6 +43,7 @@ export class DashboardService {
   constructor(
     private readonly chats: ChatsService,
     private readonly journal: BookingJournalService,
+    private readonly fieldMap?: DealFieldMapService,
   ) {}
 
   async get(
@@ -148,28 +151,31 @@ export class DashboardService {
   }
 
   /**
-   * Повторные клиенты: у контакта есть **выигранная** сделка (`STAGE_SEMANTIC_ID = S`) в выбранной
-   * воронке, закрытая раньше его первого звонка в периоде. Без контакта или воронки — новый.
+   * Повторные клиенты: у контакта есть **состоявшаяся** сделка в выбранной воронке до его первого
+   * звонка в периоде — не проиграна и её бронь уже закончилась (без даты брони — выигранная,
+   * закрытая раньше). Большинство прошедших броней не переводят в «успешно» — поэтому так.
    */
   private async repeatClients(user: B24UserContext, clients: CallClient[], funnel: number | null): Promise<Set<string>> {
     const out = new Set<string>();
     const contactIds = [...new Set(clients.map((c) => c.contactId).filter((x): x is number => x !== null))];
     if (funnel === null || !contactIds.length) return out;
-    const won: { CONTACT_ID: string | null; CLOSEDATE: string | null }[] = [];
+    const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
+    type Row = { CONTACT_ID: string | null; CLOSEDATE: string | null; STAGE_SEMANTIC_ID: string | null } & Record<string, string | null>;
+    const deals: Row[] = [];
     for (let i = 0; i < contactIds.length; i += CONTACT_CHUNK)
-      won.push(
-        ...(await user.client.listAll<{ CONTACT_ID: string | null; CLOSEDATE: string | null }>(
+      deals.push(
+        ...(await user.client.listAll<Row>(
           'crm.deal.list',
           {
-            filter: { '@CONTACT_ID': contactIds.slice(i, i + CONTACT_CHUNK), CATEGORY_ID: funnel, STAGE_SEMANTIC_ID: 'S' },
-            select: ['ID', 'CONTACT_ID', 'CLOSEDATE'],
+            filter: { '@CONTACT_ID': contactIds.slice(i, i + CONTACT_CHUNK), CATEGORY_ID: funnel, '!STAGE_SEMANTIC_ID': 'F' },
+            select: ['ID', 'CONTACT_ID', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
           },
-          { max: 2000 },
+          { max: 5000 },
         )),
       );
     for (const c of clients) {
       if (!c.contactId) continue;
-      if (won.some((d) => Number(d.CONTACT_ID) === c.contactId && (!d.CLOSEDATE || Date.parse(d.CLOSEDATE) < c.firstIncomingAt)))
+      if (deals.some((d) => Number(d.CONTACT_ID) === c.contactId && dealHappened(d, endField ? d[endField] : null, c.firstIncomingAt)))
         out.add(c.key);
     }
     return out;

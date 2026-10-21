@@ -3,6 +3,7 @@ import type { FilesService } from './files.service.js';
 import type { OpenlineIndexService } from './openline-index.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
+import type { PrismaService } from '../../prisma/prisma.service.js';
 
 const act = (session: number, userCode: string, responsible = 7, completed: 'Y' | 'N' = 'N') => ({
   ID: String(session),
@@ -20,17 +21,20 @@ function setup(
     messages?: Record<string, unknown>;
     next?: number;
     indexed?: unknown[];
+    /** Чаты в моей папке. */
+    foldered?: number[];
   } = {},
 ) {
   const call = vi.fn(async (method: string, params?: Record<string, unknown>) => {
     if (method === 'crm.activity.list') return { result: opts.activities ?? [], next: opts.next };
+    if (method === 'im.recent.list') return { result: { items: [{ id: 'chat101', chat_id: 101, counter: 3 }, { id: 'chat999', counter: 0 }] } };
     if (method === 'im.message.add') return { result: 900 + Number(String(params?.MESSAGE).length) };
     if (method === 'im.v2.File.upload') return { result: { messageId: 800 } };
     throw new Error(method);
   });
   const batch = vi.fn(async (cmds: Record<string, { method: string }>) => ({
     result: Object.fromEntries(
-      Object.keys(cmds).map((k) => [k, (k.startsWith('s') ? opts.dialogs : opts.messages)?.[k]]),
+      Object.keys(cmds).map((k) => [k, (cmds[k].method === 'imopenlines.dialog.get' ? opts.dialogs : opts.messages)?.[k]]),
     ),
     errors: {},
   }));
@@ -60,8 +64,12 @@ function setup(
   const index = {
     isActive: vi.fn(async () => Boolean(opts.indexed)),
     page: vi.fn(async () => opts.indexed ?? []),
+    byChat: vi.fn(async () => new Map()),
   } as unknown as OpenlineIndexService;
-  return { svc: new ChatsService(files, index), user, call, batch, listAll, files, index };
+  const prisma = {
+    chatFolderItem: { findMany: vi.fn(async () => (opts.foldered ?? []).map((chatId) => ({ chatId, folderId: 'f1' }))) },
+  } as unknown as PrismaService;
+  return { svc: new ChatsService(files, index, prisma), user, call, batch, listAll, files, index };
 }
 
 const client = { id: 50, name: 'Клиент', connector: true };
@@ -111,9 +119,29 @@ describe('ChatsService.list', () => {
       waitingReply: true,
       lastMessage: { author: 'client', preview: 'Здравствуйте' },
       crm: { contactId: 140, dealId: 678 },
+      unread: 3,
+      folderId: null,
     });
     // закрытая сессия не ждёт ответа, гость — не участник
-    expect(res.items[0]).toMatchObject({ joined: false, sessionClosed: true, waitingReply: false });
+    expect(res.items[0]).toMatchObject({ joined: false, sessionClosed: true, waitingReply: false, unread: 0 });
+  });
+
+  it('chats of my folders leave the main list; ?folder= lists only them', async () => {
+    const one = {
+      activities: [act(11, 'wa|1|A|50'), act(12, 'wa|1|B|51')],
+      dialogs: {
+        s11: { id: 101, name: 'Клиент', role: 'member', entity_id: 'wa|1|A|50', entity_data_2: '' },
+        s12: { id: 102, name: 'Охрана', role: 'member', entity_id: 'wa|1|B|51', entity_data_2: '' },
+      },
+      messages: {},
+      foldered: [102],
+    };
+    const main = setup(one);
+    expect((await main.svc.list(main.user, { scope: 'all' })).items.map((c) => c.chatId)).toEqual([101]);
+    const inFolder = setup({ ...one, foldered: [102, 103], dialogs: { c102: { id: 102, name: 'Охрана', role: 'member', entity_id: 'wa|1|B|51', entity_data_2: '' }, c103: { id: 103, name: 'Ресепшн', role: 'member', entity_id: 'wa|1|C|52', entity_data_2: '' } } });
+    const r = await inFolder.svc.list(inFolder.user, { scope: 'all', folder: 'f1' });
+    expect(r.items.map((c) => [c.chatId, c.folderId]).sort()).toEqual([[102, 'f1'], [103, 'f1']]);
+    expect(r.nextOffset).toBeNull();
   });
 
   it('department scope = the user plus active employees of their departments with sub-departments', async () => {
@@ -252,6 +280,7 @@ describe('ChatsService phone search', () => {
   it('finds CRM items by phone, then their open-line chats, with phones in summaries', async () => {
     const call = vi.fn(async (method: string) => {
       if (method === 'crm.duplicate.findbycomm') return { result: { CONTACT: [140], LEAD: [5] } };
+      if (method === 'im.recent.list') return { result: { items: [] } };
       throw new Error(method);
     });
     const batch = vi.fn(async (cmds: Record<string, { method: string; params: Record<string, unknown> }>) => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   todayIn,
+  type ChatFolderDto,
   type ChatListDto,
   type ChatScope,
   type ChatSummary,
@@ -11,7 +12,7 @@ import {
 } from '@btx24/shared';
 import { BookingForm } from '../bookings/BookingForm.js';
 import { ClientBookings } from '../bookings/ClientBookings.js';
-import { apiGet } from '../api.js';
+import { apiDelete, apiGet, apiPost, apiPut } from '../api.js';
 import { ChatView } from './ChatView.js';
 import {
   avatarTone,
@@ -67,8 +68,15 @@ export function ChatsPage({
   const [sort, setSort] = useState<ChatSort>('recent');
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState(false);
+  // Открытая папка (null — общий список, папки в нём строками).
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<ChatFolderDto[] | null>(null);
+  const [foldersRev, setFoldersRev] = useState(0);
+  const [cardMenu, setCardMenu] = useState<number | null>(null);
+  const listKey = folderId ? `folder:${folderId}` : `scope:${scope}`;
+  const listUrl = `/openlines/chats?scope=${scope}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
   const [list, setList] = useState<{
-    scope: ChatScope;
+    key: string;
     items: ChatSummary[];
     nextOffset: number | null;
     exactOrder: boolean;
@@ -105,14 +113,14 @@ export function ChatsPage({
 
   const refresh = useCallback(async () => {
     try {
-      const page = await apiGet<ChatListDto>(`/openlines/chats?scope=${scope}`);
+      const page = await apiGet<ChatListDto>(listUrl);
       setList((prev) => {
         // Обновление первой страницы не теряет подгруженные «ещё».
-        if (prev?.scope !== scope) return { scope, ...page };
+        if (prev?.key !== listKey) return { key: listKey, ...page };
         const fresh = new Set(page.items.map((c) => c.chatId));
         const tail = prev.items.filter((c) => !fresh.has(c.chatId));
         return {
-          scope,
+          key: listKey,
           // Порядок задаёт сервер (как в списке диалогов Битрикс24) — не пересортировываем.
           items: [...page.items, ...tail],
           nextOffset: prev.nextOffset ?? page.nextOffset,
@@ -123,12 +131,13 @@ export function ChatsPage({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить чаты');
     }
-  }, [scope]);
+    setFoldersRev((n) => n + 1);
+  }, [listKey, listUrl]);
 
   useEffect(() => {
     let active = true;
-    void apiGet<ChatListDto>(`/openlines/chats?scope=${scope}`).then(
-      (page) => active && setList({ scope, ...page }),
+    void apiGet<ChatListDto>(listUrl).then(
+      (page) => active && setList({ key: listKey, ...page }),
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить чаты'),
     );
     const timer = setInterval(() => void refresh(), POLL_MS);
@@ -136,7 +145,40 @@ export function ChatsPage({
       active = false;
       clearInterval(timer);
     };
-  }, [scope, refresh]);
+  }, [listKey, listUrl, refresh]);
+
+  // Мои папки: строки в общем списке (последнее сообщение, непрочитанные).
+  useEffect(() => {
+    let active = true;
+    apiGet<ChatFolderDto[]>('/openlines/folders').then(
+      (f) => active && setFolders(f),
+      () => active && setFolders([]),
+    );
+    return () => {
+      active = false;
+    };
+  }, [foldersRev]);
+
+  const folderAction = async (run: () => Promise<unknown>) => {
+    setCardMenu(null);
+    try {
+      await run();
+      // Список целиком заново: чат ушёл в папку или вернулся — дописывание «хвоста» его бы оставило.
+      setList({ key: listKey, ...(await apiGet<ChatListDto>(listUrl)) });
+      setFoldersRev((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось изменить папку');
+    }
+  };
+  const newFolder = async (chatId?: number) => {
+    const name = prompt('Название папки (например: Охрана, Ресепшн, АХО)')?.trim();
+    if (!name) return;
+    await folderAction(async () => {
+      const { id } = await apiPost<{ id: string }>('/openlines/folders', { name });
+      if (chatId) await apiPut(`/openlines/folders/${id}/chats/${chatId}`, {});
+    });
+  };
+  const currentFolder = folders?.find((f) => f.id === folderId) ?? null;
 
   useEffect(() => {
     if (!canSend) return;
@@ -164,14 +206,29 @@ export function ChatsPage({
     };
   }, [menu]);
 
+  // Меню «в папку» у карточки — закрыть кликом мимо или Esc.
+  useEffect(() => {
+    if (cardMenu === null) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element).closest?.('.cl-card-menu, .cl-card-more'))
+        setCardMenu(null);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [cardMenu]);
+
   const more = async () => {
     if (!list?.nextOffset) return;
     setLoadingMore(true);
     try {
-      const page = await apiGet<ChatListDto>(`/openlines/chats?scope=${scope}&offset=${list.nextOffset}`);
+      const page = await apiGet<ChatListDto>(`${listUrl}&offset=${list.nextOffset}`);
       const known = new Set(list.items.map((c) => c.chatId));
       setList({
-        scope,
+        key: listKey,
         items: [...list.items, ...page.items.filter((c) => !known.has(c.chatId))],
         nextOffset: page.nextOffset,
         exactOrder: page.exactOrder,
@@ -183,7 +240,7 @@ export function ChatsPage({
     }
   };
 
-  const current = list?.scope === scope ? list : null;
+  const current = list?.key === listKey ? list : null;
   const all = current?.items ?? [];
   const waiting = all.filter((c) => c.waitingReply).length;
   const counts: Record<ChatTab, number> = { all: all.length, waiting, answered: all.length - waiting };
@@ -270,6 +327,39 @@ export function ChatsPage({
             )}
           </label>
 
+          {folderId ? (
+            <div className="cl-folder-head">
+              <button className="link" onClick={() => setFolderId(null)}>
+                ← Все чаты
+              </button>
+              <strong>📁 {currentFolder?.name ?? 'Папка'}</strong>
+              <span className="row-actions">
+                <button
+                  title="Переименовать папку"
+                  aria-label="Переименовать папку"
+                  onClick={() => {
+                    const name = prompt('Новое название папки', currentFolder?.name ?? '')?.trim();
+                    if (name) void folderAction(() => apiPut(`/openlines/folders/${folderId}`, { name }));
+                  }}
+                >
+                  ✎
+                </button>
+                <button
+                  title="Удалить папку (чаты вернутся в общий список)"
+                  aria-label="Удалить папку"
+                  onClick={() => {
+                    if (!confirm(`Удалить папку «${currentFolder?.name ?? ''}»? Её чаты вернутся в общий список.`)) return;
+                    void folderAction(async () => {
+                      await apiDelete(`/openlines/folders/${folderId}`);
+                      setFolderId(null);
+                    });
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            </div>
+          ) : (
           <div className="cl-scope" role="group" aria-label="Чьи чаты">
             {SCOPES.map((s) => (
               <button
@@ -282,6 +372,7 @@ export function ChatsPage({
               </button>
             ))}
           </div>
+          )}
 
           <nav className="cl-tabs" aria-label="Фильтр по статусу">
             {TABS.map((t) => (
@@ -323,12 +414,81 @@ export function ChatsPage({
               {scope !== 'all' && <p>Чаты коллег — во вкладке «Все доступные».</p>}
             </div>
           )}
+          {!folderId && !query && tab === 'all' && !!folders?.length && (
+            <div className="cl-folders" aria-label="Папки">
+              {folders.map((f) => (
+                <button key={f.id} className="cl-folder" onClick={() => setFolderId(f.id)}>
+                  <span className="cl-folder-icon" aria-hidden="true">
+                    📁
+                  </span>
+                  <span className="cl-card-body">
+                    <span className="cl-card-heading">
+                      <span className="cl-card-name">
+                        {f.name} <span className="muted">· {f.chatCount}</span>
+                      </span>
+                      <time className="cl-card-time">{f.last ? shortTime(f.last.date, timezone) : ''}</time>
+                    </span>
+                    <span className="cl-card-bottom">
+                      <span className="cl-preview">
+                        {f.last ? `${f.last.title}: ${AUTHOR_PREFIX[f.last.author]}${f.last.preview}` : 'Чатов пока нет'}
+                      </span>
+                      {f.unread > 0 && <span className="cl-unread">{f.unread}</span>}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           {items.map((c) => (
-            <ChatCard key={c.chatId} c={c} active={openId === c.chatId} timezone={timezone} onOpen={() => {
-              setOpenId(c.chatId);
-              setCreated(null);
-            }}
-          />
+            <div key={c.chatId} className="cl-card-wrap">
+              <ChatCard
+                c={c}
+                active={openId === c.chatId}
+                timezone={timezone}
+                onOpen={() => {
+                  setOpenId(c.chatId);
+                  setCreated(null);
+                }}
+              />
+              <button
+                className="cl-card-more"
+                aria-label={`Папка для чата ${c.title}`}
+                title="В папку"
+                aria-expanded={cardMenu === c.chatId}
+                onClick={() => setCardMenu(cardMenu === c.chatId ? null : c.chatId)}
+              >
+                ⋯
+              </button>
+              {cardMenu === c.chatId && (
+                <div className="cl-menu cl-card-menu" role="menu">
+                  <div className="cl-menu-label">{c.folderId ? 'Перенести в папку' : 'В папку'}</div>
+                  {folders
+                    ?.filter((f) => f.id !== c.folderId)
+                    .map((f) => (
+                      <button
+                        key={f.id}
+                        role="menuitem"
+                        className="cl-menu-item"
+                        onClick={() => void folderAction(() => apiPut(`/openlines/folders/${f.id}/chats/${c.chatId}`, {}))}
+                      >
+                        📁 {f.name}
+                      </button>
+                    ))}
+                  <button role="menuitem" className="cl-menu-item" onClick={() => void newFolder(c.chatId)}>
+                    + Новая папка…
+                  </button>
+                  {c.folderId && (
+                    <button
+                      role="menuitem"
+                      className="cl-menu-item"
+                      onClick={() => void folderAction(() => apiDelete(`/openlines/folder-chats/${c.chatId}`))}
+                    >
+                      Убрать из папки
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           ))}
           {current?.nextOffset !== null && current && (
             <button className="link more" disabled={loadingMore} onClick={() => void more()}>
@@ -423,6 +583,11 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
           )}
         </span>
         {!c.joined && <span className="cl-not-joined">Вы не участник</span>}
+        {c.unread > 0 && (
+          <span className="cl-unread cl-card-unread" title="Непрочитанных сообщений">
+            {c.unread}
+          </span>
+        )}
       </span>
     </button>
   );

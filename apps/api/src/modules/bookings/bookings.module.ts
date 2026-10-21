@@ -21,6 +21,6 @@ import { BookingSyncService } from './booking-sync.service.js';
     ClientBookingsService,
     DealFieldMapService,
   ],
-  exports: [BookingJournalService, BookingAlertsService, BookingSyncService],
+  exports: [BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService],
 })
 export class BookingsModule {}

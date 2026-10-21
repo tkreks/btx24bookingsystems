@@ -30,6 +30,22 @@ export interface ChatSummary {
   crm: ChatCrmLinks;
   /** Телефоны клиента из привязанных контакта / лида / компании (для поиска; не сохраняются). */
   phones: string[];
+  /** Непрочитанных сообщений у меня (счётчик мессенджера). */
+  unread: number;
+  /** Моя папка, где лежит чат; null — в общем списке. */
+  folderId: string | null;
+}
+
+/** Личная папка чатов (`/api/openlines/folders`): строка в списке чатов. */
+export interface ChatFolderDto {
+  id: string;
+  name: string;
+  sort: number;
+  chatCount: number;
+  /** Непрочитанных сообщений во всех чатах папки. */
+  unread: number;
+  /** Последнее сообщение среди чатов папки. */
+  last: { chatId: number; title: string; preview: string; date: string; author: MessageAuthorKind } | null;
 }
 
 export interface ChatListDto {

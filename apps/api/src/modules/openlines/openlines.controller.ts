@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
   CallListDto,
+  ChatFolderDto,
   ChatHistoryDto,
   ChatListDto,
   DashboardDto,
@@ -27,6 +28,7 @@ import type {
 import { AccessService, type UserAccess } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { ChatFoldersService } from './chat-folders.service.js';
 import { ChatsService } from './chats.service.js';
 import { DashboardService } from './dashboard.service.js';
 import { FilesService, MAX_FILE_BYTES, type UploadedFile as Upload } from './files.service.js';
@@ -50,6 +52,7 @@ export class OpenlinesController {
     private readonly templates: TemplatesService,
     private readonly files: FilesService,
     private readonly dashboard: DashboardService,
+    private readonly folderService: ChatFoldersService,
   ) {}
 
   @Get('dashboard')
@@ -84,6 +87,53 @@ export class OpenlinesController {
   async list(@B24User() user: B24UserContext, @Query() query: unknown): Promise<ChatListDto> {
     await this.require(user, 'openlines.read');
     return this.chats.list(user, query);
+  }
+
+  /** Мои папки чатов — со сводкой (последнее сообщение, непрочитанные). */
+  @Get('openlines/folders')
+  async folders(@B24User() user: B24UserContext): Promise<ChatFolderDto[]> {
+    await this.require(user, 'openlines.read');
+    return this.folderService.list(user);
+  }
+
+  @Post('openlines/folders')
+  async folderCreate(@B24User() user: B24UserContext, @Body() body: unknown): Promise<{ id: string }> {
+    await this.require(user, 'openlines.read');
+    return this.folderService.create(user, body);
+  }
+
+  @Put('openlines/folders/:id')
+  @HttpCode(204)
+  async folderRename(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.folderService.rename(user, id, body);
+  }
+
+  @Delete('openlines/folders/:id')
+  @HttpCode(204)
+  async folderDelete(@B24User() user: B24UserContext, @Param('id') id: string): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.folderService.remove(user, id);
+  }
+
+  /** Положить чат в папку (перенести из другой). */
+  @Put('openlines/folders/:id/chats/:chatId')
+  @HttpCode(204)
+  async folderPut(
+    @B24User() user: B24UserContext,
+    @Param('id') id: string,
+    @Param('chatId', ParseIntPipe) chatId: number,
+  ): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.folderService.put(user, id, chatId);
+  }
+
+  /** Вернуть чат в общий список. */
+  @Delete('openlines/folder-chats/:chatId')
+  @HttpCode(204)
+  async folderTakeOut(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.folderService.takeOut(user, chatId);
   }
 
   /** Поиск по номеру телефона клиента по всему порталу (`?q=`). */

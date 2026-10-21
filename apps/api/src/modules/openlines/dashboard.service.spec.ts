@@ -1,6 +1,7 @@
 import { DashboardService, parsePeriod } from './dashboard.service.js';
 import type { ChatsService } from './chats.service.js';
 import type { BookingJournalService } from '../bookings/booking-journal.service.js';
+import type { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 
 const emptyJournal = {
@@ -82,8 +83,10 @@ describe('DashboardService', () => {
       if (method === 'crm.deal.list') {
         dealFilters.push(params?.filter ?? {});
         return [
-          { CONTACT_ID: '140', CLOSEDATE: '2026-09-01T00:00:00+03:00' },
-          { CONTACT_ID: '150', CLOSEDATE: '2026-10-21T20:00:00+03:00' },
+          // промежуточная стадия, бронь прошла до звонка → состоялась
+          { CONTACT_ID: '140', CLOSEDATE: null, STAGE_SEMANTIC_ID: 'P', UF_END: '2026-09-01T14:00:00+03:00' },
+          // бронь после звонка → ещё не состоялась
+          { CONTACT_ID: '150', CLOSEDATE: '2026-10-21T20:00:00+03:00', STAGE_SEMANTIC_ID: 'S', UF_END: '2026-10-21T20:00:00+03:00' },
         ];
       }
       if (method === 'crm.contact.list') return [{ ID: '140', NAME: 'Анна', LAST_NAME: 'И.' }, { ID: '150', NAME: 'Олег', LAST_NAME: null }];
@@ -92,11 +95,12 @@ describe('DashboardService', () => {
     const call = vi.fn(async () => ({ result: { categories: [{ id: 0, name: 'БК Алатырь' }, { id: 14, name: 'Домики и беседки' }] } }));
     const batch = vi.fn(async () => ({ result: { t2: [{ ID: '678', TITLE: 'Баня, Иванов' }], t3: [{ ID: '150', NAME: 'Олег' }] } }));
     const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call, listAll, batch } } as unknown as B24UserContext;
-    const svc = new DashboardService({} as ChatsService, emptyJournal);
+    const fieldMap = { get: vi.fn(async () => ({ bookingEnd: 'UF_END' })) } as unknown as DealFieldMapService;
+    const svc = new DashboardService({} as ChatsService, emptyJournal, fieldMap);
     const d = await svc.get(user, { from: '2026-10-21', to: '2026-10-21' }, false, [0, 14]);
     expect(d.calls).toEqual({ incoming: 2, new: 1, repeat: 1, answered: 1, missed: 2, lost: 1 });
     expect(d.callsFunnel).toBe(0);
-    expect(dealFilters[0]).toMatchObject({ CATEGORY_ID: 0, STAGE_SEMANTIC_ID: 'S' });
+    expect(dealFilters[0]).toMatchObject({ CATEGORY_ID: 0, '!STAGE_SEMANTIC_ID': 'F' });
     expect([...(dealFilters[0]['@CONTACT_ID'] as number[])].sort()).toEqual([140, 150]);
     expect(d.callFunnels).toEqual([{ id: 0, name: 'БК Алатырь' }, { id: 14, name: 'Домики и беседки' }]);
 

@@ -69,7 +69,7 @@ export function ClientBookings({
         {!data && <span className="muted">{error || 'Загрузка данных клиента…'}</span>}
         {data && (
           <>
-            <span className="cb-stat" title="Выигранные сделки клиента (только успешные)">
+            <span className="cb-stat" title="Состоявшиеся сделки клиента: не проиграны и бронь уже прошла (без брони — выигранные)">
               Повторных сделок: <b>{data.won.count}</b>
               {data.won.avgCheck !== null && (
                 <>

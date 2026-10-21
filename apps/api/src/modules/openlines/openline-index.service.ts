@@ -52,7 +52,6 @@ export class OpenlineIndexService {
     return Boolean(fresh);
   }
 
-  /** Страница индекса: сначала свежие сообщения; `responsible` — фильтр по ответственному. */
   /** Строки индекса по ID чатов (для найденных не через индекс чатов). */
   async byChat(portalId: string, chatIds: number[]) {
     if (!chatIds.length) return new Map<number, OpenlineChat>();
@@ -60,6 +59,7 @@ export class OpenlineIndexService {
     return new Map(rows.map((r) => [r.chatId, r]));
   }
 
+  /** Страница индекса: сначала свежие сообщения; `responsible` — фильтр по ответственному. */
   async page(portalId: string, responsible: number[] | null, offset: number, take: number): Promise<IndexedSession[]> {
     const rows = await this.prisma.openlineChat.findMany({
       where: { portalId, lastMessageAt: { not: null }, ...(responsible ? { responsibleId: { in: responsible } } : {}) },

@@ -46,6 +46,7 @@ model Portal {
   messageTemplates     MessageTemplate[]
   storedFiles          StoredFile[]
   openlineChats        OpenlineChat[]
+  chatFolders          ChatFolder[]
   bookingRecords       BookingRecord[]
   settingsAccessCodes  SettingsAccessCode[]
   bookingOperations    BookingOperation[]
@@ -509,4 +510,32 @@ model BookingOperation {
 
   @@unique([portalId, idempotencyKey])
   @@index([portalId, createdAt])
+}
+
+/// Личная папка чатов сотрудника (охрана, ресепшн, АХО…): чаты папки уходят из общего списка.
+model ChatFolder {
+  id          String           @id @default(cuid())
+  portalId    String
+  portal      Portal           @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ownerUserId Int
+  name        String           @db.VarChar(60)
+  sort        Int              @default(0)
+  createdAt   DateTime         @default(now()) @db.DateTime(3)
+  items       ChatFolderItem[]
+
+  @@index([portalId, ownerUserId])
+}
+
+/// Чат в папке. У сотрудника чат может быть только в одной папке.
+model ChatFolderItem {
+  id          String     @id @default(cuid())
+  folderId    String
+  folder      ChatFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  portalId    String     @db.VarChar(191)
+  ownerUserId Int
+  chatId      Int
+  addedAt     DateTime   @default(now()) @db.DateTime(3)
+
+  @@unique([portalId, ownerUserId, chatId])
+  @@index([folderId])
 }

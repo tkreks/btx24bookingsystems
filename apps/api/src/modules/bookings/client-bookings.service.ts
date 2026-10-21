@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { dealLinks, type RawBooking } from './bitrix-bookings.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
+import { dealHappened } from './deal-outcome.js';
 
 type Deal = Record<string, string | null>;
 const RECENT = 5;
@@ -24,7 +25,7 @@ export class ClientBookingsService {
   async forContact(user: B24UserContext, contactId: number | null, extraDealIds: number[] = [], now = new Date()): Promise<ClientBookingsDto> {
     const map = await this.fieldMap.get(user.portal.id);
     const ufSelect = [map.bookingId, map.bookingStart, map.bookingEnd].filter((x): x is string => !!x);
-    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CURRENCY_ID', ...ufSelect];
+    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CURRENCY_ID', 'CLOSEDATE', ...ufSelect];
     const [byClient, contactDeals, extraDeals, contact] = await Promise.all([
       contactId
         ? user.client
@@ -97,8 +98,8 @@ export class ClientBookingsService {
     }
     const upcoming = items.filter((i) => i.when !== 'past').sort((a, b) => a.start.localeCompare(b.start));
     const past = items.filter((i) => i.when === 'past').sort((a, b) => b.start.localeCompare(a.start));
-    // Выигранные сделки клиента (только успешные): сколько и средний чек.
-    const won = contactDeals.filter((d) => d.STAGE_SEMANTIC_ID === 'S');
+    // Состоявшиеся сделки клиента (не проиграны, бронь прошла; без брони — выигранные): сколько и средний чек.
+    const won = contactDeals.filter((d) => dealHappened(d, map.bookingEnd ? d[map.bookingEnd] : null, now.getTime()));
     const sums = won.map((d) => Number(d.OPPORTUNITY)).filter((x) => Number.isFinite(x) && x > 0);
     return {
       contactId,
