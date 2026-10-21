@@ -1,5 +1,5 @@
 import { BadRequestException, Controller, ForbiddenException, Get, Query, UseGuards } from '@nestjs/common';
-import { isIsoDate, todayIn, type CalendarDay } from '@btx24/shared';
+import { isIsoDate, todayIn, type CalendarDay, type GroupOptionsDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -18,16 +18,32 @@ export class CalendarController {
    * первая доступная группа). Администратор приложения без групп видит все ресурсы портала.
    */
   @Get()
-  async day(@B24User() user: B24UserContext, @Query('date') date?: string, @Query('groupId') groupId?: string): Promise<CalendarDay> {
+  async day(
+    @B24User() user: B24UserContext,
+    @Query('date') date?: string,
+    @Query('groupId') groupId?: string,
+  ): Promise<CalendarDay> {
     const day = date ?? todayIn(user.portal.timezone);
-    if (!isIsoDate(day)) throw new BadRequestException({ code: 'INVALID_DATE', message: 'date должен быть в формате YYYY-MM-DD' });
+    if (!isIsoDate(day))
+      throw new BadRequestException({ code: 'INVALID_DATE', message: 'date должен быть в формате YYYY-MM-DD' });
 
     const access = await this.access.resolve(user);
     const group = this.access.pick(access, groupId, 'calendar.view');
     if (!group) {
-      if (access.isAppAdmin && !groupId && access.groups.length === 0) return this.calendar.day(user, day, null, true);
-      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: groupId ? 'Нет доступа к этой группе' : 'Вы не состоите ни в одной группе приложения — обратитесь к администратору' });
+      if (access.isAppAdmin && !groupId && access.groups.length === 0) return this.calendar.day(user, day);
+      throw new ForbiddenException({
+        code: 'NO_GROUP_ACCESS',
+        message: groupId
+          ? 'Нет доступа к этой группе'
+          : 'Вы не состоите ни в одной группе приложения — обратитесь к администратору',
+      });
     }
-    return this.calendar.day(user, day, group.group.resourceIds, group.permissions.includes('booking.details'));
+    const options = group.group.options as GroupOptionsDto | null;
+    return this.calendar.day(user, day, {
+      resourceIds: group.group.resourceIds,
+      withDetails: group.permissions.includes('booking.details'),
+      techWindowMinutes: group.group.techWindowMinutes,
+      dealFields: options?.dealFields ?? [],
+    });
   }
 }

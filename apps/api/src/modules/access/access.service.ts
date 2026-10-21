@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { effectivePermissions, higherRole, PERMISSIONS, type GroupRole, type MyGroupDto, type Permission } from '@btx24/shared';
+import { effectivePermissions, higherRole, PERMISSIONS, type GroupOptionsDto, type GroupRole, type MyGroupDto, type Permission } from '@btx24/shared';
 import type { WorkGroup } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -79,6 +79,7 @@ export class AccessService {
       dealCategoryId: g.group.dealCategoryId,
       bookingMode: g.group.bookingMode,
       techWindowMinutes: g.group.techWindowMinutes,
+      views: (g.group.options as GroupOptionsDto | null)?.views ?? { desktop: '', mobile: '' },
     };
   }
 

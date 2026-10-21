@@ -23,7 +23,16 @@ export const ROLE_RANK: Record<GroupRole, number> = { TECHNOLOGIST: 0, VIEWER: 1
 export const ROLE_PERMISSIONS: Record<GroupRole, readonly Permission[]> = {
   TECHNOLOGIST: ['calendar.view'],
   VIEWER: ['calendar.view', 'booking.details', 'openlines.read'],
-  MANAGER: ['calendar.view', 'booking.details', 'booking.create', 'booking.edit', 'booking.cancel', 'payment.send', 'openlines.read', 'openlines.send'],
+  MANAGER: [
+    'calendar.view',
+    'booking.details',
+    'booking.create',
+    'booking.edit',
+    'booking.cancel',
+    'payment.send',
+    'openlines.read',
+    'openlines.send',
+  ],
   GROUP_ADMIN: PERMISSIONS,
 };
 
@@ -35,7 +44,15 @@ export const ROLE_LABELS: Record<GroupRole, string> = {
 };
 
 /** Функции, которые можно выключить на уровне группы (просмотр календаря выключить нельзя). */
-export const GROUP_FEATURES = ['booking.details', 'booking.create', 'booking.edit', 'booking.cancel', 'payment.send', 'openlines.read', 'openlines.send'] as const;
+export const GROUP_FEATURES = [
+  'booking.details',
+  'booking.create',
+  'booking.edit',
+  'booking.cancel',
+  'payment.send',
+  'openlines.read',
+  'openlines.send',
+] as const;
 export type GroupFeature = (typeof GROUP_FEATURES)[number];
 
 export function effectivePermissions(role: GroupRole, features: readonly string[]): Permission[] {
@@ -75,13 +92,19 @@ export interface PaymentStepConfig {
   templateId: string;
 }
 
+/** Вид календаря: календарь (сетка), список, карточки доступности. */
+export const CALENDAR_VIEWS = ['calendar', 'list', 'availability'] as const;
+export type CalendarView = (typeof CALENDAR_VIEWS)[number];
+/** '' — авто: телефон — список, ПК — календарь, «заезд/выезд» — доступность. */
+export type CalendarViewSetting = '' | CalendarView;
+
 /** Настройки направления без отдельных колонок (`WorkGroup.options`). */
 export interface GroupOptionsDto {
   dealFields: DealFieldConfig[];
   productSectionIds: string[];
   /** resourceId → товары по умолчанию. */
   resourceDefaults: Record<string, { productId: number; quantity: number }[]>;
-  views: { desktop: '' | 'calendar' | 'list' | 'availability'; mobile: '' | 'calendar' | 'list' | 'availability' };
+  views: { desktop: CalendarViewSetting; mobile: CalendarViewSetting };
   payments: {
     prepayment: PaymentStepConfig;
     surcharge: PaymentStepConfig;
@@ -126,6 +149,8 @@ export interface MyGroupDto {
   dealCategoryId: number | null;
   bookingMode: BookingMode;
   techWindowMinutes: number;
+  /** Вид календаря по умолчанию на ПК и на телефоне ('' — авто). */
+  views: GroupOptionsDto['views'];
 }
 
 export interface AppSettingsDto {
