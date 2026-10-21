@@ -649,3 +649,236 @@ main.loading {
   margin: 0;
   min-width: 0;
 }
+
+/* ---------- виды календаря (как в прототипе) ---------- */
+
+.view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid-head small {
+  display: block;
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.booking small {
+  display: block;
+  max-width: 100%;
+  font-size: 11px;
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tech-window {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  z-index: 1;
+  overflow: hidden;
+  padding: 5px 8px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(255, 177, 59, 0.92), rgba(248, 154, 29, 0.86));
+  color: #5b3300;
+  font-size: 11px;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.tech-window strong,
+.tech-window small {
+  display: block;
+}
+
+.booking {
+  z-index: 2;
+}
+
+.day-panel {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 12px;
+}
+
+.day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.day-header b::first-letter {
+  text-transform: uppercase;
+}
+
+.list-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.list-item.tech {
+  border: 1px solid rgba(248, 154, 29, 0.28);
+  background: rgba(255, 247, 237, 0.9);
+  list-style: none;
+}
+
+.pill.tech {
+  background: rgba(255, 177, 59, 0.2);
+  color: #7c3f00;
+}
+
+.availability-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #344054;
+}
+
+.availability-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  display: inline-block;
+}
+
+.dot.free {
+  background: #78c985;
+}
+.dot.booked {
+  background: #ff4b55;
+}
+.dot.tech {
+  background: #ffb13b;
+}
+
+.availability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.availability-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 220px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, #fff 0%, #fbfdff 100%);
+  box-shadow: 0 16px 38px rgba(24, 39, 75, 0.08);
+}
+
+.availability-card h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+
+.availability-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 10px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.availability-summary::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #78c985;
+}
+.availability-summary.busy::before {
+  background: #ff4b55;
+}
+.availability-summary.mixed::before {
+  background: #ffb13b;
+}
+
+.availability-bar {
+  position: relative;
+  flex: 1;
+  min-height: 108px;
+  max-height: 180px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #78c985;
+}
+
+.availability-bar .piece {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.piece.free {
+  background: linear-gradient(90deg, #62bc72, #88d292);
+}
+.piece.booked {
+  background: linear-gradient(90deg, #ff4b55, #ee3f4d);
+  color: #fff;
+}
+.piece.tech {
+  background: linear-gradient(90deg, #ffb13b, #f89a1d);
+  color: #5b3300;
+}
+
+.piece small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+.availability-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 860px) {
+  .view-toggle-text {
+    display: none;
+  }
+  .availability-grid {
+    grid-template-columns: 1fr;
+  }
+  .piece small {
+    display: none;
+  }
+}

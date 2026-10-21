@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { todayIn, type CalendarBooking, type CalendarDay, type MyGroupDto, type SessionInfo } from '@btx24/shared';
+import {
+  todayIn,
+  type CalendarBooking,
+  type CalendarDay,
+  type CalendarView,
+  type MyGroupDto,
+  type SessionInfo,
+} from '@btx24/shared';
 import { apiGet, ApiRequestError } from '../api.js';
 import { fitFrame, type PlacementContext } from '../b24.js';
 import { fmtDayTitle, shiftDate } from '../format.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { BookingDetails } from './BookingDetails.js';
+import { DayAvailability } from './DayAvailability.js';
 import { DayGrid } from './DayGrid.js';
 import { DayList } from './DayList.js';
-
-type View = 'grid' | 'list';
+import { isNarrow, nextView, parseView, VIEW_ICONS, VIEW_TITLES, viewForGroup } from './views.js';
 
 const VIEW_KEY = 'btx24.view';
 const GROUP_KEY = 'btx24.group';
@@ -20,22 +27,22 @@ function savedGroup(): string | null {
     return null;
   }
 }
-const narrow = () => window.matchMedia('(max-width: 760px)').matches;
-
-function initialView(): View {
+function initialView(): CalendarView {
   try {
-    const saved = localStorage.getItem(VIEW_KEY);
-    if (saved === 'grid' || saved === 'list') return saved;
+    const saved = parseView(localStorage.getItem(VIEW_KEY));
+    if (saved) return saved;
   } catch {
     /* localStorage недоступен (приватный режим Safari) */
   }
-  return narrow() ? 'list' : 'grid';
+  return isNarrow() ? 'list' : 'calendar';
 }
 
 export function CalendarPage({ session, placement }: { session: SessionInfo; placement: PlacementContext }) {
   const tz = session.portal.timezone;
   const [date, setDate] = useState(() => todayIn(tz));
-  const [view, setView] = useState<View>(initialView);
+  const [view, setView] = useState<CalendarView>(initialView);
+  // Переключал ли пользователь вид в этой группе (как в прототипе: при смене группы сбрасывается).
+  const [userChosen, setUserChosen] = useState(false);
   const [groups, setGroups] = useState<MyGroupDto[] | null>(null);
   const [groupId, setGroupId] = useState<string | null>(savedGroup);
   // Ответ привязан к ключу запроса (дата + группа): «загружается» = ответа на текущий ключ ещё
@@ -69,6 +76,17 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
   const activeGroup = groups?.find((g) => g.id === groupId) ?? groups?.[0] ?? null;
   const query = `date=${date}${activeGroup ? `&groupId=${encodeURIComponent(activeGroup.id)}` : ''}`;
   const loading = resp?.key !== query;
+
+  // Вид по умолчанию группы (ПК / телефон) или «доступность» для заезда/выезда — при смене
+  // группы или её настроек. Считается при рендере, без эффекта (паттерн React «state from props»).
+  const viewKey = activeGroup
+    ? `${activeGroup.id}:${activeGroup.views.desktop}:${activeGroup.views.mobile}:${activeGroup.bookingMode}`
+    : '';
+  const [appliedViewKey, setAppliedViewKey] = useState('');
+  if (activeGroup && viewKey !== appliedViewKey) {
+    setAppliedViewKey(viewKey);
+    setView(viewForGroup(activeGroup, view, userChosen, isNarrow()));
+  }
   const day = resp?.day ?? null;
   const error = loading ? null : (resp?.error ?? null);
 
@@ -92,6 +110,7 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
 
   const chooseGroup = (id: string) => {
     setGroupId(id);
+    setUserChosen(false);
     try {
       localStorage.setItem(GROUP_KEY, id);
     } catch {
@@ -101,8 +120,9 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
 
   useEffect(() => fitFrame(), [day, view, selected, adminOpen]);
 
-  const switchView = (v: View) => {
+  const switchView = (v: CalendarView) => {
     setView(v);
+    setUserChosen(true);
     try {
       localStorage.setItem(VIEW_KEY, v);
     } catch {
@@ -151,14 +171,13 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
             ›
           </button>
           <button onClick={() => setDate(todayIn(tz))}>Сегодня</button>
-          <div className="segmented" role="group" aria-label="Вид">
-            <button className={view === 'grid' ? 'active' : ''} onClick={() => switchView('grid')}>
-              Сетка
-            </button>
-            <button className={view === 'list' ? 'active' : ''} onClick={() => switchView('list')}>
-              Список
-            </button>
-          </div>
+          <button
+            className="view-toggle"
+            title={`Показать: ${VIEW_TITLES[nextView(view)].toLowerCase()}`}
+            onClick={() => switchView(nextView(view))}
+          >
+            {VIEW_ICONS[nextView(view)]} <span className="view-toggle-text">{VIEW_TITLES[nextView(view)]}</span>
+          </button>
           {session.canManageApp && (
             <button aria-label="Настройки" onClick={() => setAdminOpen(true)}>
               ⚙
@@ -184,12 +203,18 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
       {error && <div className="notice error">{error}</div>}
 
       <main className={loading ? 'loading' : ''}>
-        {day &&
-          (view === 'grid' ? (
-            <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} />
-          ) : (
-            <DayList day={day} highlightDealId={placement.dealId} onSelect={setSelected} />
-          ))}
+        {day && view === 'calendar' && <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} />}
+        {day && view === 'list' && (
+          <DayList
+            day={day}
+            groupName={activeGroup?.name ?? ''}
+            highlightDealId={placement.dealId}
+            onSelect={setSelected}
+          />
+        )}
+        {day && view === 'availability' && (
+          <DayAvailability day={day} groupName={activeGroup?.name ?? ''} onSelect={setSelected} />
+        )}
         {!day && loading && <div className="muted pad">Загрузка броней…</div>}
       </main>
 
