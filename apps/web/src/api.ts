@@ -31,9 +31,10 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     headers: {
       Authorization: `Bearer ${auth.token}`,
       'X-B24-Member-Id': auth.memberId,
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      // FormData: Content-Type с границей частей выставит браузер.
+      ...(body === undefined || body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
   });
   if (res.ok) return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
   const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
@@ -47,4 +48,11 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 
 export async function apiDelete(path: string): Promise<void> {
   return request<void>('DELETE', path);
+}
+
+/** Загрузка файла (multipart, поле `file`). */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  return request<T>('POST', path, form);
 }

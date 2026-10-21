@@ -14,6 +14,7 @@ interface Bx24 {
   placement: { info(): { placement: string; options: Record<string, unknown> } };
   fitWindow(cb?: () => void): void;
   openPath?(path: string): void;
+  im?: { openMessenger?(dialogId: string): void };
   selectUsers?(cb: (users: { id: string; name: string }[]) => void): void;
 }
 
@@ -95,4 +96,16 @@ export function selectEmployees(onSelect: (users: { id: number; name: string }[]
       users.map((u) => ({ id: Number(u.id), name: u.name })).filter((u) => Number.isSafeInteger(u.id) && u.id > 0),
     ),
   );
+}
+
+/** Открыть чат в мессенджере портала (поверх приложения). */
+export function openMessenger(chatId: number): void {
+  const sdk = window.BX24;
+  if (sdk?.im?.openMessenger) sdk.im.openMessenger(`chat${chatId}`);
+  else sdk?.openPath?.(`/online/?IM_DIALOG=chat${chatId}`);
+}
+
+/** Карточка CRM в слайдере портала. */
+export function openCrm(type: 'lead' | 'contact' | 'company' | 'deal', id: number): void {
+  window.BX24?.openPath?.(`/crm/${type}/details/${id}/`);
 }

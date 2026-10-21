@@ -43,6 +43,9 @@ model Portal {
   settings             PortalSettings?
   externalUsers        ExternalUser[]
   sandboxBookings      SandboxBooking[]
+  messageTemplates     MessageTemplate[]
+  storedFiles          StoredFile[]
+  openlineChats        OpenlineChat[]
 }
 
 enum PortalStatus {
@@ -213,4 +216,62 @@ model SandboxBooking {
   deletedAt DateTime? @db.DateTime(3)
 
   @@unique([portalId, bookingId])
+}
+
+// ---------- Открытые линии ----------
+
+/// Личный шаблон сообщений менеджера: цепочка шагов (текст + вложения), отправляется по порядку.
+/// Видит и меняет только автор (`ownerUserId` — ID сотрудника Битрикс24).
+model MessageTemplate {
+  id          String   @id @default(cuid())
+  portalId    String
+  portal      Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ownerUserId Int
+  name        String   @db.VarChar(100)
+  /// `[{ text, fileIds }]` в порядке отправки (`TemplateStepDto` в @btx24/shared).
+  steps       Json
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @db.DateTime(3)
+
+  @@index([portalId, ownerUserId])
+}
+
+/// Файл вложения для отправки в чат (из шаблона или разовый). Хранится в БД, до 10 МБ: отдаётся
+/// в Битрикс24 через im.v2.File.upload. Доступен только автору.
+model StoredFile {
+  id          String   @id @default(cuid())
+  portalId    String
+  portal      Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ownerUserId Int
+  name        String   @db.VarChar(255)
+  mime        String   @db.VarChar(150)
+  size        Int
+  data        Bytes    @db.LongBlob
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  @@index([portalId, ownerUserId])
+}
+
+/// Индекс диалогов открытых линий для сортировки «по дате последнего сообщения» — как в списке
+/// диалогов Битрикс24. Только метаданные: ни текстов, ни имён. Ведёт worker, пока включён «сбор
+/// метаданных диалогов» (`PortalSettings.dialogMetadataEnabled`). Видимость каждому пользователю
+/// проверяется его токеном при показе — индекс прав не даёт.
+model OpenlineChat {
+  id            String    @id @default(cuid())
+  portalId      String
+  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  chatId        Int
+  /// Последняя сессия чата (ID в списке диалогов Битрикс24).
+  sessionId     Int
+  responsibleId Int?
+  completed     Boolean
+  connector     String    @db.VarChar(64)
+  /// Последнее сообщение клиента или оператора (без системных и ботов).
+  lastMessageAt DateTime? @db.DateTime(3)
+  lastAuthor    String?   @db.VarChar(10)
+  checkedAt     DateTime  @db.DateTime(3)
+
+  @@unique([portalId, chatId])
+  @@index([portalId, lastMessageAt])
+  @@index([portalId, responsibleId, lastMessageAt])
 }

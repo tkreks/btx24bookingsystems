@@ -10,6 +10,8 @@ import {
 import { apiGet, ApiRequestError } from '../api.js';
 import { fitFrame, type PlacementContext } from '../b24.js';
 import { fmtDayTitle, shiftDate } from '../format.js';
+import { ChatsPage } from '../openlines/ChatsPage.js';
+import { DashboardPage } from '../openlines/DashboardPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { BookingDetails } from './BookingDetails.js';
 import { DayAvailability } from './DayAvailability.js';
@@ -53,6 +55,10 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
   const [adminOpen, setAdminOpen] = useState(false);
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [groupsError, setGroupsError] = useState<string | null>(null);
+  // Экран приложения. Состояние календаря (дата, вид) живёт здесь и не теряется при переходах.
+  const [screen, setScreen] = useState<
+    { name: 'calendar' } | { name: 'dashboard' } | { name: 'chats'; chatId?: number; waiting?: boolean }
+  >({ name: 'calendar' });
 
   useEffect(() => {
     let active = true;
@@ -118,7 +124,7 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
     }
   };
 
-  useEffect(() => fitFrame(), [day, view, selected, adminOpen]);
+  useEffect(() => fitFrame(), [day, view, selected, adminOpen, screen]);
 
   const switchView = (v: CalendarView) => {
     setView(v);
@@ -134,6 +140,31 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
     () => (placement.dealId && day ? day.bookings.filter((b) => b.dealId === placement.dealId).length : 0),
     [placement.dealId, day],
   );
+
+  // Права на открытые линии — подсказка интерфейсу; проверяет сервер.
+  const permissions = new Set(groups?.flatMap((g) => g.permissions) ?? []);
+  const openlinesRead = session.canManageApp || permissions.has('openlines.read');
+  const openlinesSend = session.canManageApp || permissions.has('openlines.send');
+
+  if (screen.name === 'dashboard')
+    return (
+      <DashboardPage
+        session={session}
+        openlines={openlinesRead}
+        onBack={() => setScreen({ name: 'calendar' })}
+        onChats={(o) => setScreen({ name: 'chats', ...o })}
+      />
+    );
+  if (screen.name === 'chats')
+    return (
+      <ChatsPage
+        timezone={tz}
+        canSend={openlinesSend}
+        initialChatId={screen.chatId}
+        initialWaiting={screen.waiting}
+        onClose={() => setScreen({ name: 'dashboard' })}
+      />
+    );
 
   return (
     <div className="page">
@@ -177,6 +208,26 @@ export function CalendarPage({ session, placement }: { session: SessionInfo; pla
             onClick={() => switchView(nextView(view))}
           >
             {VIEW_ICONS[nextView(view)]} <span className="view-toggle-text">{VIEW_TITLES[nextView(view)]}</span>
+          </button>
+          <button
+            className="home-button"
+            aria-label="Мой дашборд"
+            title="Мой дашборд"
+            onClick={() => setScreen({ name: 'dashboard' })}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M3 10.5 12 3l9 7.5" />
+              <path d="M5 9.5V21h14V9.5" />
+              <path d="M9 21v-7h6v7" />
+            </svg>
           </button>
           {session.canManageApp && (
             <button aria-label="Настройки" onClick={() => setAdminOpen(true)}>
