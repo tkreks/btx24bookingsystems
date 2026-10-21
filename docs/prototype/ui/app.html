@@ -1,0 +1,2811 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Система бронирования</title>
+<script src="//api.bitrix24.com/api/v1/"></script>
+<style>
+:root{
+  --bg:#f5f5f7; --surface:rgba(255,255,255,.78); --surfaceSolid:#fff; --text:#111827;
+  --muted:#6b7280; --line:rgba(17,24,39,.10); --primary:#007aff; --primary2:#5856d6;
+  --danger:#ff3b30; --ok:#34c759; --shadow:0 18px 60px rgba(15,23,42,.13);
+  --softShadow:0 10px 32px rgba(15,23,42,.08); --radius:22px; --hourPx:54px;
+}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Arial,sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(circle at 15% 0%, rgba(0,122,255,.16), transparent 26%),
+    radial-gradient(circle at 90% 12%, rgba(88,86,214,.14), transparent 28%),
+    linear-gradient(180deg,#fbfbfd 0%,#f5f5f7 58%,#eef1f6 100%);
+}
+body:before{
+  content:""; position:fixed; inset:0; pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.45) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.45) 1px,transparent 1px);
+  background-size:38px 38px; opacity:.32; mask-image:linear-gradient(#000,transparent 80%);
+}
+header.top{
+  display:flex; align-items:center; gap:16px; justify-content:space-between;
+  background:rgba(255,255,255,.72); border-bottom:1px solid var(--line);
+  padding:10px 16px; position:sticky; top:0; z-index:20;
+  backdrop-filter:saturate(180%) blur(22px); -webkit-backdrop-filter:saturate(180%) blur(22px);
+}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{
+  width:38px;height:38px;border-radius:13px;
+  background:linear-gradient(135deg,var(--primary),var(--primary2));
+  box-shadow:0 10px 24px rgba(0,122,255,.25);
+  display:grid;place-items:center;color:white;font-weight:800;
+}
+h1{font-size:18px;margin:0;letter-spacing:-.03em}.muted{color:var(--muted);font-size:12px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}
+button,.btn{
+  border:1px solid var(--line); background:rgba(255,255,255,.8); color:var(--text);
+  border-radius:999px; padding:7px 12px; cursor:pointer; font-size:14px; font-weight:600;
+  box-shadow:0 1px 0 rgba(255,255,255,.75) inset,0 8px 18px rgba(15,23,42,.05);
+  transition:.18s ease;
+}
+button:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(15,23,42,.10)}
+button:active{transform:translateY(0)}
+.primary{background:linear-gradient(135deg,var(--primary),#3b82f6);color:white;border-color:rgba(0,122,255,.2)}
+.danger{background:linear-gradient(135deg,var(--danger),#ff6b5f);color:white;border-color:rgba(255,59,48,.25)}
+.ok{background:linear-gradient(135deg,var(--ok),#30d158);color:white;border-color:rgba(52,199,89,.25)}
+input,select,textarea{
+  border:1px solid var(--line); border-radius:14px; padding:10px 12px; font-size:14px;
+  background:rgba(255,255,255,.82); color:var(--text); outline:none;
+  box-shadow:0 1px 0 rgba(255,255,255,.75) inset;
+}
+input:focus,select:focus,textarea:focus{border-color:rgba(0,122,255,.55);box-shadow:0 0 0 4px rgba(0,122,255,.12)}
+textarea{min-height:82px;width:100%;resize:vertical}
+main{padding:10px 16px 14px;position:relative;z-index:1}
+.card{
+  background:var(--surface); border:1px solid rgba(255,255,255,.72); border-radius:var(--radius);
+  padding:12px; margin-bottom:10px; box-shadow:var(--softShadow);
+  backdrop-filter:saturate(180%) blur(22px); -webkit-backdrop-filter:saturate(180%) blur(22px);
+}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 6px}.tab{border-radius:999px}.tab.active{background:#111827;color:#fff;border-color:#111827}
+.hidden{display:none!important}
+.notice{padding:9px 12px;border-radius:18px;background:rgba(239,246,255,.9);border:1px solid rgba(59,130,246,.22);color:#1e40af;margin-bottom:8px}
+.warn{background:rgba(255,247,237,.9);border-color:rgba(251,146,60,.28);color:#9a3412}.error{background:rgba(254,242,242,.9);border-color:rgba(248,113,113,.28);color:#991b1b}
+#loginPanel{max-width:460px;margin:64px auto}
+.calendarWrap{overflow:auto;background:rgba(255,255,255,.58);border:1px solid rgba(255,255,255,.78);border-radius:20px;box-shadow:var(--shadow);backdrop-filter:blur(20px)}
+.calendarGrid{display:grid;grid-template-columns:82px repeat(var(--cols),minmax(190px,1fr));min-width:980px}
+.corner,.resourceHeader{
+  position:sticky;top:0;z-index:10;background:rgba(255,255,255,.82);
+  backdrop-filter:blur(18px);border-bottom:1px solid var(--line);padding:10px 14px;min-height:54px
+}
+.corner{left:0;z-index:12;border-right:1px solid var(--line);color:var(--muted);font-weight:700}
+.resourceHeader{font-weight:800;letter-spacing:-.02em;border-right:1px solid var(--line)}
+.timeLane,.resourceColumn{position:relative;height:calc(var(--hourPx) * 24);background:rgba(255,255,255,.36)}
+.timeLane{position:sticky;left:0;z-index:6;background:rgba(250,250,252,.9);border-right:1px solid var(--line)}
+.timeLabel{position:absolute;left:14px;right:10px;height:24px;transform:none;font-size:12px;color:#687083;font-weight:600}
+.hourLine{position:absolute;left:0;right:0;border-top:1px solid rgba(17,24,39,.08);height:0}
+.halfLine{position:absolute;left:0;right:0;border-top:1px dashed rgba(17,24,39,.05);height:0}
+.resourceColumn{border-right:1px solid rgba(17,24,39,.08)}
+.slotHotspot{position:absolute;left:0;right:0;height:var(--hourPx);cursor:pointer}
+.slotHotspot:hover{background:rgba(0,122,255,.055)}
+.booking{
+  position:absolute;left:8px;right:8px;min-height:34px;border-radius:18px;padding:10px 12px;overflow:hidden;
+  background:linear-gradient(145deg,rgba(0,122,255,.95),rgba(88,86,214,.9));
+  color:white;box-shadow:0 16px 36px rgba(0,122,255,.22);cursor:pointer;z-index:8;
+  border:1px solid rgba(255,255,255,.35);
+}
+.booking:hover{filter:saturate(1.08);transform:translateY(-1px)}
+.booking strong{display:block;font-size:13px;line-height:1.2;margin-bottom:4px}.booking small{display:block;font-size:11px;opacity:.88;line-height:1.25}
+.booking.continuedStart{border-top-left-radius:8px;border-top-right-radius:8px}.booking.continuedEnd{border-bottom-left-radius:8px;border-bottom-right-radius:8px}
+.modalBackdrop{position:absolute;top:0;left:0;right:0;min-height:100%;background:rgba(15,23,42,.42);display:flex;align-items:flex-start;justify-content:center;padding:18px 12px;z-index:100;backdrop-filter:blur(16px);overflow:visible}
+.modal{background:rgba(255,255,255,.88);border-radius:30px;max-width:980px;width:100%;max-height:none;overflow:visible;border:1px solid rgba(255,255,255,.78);box-shadow:0 30px 90px rgba(15,23,42,.28);backdrop-filter:saturate(180%) blur(28px)}
+.modal header{position:static;background:rgba(255,255,255,.78);backdrop-filter:blur(22px);border-bottom:1px solid var(--line);padding:16px 18px;z-index:4}
+.modalBody{padding:18px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:700}.field input,.field select{width:100%}
+.productRow,.groupBox,.miniCard{border:1px solid rgba(17,24,39,.08);border-radius:22px;padding:14px;margin:10px 0;background:rgba(255,255,255,.64);box-shadow:0 10px 26px rgba(15,23,42,.05)}
+.resourcesList{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+.resourcesList label{font-size:13px;background:rgba(255,255,255,.78);border:1px solid var(--line);border-radius:14px;padding:8px;display:flex;gap:7px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(0,122,255,.09);color:#075985;font-size:12px;font-weight:700}
+.fieldRows .row{padding:8px 0;border-bottom:1px solid rgba(17,24,39,.06)}
+
+#status{margin:0 0 4px 2px;font-size:11px}
+#dealInfo{font-size:14px;line-height:1.25}
+.compactSchedule{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;border-radius:18px;background:rgba(0,122,255,.08);border:1px solid rgba(0,122,255,.16);margin-bottom:12px;color:#075985;font-weight:700}
+.compactBookingGrid{grid-template-columns:2fr 1fr}
+.dynamicFieldsWrap{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.dynamicFieldSingle{display:grid;grid-template-columns:1fr;gap:12px}
+.dynamicFieldPair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.resourceSettingRow{display:grid;grid-template-columns:minmax(220px,1.2fr) minmax(220px,1fr) 110px;gap:8px;align-items:center;padding:8px;border:1px solid rgba(17,24,39,.08);border-radius:16px;background:rgba(255,255,255,.58);margin:7px 0}
+.resourceSettingRow label{font-size:13px;font-weight:700;display:flex;gap:7px;align-items:center}
+.settingSubgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0}
+.fieldRows .row{align-items:center}
+.fieldRowActions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.fieldRowActions button{padding:6px 9px}
+
+.bookingDatesGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 12px}
+.bookingDateCard{border:1px solid rgba(0,122,255,.14);border-radius:20px;background:rgba(255,255,255,.78);padding:12px;box-shadow:0 10px 26px rgba(15,23,42,.06)}
+.bookingDateCard>label{display:block;font-size:12px;color:#64748b;font-weight:800;margin-bottom:7px;text-transform:uppercase;letter-spacing:.02em}
+.bookingDatePair{display:grid;grid-template-columns:1.4fr 1fr;gap:8px}
+.productAddRow{align-items:flex-start}
+.productSearchWrap{position:relative;min-width:260px}
+.productSearchWrap input{width:100%}
+.productSuggest{position:absolute;z-index:200;left:0;right:0;top:calc(100% + 6px);max-height:280px;overflow:auto;background:rgba(255,255,255,.98);border:1px solid rgba(15,23,42,.12);border-radius:18px;box-shadow:0 20px 50px rgba(15,23,42,.18);padding:6px}
+.productSuggestItem{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;cursor:pointer;font-size:13px;color:#111827}
+.productSuggestItem:hover{background:#eef6ff}
+.productSuggestItem .muted{white-space:nowrap}
+.productRow{display:grid;grid-template-columns:minmax(220px,1fr) 92px 130px 130px auto;gap:8px;align-items:end}
+.productRow .field{margin:0}
+.productRow .productTitle{font-weight:800;color:#111827;padding-bottom:10px}
+
+#bookingEditArea,#bookingViewArea{overflow:visible}.viewHero{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px}.viewCard{border:1px solid rgba(15,23,42,.08);border-radius:20px;background:rgba(255,255,255,.72);padding:12px;box-shadow:0 10px 26px rgba(15,23,42,.05)}.viewCard label{display:block;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:900;margin-bottom:5px}.viewValue{font-weight:850;color:#111827}.viewProductTable{display:grid;gap:8px}.viewProductRow{display:grid;grid-template-columns:minmax(180px,1fr) 80px 120px 120px;gap:8px;align-items:center;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:10px;background:rgba(255,255,255,.66)}.visibilityFlags{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.visibilityFlags label{font-weight:900;border:1px solid rgba(15,23,42,.1);border-radius:999px;padding:5px 8px;background:rgba(255,255,255,.8)}.productSearchWrap{display:flex;gap:8px}.productSearchInner{position:relative;flex:1}.productSearchInner input{width:100%}.iconBtn{width:42px;display:inline-flex;justify-content:center;align-items:center}.productCatalogModal .modal{max-width:1040px}.productCatalogTree{display:grid;gap:10px}.catalogSection{border:1px solid rgba(15,23,42,.08);border-radius:20px;background:rgba(255,255,255,.68);padding:10px}.catalogSection summary{font-weight:900;cursor:pointer}.catalogProducts{display:grid;gap:8px;margin-top:10px}.catalogProductRow{display:grid;grid-template-columns:minmax(220px,1fr) 90px 130px auto;gap:8px;align-items:end;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:10px;background:rgba(255,255,255,.75)}.catalogIndent{margin-left:18px;margin-top:8px}.calendarListField{font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.calendarListField b{color:#0f172a}.externalUserCard{border:1px solid rgba(15,23,42,.08);border-radius:20px;background:rgba(255,255,255,.70);padding:12px;margin:10px 0}.externalUserTop{display:grid;grid-template-columns:minmax(160px,1fr) minmax(160px,1fr) minmax(140px,.8fr) auto;gap:10px;align-items:end}.externalFieldList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px}.externalFieldList label{font-size:12px;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:rgba(255,255,255,.72);padding:7px;display:flex;gap:6px;align-items:center}.externalUserHint{margin-top:8px}.externalUserEmpty{border:1px dashed rgba(15,23,42,.18);border-radius:18px;padding:12px;color:#64748b;background:rgba(255,255,255,.58)}@media(max-width:860px){.externalUserTop,.externalFieldList{grid-template-columns:1fr}.viewHero,.viewProductRow,.catalogProductRow{grid-template-columns:1fr}.catalogIndent{margin-left:0}.productSearchWrap{flex-direction:column}.iconBtn{width:auto}}
+
+@media(max-width:860px){.bookingDatesGrid,.bookingDatePair,.productRow{grid-template-columns:1fr}.productSearchWrap{min-width:100%}}
+
+@media(max-width:860px){.compactBookingGrid,.dynamicFieldPair,.resourceSettingRow,.settingSubgrid{grid-template-columns:1fr}}
+
+@media(max-width:860px){.grid,.grid3,.resourcesList{grid-template-columns:1fr}header.top{align-items:flex-start;flex-direction:column}.calendarGrid{min-width:760px;grid-template-columns:70px repeat(var(--cols),160px)}}
+
+/* Compact header layout */
+.topLeft{min-width:0;flex:1}
+.brandCompact{min-width:0;width:100%}
+.brandText{min-width:0;flex:1}
+.brandMain{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.headerGroups{margin:0;display:inline-flex;align-items:center}
+.groupSelect{height:34px;min-width:140px;max-width:220px;padding:6px 34px 6px 12px;border-radius:999px;font-weight:800;background:rgba(255,255,255,.92)}
+.dealInline{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border-radius:999px;background:rgba(0,122,255,.08);border:1px solid rgba(0,122,255,.16);color:#075985;font-size:12px;font-weight:800;max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dealInline .dealPrefix{color:#64748b;font-weight:900}
+.headerStatus{margin-top:2px;font-size:11px;line-height:1.15}
+.topControls{flex-wrap:nowrap;justify-content:flex-end;min-width:max-content}
+.iconOnly{width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;line-height:1}
+.viewToggleBtn{height:38px;display:inline-flex;align-items:center;gap:6px}
+main{padding-top:6px}
+#status{margin:0;font-size:11px}
+#groups.tabs{margin:0}
+.listWrap{background:rgba(255,255,255,.70);border:1px solid rgba(255,255,255,.78);border-radius:20px;box-shadow:var(--shadow);backdrop-filter:blur(20px);padding:12px}
+.listHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.listQuickAdd{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
+.listBooking{border:1px solid rgba(15,23,42,.08);border-radius:18px;background:rgba(255,255,255,.78);padding:12px;margin:8px 0;box-shadow:0 10px 24px rgba(15,23,42,.06);cursor:pointer}
+.listBooking:hover{transform:translateY(-1px);box-shadow:0 14px 28px rgba(15,23,42,.10)}
+.listBookingTop{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
+.listBookingTop strong{font-size:15px;line-height:1.25}
+.listMeta{font-size:12px;color:#64748b;margin-top:5px;display:flex;gap:8px;flex-wrap:wrap}
+.listField{font-size:12px;color:#334155;margin-top:4px}
+.listField b{color:#0f172a}
+.listEmpty{border:1px dashed rgba(15,23,42,.18);border-radius:18px;padding:18px;text-align:center;color:#64748b;background:rgba(255,255,255,.58)}
+.settingsGroupBox{padding:0;overflow:hidden}
+.settingsGroupSummary{width:100%;border:0;border-radius:22px;background:rgba(255,255,255,.74);box-shadow:none;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;padding:14px 16px}
+.settingsGroupSummary:hover{transform:none;box-shadow:none;background:rgba(255,255,255,.90)}
+.settingsGroupSummaryMain{display:flex;align-items:center;gap:10px;min-width:0}
+.settingsGroupTitleText{font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settingsChevron{font-size:16px;width:18px;text-align:center;color:#334155}
+.settingsGroupContent{padding:0 14px 14px}
+.settingsGroupContent.hidden{display:none!important}
+.settingsGroupBox.collapsed{margin-bottom:8px}
+body.appLoading header.top,
+body.appLoading main,
+body.appLoading .modalBackdrop:not(.loadingOverlay){
+  opacity:.42;
+  filter:blur(1.2px) grayscale(.12);
+  pointer-events:none;
+  user-select:none;
+}
+.loadingOverlay{
+  position:fixed;inset:0;z-index:10050;display:flex;align-items:flex-start;justify-content:center;
+  padding:96px 16px 16px;pointer-events:auto;background:rgba(15,23,42,.16);
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)
+}
+.loadingPanel{
+  width:min(520px,calc(100vw - 32px));border-radius:24px;padding:18px 18px 16px;
+  background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.85);
+  box-shadow:0 28px 80px rgba(15,23,42,.24);
+  backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px)
+}
+.loadingTitle{font-size:13px;color:#64748b;font-weight:850;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px}
+.loadingMessage{font-size:18px;font-weight:850;letter-spacing:-.02em;color:#0f172a;min-height:28px;line-height:1.25}
+.loadingSub{font-size:12px;color:#64748b;margin-top:4px}
+.loadingBar{position:relative;overflow:hidden;height:9px;border-radius:999px;background:rgba(15,23,42,.10);margin-top:14px}
+.loadingBar:before{content:'';position:absolute;inset:0;width:42%;border-radius:999px;background:linear-gradient(90deg,rgba(0,122,255,.35),rgba(0,122,255,.95),rgba(88,86,214,.95));animation:loadingSweep 1.15s ease-in-out infinite}
+@keyframes loadingSweep{0%{transform:translateX(-110%)}50%{transform:translateX(95%)}100%{transform:translateX(260%)}}
+.loadingDots:after{content:'';animation:loadingDots 1.2s steps(4,end) infinite}
+@keyframes loadingDots{0%{content:''}25%{content:'.'}50%{content:'..'}75%,100%{content:'...'}}
+@media(max-width:860px){.loadingOverlay{padding-top:84px}.loadingPanel{border-radius:20px}.loadingMessage{font-size:16px}}
+
+@media(max-width:860px){
+  header.top{padding:8px 10px;gap:8px;align-items:flex-start;flex-direction:column;max-width:100vw;overflow:hidden}
+  .topLeft,.brandCompact,.brandText{width:100%;min-width:0}
+  .logo{width:32px;height:32px;border-radius:11px;flex:0 0 32px}
+  h1{font-size:16px;max-width:100%;white-space:normal;line-height:1.12}
+  .brandMain{gap:6px;width:100%;min-width:0}
+  .headerGroups{max-width:calc(100vw - 64px);min-width:0}
+  .groupSelect{min-width:0;width:auto;max-width:min(190px,calc(100vw - 86px));height:32px;font-size:13px;padding-top:5px;padding-bottom:5px}
+  .dealInline{max-width:100%;font-size:11px;min-height:28px;padding:5px 8px}
+  .topControls{width:100%;max-width:100%;min-width:0;overflow:visible;justify-content:flex-start;padding-bottom:0;gap:6px;flex-wrap:nowrap}
+  .topControls button,.topControls input[type="date"]{height:38px;min-width:0}
+  .topControls input[type="date"]{flex:1 1 auto;width:auto;min-width:104px;padding-left:10px;padding-right:8px}
+  #prevDay,#nextDay,.viewToggleBtn,.iconOnly{flex:0 0 38px;width:38px;justify-content:center;padding:0}
+  #todayBtn{flex:0 0 auto;max-width:74px;padding:0 10px;white-space:nowrap}
+  .viewToggleText{display:none}
+  main{padding:6px 8px 10px;max-width:100vw;overflow-x:hidden}
+  .listWrap{padding:10px;border-radius:18px}
+  .settingsGroupSummary{padding:12px}
+  .settingsGroupSummary{align-items:flex-start}
+  .settingsGroupSummaryMain{max-width:100%}
+}
+@media(max-width:380px){
+  .topControls{gap:5px}
+  #prevDay,#nextDay,.viewToggleBtn,.iconOnly{flex-basis:36px;width:36px}
+  #todayBtn{flex-basis:36px;width:36px;padding:0;font-size:0}
+  #todayBtn:before{content:'С';font-size:14px;font-weight:900}
+  .topControls input[type="date"]{min-width:92px;padding-left:8px;padding-right:6px}
+}
+
+
+/* v10 fixes: product totals, CRM field normalization, compact settings sections */
+.bookingResourceField{grid-column:1/-1}
+.compactBookingGrid{grid-template-columns:1fr}
+.productTotal{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:10px;padding:12px 14px;border-radius:18px;background:rgba(17,24,39,.06);border:1px solid rgba(15,23,42,.10);font-size:15px}
+.productTotal strong{font-size:18px}
+.moneyFieldGroup{display:grid;grid-template-columns:minmax(0,1fr) 116px;gap:8px}
+.field select[multiple]{min-height:92px;border-radius:14px;padding:8px}
+.settingsSubsection{border:1px solid rgba(15,23,42,.08);border-radius:20px;background:rgba(255,255,255,.62);margin:12px 0;overflow:hidden}
+.settingsSubHeader{width:100%;border:0;border-radius:0;background:rgba(255,255,255,.66);box-shadow:none;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;padding:12px 14px}
+.settingsSubHeader:hover{transform:none;box-shadow:none;background:rgba(255,255,255,.9)}
+.settingsSubTitle{font-weight:900}
+.settingsSubContent{padding:12px 14px 14px}
+.settingsSubContent.hidden{display:none!important}
+.sectionPickSummary{padding:10px 12px;border-radius:16px;background:rgba(15,23,42,.04);border:1px solid rgba(15,23,42,.08)}
+.settingsSectionsModal .modal{max-width:920px}
+.settingsSectionsTree{display:grid;gap:8px;max-height:62vh;overflow:auto;padding-right:4px}
+.settingsSectionNode{border:1px solid rgba(15,23,42,.08);border-radius:16px;background:rgba(255,255,255,.72);padding:8px}
+.settingsSectionNode summary{cursor:pointer;font-weight:850;list-style:none}
+.settingsSectionNode summary::-webkit-details-marker{display:none}
+.settingsSectionLine{display:flex;align-items:center;gap:8px}
+.settingsSectionChildren{margin-left:22px;margin-top:8px;display:grid;gap:8px}
+.settingsSectionLeaf{display:flex;align-items:center;gap:8px;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:rgba(255,255,255,.72);padding:9px}
+.settingsModeDurationOnly.hidden,.settingsModeIntervalOnly.hidden{display:none!important}
+.paymentActions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}
+.paymentStageToggle{margin-top:8px;justify-content:flex-start}
+@media(max-width:860px){.moneyFieldGroup{grid-template-columns:1fr}.settingsSectionChildren{margin-left:0}}
+
+
+
+/* v12: технологические окна и карточный вид доступности */
+.techWindow{position:absolute;left:10px;right:10px;min-height:24px;border-radius:14px;padding:7px 10px;overflow:hidden;background:linear-gradient(145deg,rgba(255,177,59,.92),rgba(248,154,29,.86));color:#5b3300;box-shadow:0 12px 26px rgba(248,154,29,.18);border:1px solid rgba(255,255,255,.38);z-index:7;pointer-events:none}
+.techWindow strong{display:block;font-size:12px;line-height:1.15}.techWindow small{display:block;font-size:10px;line-height:1.2;opacity:.9}.techPill{background:rgba(255,177,59,.20);color:#7c3f00}.listTechWindow{border-color:rgba(248,154,29,.28);background:rgba(255,247,237,.88)}
+.availabilityWrap{background:rgba(255,255,255,.70);border:1px solid rgba(255,255,255,.78);border-radius:20px;box-shadow:var(--shadow);backdrop-filter:blur(20px);padding:12px}
+.availabilityToolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.availabilityLegend{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#344054;font-size:13px;font-weight:750}.availabilityLegend span{display:inline-flex;align-items:center;gap:7px}.availabilityDot{width:14px;height:14px;border-radius:5px;display:inline-block}.availabilityDot.free{background:#78c985}.availabilityDot.booked{background:#ff4b55}.availabilityDot.tech{background:#ffb13b}
+.availabilityGrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;align-items:stretch}.availabilityCard{position:relative;aspect-ratio:1/1;min-width:0;overflow:hidden;display:flex;flex-direction:column;padding:16px;border:1px solid rgba(15,23,42,.10);border-radius:20px;background:linear-gradient(180deg,#fff 0%,#fbfdff 100%);box-shadow:0 16px 38px rgba(24,39,75,.08)}
+.availabilityHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px;min-height:48px}.availabilityName{margin:0;font-size:clamp(14px,1.05vw,18px);line-height:1.16;font-weight:900;letter-spacing:-.02em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.availabilityId{margin-top:4px;color:#667085;font-size:13px;font-weight:750}.availabilityIcon{width:34px;height:34px;flex:0 0 34px;display:grid;place-items:center;border:1px solid #e8eef7;border-radius:11px;color:#344054;background:#fff;font-size:18px}.availabilitySummary{display:flex;align-items:center;gap:7px;min-height:24px;margin-bottom:10px;color:#667085;font-size:13px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.availabilitySummary:before{content:"";width:8px;height:8px;border-radius:50%;background:#78c985;flex:0 0 auto}.availabilitySummary.mixed:before{background:#ffb13b}.availabilitySummary.busy:before{background:#ff4b55}
+.availabilityTimeline{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:end;gap:10px}.availabilityBar{position:relative;flex:1;min-height:108px;max-height:180px;width:100%;overflow:hidden;border-radius:14px;background:#78c985;box-shadow:inset 0 0 0 1px rgba(29,41,57,.06);isolation:isolate}.availabilityBar:after{content:"";position:absolute;inset:0;z-index:5;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.20),rgba(255,255,255,0) 28%,rgba(0,0,0,.04) 100%)}.availabilityPiece{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;padding:6px 5px;overflow:hidden;text-align:center;line-height:1.15;font-weight:850;letter-spacing:-.02em;font-size:clamp(10px,.78vw,13px);cursor:default}.availabilityPiece.free{background:linear-gradient(90deg,#62bc72,#88d292);color:transparent}.availabilityPiece.booked{background:linear-gradient(90deg,#ff4b55,#ee3f4d);color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.18);cursor:pointer}.availabilityPiece.tech{background:linear-gradient(90deg,#ffb13b,#f89a1d);color:#5b3300;text-shadow:0 1px 0 rgba(255,255,255,.42)}.availabilityPiece.addable{cursor:pointer}.availabilityPieceLabel{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}.availabilityPieceLabel small{display:block;margin-top:2px;font-size:.86em;opacity:.96;white-space:nowrap}.availabilityAxis{display:grid;grid-template-columns:repeat(5,1fr);color:#475467;font-size:12px;font-weight:800;line-height:1}.availabilityAxis span:nth-child(1){text-align:left}.availabilityAxis span:nth-child(2),.availabilityAxis span:nth-child(3),.availabilityAxis span:nth-child(4){text-align:center}.availabilityAxis span:nth-child(5){text-align:right}
+.externalGroupList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px}.externalGroupList label{font-size:12px;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:rgba(255,255,255,.72);padding:7px;display:flex;gap:6px;align-items:center}.externalUserTop{grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(140px,.7fr) auto}
+@media(max-width:1380px){.availabilityGrid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:1100px){.availabilityGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:780px){.availabilityGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.availabilityCard{padding:14px;border-radius:16px}.availabilityBar{min-height:86px;border-radius:12px}.availabilityPiece{font-size:10px;padding:4px 3px}.availabilityPieceLabel small{display:none}.externalGroupList{grid-template-columns:1fr}}@media(max-width:500px){.availabilityGrid{grid-template-columns:1fr}.availabilityCard{padding:16px}.availabilityBar{min-height:132px;max-height:none}.availabilityPiece{font-size:12px}.availabilityPieceLabel small{display:block}}
+
+
+
+/* iOS/mobile layout hardening */
+html,body{width:100%;max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%}
+body{position:relative}
+img,svg,canvas,video{max-width:100%}
+button,input,select,textarea{max-width:100%;min-width:0}
+.card,.listWrap,.availabilityWrap,.modal,.modalBody,.groupBox,.miniCard,.settingsSubsection,.externalUserCard,.bookingDateCard,.viewCard,.techTaskCard{min-width:0;max-width:100%}
+.row,.brand,.brandMain,.topControls,.listBookingTop,.listMeta,.techTaskTop,.techTaskMeta,.availabilityToolbar,.availabilityLegend,.settingsGroupSummary,.settingsSubHeader,.fieldRowActions,.paymentActions{min-width:0}
+.listBooking,.listField,.viewValue,.techTaskResource,.settingsSubTitle,.settingsGroupTitleText,.availabilitySummary,.availabilityName,.productTitle{overflow-wrap:anywhere;word-break:break-word}
+.modalBackdrop{max-width:100%;overflow-x:hidden}.modal{max-width:min(980px,calc(100vw - 24px))}.modalBody{overflow-x:hidden}
+@media(max-width:860px){
+  html,body{min-width:0;width:100%;max-width:100%;overflow-x:hidden}
+  body:before{display:none}
+  header.top{left:0;right:0;width:100%;max-width:100%;overflow:hidden;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right))}
+  main{width:100%;max-width:100%;overflow-x:hidden;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right))}
+  .brand{width:100%;min-width:0;align-items:flex-start}.brandMain{align-items:flex-start}.brandText{overflow:hidden}
+  .headerGroups{max-width:100%;width:100%;display:flex}.groupSelect{width:100%;max-width:100%}
+  .topControls{display:grid;width:100%;max-width:100%;min-width:0;grid-template-columns:38px minmax(0,1fr) 38px 38px 38px 38px;gap:6px;align-items:center;overflow:hidden}
+  .topControls button,.topControls input[type="date"]{min-width:0;width:100%;max-width:100%;height:38px;justify-content:center}
+  #todayBtn{width:100%;max-width:100%;padding:0;font-size:0;overflow:hidden}#todayBtn:before{content:'С';font-size:14px;font-weight:900}
+  #viewToggleBtn{width:100%;padding:0}.viewToggleText{display:none}
+  #settingsBtn,#logoutBtn,#reportBtn{width:100%;padding:0}
+  .topControls input[type="date"]{min-width:0;padding:0 6px;font-size:13px;text-align:center}
+  .modalBackdrop{position:fixed;inset:0;width:100%;padding:10px max(8px,env(safe-area-inset-right)) 18px max(8px,env(safe-area-inset-left));overflow-y:auto;overflow-x:hidden;align-items:flex-start}
+  .modal{width:100%;max-width:100%;border-radius:20px;overflow:hidden}.modal header{padding:12px}.modalBody{padding:12px;overflow-x:hidden}
+  .calendarWrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.calendarGrid{min-width:640px;grid-template-columns:58px repeat(var(--cols),minmax(132px,1fr))}.corner,.resourceHeader{padding:8px 9px;min-height:44px}.timeLabel{left:8px;right:6px;font-size:11px}
+  .booking{left:5px;right:5px;border-radius:13px;padding:7px 8px}.booking strong{font-size:12px}.booking small{font-size:10px}
+  .listHeader,.techTaskHeader,.availabilityToolbar{align-items:flex-start}.listBookingTop,.techTaskTop{flex-direction:column}.listBookingTop .pill,.techTaskTop .pill{align-self:flex-start}
+  .techTaskPanel{grid-template-columns:1fr}.techTaskTime{font-size:16px}.listWrap,.availabilityWrap{padding:10px;border-radius:16px}
+  .settingsGroupSummary,.settingsSubHeader{padding:11px 12px;align-items:flex-start}.settingsGroupSummary{flex-direction:column}.settingsGroupSummary .muted{width:100%}.settingsGroupContent,.settingsSubContent{padding:10px}
+  .productAddRow,.productSearchWrap{width:100%;min-width:0}.productSearchInner{min-width:0}.productSuggest{max-width:100%;left:0;right:0}
+  .moneyFieldGroup{grid-template-columns:1fr}.paymentActions{justify-content:flex-start}
+  .availabilityGrid{grid-template-columns:1fr!important}.availabilityCard{aspect-ratio:auto;min-height:220px}.availabilityPieceLabel small{display:none}
+}
+@media(max-width:390px){
+  .topControls{grid-template-columns:34px minmax(0,1fr) 34px 34px 34px 34px;gap:5px}.topControls button,.topControls input[type="date"]{height:36px}.iconOnly{font-size:16px}.calendarGrid{min-width:580px;grid-template-columns:54px repeat(var(--cols),minmax(120px,1fr))}
+}
+
+
+
+/* Settings group redesign */
+.settingsGroupBox{border:0;border-radius:16px;background:transparent;box-shadow:none;padding:0;margin:14px 0;overflow:visible}
+.settingsGroupSummary{width:100%;border:1px solid #d9e1ec;border-radius:14px;background:#fff;box-shadow:0 10px 30px rgba(15,23,42,.04);display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;padding:14px 16px;color:#111827}
+.settingsGroupSummary:hover{transform:none;background:#fff;box-shadow:0 10px 30px rgba(15,23,42,.06)}
+.settingsGroupContent{padding:12px 0 4px}.settingsGroupContent.hidden{display:none!important}
+.settingsGroupShell{--sg-bg:#f8fafc;--sg-card:#fff;--sg-text:#111827;--sg-muted:#667085;--sg-border:#d9e1ec;--sg-blue:#1677ff;--sg-blue-soft:#eaf2ff;--sg-green:#16c784;--sg-red:#ff3b30;--sg-purple:#6b5cff;--sg-shadow:0 10px 30px rgba(15,23,42,.04);background:var(--sg-bg);border:1px solid var(--sg-border);border-radius:18px;padding:14px 12px;color:var(--sg-text)}
+.settingsGroupHero{display:flex;align-items:flex-start;gap:18px;padding:0 8px 18px;position:relative}.settingsGroupIcon{width:64px;height:64px;border-radius:18px;background:var(--sg-blue-soft);display:grid;place-items:center;color:var(--sg-blue);flex-shrink:0}.settingsGroupIcon svg{width:34px;height:34px;stroke-width:2}.settingsGroupHeroTitle{min-width:0;flex:1}.settingsGroupHeroTitle h2{margin:2px 0 4px;font-size:30px;line-height:1.1;font-weight:800;letter-spacing:-.02em;color:#111827}.settingsGroupHeroTitle p{margin:0;font-size:17px;color:#4b5565;font-weight:600}.settingsGroupStats{position:absolute;right:58px;top:8px;padding:11px 16px;border:1px solid var(--sg-border);border-radius:10px;background:#fff;color:#475467;font-size:15px;box-shadow:0 4px 18px rgba(15,23,42,.03)}.settingsGroupCollapse{position:absolute;right:10px;top:8px;width:30px;height:30px;border:0;background:transparent;box-shadow:none;border-radius:8px;color:#667085;font-size:30px;line-height:1;padding:0}.settingsGroupCollapse:hover{box-shadow:none;transform:none;background:#f2f4f7}
+.settingsPanel{background:var(--sg-card);border:1px solid var(--sg-border);border-radius:14px;box-shadow:var(--sg-shadow);padding:22px 20px;margin-bottom:10px}.settingsSectionTitle{display:flex;align-items:center;gap:12px;margin:0 0 20px;font-size:20px;font-weight:800;color:#182230}.settingsSectionTitle .icon{width:26px;height:26px;display:grid;place-items:center;color:var(--sg-blue)}.settingsSectionTitle .icon.green{color:var(--sg-green)}.settingsSectionTitle .icon.purple{color:var(--sg-purple)}.settingsSectionTitle svg{width:24px;height:24px;stroke-width:2}
+.settingsMainGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 22px}.settingsField{min-width:0}.settingsField.wide{grid-column:span 2}.settingsField label{display:block;margin:0 0 8px;font-size:14px;font-weight:700;color:#5b667a}.settingsField input,.settingsField select{height:48px;border:1px solid var(--sg-border);background:#fff;border-radius:10px;padding:0 15px;color:#1f2937;font-size:16px;font-weight:550;box-shadow:inset 0 1px 2px rgba(15,23,42,.02);width:100%}.settingsField input[type=checkbox],.settingsDefaultBtn input[type=radio]{width:auto;height:auto;box-shadow:none}.settingsPaymentsGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.settingsSubcard{border:1px solid var(--sg-border);border-radius:14px;padding:18px;background:#fff}.settingsSubTitle{display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:17px;font-weight:800}.settingsSubTitle svg{width:22px;height:22px;stroke-width:2}.settingsSwitchLabel{display:flex;align-items:center;gap:11px;margin-top:10px;color:#475467;font-size:14px;font-weight:700}.settingsSwitchLabel input{position:absolute;opacity:0;pointer-events:none}.settingsSwitch{width:46px;height:26px;border-radius:999px;background:#e0e6ee;position:relative;flex-shrink:0;transition:.18s ease}.settingsSwitch:after{content:"";position:absolute;width:22px;height:22px;top:2px;left:2px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(15,23,42,.2);transition:.18s ease}.settingsSwitchLabel input:checked + .settingsSwitch{background:var(--sg-blue)}.settingsSwitchLabel input:checked + .settingsSwitch:after{left:22px}.settingsAfterPay{border:1px solid var(--sg-border);border-radius:14px;padding:12px 12px 18px;margin-top:14px;background:#fff}.settingsAfterPay .settingsSectionTitle{margin-bottom:12px}.settingsAfterGrid{display:grid;grid-template-columns:1fr 1fr 1.1fr;gap:16px}.settingsGroupFooter{display:flex;align-items:center;gap:22px;padding:14px 0 0;margin-top:10px}.settingsDefaultBtn,.settingsDeleteBtn{height:48px;border-radius:10px;padding:0 18px;font-size:15px;font-weight:700;display:inline-flex;align-items:center;gap:12px;border:1px solid transparent;cursor:pointer;box-shadow:none}.settingsDefaultBtn{background:var(--sg-blue-soft);color:#1b64d8}.settingsDefaultBtn .radioDot{width:20px;height:20px;border-radius:50%;border:2px solid var(--sg-blue);display:grid;place-items:center;flex-shrink:0}.settingsDefaultBtn .radioDot:after{content:"";width:10px;height:10px;border-radius:50%;background:var(--sg-blue);opacity:0}.settingsDefaultBtn input:checked + .radioDot:after{opacity:1}.settingsDeleteBtn{background:#fff;border-color:#ffb3ad;color:var(--sg-red)}.settingsDeleteBtn svg{width:20px;height:20px}.settingsResourcesPanel,.settingsCatalogPanel,.settingsFieldsPanel{background:#fff;border:1px solid var(--sg-border);border-radius:14px;box-shadow:var(--sg-shadow);padding:16px;margin:10px 0}.settingsResourcesPanel .settingsSubHeader,.settingsFieldsPanel .settingsSubHeader{border-radius:10px;background:#f8fafc}.settingsResourcesPanel .settingsSubContent,.settingsFieldsPanel .settingsSubContent{padding-top:12px}.resourceSettingRow{grid-template-columns:minmax(220px,1fr) minmax(0,2fr);border-color:#d9e1ec;border-radius:12px;background:#fff}.resourceDefaultProducts{display:grid;gap:8px}.resourceDefaultProductRow{display:grid;grid-template-columns:minmax(160px,1fr) 96px auto;gap:8px;align-items:center}.resourceDefaultProductRow select,.resourceDefaultProductRow input{height:40px;border-radius:10px}.resourceDefaultProductRow button,[data-add-res-product]{border-radius:10px;box-shadow:none}
+@media(max-width:900px){.settingsMainGrid,.settingsPaymentsGrid,.settingsAfterGrid{grid-template-columns:1fr}.settingsField.wide{grid-column:auto}.settingsGroupStats{position:static;margin-left:auto}.settingsGroupHero{flex-wrap:wrap}.settingsGroupFooter{flex-wrap:wrap}.resourceSettingRow,.resourceDefaultProductRow{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="topLeft">
+    <div class="brand brandCompact">
+      <div class="logo">B</div>
+      <div class="brandText">
+        <div class="brandMain">
+          <h1>Система бронирования</h1>
+          <div id="groups" class="tabs headerGroups"></div>
+          <div id="dealInfo" class="dealInline hidden"></div>
+        </div>
+        <div id="status" class="muted headerStatus"></div>
+      </div>
+    </div>
+  </div>
+  <div class="row topControls">
+    <button id="prevDay" title="Предыдущий день">←</button>
+    <input id="datePicker" type="date">
+    <button id="nextDay" title="Следующий день">→</button>
+    <button id="todayBtn">Сегодня</button>
+    <button id="viewToggleBtn" class="viewToggleBtn" title="Показать списком">☰ <span class="viewToggleText">Список</span></button>
+    <button id="reportBtn" class="iconOnly hidden" title="Отправить отчет в чат" aria-label="Отправить отчет в чат">▦</button>
+    <button id="settingsBtn" class="iconOnly hidden" title="Настройки" aria-label="Настройки">⚙</button>
+  </div>
+</header>
+
+<div id="loadingOverlay" class="loadingOverlay hidden" role="status" aria-live="polite">
+  <div class="loadingPanel">
+    <div class="loadingTitle">Подождите<span class="loadingDots"></span></div>
+    <div id="loadingText" class="loadingMessage">Загружаем бронирования</div>
+    <div class="loadingSub">Интерфейс временно заблокирован, данные обновляются.</div>
+    <div class="loadingBar" aria-hidden="true"></div>
+  </div>
+</div>
+
+<main>
+  <section id="loginPanel" class="card hidden">
+    <h2>Нет активной сессии Битрикс24</h2>
+    <p class="muted">Откройте приложение из карточки сделки или левого меню Битрикс24.</p>
+    <div id="loginError" class="notice error hidden" style="margin-top:10px"></div>
+  </section>
+
+  <section id="dealGate" class="card hidden">
+    <h2>Выберите сделку для бронирования</h2>
+    <p class="muted">Если приложение открыто не из сделки, сначала выберите существующую сделку или создайте новую.</p>
+    <div class="row">
+      <input id="dealSearchInput" class="grow" placeholder="Название или ID сделки">
+      <button id="dealSearchBtn">Найти</button>
+    </div>
+    <div id="dealResults"></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <div class="row">
+      <input id="newDealTitle" class="grow" placeholder="Название новой сделки">
+      <button id="createDealBtn" class="primary">Создать сделку</button>
+    </div>
+  </section>
+
+  <section id="appArea" class="hidden">
+    <div id="readonlyNotice" class="notice warn hidden">Открыто по прямой ссылке: доступен только просмотр.</div>
+    <div id="calendarWrap" class="calendarWrap"><div id="calendarGrid" class="calendarGrid"></div></div>
+    <div id="listWrap" class="listWrap hidden"></div>
+    <div id="availabilityWrap" class="availabilityWrap hidden"></div>
+  </section>
+</main>
+
+<div id="bookingModal" class="modalBackdrop hidden">
+  <div class="modal">
+    <header class="row" style="justify-content:space-between"><h1 id="bookingModalTitle">Бронирование</h1><button id="closeBooking">×</button></header>
+    <div class="modalBody">
+      <div id="bookingViewArea" class="hidden">
+        <div id="bookingViewContent"></div>
+        <div class="row paymentActions" style="justify-content:flex-end;margin-top:18px">
+          <button id="viewPrepayBtn" class="hidden">Отправить ссылку на предоплату</button>
+          <button id="viewSurchargeBtn" class="hidden">Отправить ссылку на доплату</button>
+          <button id="editBookingBtn" class="primary">Редактировать</button>
+        </div>
+      </div>
+      <div id="bookingEditArea">
+      <div class="bookingDatesGrid">
+        <div class="bookingDateCard">
+          <label>Дата и время начала бронирования</label>
+          <div class="bookingDatePair">
+            <input id="bookingStartDate" type="date">
+            <input id="bookingStartTime" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" placeholder="14:00" autocomplete="off">
+          </div>
+        </div>
+        <div class="bookingDateCard">
+          <label>Дата и время завершения бронирования</label>
+          <div class="bookingDatePair">
+            <input id="bookingEndDate" type="date">
+            <input id="bookingEndTime" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" placeholder="12:00" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div id="bookingScheduleInfo" class="compactSchedule"></div>
+      <div class="grid compactBookingGrid">
+        <div class="field bookingResourceField"><label>Ресурс</label><select id="bookingResource"></select></div>
+        <div class="field" id="bookingDaysWrap"><label>Количество дней</label><input id="bookingDays" type="number" min="0" step="1" value="1"></div>
+      </div>
+      <input id="bookingDealId" type="hidden">
+      <input id="bookingStart" type="hidden">
+      <input id="bookingEnd" type="hidden">
+      <div id="dynamicDealFields" class="dynamicFieldsWrap"></div>
+      <h3>Товары</h3>
+      <div class="row productAddRow">
+        <div class="productSearchWrap grow">
+          <div class="productSearchInner">
+            <input id="productSearch" placeholder="Начните вводить название товара" autocomplete="off">
+            <input id="productSelect" type="hidden">
+            <div id="productSuggest" class="productSuggest hidden"></div>
+          </div>
+          <button id="openProductCatalogBtn" class="iconBtn" title="Открыть каталог товаров">☰</button>
+        </div>
+        <input id="productQty" type="number" min="1" value="1" style="width:90px" title="Количество">
+        <input id="productPrice" type="number" step="0.01" style="width:120px" title="Цена">
+        <input id="productSum" type="number" step="0.01" style="width:120px" title="Сумма">
+        <button id="addProductBtn">Добавить</button>
+      </div>
+      <div id="productRows"></div>
+      <div id="productTotal" class="productTotal hidden"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:18px">
+        <button id="deleteBookingBtn" class="danger">Удалить</button>
+        <button id="saveBookingBtn" class="primary">Сохранить</button>
+      </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="productCatalogModal" class="modalBackdrop productCatalogModal hidden">
+  <div class="modal">
+    <header class="row" style="justify-content:space-between"><h1>Каталог товаров</h1><button id="closeProductCatalog">×</button></header>
+    <div class="modalBody">
+      <p class="muted">Выберите товар из иерархии разделов, укажите количество и цену за единицу.</p>
+      <div id="productCatalogTree" class="productCatalogTree"></div>
+    </div>
+  </div>
+</div>
+
+<div id="settingsModal" class="modalBackdrop hidden">
+  <div class="modal">
+    <header class="row" style="justify-content:space-between"><h1>Настройка групп</h1><button id="closeSettings">×</button></header>
+    <div class="modalBody">
+      <p class="muted">Для каждой группы можно задать ресурсы, разрешенные разделы товарного каталога, привязку к канбану и поля сделки с обязательностью.</p>
+      <h3>Пользователи прямой ссылки</h3>
+      <p class="muted">Можно создать несколько пользователей просмотра и ограничить каждому видимость полей сделки в карточке бронирования, календаре и списке.</p>
+      <div id="externalUsersSettings"></div>
+      <button id="addExternalUserBtn" type="button">Добавить пользователя прямой ссылки</button>
+      <h3>Общие настройки</h3>
+      <label class="pill"><input id="removeWazzupEmail" type="checkbox"> удаление почты wazzup</label>
+      <div id="settingsGroups"></div>
+      <button id="addGroupBtn">Добавить группу</button>
+      <div class="row" style="justify-content:flex-end;margin-top:18px">
+        <button id="saveSettingsBtn" class="primary">Сохранить настройки</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div id="settingsSectionsModal" class="modalBackdrop settingsSectionsModal hidden">
+  <div class="modal">
+    <header class="row" style="justify-content:space-between"><h1>Выбор разделов каталога</h1><button id="closeSettingsSections">×</button></header>
+    <div class="modalBody">
+      <p class="muted">Отметьте разделы, которые должны быть доступны в этой группе. Нажмите на название раздела, чтобы раскрыть подразделы.</p>
+      <div id="settingsSectionsTree" class="settingsSectionsTree"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:18px">
+        <button id="cancelSettingsSections">Отмена</button>
+        <button id="applySettingsSections" class="primary">Применить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+window.BOOKING_BOOT = {{{bootJson}}};
+(function(){
+'use strict';
+
+var boot = window.BOOKING_BOOT || {};
+var entryMode = 'bitrix';
+var API_BASE = '/booking-local/rest';
+var HOUR_PX = 54;
+var BOOKING_START_FIELD = 'UF_CRM_1755010183195';
+var BOOKING_END_FIELD = 'UF_CRM_1755010214225';
+var sessionToken = boot.sessionToken || '';
+var bitrixAuthCache = null;
+function mergeBitrixAuth(out, src){
+  src = src || {};
+  var map = ['AUTH_ID','REFRESH_ID','DOMAIN','member_id','memberId','PLACEMENT','PLACEMENT_OPTIONS','AUTH_EXPIRES','access_token','refresh_token','domain','placement','placement_options','expires_in','expires'];
+  map.forEach(function(k){ if(src[k] !== undefined && src[k] !== null && src[k] !== '') out[k] = src[k]; });
+  if(src.auth && typeof src.auth === 'object') mergeBitrixAuth(out, src.auth);
+  if(out.access_token && !out.AUTH_ID) out.AUTH_ID = out.access_token;
+  if(out.refresh_token && !out.REFRESH_ID) out.REFRESH_ID = out.refresh_token;
+  if(out.domain && !out.DOMAIN) out.DOMAIN = out.domain;
+  if(out.placement && !out.PLACEMENT) out.PLACEMENT = out.placement;
+  if(out.placement_options && !out.PLACEMENT_OPTIONS) out.PLACEMENT_OPTIONS = out.placement_options;
+  if(out.expires_in && !out.AUTH_EXPIRES) out.AUTH_EXPIRES = out.expires_in;
+  if(out.expires && !out.AUTH_EXPIRES) out.AUTH_EXPIRES = out.expires;
+  return out;
+}
+function bitrixAuthPayload(){
+  if(entryMode !== 'bitrix') return null;
+  var out = {};
+  try {
+    var qs = new URLSearchParams(window.location.search || '');
+    ['AUTH_ID','REFRESH_ID','DOMAIN','member_id','PLACEMENT','PLACEMENT_OPTIONS','AUTH_EXPIRES','access_token','refresh_token','domain','placement','placement_options','expires_in'].forEach(function(k){ var v = qs.get(k); if(v !== null && v !== '') out[k] = v; });
+  } catch(e) {}
+  mergeBitrixAuth(out, bitrixAuthCache || {});
+  try { if(window.BX24 && typeof BX24.getAuth === 'function') mergeBitrixAuth(out, BX24.getAuth() || {}); } catch(e) {}
+  bitrixAuthCache = Object.keys(out).length ? out : bitrixAuthCache;
+  return Object.keys(out).length ? out : null;
+}
+function hasBitrixAccess(auth){ return !!(auth && (auth.AUTH_ID || auth.access_token || auth.auth) && (auth.DOMAIN || auth.domain)); }
+function refreshBitrixAuth(){
+  return new Promise(function(resolve){
+    var current = bitrixAuthPayload();
+    if(hasBitrixAccess(current)) return resolve(current);
+    var finished = false;
+    function done(value){ if(finished) return; finished = true; resolve(value || bitrixAuthPayload()); }
+    try {
+      if(window.BX24 && typeof BX24.init === 'function') {
+        var timer = setTimeout(function(){ done(bitrixAuthPayload()); }, 1500);
+        BX24.init(function(){ clearTimeout(timer); try { mergeBitrixAuth(bitrixAuthCache = bitrixAuthCache || {}, BX24.getAuth ? BX24.getAuth() : {}); } catch(e) {} done(bitrixAuthPayload()); });
+        return;
+      }
+    } catch(e) {}
+    done(current);
+  });
+}
+function isMobileView(){
+  try {
+    return (window.matchMedia && window.matchMedia('(max-width: 860px)').matches) ||
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent || '') ||
+      (Math.min(window.innerWidth || 9999, document.documentElement.clientWidth || 9999) <= 860);
+  } catch(e) {
+    return (window.innerWidth || 0) <= 860;
+  }
+}
+var initialViewMeta = { explicit:false, saved:false };
+function initialViewMode(){
+  var queryView = '';
+  try { queryView = new URLSearchParams(window.location.search || '').get('view') || ''; } catch(e) {}
+  if(queryView === 'list' || queryView === 'calendar' || queryView === 'availability') { initialViewMeta.explicit = true; return queryView; }
+  var saved = localStorage.getItem('bookingViewModeV3') || '';
+  if(saved === 'list' || saved === 'calendar' || saved === 'availability') { initialViewMeta.saved = true; return saved; }
+  if(isMobileView()) return 'list';
+  return 'calendar';
+}
+var state = {
+  date: todayMoscow(),
+  viewMode: initialViewMode(),
+  viewModeUserSelected: initialViewMeta.explicit,
+  groupId: null,
+  calendar: null,
+  settings: null,
+  resources: [],
+  products: [],
+  productSections: [],
+  productsLoaded: false,
+  dealFields: [],
+  dealFieldsByName: {},
+  dealCategories: [],
+  dealStages: [],
+  bizprocTemplates: [],
+  settingsSectionsGroupIdx: null,
+  selectedDealId: boot.context && boot.context.dealId ? String(boot.context.dealId) : '',
+  dealDefaults: {},
+  editingBooking: null,
+  formProducts: [],
+  settingsExpandedGroups: {},
+  settingsExpandedSubs: {}
+};
+
+function el(id){ return document.getElementById(id); }
+function show(id, yes){ el(id).classList.toggle('hidden', !yes); }
+function text(id, value){ el(id).textContent = value || ''; }
+function html(id, value){ el(id).innerHTML = value || ''; }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function pad(n){ return String(n).padStart(2,'0'); }
+function todayMoscow(){ return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+function addDays(dateStr, n){ var d = new Date(dateStr + 'T12:00:00+03:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function addHoursLocal(dateStr, hour, hours){ var d = new Date(dateStr + 'T' + pad(hour) + ':00:00+03:00'); d.setHours(d.getHours()+hours); return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d).replace(' ','T').slice(0,16); }
+function moscowDayMs(dateStr, h, m){ return new Date(dateStr + 'T' + pad(h||0) + ':' + pad(m||0) + ':00+03:00').getTime(); }
+function toMoscowInput(value){ if(!value) return ''; var d = new Date(value); if(isNaN(d)) return String(value).slice(0,16); return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d).replace(' ','T').slice(0,16); }
+function fmtTime(value){ if(!value) return ''; var d = new Date(value); if(isNaN(d)) return ''; return new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'}).format(d); }
+function fmtDateTime(value){ if(!value) return ''; var d = new Date(value); if(isNaN(d)) return ''; return new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(d); }
+function rememberSessionToken(res){
+  if(res && res.sessionToken) {
+    sessionToken = String(res.sessionToken);
+    try { localStorage.setItem('bookingLocalSessionV3', sessionToken); } catch(e) {}
+  }
+}
+function xhrJson(method, base, path, data){
+  return new Promise(function(resolve,reject){
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, base + path, true);
+    xhr.setRequestHeader('Content-Type','application/json');
+    if(sessionToken) xhr.setRequestHeader('X-Booking-Session', sessionToken);
+    xhr.onreadystatechange = function(){
+      if(xhr.readyState !== 4) return;
+      var res = {};
+      try { res = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch(e){ res = { error: xhr.responseText }; }
+      if(xhr.status >= 200 && xhr.status < 300) { rememberSessionToken(res); resolve(res); }
+      else { if(!res || typeof res !== 'object') res = {}; res.status = xhr.status; if(!res.error) res.error = 'HTTP ' + xhr.status; reject(res); }
+    };
+    xhr.send(data ? JSON.stringify(data) : null);
+  });
+}
+var bitrixSessionRefreshPromise = null;
+function restoreBitrixSession(){
+  if(entryMode !== 'bitrix') return Promise.reject({ error: 'Нет Bitrix24-сессии' });
+  if(bitrixSessionRefreshPromise) return bitrixSessionRefreshPromise;
+  bitrixSessionRefreshPromise = refreshBitrixAuth().then(function(authPayload){
+    if(!hasBitrixAccess(authPayload)) throw { error: 'Bitrix24 не передал авторизацию. Обновите приложение из карточки сделки.' };
+    return xhrJson('POST', API_BASE, '/session/refresh', { _bitrixAuth: authPayload });
+  }).then(function(res){ bitrixSessionRefreshPromise = null; return res; }, function(e){ bitrixSessionRefreshPromise = null; throw e; });
+  return bitrixSessionRefreshPromise;
+}
+function request(method, base, path, data, retried){
+  return xhrJson(method, base, path, data).catch(function(e){
+    if(!retried && base === API_BASE && e && e.status === 401 && entryMode === 'bitrix' && String(path || '').indexOf('/booking/') === 0) {
+      return restoreBitrixSession().then(function(){ return request(method, base, path, data, true); });
+    }
+    throw e;
+  });
+}
+function api(method,path,data){ return request(method, API_BASE, path, data); }
+function auditEvent(type, action, extra){
+  try {
+    var ctx = Object.assign({}, boot.context || {}, { authKind: boot.authKind || '', userRole: boot.userRole || '', page: entryMode === 'view' ? 'booking-view' : 'app' });
+    var data = Object.assign({ eventType:type, action:action, context:ctx, dealId:(boot.context&&boot.context.dealId)||'', groupId:state.groupId||'', date:state.date||'', viewMode:state.viewMode||'' }, extra || {});
+    request('POST', API_BASE, '/audit', data).catch(function(){});
+  } catch(e) {}
+}
+function safeApi(method,path,data,fallback){ return api(method,path,data).catch(function(){ return fallback || {}; }); }
+function sendPaymentSummaryReport(){
+  auditEvent('button','payment_summary_report',{});
+  return withLoader(function(){
+    return api('POST','/payment-summary',{}).then(function(res){
+      alert((res && res.message) || 'Отчет отправлен в чат');
+    });
+  }, 'Отправляем отчет в чат').catch(function(e){
+    alert(e.error || 'Не удалось отправить отчет');
+  });
+}
+var loaderMessages = [
+  'Загружаем лиды',
+  'Загружаем сделки',
+  'Проверяем бронирования',
+  'Синхронизируем ресурсы',
+  'Обновляем свободные слоты',
+  'Получаем список бань',
+  'Получаем список домиков',
+  'Проверяем занятость ресурсов',
+  'Сверяем даты заезда и выезда',
+  'Загружаем товары каталога',
+  'Подтягиваем услуги и доплаты',
+  'Проверяем предоплаты',
+  'Собираем данные сделки',
+  'Обновляем поля CRM',
+  'Готовим календарную сетку',
+  'Строим список бронирований',
+  'Проверяем пересечения по времени',
+  'Считаем длительность брони',
+  'Загружаем настройки групп',
+  'Проверяем привязки к канбану',
+  'Обновляем карточки ресурсов',
+  'Подготавливаем мобильный список',
+  'Сортируем бронирования по времени',
+  'Подгружаем данные клиентов',
+  'Синхронизируем изменения Bitrix24',
+  'Проверяем доступы пользователя',
+  'Обновляем кеш календаря',
+  'Ищем актуальные брони',
+  'Проверяем свободные окна',
+  'Готовим интерфейс администратора',
+  'Загружаем расписание на дату',
+  'Подтягиваем данные по оплатам',
+  'Сверяем товары в сделке',
+  'Обновляем видимость полей',
+  'Готовим таблицу занятости',
+  'Формируем итоговую картину дня'
+];
+var loaderDepth = 0;
+var loaderTimer = null;
+var loaderLastIndex = -1;
+function pickLoaderMessage(preferred){
+  var source = loaderMessages.slice();
+  if(preferred) source.push(preferred);
+  if(!source.length) return 'Загружаем данные';
+  var i = Math.floor(Math.random() * source.length);
+  if(source.length > 1 && i === loaderLastIndex) i = (i + 1) % source.length;
+  loaderLastIndex = i;
+  return source[i];
+}
+function setLoaderMessage(preferred){
+  var target = el('loadingText');
+  if(target) target.textContent = preferred || pickLoaderMessage();
+}
+function showLoader(preferred){
+  loaderDepth++;
+  if(loaderDepth === 1){
+    document.body.classList.add('appLoading');
+    show('loadingOverlay', true);
+    setLoaderMessage(preferred);
+    loaderTimer = setInterval(function(){ setLoaderMessage(); }, 900);
+  } else if(preferred) {
+    setLoaderMessage(preferred);
+  }
+  requestFrameHeight();
+}
+function hideLoader(){
+  if(loaderDepth > 0) loaderDepth--;
+  if(loaderDepth === 0){
+    if(loaderTimer) clearInterval(loaderTimer);
+    loaderTimer = null;
+    document.body.classList.remove('appLoading');
+    show('loadingOverlay', false);
+    requestFrameHeight();
+  }
+}
+function withLoader(task, preferred){
+  showLoader(preferred);
+  var p;
+  try {
+    p = (typeof task === 'function') ? task() : task;
+  } catch(e) {
+    hideLoader();
+    return Promise.reject(e);
+  }
+
+  return Promise.resolve(p).then(
+    function(result){
+      hideLoader();
+      return result;
+    },
+    function(err){
+      hideLoader();
+      throw err;
+    }
+  );
+}
+function normalizeViewMode(mode){ return mode === 'list' || mode === 'availability' ? mode : 'calendar'; }
+function normalizeOptionalViewMode(mode){ return mode === 'calendar' || mode === 'list' || mode === 'availability' ? mode : ''; }
+function groupDefaultViewMode(g){
+  g = g || {};
+  var raw = isMobileView()
+    ? (g.defaultMobileView || g.mobileViewMode || g.defaultMobileViewMode)
+    : (g.defaultDesktopView || g.desktopViewMode || g.defaultDesktopViewMode);
+  raw = String(raw || '').trim();
+  return normalizeOptionalViewMode(raw);
+}
+function viewModeOptionList(value){
+  value = normalizeOptionalViewMode(String(value || '').trim());
+  var opts = [
+    {id:'', title:'Авто'},
+    {id:'calendar', title:'Календарь'},
+    {id:'list', title:'Список'},
+    {id:'availability', title:'Доступность'}
+  ];
+  return opts.map(function(o){ return '<option value="'+esc(o.id)+'" '+(String(o.id)===String(value)?'selected':'')+'>'+esc(o.title)+'</option>'; }).join('');
+}
+function nextViewMode(){
+  if(state.viewMode === 'calendar') return 'list';
+  if(state.viewMode === 'list') return 'availability';
+  return 'calendar';
+}
+function updateViewToggle(){
+  var btn = el('viewToggleBtn');
+  if(!btn) return;
+  if(state.viewMode === 'availability'){
+    btn.innerHTML = '▦ <span class="viewToggleText">Календарь</span>';
+    btn.title = 'Показать календарь';
+  } else if(state.viewMode === 'list') {
+    btn.innerHTML = '▤ <span class="viewToggleText">Доступность</span>';
+    btn.title = 'Показать карточки доступности';
+  } else {
+    btn.innerHTML = '☰ <span class="viewToggleText">Список</span>';
+    btn.title = 'Показать списком';
+  }
+}
+function setViewMode(mode, auto){
+  var nextMode = normalizeViewMode(mode);
+  if(!auto && state.viewMode !== nextMode) auditEvent('ui', 'change_view', {to:nextMode});
+  state.viewMode = nextMode;
+  if(!auto){ state.viewModeUserSelected = true; localStorage.setItem('bookingViewModeV3', state.viewMode); }
+  updateViewToggle();
+  if(state.calendar) renderCalendar();
+  requestFrameHeight();
+}
+function applyDefaultViewForCurrentGroup(){
+  var g = currentGroup();
+  var defaultMode = groupDefaultViewMode(g);
+  if(defaultMode && !initialViewMeta.explicit){ setViewMode(defaultMode, true); return; }
+  if(state.viewModeUserSelected) return;
+  if(groupMode(g) === 'interval') setViewMode('availability', true);
+  else if(state.viewMode === 'availability') setViewMode(isMobileView() ? 'list' : 'calendar', true);
+  else updateViewToggle();
+}
+function requestFrameHeight(){
+  try {
+    var h = Math.max(920, document.documentElement.scrollHeight || 0, document.body.scrollHeight || 0);
+    var viewportW = Math.ceil(Math.max(320, document.documentElement.clientWidth || 0, window.innerWidth || 0));
+    var w = isMobileView() ? viewportW : Math.max(1000, viewportW);
+    if(window.BX24 && BX24.resizeWindow) BX24.resizeWindow(w, h);
+    if(window.BX24 && BX24.fitWindow) BX24.fitWindow();
+  } catch(e) {}
+}
+if(window.BX24 && BX24.init){ try { BX24.init(function(){ requestFrameHeight(); }); } catch(e) {} }
+window.addEventListener('load', function(){ setTimeout(requestFrameHeight, 80); });
+window.addEventListener('resize', function(){ setTimeout(requestFrameHeight, 80); });
+
+
+function groupMode(g){ return String((g && (g.bookingMode || g.scheduleMode)) || 'duration'); }
+function techWindowMinutes(g){ return Math.max(0, Math.min(1440, Number((g && (g.techWindowMinutes || g.technicalWindowMinutes)) || 0) || 0)); }
+function currentUserRole(){ return String((state.calendar && state.calendar.userRole) || boot.userRole || '').toLowerCase(); }
+function isTechnologistView(){ return currentUserRole() === 'technologist'; }
+function timeOr(value, fallback){ value = String(value || '').trim(); return /^\d{2}:\d{2}$/.test(value) ? value : fallback; }
+function inputToMoscowDate(value){
+  var s = String(value || '');
+  if(!s) return null;
+  if(/Z$|[+-]\d\d:\d\d$/.test(s)) return new Date(s);
+  return new Date((s.length === 16 ? s + ':00' : s) + '+03:00');
+}
+function moscowInputFromDate(d){
+  return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d).replace(' ','T').slice(0,16);
+}
+function splitInputDateTime(value){
+  var s = String(value || '').slice(0,16);
+  return { date: s.slice(0,10), time: s.slice(11,16) || '00:00' };
+}
+function normalizeTimeText(value, fallback){
+  var raw = String(value || '').trim();
+  var m = raw.match(/^(\d{1,2})(?::?(\d{2}))?$/);
+  if(!m) return fallback || '00:00';
+  var h = Number(m[1]);
+  var min = m[2] === undefined ? 0 : Number(m[2]);
+  if(!Number.isFinite(h) || !Number.isFinite(min) || h < 0 || h > 23 || min < 0 || min > 59) return fallback || '00:00';
+  return String(h).padStart(2,'0') + ':' + String(min).padStart(2,'0');
+}
+function setPeriodControlsFromHidden(){
+  var st = splitInputDateTime(el('bookingStart').value);
+  var en = splitInputDateTime(el('bookingEnd').value);
+  el('bookingStartDate').value = st.date || state.date;
+  el('bookingStartTime').value = normalizeTimeText(st.time, '00:00');
+  el('bookingEndDate').value = en.date || state.date;
+  el('bookingEndTime').value = normalizeTimeText(en.time, '00:00');
+}
+function joinDateTime(dateId, timeId){
+  var d = el(dateId).value || state.date;
+  var input = el(timeId);
+  var t = normalizeTimeText(input.value, '00:00');
+  input.value = t;
+  return d + 'T' + t;
+}
+function syncHiddenFromPeriodControls(){
+  el('bookingStart').value = joinDateTime('bookingStartDate','bookingStartTime');
+  el('bookingEnd').value = joinDateTime('bookingEndDate','bookingEndTime');
+}
+function bitrixDateTime(value){
+  var s = String(value || '').slice(0,16);
+  if(!s) return '';
+  return s + ':00+03:00';
+}
+function isCoreBookingField(name){
+  return String(name || '') === BOOKING_START_FIELD || String(name || '') === BOOKING_END_FIELD;
+}
+function dateAtMoscowTime(dateStr, timeStr){ return new Date(dateStr + 'T' + timeStr + ':00+03:00'); }
+function nonNegativeInteger(value, fallback){
+  var raw = (value === undefined || value === null || value === '') ? fallback : value;
+  var n = Number(raw);
+  if(!Number.isFinite(n)) n = Number(fallback);
+  if(!Number.isFinite(n)) n = 1;
+  return Math.max(0, Math.floor(n));
+}
+function daysBetweenMoscowDates(startValue, endValue){
+  var st = splitInputDateTime(startValue);
+  var en = splitInputDateTime(endValue);
+  if(!st.date || !en.date) return 1;
+  var sd = dateAtMoscowTime(st.date, '00:00');
+  var ed = dateAtMoscowTime(en.date, '00:00');
+  if(isNaN(sd) || isNaN(ed)) return 1;
+  return Math.max(0, Math.round((ed - sd) / 86400000));
+}
+function calcPeriodFromClick(clickedStart, days){
+  var g = currentGroup() || {};
+  var startSeed = String(clickedStart || (state.date + 'T00:00')).slice(0,16);
+  var datePart = startSeed.slice(0,10) || state.date;
+  if(groupMode(g) === 'interval'){
+    var d = nonNegativeInteger(days, g.defaultDays !== undefined && g.defaultDays !== null ? g.defaultDays : 1);
+    var start = dateAtMoscowTime(datePart, timeOr(g.checkInTime, '14:00'));
+    var end = dateAtMoscowTime(addDays(datePart, d), timeOr(g.checkOutTime, '12:00'));
+    if(end <= start) end.setDate(end.getDate() + 1);
+    return { start: moscowInputFromDate(start), end: moscowInputFromDate(end), days: d };
+  }
+  var startDate = inputToMoscowDate(startSeed) || dateAtMoscowTime(datePart, '00:00');
+  var hours = Math.max(1, Number(g.durationHours || g.minBookingHours || 1));
+  var endDate = new Date(startDate.getTime() + hours * 3600000);
+  return { start: moscowInputFromDate(startDate), end: moscowInputFromDate(endDate), days: 1 };
+}
+function updateBookingScheduleInfo(){
+  syncHiddenFromPeriodControls();
+  var g = currentGroup() || {};
+  var mode = groupMode(g);
+  show('bookingDaysWrap', mode === 'interval');
+  var period = '<span>Период: '+esc(fmtDateTime(el('bookingStart').value))+' — '+esc(fmtDateTime(el('bookingEnd').value))+'</span>';
+  var details = mode === 'interval'
+    ? '<span class="pill">Интервал: '+esc(timeOr(g.checkInTime,'14:00'))+' → '+esc(timeOr(g.checkOutTime,'12:00'))+'</span>'
+    : '<span class="pill">Минимум: '+esc(g.durationHours || g.minBookingHours || 1)+' ч.</span>';
+  html('bookingScheduleInfo', period + details);
+}
+function recalcBookingPeriod(){
+  var g = currentGroup() || {};
+  if(groupMode(g) === 'interval'){
+    var startDate = el('bookingStartDate').value || state.date;
+    var startTime = normalizeTimeText(el('bookingStartTime').value, timeOr(g.checkInTime, '14:00'));
+    var endTime = normalizeTimeText(el('bookingEndTime').value, timeOr(g.checkOutTime, '12:00'));
+    var d = nonNegativeInteger(el('bookingDays').value, g.defaultDays !== undefined && g.defaultDays !== null ? g.defaultDays : 1);
+    var start = dateAtMoscowTime(startDate, startTime);
+    var end = dateAtMoscowTime(addDays(startDate, d), endTime);
+    if(end <= start) end.setDate(end.getDate() + 1);
+    el('bookingStart').value = moscowInputFromDate(start);
+    el('bookingEnd').value = moscowInputFromDate(end);
+    el('bookingDays').value = d;
+  } else {
+    var seed = joinDateTime('bookingStartDate','bookingStartTime');
+    var p = calcPeriodFromClick(seed || (state.date+'T00:00'), el('bookingDays').value);
+    el('bookingStart').value = p.start; el('bookingEnd').value = p.end; el('bookingDays').value = p.days;
+  }
+  setPeriodControlsFromHidden();
+  updateDefaultProductQuantity(); updateBookingScheduleInfo();
+}
+function syncManualBookingPeriod(){
+  syncHiddenFromPeriodControls();
+  updateDefaultProductQuantity(); updateBookingScheduleInfo();
+}
+function productById(id){ return (state.products || []).find(function(p){ return Number(p.id) === Number(id); }); }
+function normalizeResourceDefaultItems(value, keepEmpty){
+  var source = Array.isArray(value) ? value : (value && typeof value === 'object' ? [value] : []);
+  var seen = {};
+  var out = [];
+  source.forEach(function(item){
+    item = item && typeof item === 'object' ? item : {};
+    var rawProductId = item.productId || item.PRODUCT_ID || item.id || '';
+    var productId = Number(rawProductId || 0);
+    if(!Number.isFinite(productId) || productId <= 0){
+      if(keepEmpty) out.push({ productId:'', quantity: Math.max(1, Number(item.quantity || item.qty || 1)) });
+      return;
+    }
+    if(seen[productId]) return;
+    seen[productId] = true;
+    out.push({ productId: productId, quantity: Math.max(1, Number(item.quantity || item.qty || 1)), price: item.price });
+  });
+  return out;
+}
+function groupResourceDefaults(resourceId){
+  var g = currentGroup() || {};
+  var defs = g.resourceDefaults || g.defaultProductsByResource || {};
+  var items = normalizeResourceDefaultItems(defs[String(resourceId)] || defs[Number(resourceId)] || null);
+  if(!items.length && Array.isArray(g.resourceDefaultProducts)){
+    items = normalizeResourceDefaultItems(g.resourceDefaultProducts.filter(function(x){ return Number(x && x.resourceId) === Number(resourceId); }));
+  }
+  return items;
+}
+function groupResourceDefault(resourceId){ return groupResourceDefaults(resourceId)[0] || null; }
+function defaultProductQuantity(resourceId, def){
+  var g = currentGroup() || {};
+  if(groupMode(g) === 'interval') return Math.max(1, nonNegativeInteger(el('bookingDays').value, g.defaultDays !== undefined && g.defaultDays !== null ? g.defaultDays : 1));
+  return Math.max(1, Number((def && def.quantity) || 1));
+}
+function applyDefaultProductForResource(resourceId){
+  if(state.editingBooking) return;
+  var defs = groupResourceDefaults(resourceId);
+  if(!defs.length) return;
+  defs.forEach(function(def){
+    var product = productById(def.productId) || { id: def.productId, name: 'Товар #'+def.productId, price: def.price || 0 };
+    var qty = defaultProductQuantity(resourceId, def);
+    var price = Number(product.price || def.price || 0);
+    var existing = state.formProducts.find(function(p){ return Number(p.productId) === Number(def.productId); });
+    if(existing){ existing.quantity = qty; existing.price = price; existing.sum = Math.round(qty * price * 100) / 100; existing.isDefault = true; }
+    else state.formProducts.push({ productId:Number(def.productId), name: product.name, price:price, quantity: qty, sum: Math.round(qty * price * 100) / 100, isDefault:true });
+  });
+  renderProductRows();
+}
+function updateDefaultProductQuantity(){
+  var resourceId = el('bookingResource').value;
+  var defs = groupResourceDefaults(resourceId);
+  if(!defs.length) return;
+  var defaultIds = {};
+  defs.forEach(function(def){ defaultIds[Number(def.productId)] = def; });
+  state.formProducts.forEach(function(p){
+    var def = defaultIds[Number(p.productId)];
+    if(def && (p.isDefault || !state.editingBooking)){
+      var qty = defaultProductQuantity(resourceId, def);
+      p.quantity = qty;
+      p.sum = Math.round(qty * Number(p.price || 0) * 100) / 100;
+    }
+  });
+  renderProductRows();
+}
+function selectedSectionIdsWithChildren(){
+  var g = currentGroup();
+  var base = g && Array.isArray(g.productSectionIds) ? g.productSectionIds.map(String) : [];
+  if(!base.length) return null;
+  var selected = new Set(base);
+  var sections = state.productSections || [];
+  var changed = true;
+  while(changed){
+    changed = false;
+    sections.forEach(function(sec){
+      var pid = sec.parentId == null || sec.parentId === '' ? 'root' : String(sec.parentId);
+      if(selected.has(pid) && !selected.has(String(sec.id))){ selected.add(String(sec.id)); changed = true; }
+    });
+  }
+  return selected;
+}
+function currentGroup(){
+  var groups = (state.calendar && Array.isArray(state.calendar.groups) && state.calendar.groups.length)
+    ? state.calendar.groups
+    : (state.settings && Array.isArray(state.settings.groups) ? state.settings.groups : []);
+  return groups.find(function(g){ return String(g.id) === String(state.groupId); }) || groups[0] || null;
+}
+function pickGroupFromDeal(){
+  var settings = state.settings || {};
+  var groups = Array.isArray(settings.groups) ? settings.groups : [];
+  var deal = state.dealDefaults || {};
+  var cat = deal.CATEGORY_ID !== undefined && deal.CATEGORY_ID !== null ? String(deal.CATEGORY_ID) : '';
+  if(cat !== ''){
+    var found = groups.find(function(g){ return String(g.kanbanCategoryId || '') === cat; });
+    if(found){ state.groupId = found.id; return; }
+  }
+  if(!state.groupId) state.groupId = settings.defaultGroupId || (groups[0] && groups[0].id) || null;
+}
+
+function init(){
+  auditEvent('app', 'open', {});
+  el('datePicker').value = state.date;
+  el('settingsBtn').classList.toggle('hidden', !boot.canSettings);
+  if(el('reportBtn')) el('reportBtn').classList.toggle('hidden', !boot.canSettings);
+  updateViewToggle();
+  var isBitrixEntry = entryMode === 'bitrix';
+  show('readonlyNotice', !boot.canEdit && !boot.loginRequired && !isBitrixEntry);
+  text('status', boot.authKind === 'bitrix' ? 'Загрузка...' : (isBitrixEntry ? 'Битрикс24 · ожидание сессии' : 'Прямая ссылка · просмотр'));
+
+  if(boot.loginRequired && !sessionToken){
+    if(isBitrixEntry){
+      show('loginPanel', true);
+      show('appArea', false);
+      html('loginPanel',
+        '<h2>Нет активной сессии Битрикс24</h2>' +
+        '<p class="muted">Этот endpoint предназначен только для открытия приложения из встройки Битрикс24. Для входа по логину и паролю используйте отдельный адрес.</p>' +
+        '<div class="notice warn">Откройте приложение из Битрикс24 или перейдите на <b>/booking-view</b>.</div>'
+      );
+      return;
+    }
+    show('loginPanel', true); show('appArea', false); return;
+  }
+  show('loginPanel', false);
+  if(boot.canEdit && !state.selectedDealId){ show('dealGate', true); show('appArea', false); }
+  else {
+    show('dealGate', false); show('appArea', true);
+    loadSettingsAndCalendar();
+  }
+}
+
+
+function loadSettingsAndCalendar(){
+  return withLoader(function(){
+    text('status','Загрузка...');
+    return api('GET','/settings').then(function(s){
+      state.settings = s.settings || s;
+      var tasks = [];
+      tasks.push(safeApi('GET','/deal-fields',null,{fields:[]}).then(function(res){
+        state.dealFields = res.fields || [];
+        state.dealFieldsByName = {};
+        state.dealFields.forEach(function(f){ state.dealFieldsByName[f.name] = f; });
+      }));
+      if(state.selectedDealId && boot.canEdit){
+        tasks.push(api('POST','/deals/get',{dealId:state.selectedDealId}).then(function(res){
+          state.dealDefaults = res.deal || {};
+          renderDealInfo();
+        }).catch(function(){}));
+      }
+      return Promise.all(tasks);
+    }).then(function(){
+      pickGroupFromDeal();
+      return loadCalendar(false);
+    }).catch(function(e){ text('status', e.error || 'Ошибка загрузки настроек'); });
+  }, 'Запускаем систему бронирования');
+}
+function renderDealInfo(){
+  var d = state.dealDefaults || {};
+  if(!state.selectedDealId){ show('dealInfo', false); return; }
+  html('dealInfo','<span class="dealPrefix">Сделка</span> <b>#'+esc(state.selectedDealId)+'</b>'+(d.TITLE?' · '+esc(d.TITLE):''));
+  show('dealInfo', true);
+}
+function loadCalendar(force){
+  auditEvent('calendar', force ? 'load_force' : 'load', {});
+  return withLoader(function(){
+    el('datePicker').value = state.date;
+    var payload = { date: state.date, groupId: state.groupId, force: !!force };
+    return api('POST','/calendar', payload).then(function(data){
+      state.calendar = data;
+      state.resources = data.resources || [];
+      if(state.settings && Array.isArray(data.groups)){
+        state.settings.groups = data.groups;
+        if(data.selectedGroupId) state.settings.defaultGroupId = data.selectedGroupId;
+      }
+      state.groupId = data.selectedGroupId || null;
+      renderGroups(data.groups || []);
+      applyDefaultViewForCurrentGroup();
+      renderCalendar();
+      text('status', 'Обновлено: ' + (data.updatedAt ? new Date(data.updatedAt).toLocaleString('ru-RU') : ''));
+      requestFrameHeight();
+    }).catch(function(e){
+      text('status', e.error || 'Ошибка загрузки календаря');
+      html('calendarGrid','');
+      html('listWrap','');
+    });
+  }, force ? 'Обновляем календарь после изменений' : 'Загружаем бронирования на выбранную дату');
+}
+function renderGroups(groups){
+  var out = '<select id="groupSelect" class="groupSelect" title="Группа бронирования">';
+  groups.forEach(function(g){
+    out += '<option value="'+esc(g.id)+'" '+(String(g.id)===String(state.groupId)?'selected':'')+'>'+esc(g.title)+'</option>';
+  });
+  out += '</select>';
+  html('groups', out);
+  var select = el('groupSelect');
+  if(select) select.onchange = function(){ state.groupId = select.value; auditEvent('ui', 'change_group', {groupId:state.groupId}); state.viewModeUserSelected = initialViewMeta.explicit; loadCalendar(false); };
+}
+function renderCalendarList(){
+  var data = state.calendar || {};
+  var resources = data.resources || [];
+  var bookings = data.bookings || [];
+  var techWindows = data.techWindows || [];
+  show('calendarWrap', false);
+  show('listWrap', true);
+  show('availabilityWrap', false);
+  if(resources.length === 0){
+    html('listWrap','<div class="listEmpty">В выбранной группе нет ресурсов. Откройте «Настройка» и добавьте ресурсы в группу.</div>');
+    return;
+  }
+  var resById = {};
+  resources.forEach(function(r){ resById[String(r.id)] = r; });
+  var dayStart = moscowDayMs(state.date,0,0);
+  var dayEnd = moscowDayMs(addDays(state.date,1),0,0);
+  function overlaps(item){
+    var bs = new Date(item.start).getTime();
+    var be = new Date(item.end).getTime();
+    return isFinite(bs) && isFinite(be) && bs < dayEnd && be > dayStart;
+  }
+  var shownBookings = bookings.filter(overlaps).sort(function(a,b){ return new Date(a.start).getTime() - new Date(b.start).getTime(); });
+  var shownTech = techWindows.filter(overlaps).sort(function(a,b){ return new Date(a.start).getTime() - new Date(b.start).getTime(); });
+  var dayTitle = new Date(state.date + 'T12:00:00+03:00').toLocaleDateString('ru-RU',{weekday:'long', day:'2-digit', month:'long', year:'numeric'});
+  var out = '<div class="listHeader"><div><b>'+esc(dayTitle)+'</b><div class="muted">'+esc(currentGroup() && currentGroup().title ? currentGroup().title : '')+'</div></div><span class="pill">Броней: '+shownBookings.length+' · Техокон: '+shownTech.length+'</span></div>';
+  if(boot.canEdit){
+    out += '<div class="listQuickAdd">';
+    resources.forEach(function(r){ out += '<button data-list-add-resource="'+esc(r.id)+'">+ '+esc(r.name)+'</button>'; });
+    out += '</div>';
+  }
+  var items = [];
+  shownBookings.forEach(function(b){ items.push({ kind:'booking', startMs:new Date(b.start).getTime(), item:b }); });
+  shownTech.forEach(function(t){ items.push({ kind:'tech', startMs:new Date(t.start).getTime(), item:t }); });
+  items.sort(function(a,b){ return a.startMs - b.startMs || (a.kind === 'booking' ? -1 : 1); });
+  if(!items.length){
+    out += '<div class="listEmpty">На выбранную дату бронирований и технологических окон нет.</div>';
+  }
+  items.forEach(function(entry){
+    if(entry.kind === 'tech'){
+      var t = entry.item;
+      var tr = resById[String(t.resourceId)] || {};
+      out += '<div class="listBooking listTechWindow" '+(boot.canEdit ? 'data-list-tech-add="'+esc(t.resourceId)+'" data-list-tech-start="'+esc(toMoscowInput(t.start))+'"' : '')+'>';
+      out += '<div class="listBookingTop"><strong>Тех. окно</strong><span class="pill techPill">'+esc(tr.name || ('#'+t.resourceId))+'</span></div>';
+      out += '<div class="listMeta"><span>'+esc(fmtDateTime(t.start))+' — '+esc(fmtDateTime(t.end))+'</span></div>';
+      if(t.sourceBookingName && !isTechnologistView()) out += '<div class="listField"><b>После брони:</b> '+esc(t.sourceBookingName)+'</div>';
+      out += '</div>';
+      return;
+    }
+    var b = entry.item;
+    var r = resById[String(b.resourceId)] || {};
+    var title = b.name || b.clientName || 'Бронирование';
+    out += '<div class="listBooking" data-list-booking="'+esc(b.id)+'">';
+    out += '<div class="listBookingTop"><strong>'+esc(title)+'</strong><span class="pill">'+esc(r.name || ('#'+b.resourceId))+'</span></div>';
+    out += '<div class="listMeta"><span>'+esc(fmtDateTime(b.start))+' — '+esc(fmtDateTime(b.end))+'</span>';
+    if(b.dealId) out += '<span>Сделка #'+esc(b.dealId)+'</span>';
+    if(b.clientName) out += '<span>'+esc(b.clientName)+'</span>';
+    out += '</div>';
+    visibleDealFields('showList').forEach(function(f){
+      var values = b.dealFieldValues || {};
+      var val = values[f.name];
+      if(val === undefined || val === null || val === '') return;
+      var meta = state.dealFieldsByName[f.name] || {};
+      out += '<div class="listField"><b>'+esc(fieldLabel(f))+':</b> '+esc(formatDealFieldValue(val, meta))+'</div>';
+    });
+    out += '</div>';
+  });
+  html('listWrap', out);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-list-booking]'), function(div){
+    div.onclick = function(){
+      var id = div.getAttribute('data-list-booking');
+      var b = bookings.find(function(x){ return String(x.id) === String(id); });
+      if(b) openBookingView(b);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-list-tech-add]'), function(div){
+    div.onclick = function(){ openBookingForm(null, div.getAttribute('data-list-tech-add'), div.getAttribute('data-list-tech-start') || (state.date+'T00:00'), null); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-list-add-resource]'), function(btn){
+    btn.onclick = function(){ openBookingForm(null, btn.getAttribute('data-list-add-resource'), state.date+'T00:00', null); };
+  });
+}
+function clipIntervalToDay(item, dayStart, dayEnd){
+  var startMs = new Date(item.start).getTime();
+  var endMs = new Date(item.end).getTime();
+  if(!isFinite(startMs) || !isFinite(endMs) || startMs >= dayEnd || endMs <= dayStart) return null;
+  return Object.assign({}, item, { startMs: Math.max(startMs, dayStart), endMs: Math.min(endMs, dayEnd), realStartMs: startMs, realEndMs: endMs });
+}
+function buildAvailabilityPieces(intervals, dayStart, dayEnd){
+  var clipped = intervals.map(function(x){ return clipIntervalToDay(x, dayStart, dayEnd); }).filter(Boolean);
+  var points = [dayStart, dayEnd];
+  clipped.forEach(function(x){ points.push(x.startMs); points.push(x.endMs); });
+  points = points.filter(function(v, i, arr){ return isFinite(v) && v >= dayStart && v <= dayEnd && arr.indexOf(v) === i; }).sort(function(a,b){ return a-b; });
+  var pieces = [];
+  for(var i=0;i<points.length-1;i++){
+    var a = points[i], b = points[i+1];
+    if(b <= a) continue;
+    var active = clipped.filter(function(x){ return x.startMs < b && x.endMs > a; });
+    var chosen = active.find(function(x){ return x.type === 'booked'; }) || active.find(function(x){ return x.type === 'tech'; }) || null;
+    var type = chosen ? chosen.type : 'free';
+    var piece = { type:type, startMs:a, endMs:b, source:chosen };
+    var prev = pieces[pieces.length-1];
+    if(prev && prev.type === piece.type && ((prev.source && piece.source && prev.source.id === piece.source.id) || (!prev.source && !piece.source))){ prev.endMs = piece.endMs; }
+    else pieces.push(piece);
+  }
+  return pieces;
+}
+function availabilitySummary(intervals){
+  var booked = intervals.filter(function(i){ return i.type === 'booked'; }).length;
+  var tech = intervals.filter(function(i){ return i.type === 'tech'; }).length;
+  if(!booked && !tech) return { text:'Свободно весь день', className:'' };
+  if(booked && !tech) return { text:'Броней: '+booked, className:'busy' };
+  return { text:(booked ? ('Броней: '+booked+' · ') : '')+'Техокон: '+tech, className:'mixed' };
+}
+function renderAvailabilityCards(){
+  var data = state.calendar || {};
+  var resources = data.resources || [];
+  var bookings = data.bookings || [];
+  var techWindows = data.techWindows || [];
+  show('calendarWrap', false);
+  show('listWrap', false);
+  show('availabilityWrap', true);
+  if(resources.length === 0){ html('availabilityWrap','<div class="listEmpty">В выбранной группе нет ресурсов. Откройте «Настройка» и добавьте ресурсы в группу.</div>'); return; }
+  var dayStart = moscowDayMs(state.date,0,0);
+  var dayEnd = moscowDayMs(addDays(state.date,1),0,0);
+  var dayTitle = new Date(state.date + 'T12:00:00+03:00').toLocaleDateString('ru-RU',{weekday:'long', day:'2-digit', month:'long', year:'numeric'});
+  var out = '<div class="availabilityToolbar"><div><b>'+esc(dayTitle)+'</b><div class="muted">'+esc(currentGroup() && currentGroup().title ? currentGroup().title : '')+'</div></div><div class="availabilityLegend"><span><i class="availabilityDot free"></i>Свободно</span><span><i class="availabilityDot booked"></i>Бронь</span><span><i class="availabilityDot tech"></i>Тех. окно</span></div></div>';
+  out += '<div class="availabilityGrid">';
+  resources.forEach(function(r){
+    var intervals = [];
+    bookings.forEach(function(b){ if(Number(b.resourceId) === Number(r.id)) intervals.push(Object.assign({type:'booked'}, b)); });
+    techWindows.forEach(function(t){ if(Number(t.resourceId) === Number(r.id)) intervals.push(Object.assign({type:'tech'}, t)); });
+    intervals = intervals.map(function(x){ return clipIntervalToDay(x, dayStart, dayEnd); }).filter(Boolean);
+    var pieces = buildAvailabilityPieces(intervals, dayStart, dayEnd);
+    var summary = availabilitySummary(intervals);
+    out += '<article class="availabilityCard" aria-label="'+esc(r.name)+' #'+esc(r.id)+'">';
+    out += '<header class="availabilityHead"><div><h2 class="availabilityName">'+esc(r.name)+'</h2><div class="availabilityId">#'+esc(r.id)+'</div></div><div class="availabilityIcon" aria-hidden="true">▦</div></header>';
+    out += '<div class="availabilitySummary '+esc(summary.className)+'">'+esc(summary.text)+'</div>';
+    out += '<div class="availabilityTimeline"><div class="availabilityBar" aria-label="Шкала занятости с 00:00 до 24:00">';
+    pieces.forEach(function(p){
+      var left = ((p.startMs - dayStart) / (dayEnd - dayStart)) * 100;
+      var width = ((p.endMs - p.startMs) / (dayEnd - dayStart)) * 100;
+      var src = p.source || {};
+      var attrs = '';
+      var label = '';
+      var addable = boot.canEdit && p.type !== 'booked';
+      if(p.type === 'booked'){
+        attrs = ' data-availability-booking="'+esc(src.id)+'"';
+        label = '<span class="availabilityPieceLabel">'+esc(fmtDateTime(src.start))+'<small>→ '+esc(fmtDateTime(src.end))+'</small></span>';
+      } else if(p.type === 'tech'){
+        if(addable) attrs = ' data-availability-add="'+esc(r.id)+'" data-availability-start="'+esc(moscowInputFromDate(new Date(p.startMs)))+'"';
+        label = '<span class="availabilityPieceLabel">Тех.<small>'+esc(fmtTime(src.start))+'–'+esc(fmtTime(src.end))+'</small></span>';
+      } else if(addable) {
+        attrs = ' data-availability-add="'+esc(r.id)+'" data-availability-start="'+esc(moscowInputFromDate(new Date(p.startMs)))+'"';
+      }
+      out += '<div class="availabilityPiece '+esc(p.type)+(addable?' addable':'')+'" style="left:'+left+'%;width:'+width+'%"'+attrs+'>'+label+'</div>';
+    });
+    out += '</div><div class="availabilityAxis" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div></div></article>';
+  });
+  out += '</div>';
+  html('availabilityWrap', out);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-availability-booking]'), function(div){
+    div.onclick = function(ev){ ev.stopPropagation(); var id = div.getAttribute('data-availability-booking'); var b = bookings.find(function(x){ return String(x.id) === String(id); }); if(b) openBookingView(b); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-availability-add]'), function(div){
+    div.onclick = function(ev){ ev.stopPropagation(); openBookingForm(null, div.getAttribute('data-availability-add'), div.getAttribute('data-availability-start') || (state.date+'T00:00'), null); };
+  });
+  requestFrameHeight();
+}
+function renderCalendar(){
+  updateViewToggle();
+  if(state.viewMode === 'availability'){ renderAvailabilityCards(); return; }
+  if(state.viewMode === 'list'){ renderCalendarList(); return; }
+  show('calendarWrap', true);
+  show('listWrap', false);
+  show('availabilityWrap', false);
+  var data = state.calendar || {};
+  var resources = data.resources || [];
+  var bookings = data.bookings || [];
+  var techWindows = data.techWindows || [];
+  if(resources.length === 0){ html('calendarGrid','<div class="card" style="grid-column:1/-1;margin:0">В выбранной группе нет ресурсов. Откройте «Настройка» и добавьте ресурсы в группу.</div>'); return; }
+
+  var dayStart = moscowDayMs(state.date,0,0);
+  var dayEnd = moscowDayMs(addDays(state.date,1),0,0);
+  var out = '<div class="corner">Время</div>';
+  resources.forEach(function(r){ out += '<div class="resourceHeader">'+esc(r.name)+'<div class="muted">#'+esc(r.id)+'</div></div>'; });
+
+  out += '<div class="timeLane">';
+  for(var h=0; h<=24; h++){
+    out += '<div class="hourLine" style="top:'+(h*HOUR_PX)+'px"></div>';
+    if(h<24) out += '<div class="halfLine" style="top:'+(h*HOUR_PX + HOUR_PX/2)+'px"></div>';
+    if(h<24) out += '<div class="timeLabel" style="top:'+(h*HOUR_PX + 6)+'px">'+pad(h)+':00</div>';
+  }
+  out += '</div>';
+
+  resources.forEach(function(r){
+    out += '<div class="resourceColumn" data-resource-col="'+esc(r.id)+'">';
+    for(var h=0; h<24; h++){
+      out += '<div class="hourLine" style="top:'+(h*HOUR_PX)+'px"></div>';
+      out += '<div class="halfLine" style="top:'+(h*HOUR_PX + HOUR_PX/2)+'px"></div>';
+      out += '<div class="slotHotspot" data-hour="'+h+'" data-resource="'+esc(r.id)+'" style="top:'+(h*HOUR_PX)+'px"></div>';
+    }
+    techWindows.forEach(function(t){
+      if(Number(t.resourceId) !== Number(r.id)) return;
+      var ts = new Date(t.start).getTime();
+      var te = new Date(t.end).getTime();
+      if(!isFinite(ts) || !isFinite(te)) return;
+      var cs = Math.max(ts, dayStart);
+      var ce = Math.min(te, dayEnd);
+      if(ce <= cs) return;
+      var top = Math.max(0, Math.round((cs - dayStart) / 3600000 * HOUR_PX));
+      var height = Math.max(24, Math.round((ce - cs) / 3600000 * HOUR_PX) - 4);
+      out += '<div class="techWindow" title="Тех. окно: '+esc(fmtDateTime(t.start))+' — '+esc(fmtDateTime(t.end))+'" style="top:'+top+'px;height:'+height+'px"><strong>Тех. окно</strong><small>'+esc(fmtTime(t.start))+' — '+esc(fmtTime(t.end))+'</small></div>';
+    });
+    bookings.forEach(function(b){
+      if(Number(b.resourceId) !== Number(r.id)) return;
+      var bs = new Date(b.start).getTime();
+      var be = new Date(b.end).getTime();
+      if(!isFinite(bs) || !isFinite(be)) return;
+      var cs = Math.max(bs, dayStart);
+      var ce = Math.min(be, dayEnd);
+      if(ce <= cs) return;
+      var top = Math.max(0, Math.round((cs - dayStart) / 3600000 * HOUR_PX));
+      var height = Math.max(34, Math.round((ce - cs) / 3600000 * HOUR_PX) - 4);
+      var cls = 'booking' + (bs < dayStart ? ' continuedStart' : '') + (be > dayEnd ? ' continuedEnd' : '');
+      var title = b.name || b.clientName || 'Бронирование';
+      out += '<div class="'+cls+'" data-booking="'+esc(b.id)+'" style="top:'+top+'px;height:'+height+'px">';
+      out += '<strong>'+esc(title)+'</strong>';
+      out += '<small>'+esc(fmtDateTime(b.start))+' — '+esc(fmtDateTime(b.end))+'</small>';
+      if(b.clientName) out += '<small>'+esc(b.clientName)+'</small>';
+      if(b.dealId) out += '<small>Сделка #'+esc(b.dealId)+'</small>';
+      visibleDealFields('showList').forEach(function(f){
+        var values = b.dealFieldValues || {};
+        var val = values[f.name];
+        if(val === undefined || val === null || val === '') return;
+        var meta = state.dealFieldsByName[f.name] || {};
+        out += '<small class="calendarListField"><b>'+esc(fieldLabel(f))+':</b> '+esc(formatDealFieldValue(val, meta))+'</small>';
+      });
+      out += '</div>';
+    });
+    out += '</div>';
+  });
+  var grid = el('calendarGrid');
+  grid.style.setProperty('--cols', resources.length);
+  html('calendarGrid', out);
+  requestFrameHeight();
+
+  Array.prototype.forEach.call(document.querySelectorAll('.slotHotspot'), function(cell){
+    cell.onclick = function(){
+      if(!boot.canEdit) return;
+      var hour = Number(cell.getAttribute('data-hour'));
+      var resId = cell.getAttribute('data-resource');
+      openBookingForm(null, resId, state.date+'T'+pad(hour)+':00', null);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.booking'), function(div){
+    div.onclick = function(ev){
+      ev.stopPropagation();
+      var id = div.getAttribute('data-booking');
+      var b = bookings.find(function(x){ return String(x.id) === String(id); });
+      if(b) openBookingView(b);
+    };
+  });
+}
+
+
+function renderDealResults(items){
+  var out = '<div class="card" style="margin-top:10px">';
+  if(!items || !items.length) out += '<div class="muted">Ничего не найдено</div>';
+  (items || []).forEach(function(d){
+    out += '<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0"><div><b>#'+esc(d.ID)+'</b> '+esc(d.TITLE || '')+'</div><button data-deal="'+esc(d.ID)+'">Выбрать</button></div>';
+  });
+  out += '</div>';
+  html('dealResults', out);
+  Array.prototype.forEach.call(document.querySelectorAll('#dealResults button[data-deal]'), function(btn){ btn.onclick = function(){ selectDeal(btn.getAttribute('data-deal')); }; });
+}
+function selectDeal(id){
+  api('POST','/deals/select',{dealId:id}).then(function(){
+    state.selectedDealId = String(id);
+    boot.context = boot.context || {}; boot.context.dealId = state.selectedDealId;
+    show('dealGate', false); show('appArea', true);
+    loadSettingsAndCalendar();
+  }).catch(function(e){ alert(e.error || 'Не удалось выбрать сделку'); });
+}
+
+function loadProducts(){
+  return api('GET','/products').then(function(res){
+    state.products = res.allProducts || [];
+    state.productSections = res.sections || [];
+    state.productsLoaded = true;
+    renderProductSelect();
+    return state.products;
+  }).catch(function(){ state.products = []; state.productSections = []; renderProductSelect(); return []; });
+}
+function sectionAllowed(product){
+  var allowed = selectedSectionIdsWithChildren();
+  if(!allowed) return true;
+  var sid = product.sectionId == null || product.sectionId === '' ? 'root' : String(product.sectionId);
+  return allowed.has(sid);
+}
+
+function productsBySectionId(sectionId){
+  var sid = sectionId == null || sectionId === '' ? 'root' : String(sectionId);
+  return allowedProducts().filter(function(p){ return String(p.sectionId == null || p.sectionId === '' ? 'root' : p.sectionId) === sid; });
+}
+function sectionChildren(parentId){
+  var pid = parentId == null || parentId === '' ? 'root' : String(parentId);
+  return (state.productSections || []).filter(function(sec){
+    var spid = sec.parentId == null || sec.parentId === '' ? 'root' : String(sec.parentId);
+    return spid === pid && String(sec.id) !== String(parentId);
+  });
+}
+function sectionHasVisibleProducts(sectionId){
+  if(productsBySectionId(sectionId).length) return true;
+  return sectionChildren(sectionId).some(function(ch){ return sectionHasVisibleProducts(ch.id); });
+}
+function catalogSectionHtml(sec, depth){
+  var sid = sec && sec.id !== undefined ? sec.id : 'root';
+  var products = productsBySectionId(sid);
+  var children = sectionChildren(sid).filter(function(ch){ return sectionHasVisibleProducts(ch.id); });
+  if(!products.length && !children.length) return '';
+  var out = '<details class="catalogSection" open><summary>'+esc(sec.name || sec.title || (String(sid)==='root'?'Без категории':sid))+'</summary>';
+  if(products.length){
+    out += '<div class="catalogProducts">';
+    products.forEach(function(p){
+      out += '<div class="catalogProductRow" data-catalog-row="'+esc(p.id)+'"><div><b>'+esc(p.name)+'</b><div class="muted">#'+esc(p.id)+'</div></div>' +
+        '<div class="field"><label>Кол-во</label><input data-catalog-qty="'+esc(p.id)+'" type="number" min="1" step="1" value="1"></div>' +
+        '<div class="field"><label>Цена</label><input data-catalog-price="'+esc(p.id)+'" type="number" step="0.01" value="'+esc(p.price || 0)+'"></div>' +
+        '<button data-catalog-add="'+esc(p.id)+'">Добавить</button></div>';
+    });
+    out += '</div>';
+  }
+  if(children.length){
+    out += '<div class="catalogIndent">';
+    children.forEach(function(ch){ out += catalogSectionHtml(ch, (depth||0)+1); });
+    out += '</div>';
+  }
+  out += '</details>';
+  return out;
+}
+function renderProductCatalog(){
+  loadProducts().then(function(){
+    var sections = state.productSections || [];
+    var roots = sections.filter(function(sec){ return String(sec.parentId == null || sec.parentId === '' ? 'root' : sec.parentId) === 'root' && String(sec.id) !== 'root'; }).filter(function(sec){ return sectionHasVisibleProducts(sec.id); });
+    var out = '';
+    roots.forEach(function(sec){ out += catalogSectionHtml(sec, 0); });
+    if(productsBySectionId('root').length){
+      var rootProducts = productsBySectionId('root');
+      var rootOut = '<details class="catalogSection" open><summary>Без категории</summary><div class="catalogProducts">';
+      rootProducts.forEach(function(p){
+        rootOut += '<div class="catalogProductRow" data-catalog-row="'+esc(p.id)+'"><div><b>'+esc(p.name)+'</b><div class="muted">#'+esc(p.id)+'</div></div>' +
+          '<div class="field"><label>Кол-во</label><input data-catalog-qty="'+esc(p.id)+'" type="number" min="1" step="1" value="1"></div>' +
+          '<div class="field"><label>Цена</label><input data-catalog-price="'+esc(p.id)+'" type="number" step="0.01" value="'+esc(p.price || 0)+'"></div>' +
+          '<button data-catalog-add="'+esc(p.id)+'">Добавить</button></div>';
+      });
+      rootOut += '</div></details>';
+      out = rootOut + out;
+    }
+    if(!out && allowedProducts().length){
+      out = '<div class="catalogProducts">' + allowedProducts().map(function(p){ return '<div class="catalogProductRow" data-catalog-row="'+esc(p.id)+'"><div><b>'+esc(p.name)+'</b><div class="muted">#'+esc(p.id)+'</div></div><div class="field"><label>Кол-во</label><input data-catalog-qty="'+esc(p.id)+'" type="number" min="1" step="1" value="1"></div><div class="field"><label>Цена</label><input data-catalog-price="'+esc(p.id)+'" type="number" step="0.01" value="'+esc(p.price || 0)+'"></div><button data-catalog-add="'+esc(p.id)+'">Добавить</button></div>'; }).join('') + '</div>';
+    }
+    if(!out) out = '<div class="notice warn">В выбранных разделах нет доступных товаров.</div>';
+    html('productCatalogTree', out);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-catalog-add]'), function(btn){
+      btn.onclick = function(){ addProductFromCatalog(btn.getAttribute('data-catalog-add')); };
+    });
+    show('productCatalogModal', true);
+    requestFrameHeight();
+  });
+}
+function addProductFromCatalog(productId){
+  var p = productById(productId);
+  if(!p) return;
+  var qtyEl = document.querySelector('[data-catalog-qty="'+productId+'"]');
+  var priceEl = document.querySelector('[data-catalog-price="'+productId+'"]');
+  var qty = Math.max(1, Number(qtyEl && qtyEl.value || 1));
+  var price = Number(priceEl && priceEl.value || p.price || 0) || 0;
+  state.formProducts.push({ productId:Number(p.id), name:p.name, quantity:qty, price:price, sum:Math.round(qty * price * 100) / 100 });
+  renderProductRows();
+}
+
+function renderProductSelect(){
+  if(el('productSuggest')) show('productSuggest', false);
+}
+function normalizedProductSum(p){
+  var qty = Number(p.quantity || 1) || 1;
+  var price = Number(p.price || 0) || 0;
+  var sum = p.sum !== undefined && p.sum !== null && p.sum !== '' ? Number(p.sum) : qty * price;
+  if(!Number.isFinite(sum)) sum = qty * price;
+  return Math.round(sum * 100) / 100;
+}
+function allowedProducts(){ return (state.products || []).filter(sectionAllowed); }
+function renderProductSuggest(){
+  var box = el('productSuggest');
+  if(!box) return;
+  var q = String(el('productSearch').value || '').toLowerCase().trim();
+  if(!q){ html('productSuggest',''); show('productSuggest', false); return; }
+  var items = allowedProducts().filter(function(p){ return String(p.name || '').toLowerCase().indexOf(q) >= 0 || String(p.id).indexOf(q) >= 0; }).slice(0, 40);
+  var out = '';
+  if(!items.length) out = '<div class="productSuggestItem muted">Ничего не найдено</div>';
+  items.forEach(function(p){ out += '<div class="productSuggestItem" data-pick-product="'+esc(p.id)+'"><span>'+esc(p.name)+'</span><span class="muted">'+esc(p.price || 0)+'</span></div>'; });
+  html('productSuggest', out);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pick-product]'), function(item){
+    item.onclick = function(){ selectProductForAdd(item.getAttribute('data-pick-product')); };
+  });
+  show('productSuggest', true);
+}
+function selectProductForAdd(productId){
+  var p = productById(productId);
+  if(!p) return;
+  el('productSelect').value = p.id;
+  el('productSearch').value = p.name || ('Товар #'+p.id);
+  el('productPrice').value = Number(p.price || 0);
+  var qty = Math.max(1, Number(el('productQty').value || 1));
+  el('productSum').value = Math.round(qty * Number(p.price || 0) * 100) / 100;
+  show('productSuggest', false);
+}
+function syncAddProductSumFromPrice(){
+  var qty = Math.max(1, Number(el('productQty').value || 1));
+  var price = Number(el('productPrice').value || 0) || 0;
+  el('productSum').value = Math.round(qty * price * 100) / 100;
+}
+function syncAddProductPriceFromSum(){
+  var qty = Math.max(1, Number(el('productQty').value || 1));
+  var sum = Number(el('productSum').value || 0) || 0;
+  el('productPrice').value = Math.round((sum / qty) * 100) / 100;
+}
+
+function productRowsTotal(){
+  return (state.formProducts || []).reduce(function(total, p){
+    return total + normalizedProductSum(p);
+  }, 0);
+}
+function renderProductRows(){
+  var out = '';
+  state.formProducts.forEach(function(p,i){
+    p.quantity = Math.max(1, Number(p.quantity || 1));
+    p.price = Number(p.price || 0) || 0;
+    p.sum = normalizedProductSum(p);
+    out += '<div class="productRow productRowEditable"><div class="productTitle">'+esc(p.name || ('Товар #'+p.productId))+'</div>' +
+      '<div class="field"><label>Кол-во</label><input data-prod-qty="'+i+'" type="number" min="1" step="1" value="'+esc(p.quantity)+'"></div>' +
+      '<div class="field"><label>Цена</label><input data-prod-price="'+i+'" type="number" step="0.01" value="'+esc(p.price)+'"></div>' +
+      '<div class="field"><label>Сумма</label><input data-prod-sum="'+i+'" type="number" step="0.01" value="'+esc(p.sum)+'"></div>' +
+      '<button data-del-product="'+i+'">Удалить</button></div>';
+  });
+  html('productRows', out);
+  var totalBox = el('productTotal');
+  if(totalBox){
+    if(state.formProducts.length){
+      totalBox.innerHTML = '<span>Итоговая сумма товаров:</span> <strong>'+esc(formatMoneyAmount(productRowsTotal()))+'</strong>';
+      totalBox.classList.remove('hidden');
+    } else {
+      totalBox.innerHTML = '';
+      totalBox.classList.add('hidden');
+    }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-del-product]'), function(btn){ btn.onclick = function(){ state.formProducts.splice(Number(btn.getAttribute('data-del-product')),1); renderProductRows(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-prod-qty]'), function(inp){ inp.onchange = function(){ var i=Number(inp.getAttribute('data-prod-qty')); state.formProducts[i].quantity=Math.max(1,Number(inp.value||1)); state.formProducts[i].sum=Math.round(state.formProducts[i].quantity*Number(state.formProducts[i].price||0)*100)/100; renderProductRows(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-prod-price]'), function(inp){ inp.onchange = function(){ var i=Number(inp.getAttribute('data-prod-price')); state.formProducts[i].price=Number(inp.value||0)||0; state.formProducts[i].sum=Math.round(Number(state.formProducts[i].quantity||1)*state.formProducts[i].price*100)/100; renderProductRows(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-prod-sum]'), function(inp){ inp.onchange = function(){ var i=Number(inp.getAttribute('data-prod-sum')); var qty=Math.max(1,Number(state.formProducts[i].quantity||1)); var sum=Number(inp.value||0)||0; state.formProducts[i].sum=Math.round(sum*100)/100; state.formProducts[i].price=Math.round((sum/qty)*100)/100; renderProductRows(); }; });
+}
+function fillDealDefaultsIntoForm(){
+  var d = state.dealDefaults || {};
+  if(d.UF_CRM_1754826067667) el('guestCount').value = d.UF_CRM_1754826067667;
+  if(d.UF_CRM_1768062390870) el('programGuestCount').value = d.UF_CRM_1768062390870;
+  if(d.UF_CRM_1754844063420) el('prepaymentAmount').value = d.UF_CRM_1754844063420;
+  if(d.UF_CRM_1754862979543) el('surchargeAmount').value = d.UF_CRM_1754862979543;
+  if(d.UF_CRM_1754826154718) el('dealType').value = d.UF_CRM_1754826154718;
+  if(d.UF_CRM_1768062914547) el('managerComment').value = d.UF_CRM_1768062914547;
+  if(d.COMMENTS) el('bookingComment').value = d.COMMENTS;
+}
+
+function fieldFlag(f, key){
+  if(!f) return false;
+  if(Object.prototype.hasOwnProperty.call(f, key)) return !!f[key];
+  if(key === 'showCreate') return f.create !== undefined ? !!f.create : (f.c !== undefined ? !!f.c : true);
+  if(key === 'showView') return f.view !== undefined ? !!f.view : (f.p !== undefined ? !!f.p : true);
+  if(key === 'showList') return f.list !== undefined ? !!f.list : (f.o !== undefined ? !!f.o : false);
+  return false;
+}
+function visibleDealFields(flag){
+  var g = currentGroup();
+  return (g && Array.isArray(g.dealFields) ? g.dealFields : []).filter(function(f){ return !isCoreBookingField(f.name) && fieldFlag(f, flag); });
+}
+
+function dealFieldMeta(name){
+  if(state.dealFieldsByName && state.dealFieldsByName[name]) return state.dealFieldsByName[name];
+  var g = currentGroup();
+  var cfg = g && Array.isArray(g.dealFields) ? g.dealFields.find(function(f){ return String(f.name) === String(name); }) : null;
+  return cfg || {};
+}
+function normalizeFieldType(meta){
+  return String((meta && (meta.type || meta.userTypeId || meta.USER_TYPE_ID || meta.dataType)) || '').toLowerCase();
+}
+function fieldItems(meta){
+  var items = meta && Array.isArray(meta.items) ? meta.items : [];
+  return items.map(function(it){
+    if(it && typeof it === 'object'){
+      var id = it.id !== undefined ? it.id : (it.ID !== undefined ? it.ID : (it.value !== undefined ? it.value : it.VALUE));
+      var label = it.label || it.text || it.title || it.name || it.VALUE || it.value || it.ID || it.id;
+      return { id:String(id == null ? '' : id), label:String(label == null ? '' : label) };
+    }
+    return { id:String(it == null ? '' : it), label:String(it == null ? '' : it) };
+  }).filter(function(it){ return it.id !== ''; });
+}
+function fieldIsList(meta){
+  var t = normalizeFieldType(meta);
+  return fieldItems(meta).length > 0 || /enumeration|list|crm_status|status/.test(t);
+}
+function fieldIsMoney(meta){
+  var t = normalizeFieldType(meta);
+  return /money|crm_money/.test(t);
+}
+function fieldIsMultiple(meta){
+  return !!(meta && (meta.isMultiple || meta.multiple || meta.MULTIPLE === 'Y'));
+}
+function fieldValueArray(value){
+  if(value === undefined || value === null || value === '') return [];
+  if(Array.isArray(value)) return value;
+  if(value && typeof value === 'object'){
+    if(Array.isArray(value.VALUE)) return value.VALUE;
+    if(value.value !== undefined) return [value.value];
+    if(value.ID !== undefined) return [value.ID];
+    if(value.id !== undefined) return [value.id];
+  }
+  return [value];
+}
+function lookupFieldOption(meta, value){
+  var s = String(value == null ? '' : value);
+  var items = fieldItems(meta);
+  var found = items.find(function(it){ return String(it.id) === s || String(it.label) === s; });
+  return found ? found.label : s;
+}
+var MONEY_CURRENCIES = ['RUB','USD','EUR','KZT','BYN','UAH','CNY','TRY'];
+function splitMoneyValue(value){
+  var raw = Array.isArray(value) ? value[0] : value;
+  var s = String(raw == null ? '' : raw).trim();
+  var amount = s, currency = 'RUB';
+  if(s.indexOf('|') >= 0){
+    var parts = s.split('|');
+    amount = parts[0] || '';
+    currency = parts[1] || 'RUB';
+  }
+  amount = String(amount).replace(',', '.');
+  return { amount: amount, currency: currency };
+}
+function formatMoneyAmount(value){
+  var n = Number(String(value == null ? '' : value).replace(',', '.'));
+  if(!Number.isFinite(n)) return String(value == null ? '' : value);
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: (Math.round(n) === n ? 0 : 2), maximumFractionDigits: 2 });
+}
+function formatDealFieldValue(value, meta){
+  if(value === undefined || value === null || value === '') return '';
+  meta = meta || {};
+  if(fieldIsMoney(meta)){
+    var m = splitMoneyValue(value);
+    return (formatMoneyAmount(m.amount) + (m.currency ? ' ' + m.currency : '')).trim();
+  }
+  if(fieldIsList(meta)){
+    return fieldValueArray(value).map(function(v){ return lookupFieldOption(meta, v); }).filter(Boolean).join(', ');
+  }
+  if(Array.isArray(value)) return value.map(function(v){ return formatDealFieldValue(v, {}); }).join(', ');
+  if(value && typeof value === 'object'){
+    if(value.VALUE !== undefined) return String(value.VALUE);
+    if(value.value !== undefined) return String(value.value);
+    return JSON.stringify(value);
+  }
+  var s = String(value);
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return fmtDateTime(s);
+  return s;
+}
+function bookingResourceName(resourceId){
+  var r = (state.resources || []).find(function(x){ return Number(x.id) === Number(resourceId); });
+  return r ? r.name : ('#' + resourceId);
+}
+
+function codeLikeFieldName(value){
+  return /^UF_CRM(_|\d)/i.test(String(value || '')) || /^[A-Z0-9_]+$/i.test(String(value || ''));
+}
+function cleanFieldLabel(value, code){
+  var label = String(value == null ? '' : value).trim();
+  var c = String(code || '').trim();
+  if(!label) return '';
+  if(c && label.toUpperCase() === c.toUpperCase()) return '';
+  if(/^UF_CRM(_|\d)/i.test(label)) return '';
+  return label;
+}
+function pickFieldLabelFromObject(obj, code){
+  obj = obj || {};
+  var keys = ['title','label','formLabel','editFormLabel','listLabel','filterLabel','TITLE','LABEL','FORM_LABEL','EDIT_FORM_LABEL','LIST_COLUMN_LABEL','LIST_FILTER_LABEL','caption','CAPTION'];
+  for(var i=0;i<keys.length;i++){
+    var raw = obj[keys[i]];
+    if(raw && typeof raw === 'object'){
+      raw = raw.ru || raw.RU || raw.ru_RU || raw['ru-RU'] || raw.ua || raw.UA || raw.uk || raw.UK || raw.en || raw.EN || raw.en_US || raw['en-US'] || raw.value || raw.VALUE || raw.label || raw.LABEL || raw.title || raw.TITLE || '';
+    }
+    var label = cleanFieldLabel(raw, code);
+    if(label) return label;
+  }
+  return '';
+}
+function fieldLabel(f){
+  f = f || {};
+  var code = String(f.name || f.field || f.id || '').trim();
+  var meta = dealFieldMeta(code) || {};
+  return pickFieldLabelFromObject(meta, code) || pickFieldLabelFromObject(f, code) || code;
+}
+function settingsFieldLabel(f){
+  f = f || {};
+  var code = String((f.name || f.field || f.id) || '').trim();
+  var title = fieldLabel(f);
+  return code && title && title !== code ? (title + ' · ' + code) : (title || code);
+}
+function currentPaymentDealId(){
+  if(state.editingBooking && state.editingBooking.dealId) return String(state.editingBooking.dealId);
+  if(state.viewingBooking && state.viewingBooking.dealId) return String(state.viewingBooking.dealId);
+  if(el('bookingDealId') && el('bookingDealId').value) return String(el('bookingDealId').value);
+  return state.selectedDealId ? String(state.selectedDealId) : '';
+}
+function updatePaymentButtons(){
+  var can = !!boot.canEdit && !!currentPaymentDealId();
+  ['prepayBtn','surchargeBtn'].forEach(function(id){ if(el(id)) show(id, false); });
+  ['viewPrepayBtn','viewSurchargeBtn'].forEach(function(id){ if(el(id)) show(id, can); });
+}
+
+function renderBookingView(booking){
+  var values = Object.assign({}, state.dealDefaults || {}, booking && booking.dealFieldValues ? booking.dealFieldValues : {});
+  var out = '<div class="viewHero">' +
+    '<div class="viewCard"><label>Начало</label><div class="viewValue">'+esc(fmtDateTime(booking.start))+'</div></div>' +
+    '<div class="viewCard"><label>Завершение</label><div class="viewValue">'+esc(fmtDateTime(booking.end))+'</div></div>' +
+    '<div class="viewCard"><label>Ресурс</label><div class="viewValue">'+esc(bookingResourceName(booking.resourceId))+'</div></div>' +
+    '</div>';
+  var fields = visibleDealFields('showView');
+  if(fields.length){
+    out += '<h3>Поля сделки</h3><div class="dynamicFieldsWrap">';
+    for(var i=0;i<fields.length;i++){
+      var f = fields[i];
+      var meta = dealFieldMeta(f.name);
+      var label = fieldLabel(f);
+      var val = formatDealFieldValue(values[f.name], meta);
+      var card = '<div class="field"><label>'+esc(label)+'</label><input disabled value="'+esc(val)+'"></div>';
+      if(f.inlineNext && fields[i+1]){
+        var f2 = fields[i+1], meta2 = dealFieldMeta(f2.name), label2 = fieldLabel(f2);
+        var val2 = formatDealFieldValue(values[f2.name], meta2);
+        out += '<div class="dynamicFieldPair">'+card+'<div class="field"><label>'+esc(label2)+'</label><input disabled value="'+esc(val2)+'"></div></div>';
+        i++;
+      } else out += '<div class="dynamicFieldSingle">'+card+'</div>';
+    }
+    out += '</div>';
+  }
+  var products = Array.isArray(booking.products) ? booking.products : [];
+  out += '<h3>Товары</h3>';
+  if(!products.length) out += '<div class="notice warn">Товары не добавлены.</div>';
+  else {
+    var total = 0;
+    out += '<div class="viewProductTable">';
+    products.forEach(function(p){
+      var qty = Math.max(1, Number(p.quantity || 1));
+      var price = Number(p.price || 0) || 0;
+      var sum = p.sum !== undefined && p.sum !== null && p.sum !== '' ? Number(p.sum) : qty * price;
+      if(!Number.isFinite(sum)) sum = qty * price;
+      sum = Math.round(sum * 100) / 100;
+      total += sum;
+      out += '<div class="viewProductRow"><div><b>'+esc(p.name || ('Товар #'+p.productId))+'</b></div><div>× '+esc(qty)+'</div><div>'+esc(formatMoneyAmount(price))+'</div><div>'+esc(formatMoneyAmount(sum))+'</div></div>';
+    });
+    out += '</div><div class="productTotal"><span>Итоговая сумма товаров:</span> <strong>'+esc(formatMoneyAmount(total))+'</strong></div>';
+  }
+  html('bookingViewContent', out);
+  updatePaymentButtons();
+}
+function openBookingView(booking){
+  state.viewingBooking = booking || null;
+  state.editingBooking = booking || null;
+  text('bookingModalTitle', 'Просмотр бронирования');
+  renderBookingView(booking);
+  show('bookingEditArea', false);
+  show('bookingViewArea', true);
+  show('editBookingBtn', !!boot.canEdit);
+  updatePaymentButtons();
+  show('bookingModal', true);
+  requestFrameHeight();
+}
+
+
+function renderDynamicDealFields(booking){
+  var fields = visibleDealFields('showCreate');
+  var values = Object.assign({}, state.dealDefaults || {}, booking && booking.dealFieldValues ? booking.dealFieldValues : {});
+  function requiredMark(f){ return f.required ? '<span style="color:#ff3b30">*</span>' : ''; }
+  function optionHtml(meta, selectedValues, allowEmpty){
+    var selected = new Set((selectedValues || []).map(function(v){ return String(v); }));
+    var out = allowEmpty ? '<option value="">Не выбрано</option>' : '';
+    fieldItems(meta).forEach(function(it){
+      out += '<option value="'+esc(it.id)+'" '+(selected.has(String(it.id)) || selected.has(String(it.label)) ? 'selected' : '')+'>'+esc(it.label)+'</option>';
+    });
+    return out;
+  }
+  function currencyOptions(current){
+    var list = MONEY_CURRENCIES.slice();
+    if(current && list.indexOf(current) < 0) list.unshift(current);
+    return list.map(function(c){ return '<option value="'+esc(c)+'" '+(String(c)===String(current)?'selected':'')+'>'+esc(c)+'</option>'; }).join('');
+  }
+  function fieldHtml(f){
+    var meta = dealFieldMeta(f.name);
+    var label = fieldLabel(f);
+    var raw = values[f.name];
+    if(fieldIsMoney(meta)){
+      var money = splitMoneyValue(raw);
+      return '<div class="field"><label>'+esc(label)+' '+requiredMark(f)+'</label><div class="moneyFieldGroup"><input data-deal-money-amount="'+esc(f.name)+'" type="number" step="0.01" value="'+esc(money.amount || '')+'"><select data-deal-money-currency="'+esc(f.name)+'">'+currencyOptions(money.currency || 'RUB')+'</select></div></div>';
+    }
+    if(fieldIsList(meta)){
+      var vals = fieldValueArray(raw);
+      var multiple = fieldIsMultiple(meta);
+      return '<div class="field"><label>'+esc(label)+' '+requiredMark(f)+'</label><select data-deal-field="'+esc(f.name)+'" '+(multiple?'multiple':'')+'>'+optionHtml(meta, vals, !multiple)+'</select></div>';
+    }
+    var val = formatDealFieldValue(raw, meta);
+    return '<div class="field"><label>'+esc(label)+' '+requiredMark(f)+'</label><input data-deal-field="'+esc(f.name)+'" value="'+esc(val || '')+'"></div>';
+  }
+  var out = '';
+  for(var i=0;i<fields.length;i++){
+    var f = fields[i];
+    if(f.inlineNext && fields[i+1]){ out += '<div class="dynamicFieldPair">'+fieldHtml(f)+fieldHtml(fields[i+1])+'</div>'; i++; }
+    else out += '<div class="dynamicFieldSingle">'+fieldHtml(f)+'</div>';
+  }
+  html('dynamicDealFields', out);
+}
+
+function collectDynamicDealFields(){
+  var fields = visibleDealFields('showCreate');
+  var values = {};
+  function findByAttr(attr, name){
+    return Array.prototype.find.call(document.querySelectorAll('['+attr+']'), function(x){ return x.getAttribute(attr) === name; });
+  }
+  for(var i=0;i<fields.length;i++){
+    var f = fields[i];
+    var meta = dealFieldMeta(f.name);
+    var val = '';
+    if(fieldIsMoney(meta)){
+      var amountInput = findByAttr('data-deal-money-amount', f.name);
+      var currencyInput = findByAttr('data-deal-money-currency', f.name);
+      var amount = amountInput ? String(amountInput.value || '').trim() : '';
+      var currency = currencyInput ? String(currencyInput.value || 'RUB').trim() : 'RUB';
+      val = amount ? (amount.replace(',', '.') + '|' + currency) : '';
+    } else {
+      var input = findByAttr('data-deal-field', f.name);
+      if(input && input.tagName === 'SELECT' && input.multiple){
+        val = Array.prototype.slice.call(input.selectedOptions).map(function(o){ return o.value; }).filter(Boolean);
+      } else {
+        val = input ? input.value : '';
+      }
+    }
+    var empty = Array.isArray(val) ? val.length === 0 : !String(val).trim();
+    if(f.required && empty){
+      var label = fieldLabel(f);
+      throw new Error('Заполните обязательное поле: ' + label);
+    }
+    values[f.name] = val;
+  }
+  syncHiddenFromPeriodControls();
+  values[BOOKING_START_FIELD] = bitrixDateTime(el('bookingStart').value);
+  values[BOOKING_END_FIELD] = bitrixDateTime(el('bookingEnd').value);
+  return values;
+}
+function openBookingForm(booking, resourceId, start, end){
+  if(!boot.canEdit) return;
+  state.editingBooking = booking || null;
+  if(!booking) state.viewingBooking = null;
+  state.formProducts = booking && Array.isArray(booking.products) ? booking.products.map(function(p){ return {productId:p.productId, name:p.name, price:Number(p.price||0), quantity:Number(p.quantity||1), sum: Math.round(Number(p.quantity||1)*Number(p.price||0)*100)/100}; }) : [];
+  text('bookingModalTitle', booking ? 'Редактирование бронирования' : 'Новое бронирование');
+  show('bookingViewArea', false);
+  show('bookingEditArea', true);
+  var resOut = '';
+  (state.resources || []).forEach(function(r){ resOut += '<option value="'+esc(r.id)+'">'+esc(r.name)+'</option>'; });
+  html('bookingResource', resOut);
+  el('bookingResource').value = resourceId || '';
+  el('bookingDealId').value = state.selectedDealId || '';
+  if(booking){
+    el('bookingStart').value = start || toMoscowInput(booking.start);
+    el('bookingEnd').value = end || toMoscowInput(booking.end);
+    el('bookingDays').value = daysBetweenMoscowDates(el('bookingStart').value, el('bookingEnd').value);
+  } else {
+    var p = calcPeriodFromClick(start || (state.date+'T00:00'), null);
+    el('bookingStart').value = p.start; el('bookingEnd').value = p.end; el('bookingDays').value = p.days;
+  }
+  setPeriodControlsFromHidden();
+  renderDynamicDealFields(booking);
+  updateBookingScheduleInfo();
+  show('deleteBookingBtn', !!booking);
+  updatePaymentButtons();
+  show('productSuggest', false);
+  var defaultDef = !booking ? groupResourceDefault(el('bookingResource').value) : null;
+  function finishOpenAfterProducts(applyDefault){
+    renderProductSelect();
+    if(applyDefault && !booking) applyDefaultProductForResource(el('bookingResource').value);
+    else renderProductRows();
+    show('bookingModal', true);
+    requestFrameHeight();
+  }
+  if(defaultDef && !state.productsLoaded){
+    return withLoader(function(){ return loadProducts(); }, 'Загружаем товар по умолчанию').then(function(){
+      finishOpenAfterProducts(true);
+    }).catch(function(){
+      finishOpenAfterProducts(true);
+    });
+  }
+  if(!booking && state.productsLoaded) applyDefaultProductForResource(el('bookingResource').value);
+  else renderProductRows();
+  show('bookingModal', true);
+  requestFrameHeight();
+  if(!state.productsLoaded){
+    loadProducts().then(function(){
+      renderProductSelect();
+      if(defaultDef && !booking) applyDefaultProductForResource(el('bookingResource').value);
+      requestFrameHeight();
+    });
+  }
+}
+function delay(ms){
+  return new Promise(function(resolve){
+    setTimeout(resolve, ms || 0);
+  });
+}
+
+function isBookingEditModeActive(){
+  var modal = el('bookingModal');
+  var editArea = el('bookingEditArea');
+
+  return !!(
+    modal &&
+    editArea &&
+    !modal.classList.contains('hidden') &&
+    !editArea.classList.contains('hidden')
+  );
+}
+
+function buildBookingPayload(){
+  var booking = state.editingBooking;
+  var dealFieldValues = collectDynamicDealFields();
+
+  return {
+    bookingId: booking && booking.id ? booking.id : undefined,
+    resourceId: el('bookingResource').value,
+    dealId: state.selectedDealId || (el('bookingDealId') && el('bookingDealId').value) || '',
+    startDateTime: el('bookingStart').value,
+    endDateTime: el('bookingEnd').value,
+    products: state.formProducts,
+    groupId: state.groupId,
+    kanbanCategoryId: currentGroup() ? (currentGroup().kanbanCategoryId || '') : '',
+    dealFieldValues: dealFieldValues
+  };
+}
+
+function rememberSavedBooking(payload, res){
+  var savedId =
+    (res && (res.bookingId || res.id || res.ID)) ||
+    payload.bookingId ||
+    (state.editingBooking && state.editingBooking.id) ||
+    '';
+
+  if(!savedId) return;
+
+  state.editingBooking = Object.assign({}, state.editingBooking || {}, {
+    id: savedId,
+    resourceId: Number(payload.resourceId),
+    dealId: String(payload.dealId || ''),
+    start: payload.startDateTime,
+    end: payload.endDateTime,
+    products: Array.isArray(payload.products) ? payload.products.slice() : [],
+    dealFieldValues: Object.assign({}, payload.dealFieldValues || {})
+  });
+
+  if(el('bookingDealId')) el('bookingDealId').value = payload.dealId || '';
+  show('deleteBookingBtn', true);
+}
+
+function persistBooking(options){
+  options = options || {};
+
+  var booking = state.editingBooking;
+  var payload;
+
+  try {
+    payload = buildBookingPayload();
+  } catch(e) {
+    return Promise.reject(e);
+  }
+
+  var isUpdate = !!(booking && booking.id);
+  var path = isUpdate ? '/booking/update' : '/booking/create';
+
+  return api('POST', path, payload).then(function(res){
+    rememberSavedBooking(payload, res || {});
+
+    if(options.closeModal !== false){
+      show('bookingModal', false);
+      requestFrameHeight();
+    }
+
+    if(options.reloadCalendar === false){
+      return res;
+    }
+
+    return loadCalendar(true).then(function(){
+      return res;
+    });
+  });
+}
+
+function findBookingById(id){
+  if(!id || !state.calendar) return null;
+  var lists = [];
+  if(Array.isArray(state.calendar.bookings)) lists.push(state.calendar.bookings);
+  if(Array.isArray(state.calendar.techWindows)) lists.push(state.calendar.techWindows);
+  for(var li=0; li<lists.length; li++){
+    var found = lists[li].find(function(b){ return String(b && b.id) === String(id); });
+    if(found) return found;
+  }
+  return null;
+}
+
+function saveBooking(){
+  return withLoader(function(){
+    return persistBooking({
+      closeModal: false,
+      reloadCalendar: true
+    }).then(function(res){
+      var saved = state.editingBooking || {};
+      var fresh = findBookingById(saved.id) || saved;
+      if(fresh && fresh.id){
+        openBookingView(fresh);
+      } else {
+        show('bookingModal', false);
+        requestFrameHeight();
+      }
+      return res;
+    });
+  }, 'Сохраняем бронирование').catch(function(e){
+    alert(e.message || e.error || 'Не удалось сохранить');
+  });
+}
+
+function deleteBooking(){
+  if(!state.editingBooking || !state.editingBooking.id) return;
+  if(!confirm('Удалить бронирование?')) return;
+
+  return withLoader(function(){
+    return api('POST','/booking/delete',{bookingId:state.editingBooking.id}).then(function(){
+      show('bookingModal', false);
+      return loadCalendar(true);
+    });
+  }, 'Удаляем бронирование').catch(function(e){
+    alert(e.error || 'Не удалось удалить');
+  });
+}
+
+function saveCurrentBookingBeforePayment(){
+  if(!isBookingEditModeActive()){
+    return Promise.resolve(false);
+  }
+
+  return persistBooking({
+    closeModal: false,
+    reloadCalendar: false
+  }).then(function(){
+    return true;
+  });
+}
+
+function paymentActionName(type){
+  return type === 'prepayment' ? 'предоплату' : 'доплату';
+}
+
+function runPaymentAction(type){
+  var dealId = currentPaymentDealId();
+  if(!dealId) return alert('Сначала выберите сделку');
+  if(isBookingEditModeActive()) return alert('Сначала сохраните бронирование. Кнопки отправки ссылок доступны в окне просмотра брони.');
+
+  if(state.paymentActionRunning) return;
+  state.paymentActionRunning = true;
+
+  var actionName = paymentActionName(type);
+  var paymentResult = null;
+
+  return withLoader(function(){
+    var paymentPayload = {
+      resourceType: state.groupId,
+      groupId: state.groupId,
+      dealId: dealId
+    };
+    return restoreBitrixSession().catch(function(){ return null; }).then(function(){
+      return api('POST','/booking/'+type,paymentPayload);
+    }).then(function(res){
+      paymentResult = res || {};
+      return loadCalendar(true);
+    }).then(function(){
+      return paymentResult;
+    });
+  }, 'Запускаем ' + actionName).then(
+    function(res){
+      state.paymentActionRunning = false;
+      alert((res && res.message) || 'Готово');
+    },
+    function(e){
+      state.paymentActionRunning = false;
+      alert(e.message || e.error || 'Ошибка операции');
+    }
+  );
+}function openSettings(){
+  if(!boot.canSettings) return;
+
+  return withLoader(function(){
+    return Promise.all([
+      api('GET','/settings'),
+      api('GET','/resources'),
+      safeApi('GET','/products',null,{sections:[],allProducts:[]}),
+      safeApi('GET','/deal-fields',null,{fields:[]}),
+      safeApi('GET','/deal-categories',null,{categories:[{id:'0',name:'Общий канбан'}]}),
+      safeApi('GET','/deal-stages',null,{stages:[]}),
+      safeApi('GET','/bizproc-templates',null,{templates:[]})
+    ]).then(function(arr){
+      var s = arr[0].settings || arr[0];
+      var r = arr[1].resources || [];
+
+      state.settingsDraft = JSON.parse(JSON.stringify(s));
+      state.settingsExpandedGroups = {};
+      state.settingsExpandedSubs = {};
+      state.allResources = r;
+      state.productSections = arr[2].sections || [];
+      state.products = arr[2].allProducts || [];
+      state.productsLoaded = true;
+      state.dealFields = arr[3].fields || [];
+      state.dealFieldsByName = {};
+      state.dealFields.forEach(function(f){ state.dealFieldsByName[f.name] = f; });
+      state.dealCategories = arr[4].categories || [{id:'0',name:'Общий канбан'}];
+      state.dealStages = arr[5].stages || [];
+      state.bizprocTemplates = arr[6].templates || [];
+      state.settingsDraft.externalUsers = normalizeExternalUsersForUi(s.externalUsers || []);
+      state.settingsDraft.removeWazzupEmail = !!s.removeWazzupEmail;
+
+      renderExternalUsersSettings();
+      if(el('removeWazzupEmail')) el('removeWazzupEmail').checked = !!state.settingsDraft.removeWazzupEmail;
+      renderSettingsGroups();
+
+      show('settingsModal', true);
+      requestFrameHeight();
+    });
+  }, 'Открываем настройки').catch(function(e){
+    alert(e.error || 'Не удалось открыть настройки');
+  });
+}function optionList(items, value){
+  return (items||[]).map(function(x){ return '<option value="'+esc(x.id)+'" '+(String(x.id)===String(value)?'selected':'')+'>'+esc(x.name || x.title || x.id)+'</option>'; }).join('');
+}
+function productOptionList(value){
+  var out = '<option value="">Не выбран</option>';
+  (state.products || []).forEach(function(p){ out += '<option value="'+esc(p.id)+'" '+(String(p.id)===String(value)?'selected':'')+'>'+esc(p.name)+' · '+esc(p.price)+'</option>'; });
+  return out;
+}
+function sectionName(sec){
+  var prefix = sec.parentId ? '— ' : '';
+  return prefix + (sec.name || sec.title || sec.id);
+}
+function normalizePermissionsForUi(user){
+  user = user || {};
+  var p = user.permissions || user.fieldPermissions || {};
+  if(p.allFields || p.all || p.fields === '*' || p.allowedFields === '*') return { allFields:true, fields:[] };
+  var fields = Array.isArray(p.fields) ? p.fields : (Array.isArray(p.allowedFields) ? p.allowedFields : []);
+  if(!fields.length && user.role !== 'limited') return { allFields:true, fields:[] };
+  return { allFields:false, fields:fields.map(String).filter(Boolean) };
+}
+function normalizeExternalRoleForUi(role){ return String(role || '').toLowerCase() === 'technologist' ? 'technologist' : 'viewer'; }
+function normalizeExternalGroupIdsForUi(u){
+  var raw = (u && (u.groupIds || u.allowedGroupIds || u.groups)) || [];
+  if(typeof raw === 'string') raw = raw.split(/[\s,;]+/);
+  if(!Array.isArray(raw)) raw = [];
+  return raw.map(String).map(function(v){ return v.trim(); }).filter(Boolean);
+}
+function normalizeExternalUsersForUi(users){
+  var list = Array.isArray(users) ? users : [];
+  if(!list.length) list = [{ login:'viewer', role:'viewer', groupIds:[], permissions:{ allFields:true, fields:[] } }];
+  return list.map(function(u){
+    var perms = normalizePermissionsForUi(u);
+    return {
+      login: String((u && u.login) || '').trim() || 'viewer',
+      password: '',
+      role: normalizeExternalRoleForUi((u && u.role) || 'viewer'),
+      groupIds: normalizeExternalGroupIdsForUi(u),
+      permissions: perms
+    };
+  });
+}
+function configuredPermissionFields(){
+  var map = {};
+  var out = [];
+  var groups = state.settingsDraft && Array.isArray(state.settingsDraft.groups) ? state.settingsDraft.groups : [];
+  groups.forEach(function(g){
+    (g.dealFields || []).forEach(function(f){
+      var code = String((f && (f.name || f.field || f.id)) || '').trim();
+      if(code && !map[code]){ map[code] = true; out.push(Object.assign({}, state.dealFieldsByName[code] || {}, f, {name:code})); }
+    });
+  });
+  if(!out.length){
+    (state.dealFields || []).forEach(function(f){
+      var code = String((f && f.name) || '').trim();
+      if(code && !map[code]){ map[code] = true; out.push(f); }
+    });
+  }
+  return out;
+}
+function collectExternalUsersFromDom(){
+  var users = [];
+  Array.prototype.forEach.call(document.querySelectorAll('#externalUsersSettings .externalUserCard'), function(card){
+    var loginEl = card.querySelector('[data-external-login]');
+    var passEl = card.querySelector('[data-external-password]');
+    var roleEl = card.querySelector('[data-external-role]');
+    var allEl = card.querySelector('[data-external-all-fields]');
+    var allGroupsEl = card.querySelector('[data-external-all-groups]');
+    var login = loginEl ? String(loginEl.value || '').trim() : '';
+    if(!login) return;
+    var fields = [];
+    Array.prototype.forEach.call(card.querySelectorAll('[data-external-field]'), function(ch){ if(ch.checked) fields.push(ch.getAttribute('data-external-field')); });
+    var allFields = !!(allEl && allEl.checked);
+    var groupIds = [];
+    if(!(allGroupsEl && allGroupsEl.checked)){
+      Array.prototype.forEach.call(card.querySelectorAll('[data-external-group]'), function(ch){ if(ch.checked) groupIds.push(ch.getAttribute('data-external-group')); });
+    }
+    users.push({
+      login: login,
+      password: passEl ? String(passEl.value || '') : '',
+      role: normalizeExternalRoleForUi(roleEl ? String(roleEl.value || 'viewer') : 'viewer'),
+      groupIds: groupIds,
+      permissions: { allFields: allFields, fields: allFields ? [] : fields }
+    });
+  });
+  if(!users.length) users.push({ login:'viewer', password:'', role:'viewer', groupIds:[], permissions:{ allFields:true, fields:[] } });
+  return users;
+}
+function syncExternalUsersFromDom(){
+  if(!state.settingsDraft) return;
+  state.settingsDraft.externalUsers = collectExternalUsersFromDom();
+}
+function renderExternalUsersSettings(){
+  if(!el('externalUsersSettings') || !state.settingsDraft) return;
+  var users = normalizeExternalUsersForUi(state.settingsDraft.externalUsers || []);
+  state.settingsDraft.externalUsers = users;
+  var fields = configuredPermissionFields();
+  var out = '';
+  users.forEach(function(u, idx){
+    var perms = normalizePermissionsForUi(u);
+    var checked = new Set((perms.fields || []).map(String));
+    out += '<div class="externalUserCard" data-external-user-idx="'+idx+'">';
+    out += '<div class="externalUserTop">';
+    out += '<div class="field"><label>Логин</label><input data-external-login value="'+esc(u.login || '')+'"></div>';
+    out += '<div class="field"><label>Новый пароль</label><input data-external-password type="password" placeholder="Пусто — не менять"></div>';
+    out += '<div class="field"><label>Тип пользователя</label><select data-external-role><option value="viewer" '+(u.role !== 'technologist'?'selected':'')+'>Просмотр</option><option value="technologist" '+(u.role === 'technologist'?'selected':'')+'>Технолог</option></select></div>';
+    out += '<button type="button" data-remove-external-user="'+idx+'">Удалить</button>';
+    out += '</div>';
+    var userGroups = new Set((u.groupIds || []).map(String));
+    var allGroups = !userGroups.size;
+    out += '<label class="pill externalUserHint"><input type="checkbox" data-external-all-groups '+(allGroups?'checked':'')+'> доступ ко всем группам</label>';
+    out += '<div class="externalGroupList '+(allGroups?'hidden':'')+'">';
+    var groups = state.settingsDraft && Array.isArray(state.settingsDraft.groups) ? state.settingsDraft.groups : [];
+    if(!groups.length) out += '<div class="externalUserEmpty">Группы еще не созданы.</div>';
+    groups.forEach(function(g){ out += '<label><input type="checkbox" data-external-group="'+esc(g.id)+'" '+(userGroups.has(String(g.id))?'checked':'')+'> <span>'+esc(g.title || g.id)+'</span></label>'; });
+    out += '</div>';
+    out += '<label class="pill externalUserHint"><input type="checkbox" data-external-all-fields '+(perms.allFields?'checked':'')+'> показывать все поля бронирования</label>';
+    out += '<div class="externalFieldList '+(perms.allFields?'hidden':'')+'">';
+    if(!fields.length) out += '<div class="externalUserEmpty">Поля сделки еще не добавлены в группы. Ограничения начнут применяться после добавления полей.</div>';
+    fields.forEach(function(f){
+      out += '<label><input type="checkbox" data-external-field="'+esc(f.name)+'" '+(checked.has(String(f.name))?'checked':'')+'> <span>'+esc(settingsFieldLabel(f))+'</span></label>';
+    });
+    out += '</div></div>';
+  });
+  html('externalUsersSettings', out);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-remove-external-user]'), function(btn){
+    btn.onclick = function(){ syncExternalUsersFromDom(); state.settingsDraft.externalUsers.splice(Number(btn.getAttribute('data-remove-external-user')),1); renderExternalUsersSettings(); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-external-all-groups]'), function(ch){
+    ch.onchange = function(){ var list = ch.closest('.externalUserCard').querySelector('.externalGroupList'); if(list) list.classList.toggle('hidden', ch.checked); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-external-all-fields]'), function(ch){
+    ch.onchange = function(){ var list = ch.closest('.externalUserCard').querySelector('.externalFieldList'); if(list) list.classList.toggle('hidden', ch.checked); };
+  });
+  requestFrameHeight();
+}
+function syncSettingsDraftFromDom(){
+  if(!state.settingsDraft) return;
+  try { syncExternalUsersFromDom(); } catch(e) {}
+  if(!document.querySelector('#settingsGroups .groupBox')) return;
+  try {
+    var current = collectSettings();
+    state.settingsDraft.defaultGroupId = current.defaultGroupId;
+    state.settingsDraft.groups = current.groups;
+    state.settingsDraft.externalUsers = current.externalUsers;
+  } catch(e) {}
+}
+
+function selectedSectionSummary(ids){
+  ids = (ids || []).map(String);
+  if(!ids.length) return 'Все разделы каталога';
+  var names = [];
+  ids.slice(0, 4).forEach(function(id){
+    if(id === 'root') names.push('Без категории');
+    else {
+      var sec = (state.productSections || []).find(function(s){ return String(s.id) === String(id); });
+      names.push(sec ? (sec.name || sec.title || id) : ('#'+id));
+    }
+  });
+  if(ids.length > 4) names.push('+' + (ids.length - 4));
+  return names.join(', ');
+}
+function bizprocTemplateOptionList(value){
+  var templates = state.bizprocTemplates || [];
+  var v = String(value || '');
+  var out = '<option value="">Не запускать БП</option>';
+  if(v && !templates.find(function(t){ return String(t.id) === v; })) out += '<option value="'+esc(v)+'" selected>Текущий #'+esc(v)+'</option>';
+  templates.forEach(function(t){
+    out += '<option value="'+esc(t.id)+'" '+(String(t.id)===v?'selected':'')+'>'+esc(t.name || ('Бизнес-процесс #'+t.id))+' · #'+esc(t.id)+'</option>';
+  });
+  return out;
+}
+
+function dealStageOptionList(categoryId, value){
+  var stages = state.dealStages || [];
+  var cat = String(categoryId || '0');
+  var v = String(value || '');
+  var filtered = stages.filter(function(s){ return String(s.categoryId || '0') === cat; });
+  if(!filtered.length) filtered = stages;
+  var out = '<option value="">Не выбрано</option>';
+  if(v && !filtered.find(function(s){ return String(s.id) === v; })) out += '<option value="'+esc(v)+'" selected>Текущая стадия · '+esc(v)+'</option>';
+  filtered.forEach(function(s){
+    var name = s.name || s.title || s.id;
+    out += '<option value="'+esc(s.id)+'" '+(String(s.id)===v?'selected':'')+'>'+esc(name)+' · '+esc(s.id)+'</option>';
+  });
+  return out;
+}
+function toggleBookingModeFields(box){
+  if(!box) return;
+  var mode = (box.querySelector('.bookingMode') && box.querySelector('.bookingMode').value) || 'duration';
+  Array.prototype.forEach.call(box.querySelectorAll('.settingsModeDurationOnly'), function(x){ x.classList.toggle('hidden', mode !== 'duration'); });
+  Array.prototype.forEach.call(box.querySelectorAll('.settingsModeIntervalOnly'), function(x){ x.classList.toggle('hidden', mode !== 'interval'); });
+}
+function settingsSectionNodeHtml(sec, selected, rootMode){
+  var sid = sec && sec.id !== undefined ? String(sec.id) : 'root';
+  var children = rootMode ? rootSectionsForSettings() : sectionChildrenForSettings(sid);
+  var checked = selected.has(sid) ? 'checked' : '';
+  var title = sec ? (sec.name || sec.title || sid) : 'Без категории';
+  var checkbox = '<input type="checkbox" data-settings-section-pick="'+esc(sid)+'" '+checked+'>';
+  if(children.length){
+    var out = '<details class="settingsSectionNode" open><summary><span class="settingsSectionLine">'+checkbox+'<span>'+esc(title)+'</span><span class="muted">#'+esc(sid)+'</span></span></summary><div class="settingsSectionChildren">';
+    children.forEach(function(ch){ out += settingsSectionNodeHtml(ch, selected, false); });
+    out += '</div></details>';
+    return out;
+  }
+  return '<label class="settingsSectionLeaf">'+checkbox+'<span>'+esc(title)+'</span><span class="muted">#'+esc(sid)+'</span></label>';
+}
+function rootSectionsForSettings(){
+  return (state.productSections || []).filter(function(sec){
+    return String(sec.parentId == null || sec.parentId === '' ? 'root' : sec.parentId) === 'root' && String(sec.id) !== 'root';
+  });
+}
+function sectionChildrenForSettings(parentId){
+  var pid = parentId == null || parentId === '' ? 'root' : String(parentId);
+  return (state.productSections || []).filter(function(sec){
+    return String(sec.parentId == null || sec.parentId === '' ? 'root' : sec.parentId) === pid && String(sec.id) !== String(parentId);
+  });
+}
+function openSettingsSections(idx){
+  syncSettingsDraftFromDom();
+  var g = state.settingsDraft.groups[idx] || {};
+  state.settingsSectionsGroupIdx = idx;
+  var selected = new Set((g.productSectionIds || []).map(String));
+  var out = '<label class="settingsSectionLeaf"><input type="checkbox" data-settings-section-pick="root" '+(selected.has('root')?'checked':'')+'> <span>Без категории</span></label>';
+  var roots = rootSectionsForSettings();
+  roots.forEach(function(sec){ out += settingsSectionNodeHtml(sec, selected, false); });
+  if(!roots.length) out += '<div class="notice warn">Разделы каталога не найдены. Можно оставить «Все разделы».</div>';
+  html('settingsSectionsTree', out);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-settings-section-pick]'), function(ch){
+    ch.onclick = function(ev){ ev.stopPropagation(); };
+  });
+  show('settingsSectionsModal', true);
+  requestFrameHeight();
+}
+function applySettingsSections(){
+  var idx = state.settingsSectionsGroupIdx;
+  if(idx === null || idx === undefined || !state.settingsDraft || !state.settingsDraft.groups[idx]){ show('settingsSectionsModal', false); return; }
+  var ids = [];
+  Array.prototype.forEach.call(document.querySelectorAll('[data-settings-section-pick]'), function(ch){ if(ch.checked) ids.push(ch.getAttribute('data-settings-section-pick')); });
+  state.settingsDraft.groups[idx].productSectionIds = ids;
+  var g = state.settingsDraft.groups[idx] || {};
+  state.settingsExpandedGroups[String(g.id || ('group_'+idx))] = true;
+  show('settingsSectionsModal', false);
+  renderSettingsGroups();
+  requestFrameHeight();
+}
+
+
+function settingsResourceDefaultsForUi(g, resourceId){
+  var defs = (g && g.resourceDefaults) || {};
+  var list = normalizeResourceDefaultItems(defs[String(resourceId)] || defs[Number(resourceId)] || null, true);
+  return list.length ? list : [{ productId:'', quantity:1 }];
+}
+function settingsResourceDefaultsHtml(g, r){
+  var rows = settingsResourceDefaultsForUi(g, r.id);
+  var out = '<div class="resourceDefaultProducts" data-resource-defaults="'+esc(r.id)+'">';
+  rows.forEach(function(def, di){
+    out += '<div class="resourceDefaultProductRow">';
+    out += '<select data-res-product="'+esc(r.id)+'">'+productOptionList(def.productId || '')+'</select>';
+    out += '<input data-res-qty="'+esc(r.id)+'" type="number" min="1" step="1" value="'+esc(def.quantity || 1)+'" title="Количество по умолчанию">';
+    out += '<button type="button" data-remove-res-product="'+esc(r.id)+':'+di+'">Удалить</button>';
+    out += '</div>';
+  });
+  out += '<button type="button" data-add-res-product="'+esc(r.id)+'">Добавить товар</button></div>';
+  return out;
+}
+function settingsSubKey(idx, name){
+  var g = state.settingsDraft && state.settingsDraft.groups ? (state.settingsDraft.groups[idx] || {}) : {};
+  return String(g.id || ('group_'+idx)) + ':' + String(name || '');
+}
+function settingsSubIsOpen(idx, name){
+  state.settingsExpandedSubs = state.settingsExpandedSubs || {};
+  return !!state.settingsExpandedSubs[settingsSubKey(idx, name)];
+}
+function renderSettingsGroups(){
+  var s = state.settingsDraft || {groups:[]};
+  var resources = state.allResources || [];
+  var fields = state.dealFields || [];
+  var categories = state.dealCategories || [{id:'0',name:'Общий канбан'}];
+  var out = '';
+  state.settingsExpandedGroups = state.settingsExpandedGroups || {};
+  (s.groups || []).forEach(function(g,idx){
+    g.productSectionIds = (g.productSectionIds || []).map(String);
+    g.dealFields = (g.dealFields || []).map(function(f){ return typeof f === 'string' ? {name:f, required:false, inlineNext:false, showCreate:true, showView:true, showList:false} : Object.assign({required:false, inlineNext:false, showCreate:true, showView:true, showList:false}, f); });
+    g.resourceDefaults = g.resourceDefaults || {};
+    g.bookingMode = g.bookingMode || 'duration';
+    g.defaultDesktopView = normalizeOptionalViewMode(g.defaultDesktopView || g.desktopViewMode || g.defaultDesktopViewMode || '');
+    g.defaultMobileView = normalizeOptionalViewMode(g.defaultMobileView || g.mobileViewMode || g.defaultMobileViewMode || '');
+    g.techWindowMinutes = Math.max(0, Number(g.techWindowMinutes || g.technicalWindowMinutes || 0) || 0);
+    var key = String(g.id || ('group_'+idx));
+    var open = !!state.settingsExpandedGroups[key];
+    var mode = groupMode(g);
+    var resourceCount = (g.resourceIds || []).length;
+    var fieldCount = (g.dealFields || []).length;
+    out += '<div class="groupBox settingsGroupBox '+(open?'expanded':'collapsed')+'" data-group-idx="'+idx+'" data-group-key="'+esc(key)+'">';
+    out += '<button type="button" class="settingsGroupSummary" data-toggle-settings-group="'+idx+'"><span class="settingsGroupSummaryMain"><span class="settingsChevron">'+(open?'▾':'▸')+'</span><span class="settingsGroupTitleText">'+esc(g.title || ('Группа '+(idx+1)))+'</span></span><span class="muted">Ресурсов: '+resourceCount+' · Полей: '+fieldCount+'</span></button>';
+    out += '<div class="settingsGroupContent '+(open?'':'hidden')+'">';
+    out += '<div class="settingsGroupShell">';
+    out += '<div class="settingsGroupHero"><div class="settingsGroupIcon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-7h6v7"/></svg></div><div class="settingsGroupHeroTitle"><h2>'+esc(g.title || ('Группа '+(idx+1)))+'</h2><p>Настройки группы размещения</p></div><div class="settingsGroupStats">Ресурсов: <b>'+resourceCount+'</b> &nbsp;•&nbsp; Полей: <b>'+fieldCount+'</b></div><button type="button" class="settingsGroupCollapse" data-toggle-settings-group="'+idx+'">×</button></div>';
+    out += '<section class="settingsPanel"><h2 class="settingsSectionTitle"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.06.06a2.1 2.1 0 1 1-2.97 2.97l-.06-.06a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21.4a2.1 2.1 0 1 1-4.2 0v-.09A1.8 1.8 0 0 0 8.4 19.66a1.8 1.8 0 0 0-2 .36l-.06.06a2.1 2.1 0 1 1-2.97-2.97l.06-.06a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2.1a2.1 2.1 0 1 1 0-4.2h.09A1.8 1.8 0 0 0 3.84 8.7a1.8 1.8 0 0 0-.36-2l-.06-.06A2.1 2.1 0 1 1 6.4 3.67l.06.06a1.8 1.8 0 0 0 2 .36 1.8 1.8 0 0 0 1.1-1.65V2.1a2.1 2.1 0 1 1 4.2 0v.09a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.06-.06a2.1 2.1 0 1 1 2.97 2.97l-.06.06a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.1h.09a2.1 2.1 0 1 1 0 4.2h-.09A1.8 1.8 0 0 0 19.4 15Z"/></svg></span>Основные настройки</h2>';
+    out += '<div class="settingsMainGrid">';
+    out += '<div class="settingsField wide"><label>Название группы</label><input class="groupTitle" value="'+esc(g.title || '')+'"></div>';
+    out += '<div class="settingsField wide"><label>Канбан сделки</label><select class="groupKanban"><option value="">Не привязывать</option>'+optionList(categories, g.kanbanCategoryId)+'</select></div>';
+    out += '<div class="settingsField"><label>Тип расчета времени</label><select class="bookingMode"><option value="duration" '+(mode==='duration'?'selected':'')+'>+ часы от клика</option><option value="interval" '+(mode==='interval'?'selected':'')+'>Интервал заезд/выезд</option></select></div>';
+    out += '<div class="settingsField settingsModeDurationOnly '+(mode==='duration'?'':'hidden')+'"><label>Минимум часов</label><input class="durationHours" type="number" min="1" step="1" value="'+esc(g.durationHours || g.minBookingHours || 1)+'"></div>';
+    out += '<div class="settingsField settingsModeIntervalOnly '+(mode==='interval'?'':'hidden')+'"><label>Заезд</label><input class="checkInTime" type="time" value="'+esc(timeOr(g.checkInTime,'14:00'))+'"></div>';
+    out += '<div class="settingsField settingsModeIntervalOnly '+(mode==='interval'?'':'hidden')+'"><label>Выезд</label><input class="checkOutTime" type="time" value="'+esc(timeOr(g.checkOutTime,'12:00'))+'"></div>';
+    out += '<div class="settingsField settingsModeIntervalOnly '+(mode==='interval'?'':'hidden')+'"><label>Минимум дней</label><input class="defaultDays" type="number" min="0" step="1" value="'+esc(g.defaultDays !== undefined && g.defaultDays !== null ? g.defaultDays : 1)+'"></div>';
+    out += '<div class="settingsField"><label>Тех. окно, минут</label><input class="techWindowMinutes" type="number" min="0" step="5" value="'+esc(g.techWindowMinutes || 0)+'"></div>';
+    out += '<div class="settingsField"><label>Вид на ПК</label><select class="defaultDesktopView">'+viewModeOptionList(g.defaultDesktopView || '')+'</select></div>';
+    out += '<div class="settingsField"><label>Вид на телефоне</label><select class="defaultMobileView">'+viewModeOptionList(g.defaultMobileView || '')+'</select></div>';
+    out += '</div></section>';
+    var paymentCategoryId = g.kanbanCategoryId || '0';
+    var prepayMove = g.prepaymentMoveStage !== undefined ? !!g.prepaymentMoveStage : !!g.prepaymentStageId;
+    var surchargeMove = g.surchargeMoveStage !== undefined ? !!g.surchargeMoveStage : !!g.surchargeStageId;
+    out += '<section class="settingsPanel"><h2 class="settingsSectionTitle"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/></svg></span>Оплаты и бизнес-процессы</h2>';
+    out += '<div class="settingsPaymentsGrid"><div class="settingsSubcard"><div class="settingsSubTitle"><svg viewBox="0 0 24 24" fill="none" stroke="#1677ff"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/></svg>Предоплата</div><div class="settingsField"><label>Стадия предоплаты</label><select class="prepaymentStageId">'+dealStageOptionList(paymentCategoryId, g.prepaymentStageId || '')+'</select></div><div class="settingsField" style="margin-top:16px"><label>Бизнес-процесс предоплаты</label><select class="prepaymentTemplateId">'+bizprocTemplateOptionList(g.prepaymentTemplateId || g.templateId || '')+'</select></div><label class="settingsSwitchLabel"><input type="checkbox" class="prepaymentMoveStage" '+(prepayMove?'checked':'')+'><span class="settingsSwitch"></span>Переносить сделку в эту стадию при отправке ссылки</label></div>';
+    out += '<div class="settingsSubcard"><div class="settingsSubTitle"><svg viewBox="0 0 24 24" fill="none" stroke="#16c784"><path d="M6 9h12a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Z"/><path d="M8 13h8"/></svg>Доплата</div><div class="settingsField"><label>Стадия доплаты</label><select class="surchargeStageId">'+dealStageOptionList(paymentCategoryId, g.surchargeStageId || '')+'</select></div><div class="settingsField" style="margin-top:16px"><label>Бизнес-процесс доплаты</label><select class="surchargeTemplateId">'+bizprocTemplateOptionList(g.surchargeTemplateId || g.templateId || '')+'</select></div><label class="settingsSwitchLabel"><input type="checkbox" class="surchargeMoveStage" '+(surchargeMove?'checked':'')+'><span class="settingsSwitch"></span>Переносить сделку в эту стадию при отправке ссылки</label></div></div>';
+    out += '<div class="settingsAfterPay"><h2 class="settingsSectionTitle"><span class="icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"/></svg></span>Действия после оплаты</h2><div class="settingsAfterGrid"><div class="settingsField"><label>Ожидание оплаты, минут</label><input class="paymentTimeoutMinutes" type="number" min="1" step="1" value="'+esc(g.paymentTimeoutMinutes || 60)+'"></div><div class="settingsField"><label>Стадия при успешной оплате</label><select class="paymentSuccessStageId">'+dealStageOptionList(paymentCategoryId, g.paymentSuccessStageId || '')+'</select></div><div class="settingsField"><label>Стадия при неоплате</label><select class="paymentFailStageId">'+dealStageOptionList(paymentCategoryId, g.paymentFailStageId || '')+'</select></div><div class="settingsField"><label>БП при успешной оплате</label><select class="paymentSuccessTemplateId">'+bizprocTemplateOptionList(g.paymentSuccessTemplateId || '')+'</select></div><div class="settingsField"><label>БП при неоплате</label><select class="paymentFailTemplateId">'+bizprocTemplateOptionList(g.paymentFailTemplateId || '')+'</select></div></div></div></section>';
+    out += '<footer class="settingsGroupFooter"><label class="settingsDefaultBtn"><input type="radio" name="defaultGroup" value="'+esc(g.id)+'" '+(String(s.defaultGroupId)===String(g.id)?'checked':'')+'><span class="radioDot"></span>Группа по умолчанию</label><button type="button" class="settingsDeleteBtn" data-remove-group="'+idx+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg>Удалить группу</button></footer>';
+
+    var resourcesHtml = '';
+    resources.forEach(function(r){
+      var checked = (g.resourceIds || []).map(Number).indexOf(Number(r.id)) >= 0 ? ' checked' : '';
+      resourcesHtml += '<div class="resourceSettingRow"><label><input type="checkbox" data-res="'+esc(r.id)+'"'+checked+'> '+esc(r.name)+' <span class="muted">#'+esc(r.id)+'</span></label>';
+      resourcesHtml += settingsResourceDefaultsHtml(g, r) + '</div>';
+    });
+    if(!resourcesHtml) resourcesHtml = '<div class="notice warn">Ресурсы не найдены.</div>';
+    var resourcesOpen = settingsSubIsOpen(idx, 'resources');
+    out += '<div class="settingsResourcesPanel"><div class="settingsSubsection"><button type="button" class="settingsSubHeader" data-toggle-settings-sub="'+idx+':resources"><span><span class="settingsSubTitle">Ресурсы и товар по умолчанию</span><div class="muted">Скрыто, чтобы список не занимал всю настройку</div></span><span class="pill">'+(resourcesOpen?'Свернуть':'Развернуть')+'</span></button><div class="settingsSubContent '+(resourcesOpen?'':'hidden')+'">'+resourcesHtml+'</div></div></div>';
+
+    out += '<div class="settingsCatalogPanel"><h3>Разделы товарного каталога</h3><div class="miniCard"><input type="hidden" class="groupSectionValues" value="'+esc(g.productSectionIds.join(','))+'"><div class="row"><div class="grow sectionPickSummary"><b>'+esc(selectedSectionSummary(g.productSectionIds))+'</b><div class="muted">Разделов выбрано: '+g.productSectionIds.length+'</div></div><button type="button" data-open-section-picker="'+idx+'">Выбрать</button></div></div></div>';
+
+    var dealFieldsHtml = '<div class="row"><select data-field-select="'+idx+'" class="grow"><option value="">Выберите поле сделки</option>';
+    fields.forEach(function(f){ dealFieldsHtml += '<option value="'+esc(f.name)+'">'+esc(settingsFieldLabel(f))+'</option>'; });
+    dealFieldsHtml += '</select><button data-add-field="'+idx+'">Добавить поле</button></div>';
+    dealFieldsHtml += '<div class="fieldRows">';
+    g.dealFields.forEach(function(f,fi){
+      var meta = state.dealFieldsByName[f.name] || {};
+      dealFieldsHtml += '<div class="row" data-field-row="'+fi+'"><div class="grow"><b>'+esc(settingsFieldLabel(f))+'</b></div>';
+      dealFieldsHtml += '<div class="fieldRowActions"><button data-field-up="'+idx+':'+fi+'">↑</button><button data-field-down="'+idx+':'+fi+'">↓</button>';
+      dealFieldsHtml += '<label><input type="checkbox" data-required-field="'+idx+':'+fi+'" '+(f.required?'checked':'')+'> обязательно</label>';
+      dealFieldsHtml += '<label><input type="checkbox" data-inline-field="'+idx+':'+fi+'" '+(f.inlineNext?'checked':'')+'> 2 в линии</label>';
+      dealFieldsHtml += '<span class="visibilityFlags"><label title="Карточка создания"><input type="checkbox" data-field-flag="'+idx+':'+fi+':showCreate" '+(fieldFlag(f,'showCreate')?'checked':'')+'> С</label><label title="Карточка просмотра"><input type="checkbox" data-field-flag="'+idx+':'+fi+':showView" '+(fieldFlag(f,'showView')?'checked':'')+'> П</label><label title="Общий список / календарь"><input type="checkbox" data-field-flag="'+idx+':'+fi+':showList" '+(fieldFlag(f,'showList')?'checked':'')+'> О</label></span>';
+      dealFieldsHtml += '<button data-remove-field="'+idx+':'+fi+'">Удалить</button></div></div>';
+    });
+    dealFieldsHtml += '</div>';
+    var dealFieldsOpen = settingsSubIsOpen(idx, 'dealFields');
+    out += '<div class="settingsFieldsPanel"><div class="settingsSubsection"><button type="button" class="settingsSubHeader" data-toggle-settings-sub="'+idx+':dealFields"><span><span class="settingsSubTitle">Поля сделки</span><div class="muted">Добавление, обязательность, порядок и видимость</div></span><span class="pill">'+(dealFieldsOpen?'Свернуть':'Развернуть')+'</span></button><div class="settingsSubContent '+(dealFieldsOpen?'':'hidden')+'"><div class="miniCard">'+dealFieldsHtml+'</div></div></div></div>';
+
+    out += '</div></div></div>';
+  });
+  html('settingsGroups', out);
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-toggle-settings-group]'), function(btn){
+    btn.onclick = function(){
+      var idx = Number(btn.getAttribute('data-toggle-settings-group'));
+      var g = state.settingsDraft.groups[idx] || {};
+      var key = String(g.id || ('group_'+idx));
+      var box = btn.closest('.groupBox');
+      var content = box ? box.querySelector('.settingsGroupContent') : null;
+      if(!content) return;
+      var open = content.classList.contains('hidden');
+      content.classList.toggle('hidden', !open);
+      box.classList.toggle('expanded', open);
+      box.classList.toggle('collapsed', !open);
+      var ch = btn.querySelector('.settingsChevron');
+      if(ch) ch.textContent = open ? '▾' : '▸';
+      state.settingsExpandedGroups[key] = open;
+      requestFrameHeight();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-toggle-settings-sub]'), function(btn){
+    btn.onclick = function(){
+      var box = btn.closest('.settingsSubsection');
+      var content = box ? box.querySelector('.settingsSubContent') : null;
+      if(!content) return;
+      var open = content.classList.contains('hidden');
+      content.classList.toggle('hidden', !open);
+      var pill = btn.querySelector('.pill');
+      if(pill) pill.textContent = open ? 'Свернуть' : 'Развернуть';
+      var parts = String(btn.getAttribute('data-toggle-settings-sub') || '').split(':');
+      state.settingsExpandedSubs = state.settingsExpandedSubs || {};
+      state.settingsExpandedSubs[settingsSubKey(Number(parts[0]), parts[1] || '')] = open;
+      requestFrameHeight();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#settingsGroups .groupBox'), function(box){ toggleBookingModeFields(box); });
+  Array.prototype.forEach.call(document.querySelectorAll('.bookingMode'), function(sel){ sel.onchange = function(){ toggleBookingModeFields(sel.closest('.groupBox')); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.groupKanban'), function(sel){ sel.onchange = function(){ var box = sel.closest('.groupBox'); var idx = box ? Number(box.getAttribute('data-group-idx')) : -1; syncSettingsDraftFromDom(); if(idx >= 0 && state.settingsDraft.groups[idx]){ var g = state.settingsDraft.groups[idx]; state.settingsExpandedGroups[String(g.id || ('group_'+idx))] = true; } renderSettingsGroups(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-open-section-picker]'), function(btn){ btn.onclick = function(){ openSettingsSections(Number(btn.getAttribute('data-open-section-picker'))); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-remove-group]'), function(btn){ btn.onclick = function(){ syncSettingsDraftFromDom(); state.settingsDraft.groups.splice(Number(btn.getAttribute('data-remove-group')),1); renderSettingsGroups(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-add-field]'), function(btn){
+    btn.onclick = function(){ var idx = Number(btn.getAttribute('data-add-field')); var sel = document.querySelector('[data-field-select="'+idx+'"]'); if(!sel || !sel.value) return; syncSettingsDraftFromDom(); var g = state.settingsDraft.groups[idx]; var key = String(g.id || ('group_'+idx)); state.settingsExpandedGroups[key] = true; state.settingsExpandedSubs[settingsSubKey(idx,'dealFields')] = true; g.dealFields = g.dealFields || []; if(!g.dealFields.find(function(f){return f.name === sel.value;})){ var meta = state.dealFieldsByName[sel.value] || {}; g.dealFields.push(Object.assign({name:sel.value, required:false, inlineNext:false, showCreate:true, showView:true, showList:false}, meta)); } renderSettingsGroups(); renderExternalUsersSettings(); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-remove-field]'), function(btn){ btn.onclick = function(){ syncSettingsDraftFromDom(); var p = btn.getAttribute('data-remove-field').split(':').map(Number); var g = state.settingsDraft.groups[p[0]] || {}; state.settingsExpandedGroups[String(g.id || ('group_'+p[0]))] = true; state.settingsExpandedSubs[settingsSubKey(p[0],'dealFields')] = true; state.settingsDraft.groups[p[0]].dealFields.splice(p[1],1); renderSettingsGroups(); renderExternalUsersSettings(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-field-up]'), function(btn){ btn.onclick = function(){ syncSettingsDraftFromDom(); var p = btn.getAttribute('data-field-up').split(':').map(Number); var a = state.settingsDraft.groups[p[0]].dealFields; var g = state.settingsDraft.groups[p[0]] || {}; state.settingsExpandedGroups[String(g.id || ('group_'+p[0]))] = true; if(p[1] > 0){ state.settingsExpandedSubs[settingsSubKey(p[0],'dealFields')] = true; var t=a[p[1]-1]; a[p[1]-1]=a[p[1]]; a[p[1]]=t; renderSettingsGroups(); } }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-field-down]'), function(btn){ btn.onclick = function(){ syncSettingsDraftFromDom(); var p = btn.getAttribute('data-field-down').split(':').map(Number); var a = state.settingsDraft.groups[p[0]].dealFields; var g = state.settingsDraft.groups[p[0]] || {}; state.settingsExpandedGroups[String(g.id || ('group_'+p[0]))] = true; if(p[1] < a.length-1){ state.settingsExpandedSubs[settingsSubKey(p[0],'dealFields')] = true; var t=a[p[1]+1]; a[p[1]+1]=a[p[1]]; a[p[1]]=t; renderSettingsGroups(); } }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-required-field]'), function(ch){ ch.onchange = function(){ var p = ch.getAttribute('data-required-field').split(':').map(Number); state.settingsDraft.groups[p[0]].dealFields[p[1]].required = ch.checked; }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-inline-field]'), function(ch){ ch.onchange = function(){ var p = ch.getAttribute('data-inline-field').split(':').map(Number); state.settingsDraft.groups[p[0]].dealFields[p[1]].inlineNext = ch.checked; }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-field-flag]'), function(ch){ ch.onchange = function(){ var parts = ch.getAttribute('data-field-flag').split(':'); state.settingsDraft.groups[Number(parts[0])].dealFields[Number(parts[1])][parts[2]] = ch.checked; }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-add-res-product]'), function(btn){
+    btn.onclick = function(){
+      syncSettingsDraftFromDom();
+      var box = btn.closest('.groupBox');
+      var idx = box ? Number(box.getAttribute('data-group-idx')) : -1;
+      var resId = btn.getAttribute('data-add-res-product');
+      if(idx < 0 || !state.settingsDraft.groups[idx]) return;
+      var g = state.settingsDraft.groups[idx];
+      g.resourceDefaults = g.resourceDefaults || {};
+      var list = normalizeResourceDefaultItems(g.resourceDefaults[String(resId)] || [], true);
+      list.push({ productId:'', quantity:1 });
+      g.resourceDefaults[String(resId)] = list;
+      state.settingsExpandedGroups[String(g.id || ('group_'+idx))] = true;
+      state.settingsExpandedSubs[settingsSubKey(idx,'resources')] = true;
+      renderSettingsGroups();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-remove-res-product]'), function(btn){
+    btn.onclick = function(){
+      syncSettingsDraftFromDom();
+      var box = btn.closest('.groupBox');
+      var idx = box ? Number(box.getAttribute('data-group-idx')) : -1;
+      var parts = String(btn.getAttribute('data-remove-res-product') || '').split(':');
+      var resId = parts[0];
+      var itemIdx = Number(parts[1]);
+      if(idx < 0 || !state.settingsDraft.groups[idx]) return;
+      var g = state.settingsDraft.groups[idx];
+      var list = normalizeResourceDefaultItems((g.resourceDefaults || {})[String(resId)] || [], true);
+      if(list.length > 1) list.splice(itemIdx, 1);
+      else list = [{ productId:'', quantity:1 }];
+      g.resourceDefaults = g.resourceDefaults || {};
+      g.resourceDefaults[String(resId)] = list;
+      state.settingsExpandedGroups[String(g.id || ('group_'+idx))] = true;
+      state.settingsExpandedSubs[settingsSubKey(idx,'resources')] = true;
+      renderSettingsGroups();
+    };
+  });
+  requestFrameHeight();
+}
+
+function collectSettings(){
+  var groups = [];
+  Array.prototype.forEach.call(document.querySelectorAll('#settingsGroups .groupBox'), function(box,idx){
+    var title = box.querySelector('.groupTitle').value || ('Группа '+(idx+1));
+    var old = state.settingsDraft.groups[idx] || {};
+    var ids = [];
+    Array.prototype.forEach.call(box.querySelectorAll('input[data-res]'), function(ch){ if(ch.checked) ids.push(Number(ch.getAttribute('data-res'))); });
+    var sectionInput = box.querySelector('.groupSectionValues');
+    var sectionIds = sectionInput && sectionInput.value ? sectionInput.value.split(',').map(function(v){ return String(v).trim(); }).filter(Boolean) : [];
+    var resourceDefaults = {};
+    Array.prototype.forEach.call(box.querySelectorAll('[data-resource-defaults]'), function(container){
+      var resId = container.getAttribute('data-resource-defaults');
+      var rows = [];
+      Array.prototype.forEach.call(container.querySelectorAll('.resourceDefaultProductRow'), function(row){
+        var sel = row.querySelector('select[data-res-product]');
+        var qtyInput = row.querySelector('input[data-res-qty]');
+        if(sel && sel.value){
+          rows.push({ productId:Number(sel.value), quantity:Math.max(1, Number(qtyInput && qtyInput.value || 1)) });
+        }
+      });
+      if(rows.length) resourceDefaults[String(resId)] = rows;
+    });
+    groups.push({
+      id: old.id || ('group_'+Date.now()+'_'+idx),
+      title:title,
+      resourceIds: ids,
+      productSectionIds: sectionIds,
+      kanbanCategoryId: box.querySelector('.groupKanban').value || '',
+      bookingMode: box.querySelector('.bookingMode').value || 'duration',
+      durationHours: Math.max(1, Number((box.querySelector('.durationHours') && box.querySelector('.durationHours').value) || old.durationHours || 1)),
+      checkInTime: (box.querySelector('.checkInTime') && box.querySelector('.checkInTime').value) || old.checkInTime || '14:00',
+      checkOutTime: (box.querySelector('.checkOutTime') && box.querySelector('.checkOutTime').value) || old.checkOutTime || '12:00',
+      defaultDays: nonNegativeInteger(box.querySelector('.defaultDays') ? box.querySelector('.defaultDays').value : '', old.defaultDays !== undefined && old.defaultDays !== null ? old.defaultDays : 1),
+      defaultDesktopView: normalizeOptionalViewMode((box.querySelector('.defaultDesktopView') && box.querySelector('.defaultDesktopView').value) || ''),
+      defaultMobileView: normalizeOptionalViewMode((box.querySelector('.defaultMobileView') && box.querySelector('.defaultMobileView').value) || ''),
+      techWindowMinutes: Math.max(0, Number((box.querySelector('.techWindowMinutes') && box.querySelector('.techWindowMinutes').value) || old.techWindowMinutes || old.technicalWindowMinutes || 0) || 0),
+      prepaymentStageId: (box.querySelector('.prepaymentStageId') && box.querySelector('.prepaymentStageId').value) || '',
+      prepaymentMoveStage: !!(box.querySelector('.prepaymentMoveStage') && box.querySelector('.prepaymentMoveStage').checked),
+      prepaymentTemplateId: (box.querySelector('.prepaymentTemplateId') && box.querySelector('.prepaymentTemplateId').value) || '',
+      surchargeStageId: (box.querySelector('.surchargeStageId') && box.querySelector('.surchargeStageId').value) || '',
+      surchargeMoveStage: !!(box.querySelector('.surchargeMoveStage') && box.querySelector('.surchargeMoveStage').checked),
+      surchargeTemplateId: (box.querySelector('.surchargeTemplateId') && box.querySelector('.surchargeTemplateId').value) || '',
+      paymentTimeoutMinutes: Math.max(1, Number((box.querySelector('.paymentTimeoutMinutes') && box.querySelector('.paymentTimeoutMinutes').value) || old.paymentTimeoutMinutes || 60) || 60),
+      paymentSuccessStageId: (box.querySelector('.paymentSuccessStageId') && box.querySelector('.paymentSuccessStageId').value) || '',
+      paymentFailStageId: (box.querySelector('.paymentFailStageId') && box.querySelector('.paymentFailStageId').value) || '',
+      paymentSuccessTemplateId: (box.querySelector('.paymentSuccessTemplateId') && box.querySelector('.paymentSuccessTemplateId').value) || '',
+      paymentFailTemplateId: (box.querySelector('.paymentFailTemplateId') && box.querySelector('.paymentFailTemplateId').value) || '',
+      resourceDefaults: resourceDefaults,
+      dealFields: (old.dealFields || []).map(function(f){
+        var code = String((f && (f.name || f.field || f.id)) || '').trim();
+        var meta = state.dealFieldsByName[code] || {};
+        var merged = Object.assign({required:false, inlineNext:false, showCreate:true, showView:true, showList:false}, meta, f, {name:code});
+        var label = fieldLabel(merged);
+        if(label && label !== code) merged.title = label;
+        return merged;
+      })
+    });
+  });
+  var defaultRadio = document.querySelector('input[name="defaultGroup"]:checked');
+  return {
+    removeWazzupEmail: !!(el('removeWazzupEmail') && el('removeWazzupEmail').checked),
+    defaultGroupId: defaultRadio ? defaultRadio.value : ((groups[0] && groups[0].id) || ''),
+    groups: groups,
+    externalUsers: collectExternalUsersFromDom()
+  };
+}
+function saveSettings(){
+  return withLoader(function(){
+    return api('POST','/settings', collectSettings()).then(function(){
+      show('settingsModal', false);
+      state.viewModeUserSelected = initialViewMeta.explicit;
+      return loadSettingsAndCalendar();
+    });
+  }, 'Сохраняем настройки').catch(function(e){
+    alert(e.error || 'Не удалось сохранить настройки');
+  });
+}
+el('dealSearchBtn').onclick = function(){ api('POST','/deals/search',{q:el('dealSearchInput').value}).then(function(res){ renderDealResults(res.deals || []); }).catch(function(e){ alert(e.error || 'Ошибка поиска'); }); };
+el('createDealBtn').onclick = function(){ var title = el('newDealTitle').value || 'Новая сделка из системы бронирования'; api('POST','/deals/create',{title:title}).then(function(res){ selectDeal(res.dealId); }).catch(function(e){ alert(e.error || 'Не удалось создать сделку'); }); };
+el('prevDay').onclick = function(){ state.date = addDays(state.date,-1); auditEvent('ui','prev_day',{date:state.date}); loadCalendar(false); };
+el('nextDay').onclick = function(){ state.date = addDays(state.date,1); auditEvent('ui','next_day',{date:state.date}); loadCalendar(false); };
+el('todayBtn').onclick = function(){ state.date = todayMoscow(); auditEvent('ui','today',{date:state.date}); loadCalendar(false); };
+el('datePicker').onchange = function(){ state.date = el('datePicker').value || todayMoscow(); auditEvent('ui','change_date',{date:state.date}); loadCalendar(false); };
+el('viewToggleBtn').onclick = function(){ setViewMode(nextViewMode()); };
+if(el('reportBtn')) el('reportBtn').onclick = sendPaymentSummaryReport;
+el('settingsBtn').onclick = openSettings;
+el('closeBooking').onclick = function(){ show('bookingModal', false); requestFrameHeight(); };
+el('closeSettings').onclick = function(){ show('settingsModal', false); requestFrameHeight(); };
+el('editBookingBtn').onclick = function(){ if(state.viewingBooking) openBookingForm(state.viewingBooking, state.viewingBooking.resourceId, toMoscowInput(state.viewingBooking.start), toMoscowInput(state.viewingBooking.end)); };
+el('openProductCatalogBtn').onclick = renderProductCatalog;
+el('closeProductCatalog').onclick = function(){ show('productCatalogModal', false); requestFrameHeight(); };
+el('saveBookingBtn').onclick = function(){ auditEvent('button', state.editingBooking ? 'save_booking_update' : 'save_booking_create', {bookingId:state.editingBooking&&state.editingBooking.id}); saveBooking(); };
+el('deleteBookingBtn').onclick = function(){ auditEvent('button','delete_booking',{bookingId:state.editingBooking&&state.editingBooking.id}); deleteBooking(); };
+if(el('prepayBtn')) el('prepayBtn').onclick = function(){ auditEvent('button','prepayment',{bookingId:state.viewingBooking&&state.viewingBooking.id}); runPaymentAction('prepayment'); };
+if(el('surchargeBtn')) el('surchargeBtn').onclick = function(){ auditEvent('button','surcharge',{bookingId:state.viewingBooking&&state.viewingBooking.id}); runPaymentAction('surcharge'); };
+el('viewPrepayBtn').onclick = function(){ runPaymentAction('prepayment'); };
+el('viewSurchargeBtn').onclick = function(){ runPaymentAction('surcharge'); };
+el('addProductBtn').onclick = function(){
+  var productId = el('productSelect').value;
+  if(!productId){
+    var typed = String(el('productSearch').value || '').toLowerCase().trim();
+    var exact = allowedProducts().find(function(p){ return String(p.name || '').toLowerCase() === typed; });
+    if(exact) productId = exact.id;
+  }
+  var product = productById(productId);
+  if(!product) return alert('Выберите товар из списка');
+  var qty = Math.max(1, Number(el('productQty').value || 1));
+  var price = Number(el('productPrice').value || product.price || 0) || 0;
+  var sum = el('productSum').value !== '' ? Number(el('productSum').value || 0) : qty * price;
+  if(Number.isFinite(sum) && sum >= 0) price = Math.round((sum / qty) * 100) / 100;
+  state.formProducts.push({ productId:Number(product.id), name:product.name, quantity:qty, price:price, sum:Math.round(qty * price * 100) / 100 });
+  el('productSearch').value = ''; el('productSelect').value = ''; el('productPrice').value = ''; el('productSum').value = ''; el('productQty').value = '1'; show('productSuggest', false);
+  renderProductRows();
+};
+el('productSearch').oninput = function(){ el('productSelect').value = ''; renderProductSuggest(); };
+el('productSearch').onfocus = function(){ if(String(el('productSearch').value || '').trim()) renderProductSuggest(); };
+el('productQty').oninput = syncAddProductSumFromPrice;
+el('productPrice').oninput = syncAddProductSumFromPrice;
+el('productSum').oninput = syncAddProductPriceFromSum;
+el('bookingResource').onchange = function(){ if(!state.editingBooking){ state.formProducts = []; applyDefaultProductForResource(el('bookingResource').value); } };
+el('bookingStartDate').onchange = recalcBookingPeriod;
+el('bookingStartTime').onchange = recalcBookingPeriod;
+el('bookingEndDate').onchange = syncManualBookingPeriod;
+el('bookingEndTime').onchange = syncManualBookingPeriod;
+['bookingStartTime','bookingEndTime'].forEach(function(id){
+  var input = el(id);
+  input.onblur = syncManualBookingPeriod;
+  input.onkeydown = function(ev){ if(ev.key === 'Enter'){ ev.preventDefault(); input.blur(); syncManualBookingPeriod(); } };
+});
+el('bookingDays').onchange = function(){ recalcBookingPeriod(); };
+el('addExternalUserBtn').onclick = function(){
+  syncExternalUsersFromDom();
+  state.settingsDraft = state.settingsDraft || {groups:[], externalUsers:[]};
+  state.settingsDraft.externalUsers = state.settingsDraft.externalUsers || [];
+  state.settingsDraft.externalUsers.push({ login:'viewer'+(state.settingsDraft.externalUsers.length+1), password:'', role:'viewer', groupIds:[], permissions:{ allFields:true, fields:[] } });
+  renderExternalUsersSettings();
+};
+el('addGroupBtn').onclick = function(){
+  syncSettingsDraftFromDom();
+  state.settingsDraft.groups = state.settingsDraft.groups || [];
+  var id = 'group_'+Date.now();
+  state.settingsDraft.groups.push({ id:id, title:'Новая группа', resourceIds:[], productSectionIds:[], kanbanCategoryId:'', bookingMode:'duration', durationHours:1, checkInTime:'14:00', checkOutTime:'12:00', defaultDays:1, defaultDesktopView:'', defaultMobileView:'', prepaymentStageId:'', prepaymentMoveStage:false, prepaymentTemplateId:'', surchargeStageId:'', surchargeMoveStage:false, surchargeTemplateId:'', paymentTimeoutMinutes:60, paymentSuccessStageId:'', paymentFailStageId:'', paymentSuccessTemplateId:'', paymentFailTemplateId:'', resourceDefaults:{}, dealFields:[] });
+  state.settingsExpandedGroups = state.settingsExpandedGroups || {};
+  state.settingsExpandedSubs = state.settingsExpandedSubs || {};
+  state.settingsExpandedGroups[id] = true;
+  renderSettingsGroups();
+};
+el('closeSettingsSections').onclick = function(){ show('settingsSectionsModal', false); requestFrameHeight(); };
+el('cancelSettingsSections').onclick = function(){ show('settingsSectionsModal', false); requestFrameHeight(); };
+el('applySettingsSections').onclick = applySettingsSections;
+el('saveSettingsBtn').onclick = saveSettings;
+
+init();
+})();
+</script>
+</body>
+</html>
