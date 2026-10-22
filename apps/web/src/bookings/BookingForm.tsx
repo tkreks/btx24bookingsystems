@@ -5,11 +5,13 @@ import {
   PAYMENT_MODES,
   type CalendarDay,
   type CreateBookingResultDto,
+  type DealFormDto,
   type MyGroupDto,
   type PaymentMode,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
+import { DealFieldsEditor, initialValues } from './DealFieldsEditor.js';
 
 export interface BookingFormContext {
   date: string;
@@ -95,6 +97,34 @@ export function BookingForm({
   }, [groupId, context.date]);
 
   const list = resources?.groupId === groupId ? resources.list : null;
+
+  // Поля сделки группы (флаг «С»); у существующей сделки — с её текущими значениями.
+  const formKey = deal.mode === 'service' || !groupId ? '' : `${groupId}:${deal.mode === 'existing' ? deal.dealId : ''}`;
+  const [dealForm, setDealForm] = useState<{ key: string; form: DealFormDto | null; error: string } | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!formKey) return;
+    let active = true;
+    const [gid, did] = formKey.split(':');
+    apiGet<DealFormDto>(`/deal-form?groupId=${encodeURIComponent(gid)}${did ? `&dealId=${did}` : ''}`).then(
+      (f) => {
+        if (!active) return;
+        setDealForm({ key: formKey, form: f, error: '' });
+        setValues(initialValues(f.fields));
+      },
+      (e) => active && setDealForm({ key: formKey, form: null, error: e instanceof Error ? e.message : 'Не удалось загрузить поля сделки' }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [formKey]);
+  const currentForm = formKey && dealForm?.key === formKey ? dealForm : null;
+  // Тип брони — отдельным выбором выше (с автоопределением по товарам).
+  const createFields = (currentForm?.form?.fields ?? []).filter((f) => f.showCreate && f.role !== 'bookingType');
+  const roleField = (role: string) => createFields.find((f) => f.role === role && !f.readOnly);
+  // Гости и комментарий менеджера есть среди полей группы — отдельные поля формы не нужны.
+  const guestsField = roleField('guests');
+  const commentField = roleField('managerComment');
   const chooseGroup = (id: string) => {
     setGroupId(id);
     const g = allowed.find((x) => x.id === id);
@@ -132,6 +162,11 @@ export function BookingForm({
     if (!resourceIds.length) return setError('Выберите ресурс');
     if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
     if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId) return setError('Выберите тип брони: у новой сделки ещё нет товаров');
+    if (deal.mode !== 'service' && formKey && !currentForm) return setError('Поля сделки ещё загружаются');
+    const missing = deal.mode === 'service' ? undefined : createFields.find((f) => f.required && !f.readOnly && !values[f.code]?.trim());
+    if (missing) return setError(`Заполните поле «${missing.label}»`);
+    const dealFields = Object.fromEntries(createFields.filter((f) => !f.readOnly).map((f) => [f.code, values[f.code] ?? '']));
+    const commentText = (deal.mode !== 'service' && commentField ? values[commentField.code] ?? '' : comment).trim();
     setBusy(true);
     setError('');
     try {
@@ -145,10 +180,11 @@ export function BookingForm({
         dealId: deal.mode === 'existing' ? deal.dealId : null,
         newDeal: deal.mode === 'new' ? { title: deal.title.trim(), contactId: context.contactId ?? null } : null,
         contactId: context.contactId ?? null,
-        guests: guests ? Number(guests) : null,
-        comment: comment.trim() || undefined,
+        guests: !guestsField && guests ? Number(guests) : null,
+        comment: commentText || undefined,
         paymentMode,
         bookingTypeId: deal.mode === 'service' ? null : bookingTypeId || null,
+        ...(deal.mode === 'service' ? {} : { dealFields }),
       });
       onDone(r, deal.mode === 'service' ? null : paymentMode);
     } catch (e) {
@@ -301,10 +337,12 @@ export function BookingForm({
             <div className="settings-grid">
               {deal.mode !== 'service' && (
                 <>
-                  <label>
-                    Гостей
-                    <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
-                  </label>
+                  {!guestsField && (
+                    <label>
+                      Гостей
+                      <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
+                    </label>
+                  )}
                   {group && (group.bookingTypes ?? []).length > 0 && (
                     <label>
                       Тип брони{group.bookingTypeRequired ? ' *' : ''}
@@ -335,10 +373,20 @@ export function BookingForm({
                 </>
               )}
             </div>
-            <label className="settings-block">
-              Комментарий
-              <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
-            </label>
+            {deal.mode !== 'service' && createFields.length > 0 && (
+              <fieldset className="form-deal-fields">
+                <legend>Поля сделки</legend>
+                <DealFieldsEditor fields={createFields} values={values} onChange={(code, v) => setValues((prev) => ({ ...prev, [code]: v }))} />
+              </fieldset>
+            )}
+            {deal.mode !== 'service' && formKey && !currentForm && <p className="muted">Загрузка полей сделки…</p>}
+            {currentForm?.error && <p className="notice error">{currentForm.error}</p>}
+            {(deal.mode === 'service' || !commentField) && (
+              <label className="settings-block">
+                Комментарий
+                <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
+              </label>
+            )}
             <p className="muted">Товары и цены — в сделке; тип брони и сообщение клиенту приложение определит по товарам.</p>
             </>
             )}

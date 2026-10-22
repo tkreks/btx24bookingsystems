@@ -8,6 +8,7 @@ import type {
   ClientBookingsDto,
   CreateBookingResultDto,
   DealFieldMapDto,
+  DealFormDto,
   Permission,
 } from '@btx24/shared';
 import { z } from 'zod';
@@ -21,6 +22,7 @@ import { BookingCreateService } from './booking-create.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
+import { DealFormService } from './deal-form.service.js';
 
 /**
  * Уведомления о бронях и история броней. Видеть — право `booking.details` хотя бы в одной группе;
@@ -35,6 +37,7 @@ export class BookingsController {
     private readonly journal: BookingJournalService,
     private readonly creator: BookingCreateService,
     private readonly clients: ClientBookingsService,
+    private readonly dealForm: DealFormService,
   ) {}
 
   @Get('booking-alerts')
@@ -60,6 +63,21 @@ export class BookingsController {
   @Post('bookings')
   create(@B24User() user: B24UserContext, @Body() body: unknown): Promise<CreateBookingResultDto> {
     return this.creator.create(user, body);
+  }
+
+  /** Поля сделки группы для формы брони и карточки (значения — если указана сделка). Права проверяет сервис. */
+  @Get('deal-form')
+  form(@B24User() user: B24UserContext, @Query('groupId') groupId?: string, @Query('dealId') dealId?: string): Promise<DealFormDto> {
+    if (!groupId) throw new BadRequestException({ code: 'GROUP_REQUIRED', message: 'Укажите группу' });
+    const id = dealId ? Number(dealId) : null;
+    if (id !== null && !(Number.isSafeInteger(id) && id > 0)) throw new BadRequestException({ code: 'INVALID_DEAL', message: 'Неверный ID сделки' });
+    return this.dealForm.form(user, groupId, id);
+  }
+
+  /** Правка полей сделки из карточки брони (`booking.edit` в группе). */
+  @Put('deals/:dealId/fields')
+  updateDealFields(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number, @Body() body: unknown): Promise<DealFormDto> {
+    return this.dealForm.update(user, dealId, body);
   }
 
   /** Брони сделки и её клиента — встройка в карточку сделки, дата календаря. */

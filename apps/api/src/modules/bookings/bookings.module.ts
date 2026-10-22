@@ -7,6 +7,7 @@ import { BookingAlertsService } from './booking-alerts.service.js';
 import { BookingCreateService } from './booking-create.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
+import { DealFormService } from './deal-form.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { BookingSyncService } from './booking-sync.service.js';
 import { MessageContextService } from './message-context.service.js';
@@ -21,6 +22,7 @@ import { MessageContextService } from './message-context.service.js';
     BookingCreateService,
     ClientBookingsService,
     DealFieldMapService,
+    DealFormService,
     MessageContextService,
   ],
   exports: [BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService, MessageContextService],

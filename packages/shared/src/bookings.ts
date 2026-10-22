@@ -189,6 +189,8 @@ export interface CreateBookingDto {
   paymentMode: PaymentMode;
   /** Тип брони, выбранный менеджером (id правила группы); не задан — по товарам сделки, как в БП 270. */
   bookingTypeId?: string | null;
+  /** Поля сделки группы (флаг «С»): код → значение формы (`DealFormField.value`). */
+  dealFields?: Record<string, string>;
 }
 
 export interface CreateBookingResultDto {
@@ -197,4 +199,46 @@ export interface CreateBookingResultDto {
   /** Тип брони по товарам (для сообщения клиенту); null — не определён. */
   bookingType: string | null;
   warnings: string[];
+}
+
+/** Вид поля сделки в форме (из типа `crm.deal.fields`). */
+export type DealFormFieldKind = 'string' | 'number' | 'money' | 'enum' | 'boolean' | 'date' | 'datetime';
+
+/**
+ * Поле сделки группы для формы брони и правки в карточке (`options.dealFields` + `crm.deal.fields`).
+ * Значение — строкой, как в поле ввода: число «1500», список — ID варианта, да/нет — «Y»/«N»,
+ * дата — «YYYY-MM-DD», дата и время — «YYYY-MM-DDTHH:MM» в поясе портала.
+ */
+export interface DealFormField {
+  code: string;
+  label: string;
+  kind: DealFormFieldKind;
+  required: boolean;
+  /** Не редактируется: поле только для чтения в CRM, множественное/составное или его заполняет приложение. */
+  readOnly: boolean;
+  /** Два в строку: поле и следующее — в одной строке. */
+  inlineNext: boolean;
+  /** «С» — в форме создания брони; «П» — в карточке брони. */
+  showCreate: boolean;
+  showView: boolean;
+  items?: { id: string; value: string }[];
+  /** Системная роль поля (⚙ → «Приложение»): гости, комментарий менеджера… */
+  role: DealFieldRole | null;
+  value: string;
+  /** Значение для показа, если поле не редактируется (списки, составные). */
+  display: string;
+}
+
+/** `GET /api/deal-form?groupId=&dealId=` — поля сделки группы и значения сделки (если указана). */
+export interface DealFormDto {
+  groupId: string;
+  dealId: number | null;
+  currency: string;
+  fields: DealFormField[];
+}
+
+/** `PUT /api/deals/:dealId/fields` — правка полей сделки из карточки брони (только изменённые). */
+export interface UpdateDealFieldsDto {
+  groupId: string;
+  values: Record<string, string>;
 }

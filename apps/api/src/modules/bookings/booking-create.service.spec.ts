@@ -1,6 +1,8 @@
 import { BookingCreateService, dateRu, timeRu, zonedIso } from './booking-create.service.js';
 import { detectFieldMap, type DealFieldMapService } from './deal-field-map.service.js';
 import type { BookingJournalService } from './booking-journal.service.js';
+import type { DealFormService } from './deal-form.service.js';
+import type { DealFormField } from '@btx24/shared';
 import type { AccessService } from '../access/access.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -19,7 +21,7 @@ const group = {
 };
 const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
 
-function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[] } = {}) {
+function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[]; formFields?: DealFormField[] } = {}) {
   const ops: Record<string, unknown>[] = [];
   const prisma = {
     bookingOperation: {
@@ -49,7 +51,8 @@ function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions
   });
   const listAll = vi.fn(async () => [{ NAME: 'Программа «Алатырь» 4 часа' }]);
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call, listAll } } as unknown as B24UserContext;
-  const svc = new BookingCreateService(prisma, access, journal as unknown as BookingJournalService, fieldMap);
+  const dealForm = { createFields: vi.fn(async () => o.formFields ?? []) } as unknown as DealFormService;
+  const svc = new BookingCreateService(prisma, access, journal as unknown as BookingJournalService, fieldMap, dealForm);
   return { svc, user, calls, journal, ops };
 }
 
@@ -226,5 +229,38 @@ describe('DealFieldMapService.enumId', () => {
     expect(await svc.enumId('p1', client, 'UF_T', 'Почасовка')).toBe('88');
     expect(await svc.enumId('p1', client, 'UF_T', 'нет')).toBeNull();
     expect(call).toHaveBeenCalledTimes(1); // кэш
+  });
+});
+
+describe('BookingCreateService — поля сделки группы', () => {
+  const field = (over: Partial<DealFormField>): DealFormField => ({
+    code: 'UF_X', label: 'Поле', kind: 'string', required: false, readOnly: false, inlineNext: false,
+    showCreate: true, showView: true, role: null, value: '', display: '', ...over,
+  });
+  const formFields = [
+    field({ code: 'UF_KIND', label: 'Тип сделки', kind: 'enum', items: [{ id: '72', value: 'Посещение' }] }),
+    field({ code: 'UF_SUM', label: 'Предоплата', kind: 'money', required: true }),
+  ];
+
+  it('пишет поля формы в сделку вместе с системными (системные важнее)', async () => {
+    const { svc, user, calls } = setup({ formFields });
+    await svc.create(user, body({ dealFields: { UF_KIND: '72', UF_SUM: '1500' }, bookingTypeId: 'hourly' }));
+    const upd = calls.find(([m]) => m === 'crm.deal.update')![1] as { fields: Record<string, unknown> };
+    expect(upd.fields).toMatchObject({ UF_KIND: '72', UF_SUM: '1500|RUB', UF_ID: '555' });
+  });
+
+  it('обязательное поле пустое — 400 до записей в Битрикс24', async () => {
+    const { svc, user, calls } = setup({ formFields });
+    await expect(svc.create(user, body({ dealFields: { UF_KIND: '72' }, bookingTypeId: 'hourly' }))).rejects.toMatchObject({
+      response: { code: 'INVALID_DEAL_FIELDS', message: 'Заполните поле «Предоплата»' },
+    });
+    expect(calls.filter(([m]) => m !== 'crm.deal.productrows.get')).toEqual([]);
+  });
+
+  it('чужое поле — 400', async () => {
+    const { svc, user } = setup({ formFields });
+    await expect(svc.create(user, body({ dealFields: { UF_SUM: '1', STAGE_ID: 'WON' }, bookingTypeId: 'hourly' }))).rejects.toMatchObject({
+      response: { code: 'INVALID_DEAL_FIELDS' },
+    });
   });
 });

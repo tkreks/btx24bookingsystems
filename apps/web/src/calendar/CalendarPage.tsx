@@ -423,7 +423,16 @@ export function CalendarPage({
       </main>
 
       {createdNote && <div className="notice">{createdNote}</div>}
-      {selected && day && <BookingDetails booking={selected} day={day} onClose={() => setSelected(null)} />}
+      {selected && day && (
+        <BookingDetails
+          booking={selected}
+          day={day}
+          groupId={activeGroup?.id ?? null}
+          canEdit={!!activeGroup?.permissions.includes('booking.edit')}
+          onClose={() => setSelected(null)}
+          onChanged={() => setSettingsRevision((n) => n + 1)}
+        />
+      )}
       {bookingForm && (
         <BookingForm
           groups={groups ?? []}

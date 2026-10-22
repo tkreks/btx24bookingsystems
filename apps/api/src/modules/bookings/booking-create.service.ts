@@ -17,6 +17,8 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
+import { dealUpdateFields } from './deal-form.js';
+import { DealFormService } from './deal-form.service.js';
 
 const iso = z.string().refine((v) => Number.isFinite(Date.parse(v)), 'ISO-дата');
 export const createSchema = z
@@ -38,6 +40,7 @@ export const createSchema = z
       .optional(),
     paymentMode: z.enum(PAYMENT_MODES),
     bookingTypeId: z.string().min(1).max(40).nullable().optional(),
+    dealFields: z.record(z.string().max(64), z.string().max(5000)).optional(),
   })
   .strict()
   .refine((b) => Date.parse(b.end) > Date.parse(b.start), { message: 'Конец брони раньше начала', path: ['end'] })
@@ -64,6 +67,7 @@ export class BookingCreateService {
     private readonly access: AccessService,
     private readonly journal: BookingJournalService,
     private readonly fieldMap: DealFieldMapService,
+    private readonly dealForm: DealFormService,
   ) {}
 
   async create(user: B24UserContext, body: unknown): Promise<CreateBookingResultDto> {
@@ -97,6 +101,15 @@ export class BookingCreateService {
           code: 'BOOKING_TYPE_REQUIRED',
           message: 'Укажите тип брони: по товарам сделки он не определился (добавьте товары в сделку или выберите тип)',
         });
+    }
+    // Поля сделки группы (флаг «С») — проверка до записей; валюта денег — рубли (как в прототипе).
+    let groupFields: Record<string, unknown> = {};
+    if (b.kind === 'client') {
+      try {
+        groupFields = dealUpdateFields(await this.dealForm.createFields(user, g), b.dealFields ?? {}, 'RUB', user.portal.timezone, true);
+      } catch (e) {
+        throw new BadRequestException({ code: 'INVALID_DEAL_FIELDS', message: msg(e) });
+      }
     }
     const outside = b.resourceIds.filter((id) => !g.group.resourceIds.includes(id));
     if (outside.length) throw new BadRequestException({ code: 'RESOURCE_NOT_IN_GROUP', message: `Ресурсы не из группы: ${outside.join(', ')}` });
@@ -202,7 +215,8 @@ export class BookingCreateService {
         const typeValue =
           type?.rule.dealTypeValue && map.bookingType ? await this.fieldMap.enumId(user.portal.id, user.client, map.bookingType, type.rule.dealTypeValue) : null;
         if (type && type.rule.dealTypeValue && map.bookingType && !typeValue) warnings.push(`Тип «${type.rule.title}»: значение не найдено в поле «Тип бронирования» — поле не заполнено`);
-        const fields = await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '');
+        // Системные поля важнее полей формы: их значения приложение считает само.
+        const fields = { ...groupFields, ...(await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '')) };
         if (Object.keys(fields).length) {
           if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update'))
             await log('deal.update', true, { fields: Object.keys(fields) });

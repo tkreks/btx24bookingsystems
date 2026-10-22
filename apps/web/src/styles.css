@@ -1290,6 +1290,55 @@ main.loading {
   flex-direction: column;
 }
 
+/* Поля сделки группы: форма брони и правка в карточке брони. «Два в строку» — половины. */
+.form-deal-fields {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px 12px;
+}
+.deal-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+.deal-fields > label {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.deal-fields > label.half {
+  grid-column: auto;
+}
+.deal-fields input,
+.deal-fields select,
+.deal-fields textarea {
+  min-width: 0;
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.deal-field-ro {
+  color: var(--text);
+  font-size: 14px;
+  padding: 7px 0;
+}
+.deal-edit {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+@media (max-width: 480px) {
+  .deal-fields > label.half {
+    grid-column: 1 / -1;
+  }
+}
+
 .form-deal input:not([type]) {
   font: inherit;
   font-size: 16px;

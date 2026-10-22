@@ -9,6 +9,8 @@
 | `POST /api/booking-alerts/:id/resolve` `{resolution}` | `booking.edit` / `booking.cancel` | `accept_bitrix` — принять как в Битрикс24; `cancel_booking` — удалить в Битрикс24 и отменить |
 | `GET /api/bookings/:bookingId/history` | `booking.details` | история брони (аудит) |
 | `POST /api/bookings` | `booking.create` в группе | создать бронь — сага `booking-create.service.ts` (журнал `BookingOperation`, ключ идемпотентности, компенсация) |
+| `GET /api/deal-form?groupId=&dealId=` | `booking.create` или `booking.edit` в группе (+ `booking.details` со сделкой) | поля сделки группы для формы брони и карточки: тип, варианты, «два в строку», значения сделки |
+| `PUT /api/deals/:dealId/fields` `{groupId, values}` | `booking.edit` + `booking.details` в группе | правка полей сделки из карточки брони (только изменённые; режим «только чтение» → 403 `DEAL_READ_ONLY`) |
 | `GET /api/deals/:dealId/bookings` | `calendar.view` | брони сделки и её клиента (встройка открывается на дате брони) |
 | `GET /api/openlines/chats/:chatId/bookings` | `openlines.read` | брони клиента чата: было / сейчас / будет, открытые сделки |
 | `GET/PUT /api/admin/booking-sync/deal-fields`, `…/detect` | админ приложения | системные поля сделки портала (роль → код), автоопределение по названиям |
@@ -68,3 +70,12 @@
 типами брони — заполненное менеджером не трогает. Значения поля-списка пишутся **номером варианта**:
 БП хранит внутренний код (XML_ID «3af19224…»), `DealFieldMapService.enumId` переводит код/название в
 номер (`crm.deal.userfield.list`); не нашли — поле не пишется.
+
+**Поля сделки группы** (`options.dealFields`, флаги С/П/О; `deal-form.ts`, `DealFormService`): форма
+брони показывает поля «С» (у существующей сделки — с её значениями) и шлёт их в
+`CreateBookingDto.dealFields`; карточка брони — «Редактировать» → поля «С»/«П». Сервер принимает
+только поля группы, которые можно менять: не множественные, не только для чтения в CRM и не
+заполняемые приложением (`APP_FILLED_ROLES`: ID и даты брони, тип, счета, ссылки). Обязательные
+(«required») проверяются до записей в Битрикс24. Деньги пишутся «сумма|валюта сделки» (при
+создании — RUB), да/нет — 1/0, дата и время — из пояса портала в UTC. При создании системные поля
+важнее полей формы.
