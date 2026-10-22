@@ -48,7 +48,7 @@ export function BookingDetails({
     setBusy(true);
     setError('');
     try {
-      const form = await apiGet<DealFormDto>(`/deal-form?groupId=${encodeURIComponent(groupId!)}&dealId=${booking.dealId}`);
+      const form = await apiGet<DealFormDto>(`/deal-form?groupId=${encodeURIComponent(groupId!)}&dealId=${booking.dealId}&purpose=edit`);
       // Каждое открытие правки — свежие значения сделки (ключ состояния полей).
       setEditing({ form, n: Date.now() });
     } catch (e) {

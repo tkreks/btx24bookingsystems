@@ -140,7 +140,7 @@ export class BookingAlertsService {
       if (dto.actual || alert.kind === 'new_booking') await user.client.call('booking.v1.booking.delete', { id: alert.bookingId });
       if (record?.status === 'active')
         await this.journal.recordCancelled(user.portal.id, alert.bookingId, { reason: 'manual', actor });
-      else if (record) await this.journal.note(record.id, 'deleted_in_bitrix', actor, { alertId: id }, 'app');
+      else if (record) await this.journal.note(record, 'deleted_in_bitrix', actor, { alertId: id }, 'app');
     }
     return this.setStatus(user, id, { status: 'resolved' });
   }

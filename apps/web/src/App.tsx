@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { SessionInfo } from '@btx24/shared';
-import { apiGet, ApiRequestError } from './api.js';
+import type { AppEnterDto, SessionInfo } from '@btx24/shared';
+import { apiGet, apiPost, ApiRequestError } from './api.js';
 import { initB24, placementContext, type PlacementContext } from './b24.js';
 import { CalendarPage } from './calendar/CalendarPage.js';
 import { SessionOverlay } from './SessionOverlay.js';
@@ -20,7 +20,10 @@ export function App() {
       if (!(await initB24())) return setBoot({ state: 'outside' });
       try {
         const session = await apiGet<SessionInfo>('/session');
-        setBoot({ state: 'ready', session, placement: placementContext() });
+        const placement = placementContext();
+        setBoot({ state: 'ready', session, placement });
+        // Вход — в журнал действий (откуда открыли); сбой записи не мешает работе.
+        void apiPost('/activity/enter', { placement: placement.placement, dealId: placement.dealId } satisfies AppEnterDto).catch(() => undefined);
         startSessionWatch();
       } catch (e) {
         setBoot({ state: 'error', message: e instanceof ApiRequestError ? e.message : 'Не удалось подключиться к серверу приложения' });

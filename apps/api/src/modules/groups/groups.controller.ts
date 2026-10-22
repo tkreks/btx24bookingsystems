@@ -11,6 +11,7 @@ import type {
   MyGroupDto,
 } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
+import { ActionLogService, diffFields } from '../audit/action-log.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { PermanentAdminGuard } from '../access/permanent-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
@@ -40,6 +41,7 @@ export class GroupsAdminController {
     private readonly groups: GroupsService,
     private readonly directory: GroupDirectoryService,
     private readonly passwords: ExternalPasswordsService,
+    private readonly actions: ActionLogService,
   ) {}
 
   @Get('group-directory')
@@ -84,19 +86,35 @@ export class GroupsAdminController {
   }
 
   @Post('groups')
-  create(@B24User() user: B24UserContext, @Body() body: unknown): Promise<GroupDto> {
-    return this.groups.create(user.portal.id, body);
+  async create(@B24User() user: B24UserContext, @Body() body: unknown): Promise<GroupDto> {
+    const g = await this.groups.create(user.portal.id, body);
+    await this.actions.user(user, { action: 'group.create', summary: `Создал группу «${g.name}»`, entityType: 'group', entityId: g.id, details: { after: g } });
+    return g;
   }
 
   @Put('groups/:id')
-  update(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<GroupDto> {
-    return this.groups.update(user.portal.id, id, body);
+  async update(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<GroupDto> {
+    const before = (await this.groups.list(user.portal.id)).find((g) => g.id === id) ?? null;
+    const g = await this.groups.update(user.portal.id, id, body);
+    // «Было → стало» по разделам группы; настройки направления (options) — по их блокам.
+    const flat = (x: GroupDto | null) => (x ? { ...x, ...Object.fromEntries(Object.entries(x.options ?? {}).map(([k, v]) => [`options.${k}`, v])), options: undefined } : null);
+    const changes = diffFields(flat(before), flat(g)!, GROUP_LABELS, ['sort', 'id']);
+    await this.actions.user(user, {
+      action: 'group.update',
+      summary: `Изменил группу «${g.name}»${changes.length ? `: ${changes.map((c) => c.label).join(', ')}` : ' (без изменений)'}`,
+      entityType: 'group',
+      entityId: g.id,
+      details: { changes },
+    });
+    return g;
   }
 
   @Delete('groups/:id')
   @HttpCode(204)
-  archive(@B24User() user: B24UserContext, @Param('id') id: string): Promise<void> {
-    return this.groups.archive(user.portal.id, id);
+  async archive(@B24User() user: B24UserContext, @Param('id') id: string): Promise<void> {
+    const before = (await this.groups.list(user.portal.id)).find((g) => g.id === id);
+    await this.groups.archive(user.portal.id, id);
+    await this.actions.user(user, { action: 'group.archive', summary: `Архивировал группу «${before?.name ?? id}»`, entityType: 'group', entityId: id });
   }
 
   @Get('settings')
@@ -107,7 +125,47 @@ export class GroupsAdminController {
   /** Список администраторов меняют только постоянные администраторы (не по временному паролю). */
   @Put('settings')
   @UseGuards(PermanentAdminGuard)
-  save(@B24User() user: B24UserContext, @Body() body: unknown): Promise<AppSettingsDto> {
-    return this.groups.saveSettings(user.portal.id, user.userId, body);
+  async save(@B24User() user: B24UserContext, @Body() body: unknown): Promise<AppSettingsDto> {
+    const before = await this.groups.settings(user.portal.id);
+    const after = await this.groups.saveSettings(user.portal.id, user.userId, body);
+    const changes = diffFields({ ...before }, { ...after }, SETTINGS_LABELS, ['createGrantedAt']);
+    await this.actions.user(user, {
+      action: 'settings.update',
+      summary: `Изменил настройки приложения${changes.length ? `: ${changes.map((c) => c.label).join(', ')}` : ' (без изменений)'}`,
+      entityType: 'settings',
+      details: { changes },
+    });
+    return after;
   }
 }
+
+/** Подписи разделов для «было → стало» в журнале действий. */
+const GROUP_LABELS: Record<string, string> = {
+  name: 'название',
+  dealCategoryId: 'воронка',
+  resourceIds: 'ресурсы',
+  bookingMode: 'режим времени',
+  durationMinutes: 'длительность',
+  checkInTime: 'заезд',
+  checkOutTime: 'выезд',
+  defaultNights: 'ночей по умолчанию',
+  techWindowMinutes: 'тех. окно',
+  features: 'функции',
+  members: 'участники',
+  'options.dealFields': 'поля сделки',
+  'options.productSectionIds': 'разделы каталога',
+  'options.resourceDefaults': 'товары по умолчанию',
+  'options.views': 'вид календаря',
+  'options.bookingTypes': 'типы брони и сообщения',
+  'options.bookingTypeRequired': 'обязательный тип брони',
+  'options.payments': 'оплаты',
+};
+const SETTINGS_LABELS: Record<string, string> = {
+  dialogMetadataEnabled: 'сбор метаданных диалогов',
+  dialogTextsEnabled: 'сбор текстов',
+  removeWazzupEmail: 'удаление e-mail wazzup',
+  createInBitrix: 'создание в Битрикс24',
+  updateDealFields: 'изменение полей сделок',
+  admins: 'администраторы',
+  appUsers: 'доступ к приложению',
+};

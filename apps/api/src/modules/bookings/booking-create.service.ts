@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   canUsePaymentMode,
   detectBookingType,
@@ -7,6 +7,7 @@ import {
   PAYMENT_MODES,
   type CreateBookingDto,
   type CreateBookingResultDto,
+  type DealFormField,
   type GroupOptionsDto,
 } from '@btx24/shared';
 import { z } from 'zod';
@@ -16,6 +17,7 @@ import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { BookingJournalService } from './booking-journal.service.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { dealUpdateFields } from './deal-form.js';
 import { DealFormService } from './deal-form.service.js';
@@ -68,6 +70,7 @@ export class BookingCreateService {
     private readonly journal: BookingJournalService,
     private readonly fieldMap: DealFieldMapService,
     private readonly dealForm: DealFormService,
+    @Optional() private readonly actions?: ActionLogService,
   ) {}
 
   async create(user: B24UserContext, body: unknown): Promise<CreateBookingResultDto> {
@@ -104,9 +107,11 @@ export class BookingCreateService {
     }
     // Поля сделки группы (флаг «С») — проверка до записей; валюта денег — рубли (как в прототипе).
     let groupFields: Record<string, unknown> = {};
+    let formFields: DealFormField[] = [];
     if (b.kind === 'client') {
       try {
-        groupFields = dealUpdateFields(await this.dealForm.createFields(user, g), b.dealFields ?? {}, 'RUB', user.portal.timezone, true);
+        formFields = await this.dealForm.createFields(user, g);
+        groupFields = dealUpdateFields(formFields, b.dealFields ?? {}, 'RUB', user.portal.timezone, true);
       } catch (e) {
         throw new BadRequestException({ code: 'INVALID_DEAL_FIELDS', message: msg(e) });
       }
@@ -218,9 +223,21 @@ export class BookingCreateService {
         // Системные поля важнее полей формы: их значения приложение считает само.
         const fields = { ...groupFields, ...(await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '')) };
         if (Object.keys(fields).length) {
-          if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update'))
+          if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update')) {
             await log('deal.update', true, { fields: Object.keys(fields) });
-          else warnings.push(`Поля сделки #${dealId} не заполнены: изменять существующие сделки не разрешено (⚙ → «Приложение» → «Запись в Битрикс24»)`);
+            // Поля, которые заполнил менеджер в форме брони, — в журнал действий («стало»).
+            const changes = formFields
+              .filter((f) => f.code in (b.dealFields ?? {}) && (b.dealFields?.[f.code] ?? '') !== '')
+              .map((f) => ({ field: f.code, label: f.label, before: null, after: b.dealFields?.[f.code] ?? null }));
+            if (changes.length)
+              await this.actions?.user(user, {
+                action: 'deal.update',
+                summary: `Заполнил поля сделки #${dealId} при создании брони: ${changes.map((c) => c.label).join(', ')}`,
+                entityType: 'deal',
+                entityId: dealId,
+                details: { bookingId, changes },
+              });
+          } else warnings.push(`Поля сделки #${dealId} не заполнены: изменять существующие сделки не разрешено (⚙ → «Приложение» → «Запись в Битрикс24»)`);
         } else warnings.push('Системные поля сделки не настроены (⚙ → «Приложение»)');
       }
 

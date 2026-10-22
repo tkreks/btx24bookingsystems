@@ -76,11 +76,17 @@ export class BookingsController {
 
   /** Поля сделки группы для формы брони и карточки (значения — если указана сделка). Права проверяет сервис. */
   @Get('deal-form')
-  form(@B24User() user: B24UserContext, @Query('groupId') groupId?: string, @Query('dealId') dealId?: string): Promise<DealFormDto> {
+  form(
+    @B24User() user: B24UserContext,
+    @Query('groupId') groupId?: string,
+    @Query('dealId') dealId?: string,
+    @Query('purpose') purpose?: string,
+  ): Promise<DealFormDto> {
     if (!groupId) throw new BadRequestException({ code: 'GROUP_REQUIRED', message: 'Укажите группу' });
     const id = dealId ? Number(dealId) : null;
     if (id !== null && !(Number.isSafeInteger(id) && id > 0)) throw new BadRequestException({ code: 'INVALID_DEAL', message: 'Неверный ID сделки' });
-    return this.dealForm.form(user, groupId, id);
+    // purpose=edit — карточка брони «Редактировать»: открытие правки пишется в журнал действий.
+    return this.dealForm.form(user, groupId, id, purpose === 'edit' ? 'edit' : 'create');
   }
 
   /** Правка полей сделки из карточки брони (`booking.edit` в группе). */

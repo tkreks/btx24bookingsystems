@@ -1,5 +1,5 @@
 import type { ApiError } from '@btx24/shared';
-import { getAuth, refreshAuth, type B24Auth } from './b24.js';
+import { getAuth, placementContext, refreshAuth, type B24Auth } from './b24.js';
 import { reportSessionLost } from './session-guard.js';
 
 export class ApiRequestError extends Error {
@@ -39,6 +39,8 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     headers: {
       Authorization: `Bearer ${auth.token}`,
       'X-B24-Member-Id': auth.memberId,
+      // Откуда открыто приложение (сделка, меню) — для журнала действий.
+      'X-Btx24-Placement': placementContext().placement,
       // FormData: Content-Type с границей частей выставит браузер.
       ...(body === undefined || body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     },

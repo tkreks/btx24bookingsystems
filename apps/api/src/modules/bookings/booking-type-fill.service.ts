@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { detectBookingType, type GroupOptionsDto } from '@btx24/shared';
 import type { Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 
 const BATCH = 50;
@@ -21,6 +22,7 @@ export class BookingTypeFillService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fieldMap: DealFieldMapService,
+    @Optional() private readonly actions?: ActionLogService,
   ) {}
 
   /** Один проход: `since` — сделки, изменённые с этого момента. Возвращает число заполненных. */
@@ -64,6 +66,14 @@ export class BookingTypeFillService {
           await client.call('crm.deal.update', { id: Number(d.ID), fields: { [field]: value } });
           filled++;
           this.logger.log(`deal ${d.ID}: booking type «${type.rule.title}» filled by products`);
+          await this.actions?.log(portal.id, { kind: 'system', name: 'Система: тип брони по товарам' }, {
+            action: 'deal.update',
+            summary: `Сделка #${d.ID}: тип брони «${type.rule.title}» определён по товарам и записан`,
+            entityType: 'deal',
+            entityId: Number(d.ID),
+            details: { changes: [{ field, label: 'Тип бронирования', before: null, after: type.rule.title }], products: names },
+            via: 'worker',
+          });
         } catch (e) {
           this.logger.warn(`deal ${d.ID}: booking type not filled: ${e instanceof Error ? e.message : String(e)}`);
         }

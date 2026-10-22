@@ -1,3 +1,4 @@
+import { ActionLogPanel } from './ActionLogPanel.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettingsDto, GroupDirectoryDto, GroupDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
@@ -12,13 +13,14 @@ import { fmtDateTime } from '../format.js';
 import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
 
-type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements';
+type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements' | 'log';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'groups', label: 'Группы' },
   { key: 'resources', label: 'Ресурсы' },
   { key: 'app', label: 'Приложение' },
   { key: 'passwords', label: 'Прямая ссылка' },
   { key: 'placements', label: 'Встройки' },
+  { key: 'log', label: 'Журнал действий' },
 ];
 export function SettingsPanel({
   onClose,
@@ -282,6 +284,7 @@ export function SettingsPanel({
         )}
         {tab === 'resources' && <ResourceNames />}
         {tab === 'placements' && <PlacementSettings />}
+        {tab === 'log' && <ActionLogPanel timezone={timezone} users={directory?.users ?? []} />}
       </div>
     </div>
   );

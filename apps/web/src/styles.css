@@ -4109,3 +4109,135 @@ input[role='switch']:checked::after {
     padding-left: 12px;
   }
 }
+
+/* ---------- ⚙ → «Журнал действий» ---------- */
+.action-log {
+  display: grid;
+  gap: 12px;
+}
+.action-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.action-log-filters input,
+.action-log-filters select {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+.action-log-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.action-log-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+.action-log-row + .action-log-row {
+  border-top: 1px solid var(--line);
+}
+.action-log-row.system {
+  background: #fffcf5;
+}
+.action-log-head {
+  display: grid;
+  grid-template-columns: 112px minmax(140px, 220px) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 6px 14px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-weight: 400;
+}
+.action-log-time {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.action-log-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.action-log-what {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.action-log-via {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.action-log-details {
+  display: grid;
+  gap: 8px;
+  padding: 4px 14px 14px 140px;
+  font-size: 13px;
+}
+.action-log-details p {
+  margin: 0;
+}
+.action-log-changes {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 720px;
+}
+.action-log-changes th,
+.action-log-changes td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.action-log-changes th {
+  background: #f9fafb;
+  color: #475467;
+  font-weight: 600;
+}
+.action-log-changes .before {
+  color: #b42318;
+  text-decoration: line-through;
+  text-decoration-color: rgba(180, 35, 24, 0.4);
+}
+.action-log-changes .after {
+  color: #067647;
+}
+.action-log-details pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f9fafb;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+@media (max-width: 760px) {
+  .action-log-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .action-log-what {
+    grid-column: 1 / -1;
+  }
+  .action-log-details {
+    padding-left: 14px;
+  }
+}

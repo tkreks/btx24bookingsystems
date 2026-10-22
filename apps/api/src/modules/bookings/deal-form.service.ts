@@ -1,7 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { DealFieldConfig, DealFormDto, DealFormField, GroupOptionsDto } from '@btx24/shared';
 import { z } from 'zod';
 import { AccessService, type GroupAccess } from '../access/access.service.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
@@ -22,22 +23,27 @@ export class DealFormService {
   constructor(
     private readonly access: AccessService,
     private readonly fieldMap: DealFieldMapService,
+    @Optional() private readonly actions?: ActionLogService,
   ) {}
 
   /** Форма: создать бронь (`booking.create`) или править (`booking.edit`); значения сделки — с `booking.details`. */
-  async form(user: B24UserContext, groupId: string, dealId: number | null): Promise<DealFormDto> {
+  async form(user: B24UserContext, groupId: string, dealId: number | null, purpose: 'create' | 'edit' = 'create'): Promise<DealFormDto> {
     const a = await this.access.resolve(user);
     const g = this.access.pick(a, groupId, 'booking.create') ?? this.access.pick(a, groupId, 'booking.edit');
     if (!g) throw new ForbiddenException({ code: 'NO_BOOKING_EDIT', message: 'Нет права создавать или менять брони в этой группе' });
     if (dealId && !g.permissions.includes('booking.details'))
       throw new ForbiddenException({ code: 'NO_BOOKING_DETAILS', message: 'Нет права видеть данные сделок в этой группе' });
     const deal = dealId ? await this.deal(user, dealId) : null;
-    return {
-      groupId,
-      dealId,
-      currency: currencyOf(deal),
-      fields: await this.fields(user, g, deal),
-    };
+    const fields = await this.fields(user, g, deal);
+    if (purpose === 'edit' && dealId)
+      await this.actions?.user(user, {
+        action: 'deal.edit_open',
+        summary: `Открыл редактирование сделки #${dealId}${typeof deal?.TITLE === 'string' ? ` «${deal.TITLE}»` : ''}`,
+        entityType: 'deal',
+        entityId: dealId,
+        details: { groupId, values: Object.fromEntries(fields.map((f) => [f.label, f.display || null])) },
+      });
+    return { groupId, dealId, currency: currencyOf(deal), fields };
   }
 
   /** Правка из карточки брони: только изменённые поля группы, которые можно менять. */
@@ -68,7 +74,22 @@ export class DealFormService {
         throw err;
       }
     }
-    return this.form(user, parsed.data.groupId, dealId);
+    const after = await this.form(user, parsed.data.groupId, dealId);
+    // «Было → стало» — значениями для людей (названия вариантов, суммы с валютой).
+    const changes = Object.keys(update).map((code) => {
+      const b = fields.find((f) => f.code === code);
+      const a = after.fields.find((f) => f.code === code);
+      return { field: code, label: b?.label ?? code, before: b?.display || null, after: a?.display || null };
+    });
+    if (changes.length)
+      await this.actions?.user(user, {
+        action: 'deal.update',
+        summary: `Изменил сделку #${dealId}: ${changes.map((c) => c.label).join(', ')}`,
+        entityType: 'deal',
+        entityId: dealId,
+        details: { groupId: parsed.data.groupId, changes },
+      });
+    return after;
   }
 
   /** Поля группы для проверки значений формы создания брони (без значений сделки). */

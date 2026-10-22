@@ -56,6 +56,7 @@ model Portal {
   bookingOperations    BookingOperation[]
   resources            Resource[]
   bookingAlerts        BookingAlert[]
+  actionLogs           ActionLog[]
 }
 
 enum PortalStatus {
@@ -652,5 +653,36 @@ model PaymentRequest {
   @@unique([portalId, idempotencyKey])
   @@index([portalId, dealId])
   @@index([status, deadlineAt])
+}
+
+// ---------- Журнал действий ----------
+
+/// Журнал действий в приложении (решение владельца 2026-10-22, ⚙ → «Журнал действий»): кто, что,
+/// когда и откуда — вход, правка сделки «было → стало», бронь, оплата, настройки, действия системы.
+/// Только добавление: UPDATE/DELETE запрещены триггерами БД (как у `BookingHistory`).
+model ActionLog {
+  id         String           @id @default(cuid())
+  portalId   String
+  portal     Portal           @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  at         DateTime         @default(now()) @db.DateTime(3)
+  actorKind  BookingActorKind @default(user)
+  /// Сотрудник Битрикс24 (для `user`).
+  userId     Int?
+  actorName  String?          @db.VarChar(255)
+  /// Код действия: `app.enter`, `deal.edit_open`, `deal.update`, `booking.cancelled`, `request` …
+  action     String           @db.VarChar(64)
+  /// Объект: `deal` | `booking` | `group` | `settings` | `chat` | `invoice` …
+  entityType String?          @db.VarChar(32)
+  entityId   String?          @db.VarChar(64)
+  /// Одной строкой для людей: «Открыл редактирование сделки #678».
+  summary    String           @db.VarChar(500)
+  /// Подробности: изменения `[{field, label, before, after}]`, контекст, параметры запроса.
+  details    Json?
+  /// Откуда: `deal_tab` | `app` | `worker` | `reconcile` | `api` …
+  via        String?          @db.VarChar(32)
+
+  @@index([portalId, at])
+  @@index([portalId, entityType, entityId, at])
+  @@index([portalId, userId, at])
 }
 

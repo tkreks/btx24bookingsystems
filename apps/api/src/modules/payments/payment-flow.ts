@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   DEFAULT_CLIENT_MESSAGE,
   DEFAULT_FAIL_MESSAGE,
@@ -14,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { dealOfBindings } from '../bitrix24/portals/portal.service.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 import { BookingJournalService, SYSTEM } from '../bookings/booking-journal.service.js';
 import { dateRu, timeRu } from '../bookings/booking-create.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
@@ -55,7 +56,21 @@ export class PaymentFlow {
     private readonly journal: BookingJournalService,
     private readonly fieldMap: DealFieldMapService,
     private readonly messageContext: MessageContextService,
+    @Optional() private readonly actions?: ActionLogService,
   ) {}
+
+  /** Действие автоматизации оплат — в журнал действий (⚙ → «Журнал действий»). */
+  private audit(req: PaymentRequest, action: string, summary: string, details: Record<string, unknown> = {}): Promise<void> | undefined {
+    const kind = req.kind === 'prepayment' ? 'предоплата' : 'доплата';
+    return this.actions?.log(req.portalId, { kind: 'system', name: 'Система: автоматизация оплат' }, {
+      action: `payment.${action}`,
+      summary: `${summary} — ${kind} ${money(Number(req.amount))} ₽${req.invoiceId ? `, счёт #${req.invoiceId}` : ''}, сделка #${req.dealId}`,
+      entityType: 'deal',
+      entityId: req.dealId,
+      details: { requestId: req.id, bookingId: req.bookingId, ...details },
+      via: 'worker',
+    });
+  }
 
   /** Пауза между сообщениями цепочки: каналы доставляют асинхронно (порядок). В тестах — 0. */
   sendGapMs = 1500;
@@ -122,6 +137,10 @@ export class PaymentFlow {
       },
     });
     const sent = await this.sendToClient(ctx, req, deal, text, warnings);
+    await this.audit(req, sent ? 'link_sent' : 'link_not_sent', sent ? 'Ссылка на оплату отправлена клиенту' : 'Ссылка на оплату НЕ отправлена клиенту', {
+      deadline: sent ? deadline?.toISOString() : null,
+      warnings,
+    });
     await this.comment(ctx, req.dealId, `Ссылка на оплату (${req.kind === 'prepayment' ? 'предоплата' : 'доплата'} ${money(Number(req.amount))} ₽, счёт #${req.invoiceId}) ${sent ? 'отправлена клиенту' : 'НЕ отправлена — отправьте вручную'}:\n${text}`, warnings);
     // Срок — только если клиент получил ссылку: иначе бронь снялась бы без его вины.
     return this.prisma.paymentRequest.update({
@@ -155,9 +174,10 @@ export class PaymentFlow {
       await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.successStageId }, warnings, 'стадия «оплачено»');
     if (req.bookingId) {
       const rec = await this.journal.find(ctx.portal.id, req.bookingId);
-      if (rec) await this.journal.note(rec.id, 'paid', { kind: 'system', name: 'Система: оплата получена' }, { kind: req.kind, amount: Number(req.amount), invoiceId: req.invoiceId }, 'worker');
+      if (rec) await this.journal.note(rec, 'paid', { kind: 'system', name: 'Система: оплата получена' }, { kind: req.kind, amount: Number(req.amount), invoiceId: req.invoiceId }, 'worker');
     }
     if (req.kind === 'prepayment' && opts?.payments.sendConfirmation) await this.confirm(ctx, req, opts, warnings);
+    await this.audit(req, 'paid', 'Оплата получена', { stageId: opts?.payments.successStageId ?? null, warnings });
     return this.prisma.paymentRequest.update({
       where: { id: req.id },
       data: { status: 'paid', paidAt: new Date(), closedAt: new Date(), warnings: warnings as Prisma.InputJsonValue },
@@ -174,8 +194,9 @@ export class PaymentFlow {
     if (req.bookingId) {
       const rec = await this.journal.find(ctx.portal.id, req.bookingId);
       if (rec)
-        await this.journal.note(rec.id, 'payment_cancelled', { kind: 'bitrix', name: 'Битрикс24: счёт переведён в «Не оплачен»' }, { invoiceId: req.invoiceId }, 'worker');
+        await this.journal.note(rec, 'payment_cancelled', { kind: 'bitrix', name: 'Битрикс24: счёт переведён в «Не оплачен»' }, { invoiceId: req.invoiceId }, 'worker');
     }
+    await this.audit(req, 'cancelled_in_bitrix', 'Счёт переведён в «Не оплачен» в Битрикс24 — ожидание оплаты снято, ссылка аннулирована');
     return this.prisma.paymentRequest.update({
       where: { id: req.id },
       data: {
@@ -211,6 +232,10 @@ export class PaymentFlow {
       await this.sendToClient(ctx, req, mc.deal, text, warnings);
     }
     await this.comment(ctx, req.dealId, `Предоплата по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}.`, warnings);
+    await this.audit(req, 'expired', `Срок оплаты вышел: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}`, {
+      failStageId: opts?.payments.failStageId ?? null,
+      warnings,
+    });
     return this.prisma.paymentRequest.update({
       where: { id: req.id },
       data: { status: 'expired', closedAt: new Date(), warnings: warnings as Prisma.InputJsonValue },

@@ -121,7 +121,7 @@ describe('PaymentFlow', () => {
     const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60_000) }));
     expect(r.status).toBe('paid');
     expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 678, fields: { STAGE_ID: 'EXECUTING' } });
-    expect(t.journal.note).toHaveBeenCalledWith('r1', 'paid', expect.anything(), expect.objectContaining({ amount: 25000 }), 'worker');
+    expect(t.journal.note).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), 'paid', expect.anything(), expect.objectContaining({ amount: 25000 }), 'worker');
   });
 
   it('deadline passed → invoice «not paid», unpaid payments deleted, booking removed, fail stage and message', async () => {
@@ -146,7 +146,7 @@ describe('PaymentFlow', () => {
     expect(t.calls.filter((c) => c[0] === 'crm.item.payment.delete').map((c) => c[1].id)).toEqual([9001]);
     expect(t.calls.map((c) => c[0])).not.toContain('booking.v1.booking.delete');
     expect(t.calls.map((c) => c[0])).not.toContain('imopenlines.crm.message.add');
-    expect(t.journal.note).toHaveBeenCalledWith('r1', 'payment_cancelled', expect.anything(), { invoiceId: 6001 }, 'worker');
+    expect(t.journal.note).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), 'payment_cancelled', expect.anything(), { invoiceId: 6001 }, 'worker');
   });
 
   it('paid → confirmation of the booking type with variables, then its Disk file in the deal chat', async () => {

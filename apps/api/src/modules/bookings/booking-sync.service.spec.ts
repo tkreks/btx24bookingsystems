@@ -97,7 +97,7 @@ describe('BookingSyncService', () => {
     const r = await t.svc.reconcile(portal, t.client, now);
     expect(r.bookings.alerts).toBe(1);
     expect(t.alerts.raise).toHaveBeenCalledWith('p1', expect.objectContaining({ kind: 'discrepancy', problems: ['time'] }));
-    expect(t.journal.note).toHaveBeenCalledWith('r3', 'discrepancy_found', expect.objectContaining({ kind: 'system' }), expect.anything(), 'reconcile');
+    expect(t.journal.note).toHaveBeenCalledWith(expect.objectContaining({ id: 'r3' }), 'discrepancy_found', expect.objectContaining({ kind: 'system' }), expect.anything(), 'reconcile');
     expect(t.journal.recordChanged).not.toHaveBeenCalled();
   });
 

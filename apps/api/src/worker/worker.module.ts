@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from '../config/env.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
+import { AuditModule } from '../modules/audit/audit.module.js';
 import { Bitrix24Module } from '../modules/bitrix24/bitrix24.module.js';
 import { BookingAlertsService } from '../modules/bookings/booking-alerts.service.js';
 import { BookingJournalService } from '../modules/bookings/booking-journal.service.js';
@@ -20,7 +21,7 @@ import { MessageContextService } from '../modules/bookings/message-context.servi
 // Фоновые задачи (обновление кэша календаря, контроль оплат по таймауту, рассылки) живут здесь,
 // а не в api: api отвечает на запросы, worker выполняет работу по расписанию.
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), PrismaModule, Bitrix24Module],
+  imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), PrismaModule, Bitrix24Module, AuditModule],
   providers: [
     HeartbeatService,
     OpenlineIndexService,

@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { BookingRecord, Prisma } from '../../generated/prisma/client.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 
 /** Броней за период на дашборде: больше — не для экрана менеджера за день-месяц (список обрезается). */
 export const PERIOD_LIMIT = 1000;
@@ -70,7 +71,10 @@ const json = (v: unknown) => v as Prisma.InputJsonValue;
  */
 @Injectable()
 export class BookingJournalService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly actions?: ActionLogService,
+  ) {}
 
   /** Бронь создана приложением (сотрудник через форму). Повтор возвращает существующую запись. */
   async recordCreated(
@@ -91,7 +95,7 @@ export class BookingJournalService {
           paymentMode: input.paymentMode ?? null,
         },
       });
-      await this.history(existing.id, 'created', actor, { after: stateOf(upgraded), details: { paymentMode: upgraded.paymentMode, wasImported: true } });
+      await this.history(upgraded, 'created', actor, { after: stateOf(upgraded), details: { paymentMode: upgraded.paymentMode, wasImported: true } });
       return upgraded;
     }
     if (existing) return existing;
@@ -112,7 +116,7 @@ export class BookingJournalService {
         syncedAt: new Date(),
       },
     });
-    await this.history(record.id, 'created', actor, { after: stateOf(record), details: { paymentMode: record.paymentMode } });
+    await this.history(record, 'created', actor, { after: stateOf(record), details: { paymentMode: record.paymentMode } });
     return record;
   }
 
@@ -135,7 +139,7 @@ export class BookingJournalService {
         ...(input.createdAt ? { createdAt: input.createdAt } : {}),
       },
     });
-    await this.history(record.id, 'imported', SYSTEM.bitrix, { after: stateOf(record), via: 'reconcile' });
+    await this.history(record, 'imported', SYSTEM.bitrix, { after: stateOf(record), via: 'reconcile' });
     return { record, created: true };
   }
 
@@ -158,7 +162,7 @@ export class BookingJournalService {
         syncedAt: new Date(),
       },
     });
-    await this.history(record.id, action, actor, { before: stateOf(record), after: stateOf(updated), via });
+    await this.history(updated, action, actor, { before: stateOf(record), after: stateOf(updated), via });
     return updated;
   }
 
@@ -176,7 +180,7 @@ export class BookingJournalService {
     });
     const record = await this.find(portalId, bookingId);
     if (!count || !record) return null;
-    await this.history(record.id, 'cancelled', input.actor, {
+    await this.history(record, 'cancelled', input.actor, {
       before: stateOf(record),
       details: { reason: input.reason, ...(input.comment ? { comment: input.comment } : {}) },
       via: input.via ?? 'app',
@@ -186,8 +190,8 @@ export class BookingJournalService {
   }
 
   /** Отметка в истории без изменения брони (например, найдено расхождение). */
-  async note(recordId: string, action: string, actor: BookingActor, details: unknown, via: string): Promise<void> {
-    await this.history(recordId, action, actor, { details, via });
+  async note(record: BookingRecord, action: string, actor: BookingActor, details: unknown, via: string): Promise<void> {
+    await this.history(record, action, actor, { details, via });
   }
 
   find(portalId: string, bookingId: number): Promise<BookingRecord | null> {
@@ -238,15 +242,24 @@ export class BookingJournalService {
     };
   }
 
+  /** История брони + та же запись в общем журнале действий (⚙ → «Журнал действий»). */
   private async history(
-    recordId: string,
+    record: BookingRecord,
     action: string,
     actor: BookingActor,
     o: { before?: unknown; after?: unknown; details?: unknown; via?: string; at?: Date },
   ): Promise<void> {
+    await this.actions?.log(record.portalId, actor, {
+      action: `booking.${action}`,
+      summary: bookingSummary(record, action, actor, o.details),
+      entityType: 'booking',
+      entityId: record.bookingId,
+      details: { title: record.title, dealId: record.dealId, before: o.before ?? null, after: o.after ?? null, details: o.details ?? null },
+      via: o.via ?? 'app',
+    });
     await this.prisma.bookingHistory.create({
       data: {
-        recordId,
+        recordId: record.id,
         action,
         ...actorColumns(actor),
         via: o.via ?? 'app',
@@ -257,4 +270,30 @@ export class BookingJournalService {
       },
     });
   }
+}
+
+const CANCEL_TEXT: Record<string, string> = {
+  payment_timeout: 'не оплачена в срок — снята автоматически',
+  manual: 'снята сотрудником',
+  removed_in_bitrix: 'удалена в Битрикс24',
+};
+const ACTION_TEXT: Record<string, string> = {
+  imported: 'найдена в Битрикс24 (создана там)',
+  changed_in_bitrix: 'изменена в Битрикс24',
+  discrepancy_found: 'не совпадает с Битрикс24 — уведомление',
+  deleted_in_bitrix: 'удалена в Битрикс24 по решению сотрудника',
+  paid: 'оплата получена',
+  payment_cancelled: 'счёт переведён в «Не оплачен» в Битрикс24',
+};
+
+/** Строка журнала действий о брони: «Создал бронь #555 «Иванов»», «Бронь #555 снята: не оплачена…». */
+export function bookingSummary(r: Pick<BookingRecord, 'bookingId' | 'title' | 'dealId'>, action: string, actor: BookingActor, details: unknown): string {
+  const name = `бронь #${r.bookingId}${r.title ? ` «${r.title}»` : ''}${r.dealId ? ` (сделка #${r.dealId})` : ''}`;
+  const d = (details ?? {}) as { reason?: string; comment?: string };
+  if (action === 'created') return actor.kind === 'user' ? `Создал ${name}` : `Создана ${name}`;
+  if (action === 'cancelled') {
+    const why = CANCEL_TEXT[d.reason ?? ''] ?? 'снята';
+    return `${actor.kind === 'user' ? `Снял ${name}` : `${name[0].toUpperCase()}${name.slice(1)}: ${why}`}${d.comment ? ` — «${d.comment}»` : ''}`;
+  }
+  return `${name[0].toUpperCase()}${name.slice(1)}: ${ACTION_TEXT[action] ?? action}`;
 }

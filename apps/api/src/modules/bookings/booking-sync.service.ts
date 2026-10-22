@@ -136,7 +136,7 @@ export class BookingSyncService {
       actual: a ? stripTitle(a) : null,
     });
     if (!alert) return false;
-    await this.journal.note(r.id, 'discrepancy_found', SYSTEM.reconcile, { alertId: alert.id, problems, actual: a }, 'reconcile');
+    await this.journal.note(r, 'discrepancy_found', SYSTEM.reconcile, { alertId: alert.id, problems, actual: a }, 'reconcile');
     return true;
   }
 

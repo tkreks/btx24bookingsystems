@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from './config/env.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AccessModule } from './modules/access/access.module.js';
+import { AuditApiModule } from './modules/audit/audit-api.module.js';
+import { AuditModule } from './modules/audit/audit.module.js';
 import { Bitrix24Module } from './modules/bitrix24/bitrix24.module.js';
 import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
@@ -18,6 +20,8 @@ import { WorkdayModule } from './modules/workday/workday.module.js';
     PrismaModule,
     // Доменные модули — по одному на строку, в алфавитном порядке (снижает merge-конфликты).
     AccessModule,
+    AuditApiModule,
+    AuditModule,
     Bitrix24Module,
     BookingsModule,
     PaymentsModule,
