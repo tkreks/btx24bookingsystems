@@ -17,6 +17,7 @@ const chat = (chatId: number, title: string, waitingReply: boolean, preview = ''
   phones: chatId === 1 ? ['+7 (985) 123-45-67'] : [],
   unread: 0,
   folderId: null,
+  clientName: null,
 });
 
 describe('chat list', () => {

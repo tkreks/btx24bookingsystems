@@ -6,6 +6,7 @@ import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { avatarTone, dayKey, initials } from './chat-list.js';
 import { Channel } from './Channel.js';
+import { clipName } from './format.js';
 import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
@@ -44,7 +45,7 @@ export function ChatView({
   /** Брони клиента и «Создать бронирование» (рендерит страница чатов — у неё группы). */
   bookings?: ReactNode;
   /** Статус из списка чатов: ждёт ответа / «Не требует ответа» (общий для всех). */
-  status?: Pick<ChatSummary, 'waitingReply' | 'noReply' | 'sessionClosed'>;
+  status?: Pick<ChatSummary, 'waitingReply' | 'noReply' | 'sessionClosed' | 'clientName'>;
   onStatus?: (r: ChatReplyStatusDto) => void;
   /** Открыть другой чат (канал того же клиента). */
   onOpenChat?: (chatId: number) => void;
@@ -201,7 +202,7 @@ export function ChatView({
     <main className="chat-view">
       <ChatHeader
         chatId={chat.chatId}
-        title={chat.title}
+        title={status?.clientName || chat.title}
         subtitle={
           <>
             {channels.length > 1 && onOpenChat ? (
@@ -389,7 +390,9 @@ function ChatHeader({
         </button>
         <span className={`avatar large a${avatarTone(chatId)}`}>{initials(title)}</span>
         <div className="cv-contact-info">
-          <div className="cv-contact-name">{title}</div>
+          <div className="cv-contact-name" title={title}>
+            {clipName(title)}
+          </div>
           {subtitle && <div className="cv-contact-sub">{subtitle}</div>}
           {details}
         </div>

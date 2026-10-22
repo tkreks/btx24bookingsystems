@@ -27,7 +27,7 @@ import {
   type ChatTab,
 } from './chat-list.js';
 import { Channel } from './Channel.js';
-import { AUTHOR_PREFIX, shortTime } from './format.js';
+import { AUTHOR_PREFIX, clipName, shortTime } from './format.js';
 import { Icon } from './icons.js';
 
 const SCOPES: { key: ChatScope; label: string }[] = [
@@ -461,15 +461,29 @@ export function ChatsPage({
                   setCreated(null);
                 }}
               />
-              <button
-                className="cl-card-more"
-                aria-label={`Папка для чата ${c.title}`}
-                title="В папку"
-                aria-expanded={cardMenu === c.chatId}
-                onClick={() => setCardMenu(cardMenu === c.chatId ? null : c.chatId)}
-              >
-                ⋯
-              </button>
+              {/* Под аватаркой: папка (меню), входящее/исходящее, участник ли я. */}
+              <span className="cl-card-tools">
+                <button
+                  className="cl-card-more"
+                  aria-label={`Папка для чата ${c.clientName || c.title}`}
+                  title={c.folderId ? 'Перенести в другую папку' : 'В папку'}
+                  aria-expanded={cardMenu === c.chatId}
+                  onClick={() => setCardMenu(cardMenu === c.chatId ? null : c.chatId)}
+                >
+                  <Icon name="folder" size={15} />
+                </button>
+                {c.lastMessage && (c.lastMessage.author === 'client' || c.lastMessage.author === 'employee') && (
+                  <span
+                    className={`cl-dir ${c.lastMessage.author === 'client' ? 'in' : 'out'}`}
+                    title={c.lastMessage.author === 'client' ? 'Последнее — входящее от клиента' : 'Последнее — исходящее от сотрудника'}
+                  >
+                    <Icon name={c.lastMessage.author === 'client' ? 'arrowDown' : 'arrowUp'} size={14} />
+                  </span>
+                )}
+                <span className={`cl-member${c.joined ? '' : ' no'}`} title={c.joined ? 'Вы участник чата' : 'Вы не участник чата'}>
+                  <Icon name="person" size={14} />
+                </span>
+              </span>
               {cardMenu === c.chatId && (
                 <div className="cl-menu cl-card-menu" role="menu">
                   <div className="cl-menu-label">{c.folderId ? 'Перенести в папку' : 'В папку'}</div>
@@ -561,7 +575,7 @@ export function ChatsPage({
               date: todayIn(timezone),
               contactId: form.data?.contactId ?? null,
               dealId: form.dealId ?? null,
-              clientName: items.find((c) => c.chatId === form.chatId)?.title ?? all.find((c) => c.chatId === form.chatId)?.title ?? null,
+              clientName: ((c) => c?.clientName || c?.title || null)([...items, ...all].find((c) => c.chatId === form.chatId)),
               openDeals: form.data?.openDeals ?? [],
             }}
             onClose={() => setForm(null)}
@@ -602,22 +616,20 @@ export function ChatsPage({
 
 function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boolean; timezone: string; onOpen: () => void }) {
   const last = c.lastMessage;
-  const incoming = last?.author === 'client';
+  // Имя клиента из CRM; название чата — это название сделки/линии («Имя - WAZZUP - …»).
+  const name = c.clientName || c.title;
   return (
     <button className={`cl-card${active ? ' selected' : ''}`} role="listitem" aria-current={active} onClick={onOpen}>
-      <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(c.title)}</span>
+      <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(name)}</span>
       <span className="cl-card-body">
         <span className="cl-card-heading">
-          <span className="cl-card-name">{c.title}</span>
+          <span className="cl-card-name" title={name}>
+            {clipName(name)}
+          </span>
           <time className="cl-card-time">{last ? shortTime(last.date, timezone) : ''}</time>
         </span>
         <span className="cl-card-meta">
           <Channel connector={c.connector} />
-          {last && (last.author === 'client' || last.author === 'employee') && (
-            <span className={`cl-direction${incoming ? ' in' : ''}`}>
-              <Icon name={incoming ? 'in' : 'out'} size={14} /> {incoming ? 'Вх.' : 'Исх.'}
-            </span>
-          )}
         </span>
         <span className="cl-card-bottom">
           <span className="cl-preview">
@@ -631,7 +643,6 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
             </span>
           )}
         </span>
-        {!c.joined && <span className="cl-not-joined">Вы не участник</span>}
         {c.unread > 0 && (
           <span className="cl-unread cl-card-unread" title="Непрочитанных сообщений">
             {c.unread}

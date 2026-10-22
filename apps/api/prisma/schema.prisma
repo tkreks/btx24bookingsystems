@@ -331,6 +331,8 @@ model OpenlineChat {
   /// Сводка для списка чатов (кэш, одна строка на чат — общая для всех сотрудников; кто её видит,
   /// решает OpenlineChatAccess). Текст превью — только при включённом «сборе текстов».
   title         String?   @db.VarChar(255)
+  /// Имя клиента: контакт (или компания/лид) из привязок CRM; title чата — это название сделки/линии.
+  clientName    String?   @db.VarChar(255)
   /// Привязки к CRM: { leadId, contactId, companyId, dealId }.
   crm           Json?
   phones        Json?

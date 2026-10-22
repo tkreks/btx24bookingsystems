@@ -41,3 +41,9 @@ export function fileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
 }
+
+/** Имя клиента в чатах — не длиннее `max` символов (полное — в подсказке). */
+export function clipName(name: string, max = 15): string {
+  const chars = [...name.trim()];
+  return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : name.trim();
+}

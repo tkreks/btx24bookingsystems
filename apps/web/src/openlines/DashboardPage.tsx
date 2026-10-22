@@ -22,6 +22,7 @@ import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
 import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
+import { Icon } from './icons.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
@@ -31,6 +32,8 @@ const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, st
 };
 
 /** «сегодня» / «вчера» / «за период» — подпись плиток по выбранному периоду. */
+/** «Требуют внимания»: сколько чатов показывать сразу и сколько добавляет «Ещё». */
+const ATTENTION_STEP = 5;
 const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p === 'yesterday' ? 'вчера' : 'за период');
 
 /**
@@ -70,6 +73,7 @@ export function DashboardPage({
   const [parts, setParts] = useState<Partial<Record<DashboardPart, { key: string; dto: Partial<DashboardDto> }>>>({});
   const [error, setError] = useState('');
   const [alertCount, setAlertCount] = useState<number | null>(null);
+  const [attentionShown, setAttentionShown] = useState(ATTENTION_STEP);
   const [askCode, setAskCode] = useState(false);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
@@ -236,8 +240,8 @@ export function DashboardPage({
     <div className="page dashboard">
       <header className="toolbar">
         <div className="toolbar-title">
-          <button aria-label="К календарю" onClick={onBack}>
-            ‹
+          <button className="dash-calendar-btn" aria-label="К календарю" title="Календарь броней" onClick={onBack}>
+            <Icon name="calendar" size={20} />
           </button>
           <h1>Мой дашборд</h1>
           <span className="muted">{session.user.name}</span>
@@ -291,8 +295,8 @@ export function DashboardPage({
           <span className="dash-tile-label">Чатов ждут ответа</span>
           <span className="dash-tile-value">{openlines ? n(d?.chats?.waitingReply) : '—'}</span>
           {openlines ? (
-            // Есть ждущие ответа — сразу к ним (все доступные); нет — ко всем чатам.
-            <button className="primary dash-tile-action" onClick={() => onChats({ waiting: !!d?.chats?.waitingReply })}>
+            // Чаты → «Все доступные» → «Все».
+            <button className="primary dash-tile-action" onClick={() => onChats({})}>
               Открыть чаты
             </button>
           ) : (
@@ -338,19 +342,18 @@ export function DashboardPage({
 
       {openlines && (
         <section className="day-panel dash-attention">
-          <div className="day-header">
-            <b>Требуют внимания</b>
-            <span className="muted">последние сообщения клиентов без ответа</span>
+          <p className="dash-attention-title muted">
+            Последние сообщения клиентов без ответа
             {d?.chats && <span className={`pill${d.chats.waitingReply ? ' waiting' : ''}`}>{d.chats.waitingReply}</span>}
-          </div>
+          </p>
           {!d && <p className="muted">Загрузка…</p>}
           {d?.chats && !d.chats.attention?.length && <p className="muted">Все клиенты получили ответ.</p>}
           <ul className="attention-rows">
-            {d?.chats?.attention?.map((c) => (
+            {d?.chats?.attention?.slice(0, attentionShown).map((c) => (
               <li key={c.chatId}>
                 <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
                   <span className="attention-title">
-                    <b>{c.title}</b>
+                    <b title={c.title}>{c.clientName || c.title}</b>
                     <Channel connector={c.connector} />
                   </span>
                   <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
@@ -364,11 +367,18 @@ export function DashboardPage({
               </li>
             ))}
           </ul>
-          {!!d?.chats && d.chats.waitingReply > (d.chats.attention?.length ?? 0) && (
-            <button className="link" onClick={() => onChats({ waiting: true })}>
-              Все ждущие ответа ({d.chats.waitingReply}) →
-            </button>
-          )}
+          {!!d?.chats &&
+            ((d.chats.attention?.length ?? 0) > attentionShown ? (
+              <button className="dash-more" onClick={() => setAttentionShown((n) => n + ATTENTION_STEP)}>
+                Ещё {Math.min(ATTENTION_STEP, (d.chats.attention?.length ?? 0) - attentionShown)}
+              </button>
+            ) : (
+              d.chats.waitingReply > (d.chats.attention?.length ?? 0) && (
+                <button className="dash-more" onClick={() => onChats({ waiting: true })}>
+                  Все ждущие ответа ({d.chats.waitingReply})
+                </button>
+              )
+            ))}
         </section>
       )}
 

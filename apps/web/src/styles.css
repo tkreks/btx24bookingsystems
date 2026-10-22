@@ -2244,7 +2244,8 @@ main.loading {
 .cl-card {
   position: relative;
   display: grid;
-  grid-template-columns: 50px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr);
+  min-height: 98px;
   align-items: start;
   gap: 12px;
   width: 100%;
@@ -2445,10 +2446,9 @@ main.loading {
 }
 
 .cl-card-more {
-  position: absolute;
-  top: 34px;
-  right: 10px;
-  width: 26px;
+  display: grid;
+  place-items: center;
+  width: 22px;
   height: 22px;
   padding: 0;
   border: 0;
@@ -2477,8 +2477,58 @@ main.loading {
 }
 
 .cl-card-menu {
-  top: 58px;
-  right: 8px;
+  top: 94px;
+  left: 8px;
+  right: auto;
+}
+
+/* Под аватаркой карточки чата: папка, входящее/исходящее, участник. */
+.cl-card-tools {
+  position: absolute;
+  top: 70px;
+  left: 13px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+}
+
+.cl-card-tools .cl-card-more {
+  opacity: 1;
+  color: #5b6b85;
+}
+
+.cl-card-tools .cl-card-more[aria-expanded='true'] {
+  background: #e4edff;
+  color: #3269f6;
+}
+
+.cl-dir,
+.cl-member {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 22px;
+  pointer-events: none;
+}
+
+.cl-dir.in .icon {
+  color: #16a34a;
+  stroke-width: 2.6;
+}
+
+.cl-dir.out .icon {
+  color: #dc2626;
+  stroke-width: 2.6;
+}
+
+.cl-member .icon {
+  color: #111827;
+}
+
+.cl-member.no .icon {
+  opacity: 0.4;
 }
 
 .cl-folders {
@@ -5224,4 +5274,53 @@ input[role='switch']:checked::after {
   .wz-res-ticks > span {
     display: none;
   }
+}
+
+/* Дашборд: «Последние сообщения клиентов без ответа», «Ещё», кнопка календаря. */
+.dash-attention-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+.dash-more {
+  display: block;
+  min-width: 180px;
+  min-height: 38px;
+  margin: 12px auto 2px;
+  padding: 0 20px;
+  border: 1px solid #c7d7fe;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-weight: 650;
+}
+.dash-more:hover {
+  background: #e0eaff;
+}
+.dash-calendar-btn {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.28);
+}
+.dash-calendar-btn .icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.dash-calendar-btn:hover {
+  background: #0062cc;
 }

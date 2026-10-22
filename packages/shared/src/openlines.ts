@@ -18,6 +18,8 @@ export interface ChatSummary {
   chatId: number;
   sessionId: number;
   title: string;
+  /** Имя клиента из CRM (контакт / компания / лид); null — нет привязки. */
+  clientName: string | null;
   /** Канал: whatsapp, telegram, livechat, … (из `entity_id` чата). */
   connector: string;
   responsibleId: number | null;
@@ -305,6 +307,7 @@ export interface ChatReplyStatusDto {
 export interface AttentionChatDto {
   chatId: number;
   title: string;
+  clientName: string | null;
   connector: string;
   lastMessageAt: string;
   /** Текст — только при включённом «сборе текстов». */

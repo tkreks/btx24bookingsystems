@@ -342,6 +342,7 @@ export class ChatsService {
         sessionClosed,
         crm: crmLinksOf(d.entity_data_2),
         phones: phonesFor(crmLinksOf(d.entity_data_2), phones),
+        clientName: clientNameFor(crmLinksOf(d.entity_data_2), phones) ?? clientFromTitle(d.name ?? null),
         unread: unread.get(Number(d.id)) ?? 0,
         folderId: folders.get(Number(d.id)) ?? null,
       };
@@ -373,6 +374,7 @@ export class ChatsService {
     const ops = rows.flatMap(({ summary: c, last, s }) => {
       const summary = {
         title: c.title.slice(0, 255),
+        clientName: c.clientName?.slice(0, 255) ?? null,
         crm: c.crm as unknown as Prisma.InputJsonValue,
         phones: c.phones as unknown as Prisma.InputJsonValue,
         lastMessageId: c.lastMessage?.id ?? null,
@@ -451,6 +453,7 @@ export class ChatsService {
           chatId: id,
           sessionId: r.sessionId,
           title: r.title ?? `Чат #${id}`,
+          clientName: r.clientName ?? clientFromTitle(r.title),
           connector: r.connector,
           responsibleId: r.responsibleId,
           lastMessage:
@@ -548,6 +551,7 @@ export class ChatsService {
   }
 
   /** Телефоны привязанных контактов, лидов и компаний — одним пакетом, правами пользователя. */
+  /** Телефоны (для поиска) и имена клиентов привязок CRM — одним пакетом; ключ `contact:12`. */
   private async phonesOf(user: B24UserContext, links: ChatSummary['crm'][]): Promise<Map<string, string[]>> {
     const ids = {
       contact: [...new Set(links.map((l) => l.contactId).filter((x): x is number => !!x))],
@@ -557,15 +561,19 @@ export class ChatsService {
     const commands = Object.fromEntries(
       (Object.keys(ids) as (keyof typeof ids)[])
         .filter((k) => ids[k].length)
-        .map((k) => [k, { method: `crm.${k}.list`, params: { filter: { '@ID': ids[k] }, select: ['ID', 'PHONE'] } }]),
+        .map((k) => [k, { method: `crm.${k}.list`, params: { filter: { '@ID': ids[k] }, select: ['ID', 'PHONE', 'NAME', 'LAST_NAME', 'TITLE'] } }]),
     );
     const out = new Map<string, string[]>();
     if (!Object.keys(commands).length) return out;
     try {
       const res = await user.client.batch(commands);
       for (const k of Object.keys(commands)) {
-        for (const row of (res.result[k] as { ID: string; PHONE?: { VALUE?: string }[] }[] | undefined) ?? [])
+        for (const row of (res.result[k] as { ID: string; PHONE?: { VALUE?: string }[]; NAME?: string | null; LAST_NAME?: string | null; TITLE?: string | null }[] | undefined) ?? []) {
           out.set(`${k}:${row.ID}`, (row.PHONE ?? []).map((p) => String(p.VALUE ?? '')).filter(Boolean));
+          // Имя: у контакта и лида — имя и фамилия, у компании (и лида без имени) — название.
+          const name = (k === 'company' ? '' : [row.NAME, row.LAST_NAME].filter(Boolean).join(' ').trim()) || (row.TITLE ?? '').trim();
+          if (name) out.set(`name:${k}:${row.ID}`, [name]);
+        }
       }
     } catch (err) {
       // Телефоны — только для поиска: без них список всё равно показываем.
@@ -608,7 +616,7 @@ export class ChatsService {
    * Ждут ответа среди всех доступных сотруднику чатов (кэш: сводки общие, доступ — его) и самые
    * свежие из них — «требуют внимания» на дашборде.
    */
-  async attention(user: B24UserContext, limit = 15): Promise<{ waiting: number; items: AttentionChatDto[] }> {
+  async attention(user: B24UserContext, limit = 50): Promise<{ waiting: number; items: AttentionChatDto[] }> {
     if (!this.prisma) return { waiting: 0, items: [] };
     const portalId = user.portal.id;
     const [allowed, ignored] = await Promise.all([
@@ -630,6 +638,7 @@ export class ChatsService {
         return {
           chatId: r.chatId,
           title: r.title ?? `Чат #${r.chatId}`,
+          clientName: r.clientName ?? clientFromTitle(r.title),
           connector: r.connector,
           lastMessageAt: (r.lastMessageAt ?? r.checkedAt).toISOString(),
           preview: r.lastPreview ?? '',
@@ -804,6 +813,18 @@ const isMember = (role: string | undefined) => Boolean(role) && !['guest', 'none
 
 /** Ключ команды пакета: найденные по ID чата — по чату (сессии может не быть), иначе по сессии. */
 const refKey = (s: SessionRef) => (s.chatId ? `c${s.chatId}` : `s${s.sessionId}`);
+
+/** Имя клиента чата: контакт, затем компания, затем лид. */
+function clientNameFor(l: ChatSummary['crm'], crm: Map<string, string[]>): string | null {
+  const pick = (k: string, id: number | null) => (id ? crm.get(`name:${k}:${id}`)?.[0] : undefined);
+  return pick('contact', l.contactId) ?? pick('company', l.companyId) ?? pick('lead', l.leadId) ?? null;
+}
+
+/** Без имени из CRM (старый кэш): название чата открытой линии — «Имя - канал - линия». */
+export function clientFromTitle(title: string | null): string | null {
+  const head = (title ?? '').split(' - ')[0]?.trim();
+  return head || null;
+}
 
 function phonesFor(l: ChatSummary['crm'], phones: Map<string, string[]>): string[] {
   return [
