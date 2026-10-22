@@ -5419,3 +5419,63 @@ input[role='switch']:checked::after {
 .dbm-tabs {
   margin: 0 0 10px;
 }
+
+/* Дашборд: источники новых сделок. */
+.dash-sources {
+  margin-bottom: 12px;
+}
+.src-rows {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.src-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 220px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+}
+.src-row:hover {
+  background: #f2f6ff;
+}
+.src-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.src-bar {
+  height: 14px;
+  border-radius: 7px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+.src-bar i {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: 7px;
+}
+.src-count {
+  font-size: 13px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .src-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .src-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

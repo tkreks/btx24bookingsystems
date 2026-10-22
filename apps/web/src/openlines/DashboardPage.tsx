@@ -77,7 +77,7 @@ export function DashboardPage({
   const [askCode, setAskCode] = useState(false);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
-  const [dealsOpen, setDealsOpen] = useState<'all' | 'repeat' | null>(null);
+  const [dealsOpen, setDealsOpen] = useState<'all' | 'repeat' | { source: string } | null>(null);
   const [daysOpen, setDaysOpen] = useState(false);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
   const [callsFunnel, setCallsFunnel] = useState<number | null>(null);
@@ -386,6 +386,8 @@ export function DashboardPage({
         <DealsToday d={d} tz={tz} word={word} />
       </div>
 
+      {d?.newDeals && d.newDeals.total > 0 && <DealSources items={d.newDeals.items} word={word} onOpen={(source) => setDealsOpen({ source })} />}
+
       <div className="dash-lists">
         <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings?.created} tz={tz} variant="created" />
         <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings?.removed} tz={tz} variant="removed" />
@@ -398,8 +400,16 @@ export function DashboardPage({
       {daysOpen && d?.bookingDays && <DayBookingsModal days={d.bookingDays} tz={tz} onClose={() => setDaysOpen(false)} />}
       {dealsOpen && d?.newDeals && (
         <NewDealsModal
-          title={dealsOpen === 'repeat' ? 'Повторные клиенты' : `Новые сделки ${word}`}
-          items={dealsOpen === 'repeat' ? d.newDeals.items.filter((i) => i.repeat) : d.newDeals.items}
+          title={
+            dealsOpen === 'repeat' ? 'Повторные клиенты' : dealsOpen === 'all' ? `Новые сделки ${word}` : `Источник «${sourceLabel(d.newDeals.items, dealsOpen.source)}»`
+          }
+          items={
+            dealsOpen === 'repeat'
+              ? d.newDeals.items.filter((i) => i.repeat)
+              : dealsOpen === 'all'
+                ? d.newDeals.items
+                : d.newDeals.items.filter((i) => (i.source?.id ?? '') === dealsOpen.source)
+          }
           truncated={d.newDeals.truncated}
           tz={tz}
           onClose={() => setDealsOpen(null)}
@@ -668,5 +678,39 @@ function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDa
         </ul>
       </div>
     </div>
+  );
+}
+
+const NO_SOURCE = 'Без источника';
+const sourceLabel = (items: DashboardNewDeal[], id: string) => items.find((i) => (i.source?.id ?? '') === id)?.source?.name ?? NO_SOURCE;
+const SOURCE_COLORS = ['#3269f6', '#16a34a', '#f59e0b', '#db2777', '#7c3aed', '#0891b2', '#ea580c', '#64748b'];
+
+/** Источники новых сделок за период: полосы по числу сделок; клик — список сделок источника. */
+function DealSources({ items, word, onOpen }: { items: DashboardNewDeal[]; word: string; onOpen: (source: string) => void }) {
+  const groups = [...items.reduce((m, i) => m.set(i.source?.id ?? '', [...(m.get(i.source?.id ?? '') ?? []), i]), new Map<string, DashboardNewDeal[]>())]
+    .map(([id, list]) => ({ id, name: list[0].source?.name ?? NO_SOURCE, count: list.length, paid: list.filter((i) => i.booking === 'paid').length }))
+    .sort((a, b) => b.count - a.count);
+  const max = groups[0]?.count ?? 1;
+  return (
+    <section className="day-panel dash-sources">
+      <p className="dash-attention-title muted">Источники новых сделок {word}</p>
+      <ul className="src-rows">
+        {groups.map((g, i) => (
+          <li key={g.id || '-'}>
+            <button className="src-row" onClick={() => onOpen(g.id)} title="Показать сделки источника">
+              <span className="src-name">{g.name}</span>
+              <span className="src-bar">
+                <i style={{ width: `${(g.count / max) * 100}%`, background: SOURCE_COLORS[i % SOURCE_COLORS.length] }} />
+              </span>
+              <span className="src-count">
+                <b>{g.count}</b>
+                <span className="muted"> · {Math.round((g.count / items.length) * 100)}%</span>
+                {g.paid > 0 && <span className="muted"> · 🪙 {g.paid}</span>}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
