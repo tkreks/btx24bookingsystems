@@ -7,6 +7,7 @@ export const PERMISSIONS = [
   'calendar.view', // видеть календарь ресурсов группы
   'booking.details', // видеть данные броней и сделок (без него — только занятость/тех. окна)
   'booking.create',
+  'deal.create', // новые сделки из формы брони; вместе с booking.create — «Бесплатно» и «Без предоплаты»
   'booking.edit',
   'booking.cancel',
   'payment.send', // ссылки на предоплату/доплату
@@ -29,6 +30,7 @@ export const ROLE_PERMISSIONS: Record<GroupRole, readonly Permission[]> = {
     'calendar.view',
     'booking.details',
     'booking.create',
+    'deal.create',
     'booking.edit',
     'booking.cancel',
     'payment.send',
@@ -49,6 +51,7 @@ export const ROLE_LABELS: Record<GroupRole, string> = {
 export const GROUP_FEATURES = [
   'booking.details',
   'booking.create',
+  'deal.create',
   'booking.edit',
   'booking.cancel',
   'payment.send',
@@ -178,5 +181,12 @@ export interface AppSettingsDto {
   dialogTextsEnabled: boolean;
   /** Удалять у контакта e-mail с «wazzup» перед запуском оплаты. */
   removeWazzupEmail: boolean;
+  /**
+   * Создавать в Битрикс24 новые брони (любые даты) и новые сделки, пока интеграция в режиме
+   * «только чтение» (решение владельца 2026-10-22). Существующие брони и сделки не меняются.
+   */
+  createInBitrix: boolean;
+  /** Когда разрешение включили (только для показа). */
+  createGrantedAt?: string | null;
   admins: { kind: MemberKind; bitrixId: number }[];
 }

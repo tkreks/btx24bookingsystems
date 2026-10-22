@@ -29,6 +29,8 @@ export function fakePrisma() {
       },
       update: async ({ where, data }: { where: { id: string }; data: Partial<Portal> }) => Object.assign(portals.find((p) => p.id === where.id)!, data),
     },
+    // Политика записи в режиме «только чтение» спрашивает разрешение «создавать новые»: по умолчанию нет.
+    portalSettings: { findUnique: async () => null },
     bitrix24Event: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const e = { id: `e${++seq}`, status: 'PENDING', ...data };

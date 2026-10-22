@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import {
+  canUsePaymentMode,
   detectBookingType,
+  PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
   type CreateBookingDto,
   type CreateBookingResultDto,
@@ -71,6 +73,13 @@ export class BookingCreateService {
     const a = await this.access.resolve(user);
     const g = this.access.pick(a, b.groupId, 'booking.create');
     if (!g) throw new ForbiddenException({ code: 'NO_BOOKING_CREATE', message: 'Нет права создавать брони в этой группе' });
+    if (b.kind === 'client' && b.newDeal && !g.permissions.includes('deal.create'))
+      throw new ForbiddenException({ code: 'NO_DEAL_CREATE', message: 'Нет права создавать сделки в этой группе' });
+    if (b.kind === 'client' && !canUsePaymentMode(g.permissions, b.paymentMode))
+      throw new ForbiddenException({
+        code: 'PAYMENT_MODE_FORBIDDEN',
+        message: `«${PAYMENT_MODE_LABELS[b.paymentMode]}» — только с правами создавать брони и сделки`,
+      });
     const outside = b.resourceIds.filter((id) => !g.group.resourceIds.includes(id));
     if (outside.length) throw new BadRequestException({ code: 'RESOURCE_NOT_IN_GROUP', message: `Ресурсы не из группы: ${outside.join(', ')}` });
 
@@ -176,18 +185,18 @@ export class BookingCreateService {
       if (dealId) {
         const fields = await this.systemFields(user.portal.id, b, bookingId, tz, type?.rule.dealTypeValue ?? '');
         if (Object.keys(fields).length) {
-          await user.client.call('crm.deal.update', { id: dealId, fields });
-          await log('deal.update', true, { fields: Object.keys(fields) });
+          if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update'))
+            await log('deal.update', true, { fields: Object.keys(fields) });
+          else warnings.push(`Поля сделки #${dealId} не заполнены: изменять существующие сделки приложению пока не разрешено`);
         } else warnings.push('Системные поля сделки не настроены (⚙ → «Приложение»)');
       }
 
       // 5. Товары (полная замена строк сделки)
       if (dealId && products.length) {
-        await user.client.call('crm.deal.productrows.set', {
-          id: dealId,
-          rows: products.map((p) => ({ PRODUCT_ID: p.productId, PRICE: p.price, QUANTITY: p.quantity })),
-        });
-        await log('productrows.set', true, { count: products.length });
+        const rows = products.map((p) => ({ PRODUCT_ID: p.productId, PRICE: p.price, QUANTITY: p.quantity }));
+        if (await this.dealWrite(() => user.client.call('crm.deal.productrows.set', { id: dealId, rows }), createdDeal, log, 'productrows.set'))
+          await log('productrows.set', true, { count: products.length });
+        else warnings.push(`Товары сделки #${dealId} не записаны: изменять существующие сделки приложению пока не разрешено`);
       }
       if (b.kind === 'client' && products.length && !type) warnings.push('Тип брони по товарам не определён — подтверждение клиенту не уйдёт');
 
@@ -223,6 +232,22 @@ export class BookingCreateService {
       const text = `${msg(err)}${createdDeal ? ` (создана сделка #${dealId} — проверьте её)` : ''}`.slice(0, 1000);
       await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { status: 'failed', error: text, dealId } });
       throw err;
+    }
+  }
+
+  /**
+   * Запись в сделку. Существующую сделку режим «только чтение» может не пускать (разрешено только
+   * создавать новые) — тогда бронь остаётся, а сотрудник видит предупреждение. Новую сделку
+   * приложение создало само, поэтому отказ записи в неё — настоящая ошибка (компенсация).
+   */
+  private async dealWrite(write: () => Promise<unknown>, createdDeal: boolean, log: (step: string, ok: boolean, detail?: unknown) => Promise<void>, step: string): Promise<boolean> {
+    try {
+      await write();
+      return true;
+    } catch (err) {
+      if (createdDeal || !(err instanceof Bitrix24Error) || err.code !== 'READ_ONLY_MODE') throw err;
+      await log(step, false, msg(err));
+      return false;
     }
   }
 

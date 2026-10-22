@@ -155,6 +155,13 @@ export const PAYMENT_MODE_LABELS: Record<PaymentMode, string> = {
   certificate: 'Сертификат',
 };
 
+/** Сценарии без оплаты вперёд (решение владельца 2026-10-22): только с правами создавать брони и сделки. */
+export const RESTRICTED_PAYMENT_MODES: readonly PaymentMode[] = ['postpay', 'free'];
+
+export function canUsePaymentMode(permissions: readonly string[], mode: PaymentMode): boolean {
+  return !RESTRICTED_PAYMENT_MODES.includes(mode) || (permissions.includes('booking.create') && permissions.includes('deal.create'));
+}
+
 /** `POST /api/bookings` — создать бронь (сага: сделка → бронь → связь → поля сделки → товары). */
 export interface CreateBookingDto {
   /** Ключ идемпотентности: повтор с тем же ключом вернёт тот же результат. */

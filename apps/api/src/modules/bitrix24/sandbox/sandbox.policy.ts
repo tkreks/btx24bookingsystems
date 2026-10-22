@@ -32,6 +32,10 @@ const chatOf = (dialogId: unknown) => /^chat(\d+)$/.exec(String(dialogId ?? ''))
  * Разрешает изменяющий вызов в режиме только чтения, если он целиком внутри песочницы.
  * Всё, что не распознано, — запрещено. Брони меняются/удаляются только созданные песочницей
  * (журнал SandboxBooking), поэтому реальные брони недоступны даже при ошибке в коде выше.
+ *
+ * Разрешение «создавать новые» (решение владельца 2026-10-22, `PortalSettings.createInBitrix`):
+ * новые брони на любые даты и новые сделки. Дальше менять можно только созданное приложением
+ * (журнал AppCreatedEntity); существующие сделки и брони по-прежнему только читаются.
  */
 export class SandboxWritePolicy implements WritePolicy {
   private readonly from: number | null;
@@ -50,13 +54,15 @@ export class SandboxWritePolicy implements WritePolicy {
   async allows(method: string, params: P): Promise<boolean> {
     const fields = (params.fields ?? {}) as P;
     switch (lc(method)) {
+      case 'crm.deal.add':
+        return this.createAllowed();
       case 'crm.deal.update':
       case 'crm.deal.productrows.set':
-        return this.deal(params.id);
+        return this.deal(params.id) || this.created('deal', params.id);
       case 'crm.item.update':
         if (Number(params.entityTypeId) === 3) return this.related('contactIds', params.id);
         if (Number(params.entityTypeId) === 31) return this.related('invoiceIds', params.id);
-        return Number(params.entityTypeId) === 2 && this.deal(params.id);
+        return Number(params.entityTypeId) === 2 && (this.deal(params.id) || this.created('deal', params.id));
       // Правка контакта сделки песочницы (решение владельца): например, очистка e-mail «wazzup».
       case 'crm.contact.update':
         return this.related('contactIds', params.id);
@@ -65,7 +71,7 @@ export class SandboxWritePolicy implements WritePolicy {
       case 'crm.item.payment.update':
         return this.related('paymentIds', params.id);
       case 'crm.timeline.comment.add':
-        return lc(fields.ENTITY_TYPE) === 'deal' && this.deal(fields.ENTITY_ID);
+        return lc(fields.ENTITY_TYPE) === 'deal' && (this.deal(fields.ENTITY_ID) || this.created('deal', fields.ENTITY_ID));
       case 'bizproc.workflow.start': {
         const doc = Array.isArray(params.DOCUMENT_ID) ? params.DOCUMENT_ID : [];
         const m = /^DEAL_(\d+)$/.exec(String(doc[2] ?? ''));
@@ -93,19 +99,26 @@ export class SandboxWritePolicy implements WritePolicy {
       case 'im.v2.file.upload':
         return this.related('chatIds', chatOf(params.dialogId));
       case 'booking.v1.booking.add':
-        return this.inRange(fields.datePeriod);
+        return this.inRange(fields.datePeriod) || this.createAllowed();
       case 'booking.v1.booking.update':
-        return (await this.owned(params.id)) && (fields.datePeriod === undefined || this.inRange(fields.datePeriod));
+        return (
+          ((await this.owned(params.id)) && (fields.datePeriod === undefined || this.inRange(fields.datePeriod))) ||
+          this.created('booking', params.id)
+        );
       case 'booking.v1.booking.delete':
-        return this.owned(params.id);
+        return (await this.owned(params.id)) || this.created('booking', params.id);
       case 'booking.v1.booking.externaldata.set': {
         const items = (Array.isArray(params.externalData) ? params.externalData : []) as P[];
-        return items.length > 0 && items.every((x) => lc(x.moduleId) === 'crm' && lc(x.entityTypeId) === 'deal' && this.deal(x.value)) && this.owned(params.bookingId);
+        const toDeals = items.length > 0 && items.every((x) => lc(x.moduleId) === 'crm' && lc(x.entityTypeId) === 'deal' && /^\d+$/.test(String(x.value ?? '')));
+        if (!toDeals) return false;
+        // Свою новую бронь можно связать с любой сделкой: меняется бронь, а не сделка.
+        if (await this.created('booking', params.bookingId)) return true;
+        return items.every((x) => this.deal(x.value)) && this.owned(params.bookingId);
       }
       case 'booking.v1.booking.externaldata.unset':
       case 'booking.v1.booking.client.set':
       case 'booking.v1.booking.client.unset':
-        return this.owned(params.bookingId);
+        return (await this.owned(params.bookingId)) || this.created('booking', params.bookingId);
       default:
         return false;
     }
@@ -113,9 +126,14 @@ export class SandboxWritePolicy implements WritePolicy {
 
   async recorded(method: string, params: P, result: unknown): Promise<void> {
     const m = lc(method);
+    const id = typeof result === 'object' && result !== null ? Number((result as P).id) : Number(result);
     if (m === 'booking.v1.booking.add') {
-      const id = typeof result === 'object' && result !== null ? Number((result as P).id) : Number(result);
-      if (Number.isInteger(id) && id > 0) await this.prisma.sandboxBooking.create({ data: { portalId: this.portal.id, bookingId: id } });
+      if (!(Number.isInteger(id) && id > 0)) return;
+      // Бронь в датах песочницы — в её журнал (уборка удалит), иначе — созданная по разрешению.
+      if (this.inRange(((params.fields ?? {}) as P).datePeriod)) await this.prisma.sandboxBooking.create({ data: { portalId: this.portal.id, bookingId: id } });
+      else await this.prisma.appCreatedEntity.create({ data: { portalId: this.portal.id, entityType: 'booking', entityId: id } });
+    } else if (m === 'crm.deal.add') {
+      if (Number.isInteger(id) && id > 0) await this.prisma.appCreatedEntity.create({ data: { portalId: this.portal.id, entityType: 'deal', entityId: id } });
     } else if (m === 'booking.v1.booking.delete') {
       await this.prisma.sandboxBooking.updateMany({ where: { portalId: this.portal.id, bookingId: Number(params.id) }, data: { deletedAt: new Date() } });
     }
@@ -134,6 +152,20 @@ export class SandboxWritePolicy implements WritePolicy {
   private async isAlertMessage(messageId: unknown): Promise<boolean> {
     if (!/^\d+$/.test(String(messageId ?? ''))) return false;
     const row = await this.prisma.bookingAlert.findFirst({ where: { portalId: this.portal.id, messageId: Number(messageId) } });
+    return !!row;
+  }
+
+  private async createAllowed(): Promise<boolean> {
+    const s = await this.prisma.portalSettings.findUnique({ where: { portalId: this.portal.id } });
+    return s?.createInBitrix === true;
+  }
+
+  /** Создано приложением по разрешению «создавать новые» — и разрешение всё ещё действует. */
+  private async created(entityType: 'booking' | 'deal', id: unknown): Promise<boolean> {
+    if (!/^\d+$/.test(String(id ?? '')) || !(await this.createAllowed())) return false;
+    const row = await this.prisma.appCreatedEntity.findUnique({
+      where: { portalId_entityType_entityId: { portalId: this.portal.id, entityType, entityId: Number(id) } },
+    });
     return !!row;
   }
 

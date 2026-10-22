@@ -95,8 +95,10 @@ export class PortalService {
   private readonly sandboxRelations = new Map<string, { value: SandboxRelations; expiresAt: number }>();
 
   private policyFor(portal: Portal): WritePolicy | undefined {
-    if (!this.config.readOnly || !this.config.sandbox) return undefined;
-    return new SandboxWritePolicy(this.prisma, portal, this.config.sandbox, (dealIds) => this.relationsOfDeals(portal, dealIds));
+    if (!this.config.readOnly) return undefined;
+    // Без песочницы политика всё равно нужна: разрешение «создавать новые» хранится у портала.
+    const sandbox = this.config.sandbox ?? { dealIds: [], bookingsFrom: null, bookingsTo: null };
+    return new SandboxWritePolicy(this.prisma, portal, sandbox, (dealIds) => this.relationsOfDeals(portal, dealIds));
   }
 
   /** Контакты, счета, оплаты и чаты открытых линий сделок — только чтением, токеном приложения. */

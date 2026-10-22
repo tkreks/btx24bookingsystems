@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { effectivePermissions, higherRole } from './access.js';
+import { canUsePaymentMode } from './bookings.js';
 
 describe('access', () => {
   it('intersects role permissions with group features', () => {
@@ -15,5 +16,13 @@ describe('access', () => {
     expect(higherRole(null, 'VIEWER')).toBe('VIEWER');
     expect(higherRole('MANAGER', 'VIEWER')).toBe('MANAGER');
     expect(higherRole('TECHNOLOGIST', 'VIEWER')).toBe('VIEWER');
+  });
+
+  it('allows free and postpay only with booking.create and deal.create', () => {
+    expect(canUsePaymentMode(['booking.create'], 'prepayment')).toBe(true);
+    expect(canUsePaymentMode(['booking.create'], 'cash_on_site')).toBe(true);
+    expect(canUsePaymentMode(['booking.create'], 'free')).toBe(false);
+    expect(canUsePaymentMode(['deal.create'], 'postpay')).toBe(false);
+    expect(canUsePaymentMode(['booking.create', 'deal.create'], 'free')).toBe(true);
   });
 });

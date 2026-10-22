@@ -86,6 +86,8 @@ export const appSettingsSchema = z
     dialogMetadataEnabled: z.boolean(),
     dialogTextsEnabled: z.boolean(),
     removeWazzupEmail: z.boolean(),
+    createInBitrix: z.boolean().optional(),
+    createGrantedAt: z.string().nullable().optional(), // только для показа, при сохранении игнорируется
     admins: z.array(member).max(200),
   })
   .strict()

@@ -18,6 +18,7 @@ import { useGroupReferences } from './references.js';
 const FEATURES: Record<GroupFeature, string> = {
   'booking.details': 'Данные броней и сделок',
   'booking.create': 'Создание броней',
+  'deal.create': 'Создание сделок (вместе с бронями — «Бесплатно» и «Без предоплаты»)',
   'booking.edit': 'Редактирование броней',
   'booking.cancel': 'Отмена броней',
   'payment.send': 'Отправка ссылок на оплату',

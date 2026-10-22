@@ -43,6 +43,7 @@ model Portal {
   settings             PortalSettings?
   externalUsers        ExternalUser[]
   sandboxBookings      SandboxBooking[]
+  appCreatedEntities   AppCreatedEntity[]
   messageTemplates     MessageTemplate[]
   storedFiles          StoredFile[]
   openlineChats        OpenlineChat[]
@@ -184,6 +185,10 @@ model PortalSettings {
   bookingSyncError      String?   @db.VarChar(500)
   /// Системные поля сделки портала: роль → код поля (`DealFieldMapDto` в @btx24/shared).
   dealFieldMap          Json?
+  /// Разрешение владельца создавать в Битрикс24 новые брони и сделки при B24_READ_ONLY (2026-10-22).
+  createInBitrix        Boolean  @default(false)
+  createGrantedByUserId Int?
+  createGrantedAt       DateTime? @db.DateTime(3)
   updatedByUserId       Int?
   updatedAt             DateTime @updatedAt @db.DateTime(3)
 }
@@ -233,6 +238,20 @@ model SandboxBooking {
   deletedAt DateTime? @db.DateTime(3)
 
   @@unique([portalId, bookingId])
+}
+
+/// Брони и сделки, созданные приложением по разрешению `PortalSettings.createInBitrix`: только их
+/// приложение может дальше менять (связи брони, поля и товары новой сделки, отмена своей брони).
+model AppCreatedEntity {
+  id         String   @id @default(cuid())
+  portalId   String
+  portal     Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  /// 'booking' | 'deal'
+  entityType String   @db.VarChar(20)
+  entityId   Int
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([portalId, entityType, entityId])
 }
 
 // ---------- Открытые линии ----------

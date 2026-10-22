@@ -14,7 +14,7 @@ const group = {
 };
 const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
 
-function setup(o: { fail?: string; can?: boolean; prevOp?: Record<string, unknown> } = {}) {
+function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown> } = {}) {
   const ops: Record<string, unknown>[] = [];
   const prisma = {
     bookingOperation: {
@@ -29,14 +29,14 @@ function setup(o: { fail?: string; can?: boolean; prevOp?: Record<string, unknow
   } as unknown as PrismaService;
   const access = {
     resolve: vi.fn(async () => ({})),
-    pick: vi.fn(() => (o.can === false ? null : { group })),
+    pick: vi.fn(() => (o.can === false ? null : { group, permissions: o.permissions ?? ['booking.create', 'deal.create'] })),
   } as unknown as AccessService;
   const journal = { recordCreated: vi.fn(async () => ({})) };
   const fieldMap = { get: vi.fn(async () => map) } as unknown as DealFieldMapService;
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
-    if (o.fail === method) throw new Bitrix24Error(method === 'booking.v1.booking.add' ? '1018' : 'ERR', `${method} failed`);
+    if (o.fail === method) throw new Bitrix24Error(o.failCode ?? (method === 'booking.v1.booking.add' ? '1018' : 'ERR'), `${method} failed`);
     if (method === 'crm.deal.add') return { result: 900 };
     if (method === 'booking.v1.booking.add') return { result: 555 };
     return { result: true };
@@ -122,6 +122,33 @@ describe('BookingCreateService', () => {
     await expect(t.svc.create(t.user, body({ dealId: undefined }))).rejects.toMatchObject({ status: 400 });
     await expect(t.svc.create(t.user, body({ end: '2020-06-01T10:00:00.000Z' }))).rejects.toMatchObject({ status: 400 });
     expect(await t.svc.create(t.user, body({ kind: 'service', dealId: undefined, products: [] }))).toMatchObject({ dealId: null });
+  });
+});
+
+describe('BookingCreateService: права и режим «создавать новые»', () => {
+  it('free and postpay need booking.create and deal.create; a new deal needs deal.create', async () => {
+    const t = setup({ permissions: ['booking.create'] });
+    await expect(t.svc.create(t.user, body({ paymentMode: 'free' }))).rejects.toMatchObject({ status: 403 });
+    await expect(t.svc.create(t.user, body({ paymentMode: 'postpay', idempotencyKey: 'key-22222222' }))).rejects.toMatchObject({ status: 403 });
+    await expect(t.svc.create(t.user, body({ dealId: undefined, newDeal: { title: 'x' }, idempotencyKey: 'key-33333333' }))).rejects.toMatchObject({ status: 403 });
+    expect(t.calls).toEqual([]);
+    expect(await t.svc.create(t.user, body({ paymentMode: 'cash_on_site', idempotencyKey: 'key-44444444' }))).toMatchObject({ bookingId: 555 });
+    const full = setup();
+    expect(await full.svc.create(full.user, body({ paymentMode: 'free' }))).toMatchObject({ bookingId: 555 });
+  });
+
+  it('existing deal closed for writes → booking kept, warning instead of failure', async () => {
+    const t = setup({ fail: 'crm.deal.update', failCode: 'READ_ONLY_MODE' });
+    const r = await t.svc.create(t.user, body());
+    expect(r.bookingId).toBe(555);
+    expect(r.warnings).toEqual([expect.stringContaining('Поля сделки #678 не заполнены')]);
+    expect(t.calls.map((c) => c[0])).not.toContain('booking.v1.booking.delete');
+  });
+
+  it('a new deal refusing writes is a real failure (compensated)', async () => {
+    const t = setup({ fail: 'crm.deal.update', failCode: 'READ_ONLY_MODE' });
+    await expect(t.svc.create(t.user, body({ dealId: undefined, newDeal: { title: 'x' } }))).rejects.toThrow('crm.deal.update failed');
+    expect(t.calls.at(-1)).toEqual(['booking.v1.booking.delete', { id: 555 }]);
   });
 });
 

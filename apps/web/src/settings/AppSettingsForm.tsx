@@ -104,6 +104,18 @@ export function AppSettingsForm({
           />
           Удалять e-mail с «wazzup» у контакта перед оплатой
         </label>
+        <fieldset>
+          <legend>Запись в Битрикс24</legend>
+          <label className="check">
+            <input type="checkbox" checked={draft.createInBitrix} onChange={(e) => update({ createInBitrix: e.target.checked })} />
+            Создавать новые брони и сделки
+          </label>
+          <p className="muted">
+            Брони на любые даты и новые сделки из формы брони. Существующие брони и сделки приложение не меняет: поля и товары записываются
+            только в созданные им сделки.
+            {draft.createInBitrix && draft.createGrantedAt && ` Включено ${new Date(draft.createGrantedAt).toLocaleString('ru-RU')}.`}
+          </p>
+        </fieldset>
         <button className="primary" type="submit">
           {busy ? 'Сохранение…' : 'Сохранить настройки'}
         </button>

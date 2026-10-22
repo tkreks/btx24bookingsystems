@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  canUsePaymentMode,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
   type CalendarDay,
@@ -50,6 +51,8 @@ export function BookingForm({
     () => allowed.find((g) => g.id === context.groupId || (context.resourceId && g.resourceIds.includes(context.resourceId)))?.id ?? allowed[0]?.id ?? '',
   );
   const group = allowed.find((g) => g.id === groupId);
+  const canNewDeal = !!group?.permissions.includes('deal.create');
+  const modes = useMemo(() => PAYMENT_MODES.filter((m) => canUsePaymentMode(group?.permissions ?? [], m)), [group]);
   const [period, setPeriod] = useState<PeriodFields>(() =>
     group ? defaultPeriod(group, context.date, context.time) : { startDate: context.date, startTime: '14:00', endDate: context.date, endTime: '18:00' },
   );
@@ -61,11 +64,18 @@ export function BookingForm({
       ? { mode: 'existing', dealId: context.dealId }
       : deals[0]
         ? { mode: 'existing', dealId: deals[0].id }
-        : { mode: 'new', title: '' },
+        : canNewDeal
+          ? { mode: 'new', title: '' }
+          : { mode: 'service' },
   );
   const [guests, setGuests] = useState('');
   const [comment, setComment] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('prepayment');
+  // Другая группа — другие права: недоступный выбор сбрасывается.
+  useEffect(() => {
+    if (deal.mode === 'new' && !canNewDeal) setDeal({ mode: 'service' });
+    if (!modes.includes(paymentMode)) setPaymentMode('prepayment');
+  }, [canNewDeal, deal.mode, modes, paymentMode]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // Один ключ на открытие формы: повторная отправка (обрыв связи) не создаст вторую бронь.
@@ -208,10 +218,12 @@ export function BookingForm({
                   {d.title} <span className="muted">#{d.id}</span>
                 </label>
               ))}
-              <label className="check">
-                <input type="radio" name="deal" checked={deal.mode === 'new'} onChange={() => setDeal({ mode: 'new', title: context.clientName ?? '' })} />
-                Новая сделка
-              </label>
+              {canNewDeal && (
+                <label className="check">
+                  <input type="radio" name="deal" checked={deal.mode === 'new'} onChange={() => setDeal({ mode: 'new', title: context.clientName ?? '' })} />
+                  Новая сделка
+                </label>
+              )}
               {deal.mode === 'new' && (
                 <input
                   aria-label="Название новой сделки"
@@ -237,7 +249,7 @@ export function BookingForm({
                   <label>
                     Оплата
                     <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
-                      {PAYMENT_MODES.map((m) => (
+                      {modes.map((m) => (
                         <option key={m} value={m}>
                           {PAYMENT_MODE_LABELS[m]}
                         </option>

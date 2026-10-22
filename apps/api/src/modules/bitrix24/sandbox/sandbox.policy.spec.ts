@@ -10,10 +10,18 @@ const cfg = { dealIds: [678], bookingsFrom: '2020-01-01', bookingsTo: '2021-01-0
 const in2020 = { from: { timestamp: 1590994800, timezone: 'Europe/Moscow' }, to: { timestamp: 1591002000, timezone: 'Europe/Moscow' } };
 const in2026 = { from: { timestamp: 1780300800 }, to: { timestamp: 1780308000 } };
 
-function setup(owned: number[] = [], alertChatId: number | null = null) {
+function setup(owned: number[] = [], alertChatId: number | null = null, grant = { createInBitrix: false }) {
   const rows = new Map(owned.map((id) => [id, { bookingId: id, deletedAt: null as Date | null }]));
+  const created = new Set<string>();
   const prisma = {
-    portalSettings: { findUnique: vi.fn(async () => (alertChatId ? { alertChatId } : null)) },
+    portalSettings: { findUnique: vi.fn(async () => ({ alertChatId, createInBitrix: grant.createInBitrix })) },
+    appCreatedEntity: {
+      findUnique: vi.fn(async ({ where }: { where: { portalId_entityType_entityId: { entityType: string; entityId: number } } }) => {
+        const k = where.portalId_entityType_entityId;
+        return created.has(`${k.entityType}:${k.entityId}`) ? { id: 'c' } : null;
+      }),
+      create: vi.fn(async ({ data }: { data: { entityType: string; entityId: number } }) => created.add(`${data.entityType}:${data.entityId}`)),
+    },
     bookingAlert: {
       findFirst: vi.fn(async ({ where }: { where: { messageId: number } }) => (where.messageId === 9001 ? { id: 'a1' } : null)),
     },
@@ -27,7 +35,7 @@ function setup(owned: number[] = [], alertChatId: number | null = null) {
     },
   } as unknown as PrismaService;
   const relations = { contactIds: [140], invoiceIds: [5152], paymentIds: [8672, 8674], chatIds: [3301] };
-  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] })), rows };
+  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] })), rows, created, grant };
 }
 
 describe('SandboxWritePolicy', () => {
@@ -111,10 +119,47 @@ describe('SandboxWritePolicy', () => {
 
   it('records created bookings and forgets deleted ones', async () => {
     const { policy } = setup();
-    await policy.recorded('booking.v1.booking.add', {}, 777);
+    await policy.recorded('booking.v1.booking.add', { fields: { datePeriod: in2020 } }, 777);
     await expect(policy.allows('booking.v1.booking.delete', { id: 777 })).resolves.toBe(true);
     await policy.recorded('booking.v1.booking.delete', { id: 777 }, true);
     await expect(policy.allows('booking.v1.booking.delete', { id: 777 })).resolves.toBe(false);
+  });
+});
+
+describe('SandboxWritePolicy: разрешение «создавать новые»', () => {
+  it('blocks creating real bookings and deals until the portal grants it', async () => {
+    const { policy } = setup();
+    await expect(policy.allows('booking.v1.booking.add', { fields: { datePeriod: in2026 } })).resolves.toBe(false);
+    await expect(policy.allows('crm.deal.add', { fields: { TITLE: 'x' } })).resolves.toBe(false);
+  });
+
+  it('creates bookings and deals, then changes only what it created', async () => {
+    const { policy, rows, created } = setup([], null, { createInBitrix: true });
+    await expect(policy.allows('booking.v1.booking.add', { fields: { datePeriod: in2026 } })).resolves.toBe(true);
+    await policy.recorded('booking.v1.booking.add', { fields: { datePeriod: in2026 } }, { id: 901 });
+    expect(rows.has(901)).toBe(false); // не в журнал песочницы: уборка не удалит настоящую бронь
+    expect(created.has('booking:901')).toBe(true);
+    await expect(policy.allows('crm.deal.add', { fields: { TITLE: 'x' } })).resolves.toBe(true);
+    await policy.recorded('crm.deal.add', {}, 4321);
+
+    await expect(policy.allows('booking.v1.booking.externalData.set', { bookingId: 901, externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '1' }] })).resolves.toBe(true);
+    await expect(policy.allows('booking.v1.booking.client.set', { bookingId: 901 })).resolves.toBe(true);
+    await expect(policy.allows('booking.v1.booking.delete', { id: 901 })).resolves.toBe(true);
+    await expect(policy.allows('crm.deal.update', { id: 4321, fields: {} })).resolves.toBe(true);
+    await expect(policy.allows('crm.deal.productrows.set', { id: 4321, rows: [] })).resolves.toBe(true);
+
+    // Чужие брони и существующие сделки — только чтение.
+    await expect(policy.allows('booking.v1.booking.delete', { id: 900 })).resolves.toBe(false);
+    await expect(policy.allows('booking.v1.booking.externalData.set', { bookingId: 900, externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '1' }] })).resolves.toBe(false);
+    await expect(policy.allows('crm.deal.update', { id: 1, fields: {} })).resolves.toBe(false);
+    await expect(policy.allows('crm.deal.delete', { id: 4321 })).resolves.toBe(false);
+  });
+
+  it('stops changing created entities once the grant is revoked', async () => {
+    const { policy, grant } = setup([], null, { createInBitrix: true });
+    await policy.recorded('booking.v1.booking.add', { fields: { datePeriod: in2026 } }, 902);
+    grant.createInBitrix = false;
+    await expect(policy.allows('booking.v1.booking.delete', { id: 902 })).resolves.toBe(false);
   });
 });
 
