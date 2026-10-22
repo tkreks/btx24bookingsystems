@@ -4,10 +4,11 @@ import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtTime } from '../format.js';
 import { dayKey } from '../openlines/chat-list.js';
+import { Icon } from '../openlines/icons.js';
 
 /**
- * Клиент в шапке чата: имя, повторные (выигранные) сделки и средний чек, прошедшие брони и
- * ближайшая будущая; по клику — список броней (перейти в сделку или календарь); «+ Бронь».
+ * Клиент в шапке чата одной строкой: имя · 🤝 повторные сделки · ~ средний чек · 📅 прошедшие брони ·
+ * ⏳ ближайшая бронь (подписи — в подсказках); по клику — список броней; «+ Бронь».
  */
 export function ClientBookings({
   chatId,
@@ -60,31 +61,51 @@ export function ClientBookings({
     `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(v)} ${!cur || cur === 'RUB' ? '₽' : cur}`;
   return (
     <div className="client-bookings">
-      {data?.contact?.name && (
-        <button className="link cb-client" onClick={() => openCrm('contact', data.contact!.id)}>
-          {data.contact.name}
-        </button>
-      )}
       <div className="cb-stats">
+        {data?.contact?.name && (
+          <button className="link cb-client" onClick={() => openCrm('contact', data.contact!.id)} title="Открыть контакт в CRM">
+            {data.contact.name}
+          </button>
+        )}
         {!data && <span className="muted">{error || 'Загрузка данных клиента…'}</span>}
         {data && (
           <>
-            <span className="cb-stat" title="Состоявшиеся сделки клиента: не проиграны и бронь уже прошла (без брони — выигранные)">
-              Повторных сделок: <b>{data.won.count}</b>
-              {data.won.avgCheck !== null && (
-                <>
-                  {' '}
-                  · средний чек <b>{money(data.won.avgCheck, data.won.currency)}</b>
-                </>
-              )}
+            <span
+              className="cb-stat"
+              title="Повторные сделки: состоявшиеся сделки клиента — не проиграны и бронь уже прошла (без брони — выигранные)"
+              aria-label={`Повторных сделок: ${data.won.count}`}
+            >
+              <Icon name="handshake" size={15} />
+              <b>{data.won.count}</b>
             </span>
-            <button className="cb-stat link" aria-expanded={open} onClick={() => setOpen(!open)}>
-              Прошедших броней: <b>{data.past}</b>
+            {data.won.avgCheck !== null && (
+              <span className="cb-stat" title="Средний чек повторных сделок" aria-label={`Средний чек: ${money(data.won.avgCheck, data.won.currency)}`}>
+                <span className="cb-approx" aria-hidden="true">
+                  ~
+                </span>
+                <b>{money(data.won.avgCheck, data.won.currency)}</b>
+              </span>
+            )}
+            <button
+              className="cb-stat link"
+              aria-expanded={open}
+              title="Прошедшие брони — показать список"
+              aria-label={`Прошедших броней: ${data.past}`}
+              onClick={() => setOpen(!open)}
+            >
+              <Icon name="calendar" size={15} />
+              <b>{data.past}</b>
             </button>
             {next && (
-              <button className="cb-stat link cb-next" onClick={() => setOpen(true)} title="Ближайшая бронь">
-                {next.when === 'now' ? 'Идёт сейчас' : 'Ближайшая'}: <b>{fmtDateTime(next.start, timezone)}</b>
-                {data.upcoming.length > 1 && <span className="muted"> (+{data.upcoming.length - 1})</span>}
+              <button
+                className={`cb-stat link cb-next${next.when === 'now' ? ' now' : ''}`}
+                onClick={() => setOpen(true)}
+                title={next.when === 'now' ? 'Бронь идёт сейчас' : 'Ближайшая бронь'}
+                aria-label={`${next.when === 'now' ? 'Идёт сейчас' : 'Ближайшая бронь'}: ${fmtDateTime(next.start, timezone)}`}
+              >
+                <Icon name="hourglass" size={15} />
+                <b>{next.when === 'now' ? 'сейчас' : fmtDateTime(next.start, timezone)}</b>
+                {data.upcoming.length > 1 && <span className="muted">+{data.upcoming.length - 1}</span>}
               </button>
             )}
           </>

@@ -1295,6 +1295,7 @@ main.loading {
 
 .cb-client {
   justify-self: start;
+  margin-right: 2px;
   font-size: 14px;
   font-weight: 650;
   text-align: left;
@@ -1310,10 +1311,27 @@ main.loading {
 }
 
 .cb-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12.5px;
   font-weight: 400;
   color: #5c6a80;
   padding: 0;
+  white-space: nowrap;
+}
+.cb-stat .icon {
+  flex: none;
+  color: #8a96a8;
+}
+.cb-approx {
+  color: #8a96a8;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+.cb-next.now .icon {
+  color: #d5444b;
 }
 
 .cb-stat b {
