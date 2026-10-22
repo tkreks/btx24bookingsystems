@@ -30,6 +30,8 @@ export interface PlacementContext {
   dealId: number | null;
 }
 
+const SDK_URL = 'https://api.bitrix24.com/api/v1/';
+
 let ready: Promise<boolean> | null = null;
 /** Приложение открыто вне портала: вход через Битрикс24, запросы — по cookie-сессии. */
 let standalone = false;
@@ -56,13 +58,22 @@ export function openPortalPath(path: string): void {
 export function initB24(timeoutMs = 4000): Promise<boolean> {
   if (ready) return ready;
   ready = new Promise((resolve) => {
-    const sdk = window.BX24;
-    if (!sdk || window.parent === window) return resolve(false);
+    if (window.parent === window) return resolve(false);
     const timer = setTimeout(() => resolve(false), timeoutMs);
-    sdk.init(() => {
-      clearTimeout(timer);
-      resolve(true);
-    });
+    const start = () => {
+      const sdk = window.BX24;
+      if (!sdk) return resolve(false);
+      sdk.init(() => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    };
+    if (window.BX24) return start();
+    const script = document.createElement('script');
+    script.src = SDK_URL;
+    script.onload = start;
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
   });
   return ready;
 }

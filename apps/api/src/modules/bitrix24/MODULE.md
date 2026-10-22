@@ -38,7 +38,8 @@
   refresh — заранее, одним запросом на сессию; отказ сервера авторизации удаляет сессию.
   `B24AuthGuard` берёт cookie только при отсутствии Bearer и только с заголовком
   `X-Btx24-Standalone: 1` (CSRF: чужой сайт не поставит заголовок без CORS). `redirect_uri` —
-  `APP_BASE_URL/api/auth/callback`: домен должен совпадать с обработчиком приложения на портале.
+  `APP_BASE_URL/api/auth/callback`, но облако возвращает на адрес обработчика (`/?code&state`) —
+  nginx `web` переводит такой запрос на callback по формату `state`.
 - **Секреты:** access/refresh-токены — AES-256-GCM (`ENCRYPTION_KEY`), `application_token` — только
   sha256. Токены из `auth` входящих событий в журнал не пишутся. Смена `ENCRYPTION_KEY` делает
   сохранённые токены нечитаемыми — нужна переустановка.

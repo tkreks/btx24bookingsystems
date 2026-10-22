@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="format-detection" content="telephone=no" />
     <title>Бронирование</title>
-    <!-- JS SDK Битрикс24: токен пользователя, контекст встройки, высота фрейма -->
-    <script src="https://api.bitrix24.com/api/v1/"></script>
+    <!-- JS SDK Битрикс24 (токен пользователя, контекст встройки, высота фрейма) грузит b24.ts и
+         только во фрейме: вне портала SDK падает с «Unable to initialize Bitrix24 JS library!». -->
   </head>
   <body>
     <div id="root"></div>

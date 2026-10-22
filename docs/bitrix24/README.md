@@ -41,6 +41,8 @@
 - Вход вне портала (OAuth «authorization code»): `https://{портал}/oauth/authorize/?client_id&state&redirect_uri`
   → портал возвращает на `redirect_uri` с `code`, `state`, `domain`, `member_id`, `server_domain` →
   `GET https://{server_domain}/oauth/token/?grant_type=authorization_code&client_id&client_secret&code`.
+  **Облако возвращает не на `redirect_uri`, а на адрес обработчика приложения** (`/?code=…&state=…`,
+  проверено 2026-10-22) — nginx `web` по формату `state` переводит такой запрос на `/api/auth/callback`.
   Код одноразовый и короткоживущий; токены — сотрудника, его права. Реализация — `WebSessionService`.
   Поиск MCP `bitrix24-docs` по OAuth 2026-10-22 ничего не нашёл — схема проверяется входом на живом портале.
 - Каждое входящее событие проверяем по `auth.application_token`, сохранённому при установке.
