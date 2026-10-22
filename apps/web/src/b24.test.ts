@@ -49,3 +49,15 @@ describe('getAuth', () => {
     await check;
   });
 });
+
+describe('screenFrameHeight', () => {
+  it('вкладка сделки — окно браузера без шапки портала и слайдера', async () => {
+    const { screenFrameHeight } = await import('./b24.js');
+    expect(screenFrameHeight(1000, 'CRM_DEAL_DETAIL_TAB')).toBe(700);
+    expect(screenFrameHeight(1000, 'DEFAULT')).toBe(780);
+  });
+  it('не ниже 560 px на маленьком окне', async () => {
+    const { screenFrameHeight } = await import('./b24.js');
+    expect(screenFrameHeight(600, 'CRM_DEAL_DETAIL_TAB')).toBe(560);
+  });
+});

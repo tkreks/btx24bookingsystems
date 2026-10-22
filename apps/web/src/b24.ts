@@ -105,6 +105,7 @@ export function placementContext(): PlacementContext {
   try {
     const info = window.BX24?.placement.info();
     const placement = info?.placement || 'DEFAULT';
+    framePlacement = placement;
     const raw = info?.options?.ID ?? info?.options?.ENTITY_ID;
     const dealId =
       placement.startsWith('CRM_DEAL') && raw !== undefined && /^\d+$/.test(String(raw)) ? Number(raw) : null;
@@ -114,10 +115,33 @@ export function placementContext(): PlacementContext {
   }
 }
 
-/** Подогнать высоту фрейма под содержимое (во встройках фрейм не растёт сам). */
+/**
+ * Сколько по высоте окна браузера занято над фреймом: панель браузера и шапка портала, а во
+ * вкладке карточки CRM — ещё заголовок и вкладки слайдера.
+ */
+export function frameChromeHeight(placement: string): number {
+  return placement.startsWith('CRM_') ? 300 : 220;
+}
+
+/** Высота фрейма по окну пользователя: внутри фрейма outerHeight — это окно браузера целиком. */
+export function screenFrameHeight(outerHeight: number, placement: string): number {
+  return Math.max(560, Math.round(outerHeight - frameChromeHeight(placement)));
+}
+
+let framePlacement = 'DEFAULT';
+
+/**
+ * Подогнать высоту фрейма: не ниже окна пользователя, длиннее — по содержимому. Одного
+ * `fitWindow` мало: сетка календаря ограничена высотой самого фрейма (`100dvh`), и низкий
+ * фрейм (вкладка сделки) так и остаётся низким. Поэтому сначала задаём минимум странице.
+ */
 export function fitFrame(): void {
+  const sdk = window.BX24;
+  if (!sdk) return;
   try {
-    window.BX24?.fitWindow();
+    const outer = window.outerHeight || window.screen.availHeight;
+    if (outer) document.documentElement.style.minHeight = `${screenFrameHeight(outer, framePlacement)}px`;
+    sdk.fitWindow();
   } catch {
     /* вне фрейма — нечего подгонять */
   }

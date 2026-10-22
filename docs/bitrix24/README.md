@@ -71,6 +71,11 @@
 - JS SDK: классический `BX24` (`//api.bitrix24.com/api/v1/`) или npm-пакет
   `@bitrix24/b24jssdk` (выбрать при реализации, зафиксировать ADR).
 - `BX24.fitWindow()`/`resizeWindow` — высота iframe; `BX24.placement.info()` — контекст встройки.
+  `fitWindow` шлёт `resizeWindow` с `width:'100%'` и высотой содержимого; сам `resizeWindow` берёт
+  только числа (`parseInt`, > 0), поэтому «100% ширины» доступно только через `fitWindow`. Высоту
+  окна портала из фрейма не узнать — берём `window.outerHeight` (окно браузера) минус шапку и
+  задаём её `min-height` странице перед `fitWindow` (`web/src/b24.ts` → `fitFrame`): иначе низкая
+  вкладка сделки не растёт — сетка календаря ограничена `100dvh` самого фрейма.
 - Не выставлять `X-Frame-Options`; cookies в iframe — `SameSite=None; Secure`, лучше вообще
   обходиться без cookie-сессии (токен из параметров запуска).
 
