@@ -164,8 +164,9 @@ export class ActivityService {
     return user.client.listAll<Row>(
       'crm.activity.list',
       {
-        // Звонки телефонии (запланированные дела-звонки — не разговор); не сотрудников групп отсеивает day().
-        filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', '>=START_TIME': start.toISOString(), '<START_TIME': end.toISOString() },
+        // Состоявшиеся звонки телефонии: незавершённые — это запланированные «позвонить» (12:00–13:00)
+        // и пропущенные, не работа. Не сотрудников групп отсеивает day().
+        filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', COMPLETED: 'Y', '>=START_TIME': start.toISOString(), '<START_TIME': end.toISOString() },
         select: ['ID', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'DIRECTION', 'OWNER_ID', 'OWNER_TYPE_ID'],
       },
       { max: 2000 },
