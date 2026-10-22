@@ -90,6 +90,8 @@ export interface PaymentPreviewDto {
   bookingId: number | null;
   /** Брони нет, а группа её требует — сначала создать бронь. */
   bookingMissing: boolean;
+  /** Брони нет, но есть уже прошедшая (последняя) — подсказать, почему её не видно. */
+  pastBooking: PaymentBookingOption | null;
   /** Чего не хватает, чтобы выставить счёт (настройки, сумма, права). Пусто — можно. */
   problems: string[];
 }

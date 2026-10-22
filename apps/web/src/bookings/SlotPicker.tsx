@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { zonedDayRange, zonedTimeToUtc, type CalendarBooking, type CalendarDay, type CalendarTechWindow, type MyGroupDto } from '@btx24/shared';
 import { availabilityPieces, slotAt } from '../calendar/layout.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
@@ -13,6 +13,19 @@ export function slotStateOf(rid: number, bookings: CalendarBooking[], techWindow
   if (techWindows.some((t) => t.resourceId === rid && Date.parse(t.start) < endMs && Date.parse(t.end) > startMs)) return { kind: 'tech' };
   return { kind: 'free' };
 }
+
+/** Текущее время, раз в минуту (проверка «бронь в прошлом» без Date.now() при отрисовке). */
+export function useNow(stepMs = 60_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), stepMs);
+    return () => clearInterval(t);
+  }, [stepMs]);
+  return now;
+}
+
+/** Начало брони прошло (запас 5 минут на заполнение формы). */
+export const isPastStart = (startMs: number, now: number) => startMs < now - 5 * 60_000;
 
 const DURATIONS_H = [2, 3, 4, 6];
 const NIGHTS = [1, 2, 3, 5, 7];
@@ -41,6 +54,7 @@ export function SlotPicker({
   onResources: (ids: number[]) => void;
 }) {
   const [onlyFree, setOnlyFree] = useState(false);
+  const now = useNow();
   const interval = group.bookingMode === 'interval';
   const startMs = zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).getTime();
   const endMs = zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).getTime();
@@ -165,6 +179,11 @@ export function SlotPicker({
         )}
       </div>
 
+      {isPastStart(startMs, now) && (
+        <p className="wz-slot-state busy" role="alert">
+          Начало брони уже прошло — выберите время позже или другой день.
+        </p>
+      )}
       <div className="wz-res-bar-head">
         <span className="muted">{days ? `Свободно ${free} из ${resources.length} на это время` : 'Загрузка занятости…'}</span>
         <label className="wz-only-free">

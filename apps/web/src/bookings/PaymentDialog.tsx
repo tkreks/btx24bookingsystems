@@ -246,6 +246,12 @@ export function PaymentDialog({
             {preview.bookingMissing ? (
               <div className="notice booking-required" role="alert">
                 <b>{BOOKING_REQUIRED_MESSAGE}.</b>
+                {preview.pastBooking && (
+                  <span>
+                    {' '}
+                    Бронь #{preview.pastBooking.bookingId} ({fmt(preview.pastBooking.start)} — {fmt(preview.pastBooking.end)}) уже прошла — для предоплаты нужна бронь на будущее время.
+                  </span>
+                )}
                 {onCreateBooking && (
                   <button type="button" className="primary" onClick={() => onCreateBooking(dealId)}>
                     + Создать бронь

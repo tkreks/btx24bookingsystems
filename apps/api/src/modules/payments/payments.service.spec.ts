@@ -22,7 +22,7 @@ const options = {
   },
 };
 
-function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<PaymentRequest>; link?: string; bookings?: number[] } = {}) {
+function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<PaymentRequest>; link?: string; bookings?: number[]; pastBooking?: number } = {}) {
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
@@ -54,6 +54,8 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
     workGroup: { findUnique: vi.fn(async () => ({ options })) },
     bookingRecord: {
       findUnique: vi.fn(async () => null),
+      // Прошедшая бронь сделки (для подсказки «уже прошла»).
+      findFirst: vi.fn(async () => (o.pastBooking ? { bookingId: o.pastBooking, startsAt: new Date(Date.now() - 86_400_000), endsAt: new Date(Date.now() - 82_800_000), resourceIds: [2] } : null)),
       findMany: vi.fn(async () =>
         (o.bookings ?? [5918]).map((id, i) => ({ bookingId: id, startsAt: new Date(Date.now() + (i + 1) * 86_400_000), endsAt: new Date(Date.now() + (i + 1) * 86_400_000 + 4 * 3_600_000), resourceIds: [2] })),
       ),
@@ -132,6 +134,9 @@ describe('PaymentsService', () => {
     const p = await t.svc.preview(t.user, 678, 'prepayment');
     expect(p.bookingMissing).toBe(true);
     expect(p.problems).toContain('Создайте бронирование, а потом переходите к отправке оплаты');
+    expect(p.pastBooking).toBeNull();
+    // Бронь есть, но уже прошла — подсказка, почему её нет в списке.
+    expect((await setup({ bookings: [], pastBooking: 5932 }).svc.preview(t.user, 678, 'prepayment')).pastBooking).toMatchObject({ bookingId: 5932 });
     await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ status: 400 });
     (options.payments as { requireBooking?: boolean }).requireBooking = false;
     try {

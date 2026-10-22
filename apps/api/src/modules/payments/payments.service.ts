@@ -76,6 +76,8 @@ export class PaymentsService {
     const bookings = await this.dealBookings(user, dealId);
     const requireBooking = opts?.payments.requireBooking !== false;
     const bookingMissing = requireBooking && !bookings.length;
+    // Бронь у сделки есть, но уже прошла: счёт к ней не привязать (неоплата снимает будущую бронь).
+    const pastBooking = bookingMissing ? await this.lastPastBooking(user, dealId) : null;
     if (bookingMissing) problems.push(BOOKING_REQUIRED_MESSAGE);
     const chosenBooking = bookings.find((x) => x.bookingId === bookingId)?.bookingId ?? bookings[0]?.bookingId ?? null;
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
@@ -100,7 +102,13 @@ export class PaymentsService {
       bookings,
       bookingId: chosenBooking,
       bookingMissing,
+      pastBooking,
     };
+  }
+
+  private async lastPastBooking(user: B24UserContext, dealId: number): Promise<PaymentBookingOption | null> {
+    const r = await this.prisma.bookingRecord.findFirst({ where: { portalId: user.portal.id, dealId, status: 'active', endsAt: { lte: new Date() } }, orderBy: { startsAt: 'desc' } });
+    return r ? { bookingId: r.bookingId, start: r.startsAt.toISOString(), end: r.endsAt.toISOString(), resources: [] } : null;
   }
 
   /** Действующие брони сделки (журнал приложения: свои и найденные сверкой), ближайшие сверху. */

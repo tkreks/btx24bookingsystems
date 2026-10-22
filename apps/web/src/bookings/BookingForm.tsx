@@ -3,6 +3,7 @@ import {
   canUsePaymentMode,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
+  todayIn,
   zonedTimeToUtc,
   type BookingCatalogDto,
   type CalendarDay,
@@ -23,7 +24,7 @@ import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js
 import { ClientPicker } from './ClientPicker.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
 import { ProductsEditor, productsTotal, type ProductRow } from './ProductsEditor.js';
-import { SlotPicker } from './SlotPicker.js';
+import { isPastStart, SlotPicker, useNow } from './SlotPicker.js';
 
 export interface BookingFormContext {
   date: string;
@@ -42,6 +43,9 @@ export interface BookingFormContext {
 type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new'; title: string } | { mode: 'service' } | { mode: 'none' };
 type Step = 'deal' | 'group' | 'slot' | 'details';
 type DealCard = { id: number; title: string; categoryId?: number | null; closed?: boolean; client?: string | null; opportunity?: number | null; lastActivityAt?: string | null };
+
+/** Начало брони уже прошло. */
+const PAST_START_ERROR = 'Начало брони уже прошло — выберите сегодня позже текущего времени или другой день';
 
 const STEP_TITLES: Record<Step, string> = { deal: 'Клиент и сделка', group: 'Группа', slot: 'Дата и ресурс', details: 'Товары и поля' };
 
@@ -108,8 +112,10 @@ export function BookingForm({
   );
   const group = allowed.find((g) => g.id === groupId);
   const modes = useMemo(() => PAYMENT_MODES.filter((m) => canUsePaymentMode(group?.permissions ?? [], m)), [group]);
+  // Календарь мог остаться на прошедшем дне (страницу открыли до полуночи) — бронь начинаем с сегодня.
+  const startDay = context.date < todayIn(timezone) ? todayIn(timezone) : context.date;
   const [period, setPeriod] = useState<PeriodFields>(() =>
-    group ? defaultPeriod(group, context.date, context.time) : { startDate: context.date, startTime: '14:00', endDate: context.date, endTime: '18:00' },
+    group ? defaultPeriod(group, startDay, context.time) : { startDate: startDay, startTime: '14:00', endDate: startDay, endTime: '18:00' },
   );
   const [resourceIds, setResourceIds] = useState<number[]>(context.resourceId ? [context.resourceId] : []);
   // Клиент брони: из чата/сделки — сразу; из меню — поиском или из сделок с последней активностью.
@@ -286,6 +292,7 @@ export function BookingForm({
     }
     if (step === 'group' && !groupChoices.some((g) => g.id === groupId)) return setError('Выберите группу');
     if (step === 'slot' && !resourceIds.length) return setError('Выберите время и ресурс в календаре');
+    if (step === 'slot' && pastStart) return setError(PAST_START_ERROR);
     const nextStep = steps[stepIndex + 1];
     if (nextStep) setStep(nextStep);
   };
@@ -300,6 +307,7 @@ export function BookingForm({
     const p = periodToUtc(period, timezone);
     if ('error' in p) return setError(p.error);
     if (!resourceIds.length) return setError('Выберите ресурс');
+    if (pastStart) return setError(PAST_START_ERROR);
     if (deal.mode === 'none') return setError('Выберите сделку на первом шаге');
     if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
     if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId && !productRows.length)
@@ -385,6 +393,9 @@ export function BookingForm({
   // Занятость ресурса на выбранное время — для селектора ресурса.
   const startMs = Date.parse(zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).toISOString());
   const endMs = Date.parse(zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).toISOString());
+  // Бронь в прошлом не нужна: предоплата и сверка ждут будущую (запас — 5 минут на заполнение формы).
+  const now = useNow();
+  const pastStart = isPastStart(startMs, now);
   const busyUntil = (rid: number): string | null => {
     const b = (dayData?.bookings ?? []).filter((x) => x.resourceIds.includes(rid) && Date.parse(x.start) < endMs && Date.parse(x.end) > startMs);
     return b.length ? fmtTime(b.reduce((m, x) => (Date.parse(x.end) > Date.parse(m) ? x.end : m), b[0].end), timezone) : null;
