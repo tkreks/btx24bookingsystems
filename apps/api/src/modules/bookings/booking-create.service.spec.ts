@@ -1,4 +1,4 @@
-import { BookingCreateService, dateRu, timeRu, zonedIso } from './booking-create.service.js';
+import { BookingCreateService, dateRu, productRow, timeRu, zonedIso } from './booking-create.service.js';
 import { detectFieldMap, type DealFieldMapService } from './deal-field-map.service.js';
 import type { BookingJournalService } from './booking-journal.service.js';
 import type { DealFormService } from './deal-form.service.js';
@@ -89,7 +89,7 @@ describe('BookingCreateService', () => {
       id: 678,
       fields: { UF_ID: '555', UF_START: '2020-06-01T14:00:00+03:00', UF_END: '2020-06-01T18:00:00+03:00', UF_VD: '01.06.2020', UF_VT: '14:00', UF_G: 4, UF_TYPE: '86', UF_C: 'Именинник' },
     });
-    expect(t.calls[4][1]).toEqual({ id: 678, rows: [{ PRODUCT_ID: 31, PRICE: 45000, QUANTITY: 1 }] });
+    expect(t.calls[4][1]).toEqual({ id: 678, rows: [{ PRODUCT_ID: 31, PRICE: 45000, QUANTITY: 1, DISCOUNT_TYPE_ID: 2, DISCOUNT_RATE: 0, DISCOUNT_SUM: 0 }] });
     expect(t.journal.recordCreated).toHaveBeenCalledWith('p1', expect.objectContaining({ bookingId: 555, dealId: 678, paymentMode: 'prepayment' }), { kind: 'user', userId: 7, name: 'Анна' });
     expect(t.ops[0]).toMatchObject({ status: 'done', bookingId: 555 });
   });
@@ -262,5 +262,19 @@ describe('BookingCreateService — поля сделки группы', () => {
     await expect(svc.create(user, body({ dealFields: { UF_SUM: '1', STAGE_ID: 'WON' }, bookingTypeId: 'hourly' }))).rejects.toMatchObject({
       response: { code: 'INVALID_DEAL_FIELDS' },
     });
+  });
+});
+
+describe('productRow — скидки товаров как в Битрикс24', () => {
+  it('процент: итоговая цена и скидка на единицу', () => {
+    expect(productRow({ productId: 1, quantity: 2, price: 5000, discountType: 'percent', discount: 10 })).toEqual({
+      PRODUCT_ID: 1, QUANTITY: 2, PRICE: 4500, DISCOUNT_TYPE_ID: 2, DISCOUNT_RATE: 10, DISCOUNT_SUM: 500,
+    });
+  });
+  it('сумма: скидка на единицу, процент для справки; не ниже нуля', () => {
+    expect(productRow({ productId: 1, quantity: 1, price: 1500, discountType: 'sum', discount: 300 })).toEqual({
+      PRODUCT_ID: 1, QUANTITY: 1, PRICE: 1200, DISCOUNT_TYPE_ID: 1, DISCOUNT_RATE: 20, DISCOUNT_SUM: 300,
+    });
+    expect(productRow({ productId: 1, quantity: 1, price: 100, discountType: 'sum', discount: 500 }).PRICE).toBe(0);
   });
 });

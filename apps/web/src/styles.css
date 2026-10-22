@@ -4482,45 +4482,6 @@ input[role='switch']:checked::after {
 .cp-hits .muted {
   font-size: 12.5px;
 }
-.pe {
-  display: grid;
-  gap: 10px;
-}
-.pe-rows {
-  display: grid;
-  gap: 6px;
-}
-.pe-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px auto 104px 96px 40px;
-  align-items: center;
-  gap: 8px;
-}
-.pe-name {
-  overflow: hidden;
-  font-size: 14px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.pe-x {
-  color: var(--muted);
-}
-.pe-sum {
-  font-size: 13.5px;
-  font-weight: 600;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.pe-total {
-  justify-self: end;
-  padding-top: 4px;
-  font-size: 14px;
-}
-.pe-add {
-  position: relative;
-  display: grid;
-  gap: 6px;
-}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -4534,13 +4495,523 @@ input[role='switch']:checked::after {
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+/* ---------- мастер брони (wz): макет docs/prototype/ui/booking-wizard.html ---------- */
+.sheet.bk.wz {
+  max-width: 1040px;
+}
+.wz-steps li {
+  padding-right: 12px;
+}
+.wz-step-back {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.wz-step-back:hover {
+  color: var(--primary);
+}
+/* Карточки сделок: название и клиент слева, сумма · номер · давность справа. */
+.wz-recent {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+}
+.wz-deal {
+  align-items: center;
+}
+.wz-deal-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.wz-deal-main b {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.wz-deal-sub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.wz-ago {
+  flex: none;
+  align-self: flex-start;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cp-kind button {
+  min-height: 36px;
+  padding: 0 14px;
+}
+.wz-other {
+  margin-top: 10px;
+}
+/* Группы — плитки. */
+.wz-groups,
+.wz-resources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+}
+.wz-group,
+.wz-resource {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  padding: 14px 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  font-weight: 400;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.wz-resource {
+  min-height: 60px;
+  padding: 10px 14px;
+  border-radius: 12px;
+}
+.wz-group b {
+  font-size: 16px;
+}
+.wz-group:hover,
+.wz-resource:hover {
+  border-color: #98a2b3;
+}
+.wz-group.selected,
+.wz-resource.selected {
+  border-color: var(--primary);
+  background: rgba(0, 122, 255, 0.04);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.wz-res-state {
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 600;
+}
+.wz-res-state.busy {
+  background: #fef3f2;
+  color: #b42318;
+}
+.wz-time {
+  margin-top: 14px;
+}
+/* Дата и ресурс: лента дней, календарь группы и карточка слота. */
+.wz-daynav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.wz-daynav > button {
+  flex: none;
+  width: 36px;
+  height: 44px;
+  padding: 0;
+  border-radius: 10px;
+}
+.wz-days {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.wz-day {
+  display: grid;
+  flex: 1 0 48px;
+  place-items: center;
+  height: 44px;
+  padding: 2px 0;
+  border-radius: 10px;
+  line-height: 1.1;
+}
+.wz-day small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.wz-day.weekend b {
+  color: #d92d20;
+}
+.wz-day.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.wz-day.active small,
+.wz-day.active.weekend b {
+  color: #fff;
+}
+.sheet.bk .wz-daynav input[type='date'] {
+  flex: 0 0 160px;
+  width: 160px;
+}
+.wz-slot-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 14px;
+  align-items: start;
+  margin-top: 8px;
+}
+.wz-slot-grid .grid-scroll {
+  max-height: 56dvh;
+}
+.wz-slot-card {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.wz-slot-card.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.wz-slot-res {
+  font-size: 16px;
+}
+.wz-slot-when {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wz-slot-card .df-row.pair {
+  grid-template-columns: 1fr 1fr;
+}
+.wz-durations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wz-durations button {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.wz-durations button.active {
+  border-color: var(--primary);
+  background: rgba(0, 122, 255, 0.08);
+  color: var(--primary);
+}
+.wz-slot-state {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.wz-slot-state.free {
+  background: #ecfdf3;
+  color: #15803d;
+}
+.wz-slot-state.tech {
+  background: #fffaeb;
+  color: #b54708;
+}
+.wz-slot-state.busy {
+  background: #fef3f2;
+  color: #b42318;
+}
+/* Сегмент 2–3 вариантов (скидка %/₽, оставить/очистить). */
+.wz-seg,
+.wz-keep {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border-radius: 10px;
+  background: #f2f4f7;
+}
+.wz-seg button,
+.wz-keep button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wz-seg button.active,
+.wz-keep button.active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+}
+/* Товары: таблица со скидками, итоги. */
+.pe {
+  display: grid;
+  gap: 10px;
+}
+.pe-add {
+  position: relative;
+}
+.pe-hits {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+}
+.pe-hits button {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.pe-hit-name {
+  display: grid;
+  min-width: 0;
+}
+.pe-hit-price {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pe-table {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.pe-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 120px 110px 170px 110px 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+}
+.pe-head {
+  border-top: 0;
+  background: #f9fafb;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pe-r {
+  text-align: right;
+}
+.pe-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.pe-qty {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+}
+.pe-qty button {
+  flex: none;
+  width: 32px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #f9fafb;
+}
+.sheet.bk .pe-qty input,
+.sheet.bk .pe-price input,
+.sheet.bk .pe-disc input {
+  min-height: 34px;
+  padding: 4px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sheet.bk .pe-qty input {
+  border: 0;
+  border-radius: 0;
+  text-align: center;
+}
+.pe-disc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pe-sum {
+  display: grid;
+  justify-items: end;
+  font-variant-numeric: tabular-nums;
+}
+.pe-sum s {
+  color: var(--muted);
+  font-size: 12px;
+}
+.pe-del {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.pe-totals {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: end;
+  gap: 4px 24px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: #fcfcfd;
+  font-size: 13.5px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pe-minus {
+  color: #b42318;
+}
+.pe-total-label {
+  font-weight: 600;
+}
+.pe-total {
+  font-size: 17px;
+}
+/* «В сделке уже заполнены поля» — оставить или очистить. */
+.wz-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.35);
+}
+.wz-modal {
+  display: grid;
+  gap: 10px;
+  width: min(560px, 100%);
+  max-height: 80%;
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+.wz-modal h4 {
+  margin: 0;
+  font-size: 17px;
+}
+.wz-modal p {
+  margin: 0;
+}
+.wz-modal-all {
+  display: flex;
+  gap: 8px;
+}
+.wz-filled {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.wz-filled li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+.wz-filled li + li {
+  border-top: 1px solid var(--line);
+}
+.wz-filled-name {
+  display: grid;
+  min-width: 0;
+}
+.wz-filled-name .muted {
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sheet.bk.wz {
+  position: relative;
+}
+@media (max-width: 760px) {
+  .wz-slot-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wz-slot-card {
+    position: static;
+  }
+  .sheet.bk .wz-daynav input[type='date'] {
+    display: none;
+  }
+  .pe-head {
+    display: none;
+  }
+  /* Строка товара — карточка: название и «×», количество и цена, скидка, сумма. */
   .pe-row {
-    grid-template-columns: minmax(0, 1fr) 64px auto 88px 40px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
+    grid-template-areas:
+      'name name del'
+      'qty price price'
+      'disc disc disc'
+      'sum sum sum';
   }
   .pe-name {
-    grid-column: 1 / -1;
+    grid-area: name;
+    white-space: normal;
+  }
+  .pe-del {
+    grid-area: del;
+  }
+  .pe-qty {
+    grid-area: qty;
+  }
+  .pe-price {
+    grid-area: price;
+  }
+  .pe-disc {
+    grid-area: disc;
+  }
+  .pe-disc input {
+    flex: 1;
   }
   .pe-sum {
-    display: none;
+    grid-area: sum;
+    grid-auto-flow: column;
+    justify-content: end;
+    align-items: baseline;
+    gap: 8px;
+  }
+  /* Степпер: номера, подпись — только у активного шага. */
+  .wz-steps li:not(.active) {
+    font-size: 0;
+    padding-right: 4px;
+  }
+  .wz-steps li:not(.active)::before {
+    font-size: 11px;
+  }
+  .wz-steps li:not(.active) .wz-step-back {
+    font-size: 0;
+  }
+  .wz-modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+  .wz-modal {
+    width: 100%;
+    border-radius: 16px 16px 0 0;
   }
 }

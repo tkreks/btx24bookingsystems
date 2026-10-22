@@ -1,0 +1,1146 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Мастер создания брони — макет</title>
+<style>
+/* =====================================================================
+   Макет мастера создания брони. Визуальная система — как apps/web/src/styles.css
+   (переменные :root, bk-/df-/cp-/pe-, .bk-choice, .dash-tile, .cl-status).
+   Новые компоненты — с префиксом wz- (wizard). Без внешних библиотек.
+   ===================================================================== */
+:root {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --line: rgba(17, 24, 39, 0.1);
+  --primary: #007aff;
+  --primary2: #5856d6;
+  --danger: #b91c1c;
+  --ok: #15803d;
+  --radius: 16px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  /* поля формы (как .sheet.bk) */
+  --f-border: #d0d5dd;
+  --f-focus: rgba(0, 122, 255, 0.16);
+  --f-label: #475467;
+  /* состояния */
+  --sel-bg: rgba(0, 122, 255, 0.04);
+  --hover-bg: rgba(0, 122, 255, 0.06);
+  --warn: #b54708;
+  --warn-bg: #fffaeb;
+  --err: #b42318;
+  --err-bg: #fef3f2;
+  --ok-bg: #ecfdf3;
+  --busy: #e8eefc;
+  --busy-line: #7da2f0;
+  --tech: repeating-linear-gradient(135deg, #fff4e5 0 6px, #ffe8c7 6px 12px);
+  /* ритм */
+  --ctl: 40px;
+  --gap: 16px;
+  --pad: 22px;
+  --foot-h: 76px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; max-width: 100%; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #fbfbfd 0%, var(--bg) 60%, #eef1f6 100%);
+  min-height: 100dvh;
+  font-size: 14px;
+  line-height: 1.4;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+  padding: 8px 14px; font-weight: 600; cursor: pointer; touch-action: manipulation;
+  min-height: var(--ctl);
+}
+button:disabled { opacity: .6; cursor: default; }
+button:focus-visible, [tabindex]:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--f-focus); border-color: var(--primary); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #0066d6; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--primary); }
+.btn-dashed { border-style: dashed; color: var(--primary); }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+input:not([type=checkbox]):not([type=radio]), select, textarea {
+  width: 100%; min-width: 0; min-height: var(--ctl); padding: 8px 12px;
+  border: 1px solid var(--f-border); border-radius: 10px; background: #fff;
+  font-size: 15px; transition: border-color .15s, box-shadow .15s;
+}
+textarea { min-height: 64px; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--f-focus); }
+
+/* ---------- каркас мастера ---------- */
+.wz {
+  max-width: 1080px; margin: 0 auto; padding: 0 0 calc(var(--foot-h) + 24px + var(--safe-b));
+}
+.wz-head {
+  position: sticky; top: 0; z-index: 20;
+  background: rgba(251, 251, 253, .92); backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+  padding: 14px var(--pad) 12px;
+}
+.wz-head__row { display: flex; align-items: flex-start; gap: 12px; }
+.wz-head h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+.wz-head__sub { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; }
+.wz-head__tools { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.wz-close { width: 40px; padding: 0; font-size: 18px; }
+
+/* степпер: номер в кружке + подпись; done — ✓ зелёным; условный шаг — пунктир */
+.wz-stepper {
+  display: flex; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none;
+  overflow-x: auto; scrollbar-width: none; counter-reset: step;
+}
+.wz-stepper::-webkit-scrollbar { display: none; }
+.wz-stepper li { flex: none; }
+.wz-stepper button {
+  counter-increment: step;
+  display: flex; align-items: center; gap: 8px; min-height: 34px;
+  padding: 4px 12px 4px 4px; border-radius: 999px; border: 1px solid transparent;
+  background: #f2f4f7; color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap;
+}
+.wz-stepper button::before {
+  content: counter(step); display: grid; place-items: center;
+  width: 24px; height: 24px; border-radius: 50%; background: #fff; font-weight: 700; font-size: 12px;
+}
+.wz-stepper .is-active button { background: rgba(0,122,255,.1); color: var(--primary); font-weight: 600; }
+.wz-stepper .is-active button::before { background: var(--primary); color: #fff; }
+.wz-stepper .is-done button { color: var(--text); }
+.wz-stepper .is-done button::before { content: '✓'; color: var(--ok); }
+.wz-stepper .is-cond button { background: transparent; border: 1px dashed var(--f-border); }
+.wz-stepper .is-cond small { color: var(--muted); font-weight: 400; }
+
+/* шаги: каждый — карточка; в режиме «по шагам» видна только активная */
+.wz-body { padding: 16px var(--pad) 0; display: grid; gap: 20px; }
+.wz-step {
+  scroll-margin-top: 130px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(16,24,40,.05);
+  padding: 20px var(--pad);
+}
+.wz.mode-steps .wz-step:not(.is-active) { display: none; }
+.wz-step__head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 16px; }
+.wz-step__head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.wz-step__no { color: var(--muted); font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.wz-step__hint { color: var(--muted); font-size: 13px; flex-basis: 100%; }
+.wz-section { padding: 16px 0 0; margin-top: 16px; border-top: 1px solid var(--line); }
+.wz-section__title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; font-size: 13px; font-weight: 700; }
+.wz-section__title .muted { font-weight: 500; }
+.wz-review-note { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-style: italic; }
+
+/* ---------- сегментный переключатель (общий) ---------- */
+.wz-seg {
+  display: inline-flex; flex: none; padding: 3px; gap: 2px; border-radius: 10px; background: #f2f4f7;
+  min-height: var(--ctl);
+}
+.wz-seg button {
+  min-height: 34px; padding: 4px 12px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--muted); font-weight: 600; font-size: 13px;
+}
+.wz-seg button[aria-pressed=true] { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(16,24,40,.12); }
+.wz-seg--sm { min-height: 32px; padding: 2px; }
+.wz-seg--sm button { min-height: 28px; padding: 2px 9px; font-size: 12.5px; }
+.wz-seg--danger button[aria-pressed=true].is-clear { color: var(--err); }
+
+/* ---------- бейджи (как .cl-status) ---------- */
+.wz-badge { display: inline-flex; align-items: center; gap: 4px; flex: none; border-radius: 20px; padding: 4px 8px; line-height: 1; white-space: nowrap; font-size: 11px; font-weight: 700; }
+.wz-badge--waiting { color: #d5444b; background: #ffe6e8; }
+.wz-badge--ok { color: #169a68; background: #daf8e9; }
+.wz-badge--busy { color: #b54708; background: #fef0c7; }
+.wz-badge--muted { color: #6b7a90; background: #eef1f6; }
+.wz-badge--info { color: var(--primary); background: rgba(0,122,255,.1); }
+
+/* ---------- поиск клиента/сделки (cp) ---------- */
+.wz-search { position: relative; display: grid; gap: 8px; }
+.wz-search__bar { display: flex; gap: 8px; align-items: center; }
+.wz-search__input { position: relative; flex: 1; min-width: 0; }
+.wz-search__input input:not([type=checkbox]) { padding-left: 38px; }
+.wz-search__input svg { position: absolute; left: 12px; top: 50%; translate: 0 -50%; color: var(--muted); }
+.wz-hits {
+  margin: 0; padding: 4px; list-style: none; max-height: 280px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 12px; background: #fff;
+  box-shadow: 0 8px 24px rgba(16,24,40,.10);
+}
+.wz-hits__group { padding: 8px 10px 4px; color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.wz-hit {
+  display: grid; grid-template-columns: 32px minmax(0,1fr) auto; align-items: center; gap: 2px 10px;
+  width: 100%; min-height: 48px; padding: 6px 10px; border: 0; border-radius: 8px; background: none;
+  text-align: left; font-weight: 400;
+}
+.wz-hit:hover, .wz-hit.is-focus { background: var(--hover-bg); }
+.wz-hit b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-hit mark { background: #fff3b0; color: inherit; border-radius: 3px; padding: 0 1px; }
+.wz-hit__meta { grid-column: 2; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-hit__side { grid-row: 1 / span 2; grid-column: 3; color: var(--muted); font-size: 12.5px; text-align: right; }
+.wz-ava {
+  grid-row: 1 / span 2; width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #7aa7ff, #5856d6);
+}
+
+/* выбранный клиент — «чип»-строка */
+.wz-client {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 10px 12px; border-radius: 12px; background: #f9fafb; border: 1px solid var(--line);
+}
+.wz-client b { font-size: 15px; }
+.wz-client__meta { color: var(--muted); font-size: 13px; }
+.wz-client .btn-ghost { margin-left: auto; min-height: 32px; padding: 4px 8px; }
+
+/* ---------- карточки сделок (как .bk-choice, но 2 строки) ---------- */
+.wz-deals { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.wz-card {
+  position: relative; display: grid; gap: 6px; width: 100%; min-width: 0; min-height: 0;
+  padding: 12px 14px; border: 1px solid var(--f-border); border-radius: 12px; background: #fff;
+  text-align: left; font-weight: 400; cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.wz-card:hover { border-color: #98a2b3; }
+.wz-card.is-selected, .wz-card[aria-checked=true] {
+  border-color: var(--primary); background: var(--sel-bg); box-shadow: 0 0 0 1px var(--primary);
+}
+.wz-card__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wz-card__title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-card__sum { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wz-card__meta { flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-card__time { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+.wz-card__src { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: #f2f4f7; color: #475467; }
+.wz-card__src.is-chat { background: #e8f1ff; color: var(--primary); }
+.wz-card__src.is-call { background: #e9f9ef; color: #169a68; }
+.wz-dot { flex: none; width: 16px; height: 16px; border: 1.5px solid #98a2b3; border-radius: 50%; background: #fff; }
+.is-selected .wz-dot, [aria-checked=true] .wz-dot { border: 5px solid var(--primary); }
+.wz-pipe { display: inline-flex; align-items: center; gap: 4px; }
+.wz-pipe i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #98a2b3); }
+.wz-more { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- группы (как .dash-tile clickable) ---------- */
+.wz-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.wz-group {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0;
+  padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff;
+  box-shadow: 0 1px 2px rgba(16,24,40,.05); text-align: left; font-weight: 400; min-height: 150px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.wz-group:hover { border-color: rgba(0,122,255,.45); box-shadow: 0 4px 14px rgba(16,24,40,.08); }
+.wz-group[aria-checked=true] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary), 0 4px 14px rgba(0,122,255,.12); background: var(--sel-bg); }
+.wz-group__icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #f2f4f7; font-size: 24px; }
+.wz-group__name { font-size: 17px; font-weight: 700; }
+.wz-group__stat { display: flex; gap: 14px; color: var(--muted); font-size: 13px; }
+.wz-group__stat b { display: block; color: var(--text); font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.wz-group__foot { margin-top: auto; display: flex; width: 100%; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
+
+/* ---------- дата и ресурс ---------- */
+.wz-dr { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.wz-daynav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.wz-daynav .wz-icon-btn { width: var(--ctl); padding: 0; }
+.wz-daynav input[type=date] { width: 160px; }
+.wz-days { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+.wz-days button { flex: none; min-height: var(--ctl); min-width: 52px; padding: 2px 8px; display: grid; justify-items: center; line-height: 1.1; font-size: 11px; color: var(--muted); font-weight: 500; }
+.wz-days button b { font-size: 15px; color: var(--text); }
+.wz-days button[aria-pressed=true] { border-color: var(--primary); background: var(--primary); color: #fff; }
+.wz-days button[aria-pressed=true] b { color: #fff; }
+.wz-days .is-weekend b { color: #d92d20; }
+
+.wz-cal { border: 1px solid var(--line); border-radius: 12px; overflow: auto; max-height: 520px; background: #fff; overscroll-behavior: contain; }
+.wz-cal__grid { display: grid; grid-template-columns: 52px repeat(var(--cols), minmax(120px, 1fr)); min-width: calc(52px + var(--cols) * 120px); }
+.wz-cal__corner, .wz-cal__colhead { position: sticky; top: 0; z-index: 3; background: #fcfcfd; border-bottom: 1px solid var(--line); min-height: 44px; }
+.wz-cal__corner { left: 0; z-index: 4; }
+.wz-cal__colhead { padding: 6px 10px; border-left: 1px solid var(--line); font-size: 13px; font-weight: 600; }
+.wz-cal__colhead small { display: block; color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.wz-cal__hours { position: sticky; left: 0; z-index: 2; background: #fff; }
+.wz-cal__hour { height: var(--hh); padding: 0 6px; text-align: right; color: var(--muted); font-size: 11px; transform: translateY(-7px); font-variant-numeric: tabular-nums; }
+.wz-cal__col {
+  position: relative; border-left: 1px solid var(--line); cursor: crosshair;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(rgba(17,24,39,.04) 1px, transparent 1px);
+  background-size: 100% var(--hh), 100% calc(var(--hh) / 2);
+}
+.wz-ev {
+  position: absolute; left: 4px; right: 4px; border-radius: 8px; padding: 4px 8px; overflow: hidden;
+  font-size: 12px; line-height: 1.25; pointer-events: auto; cursor: default;
+}
+.wz-ev b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-ev--busy { background: var(--busy); border-left: 3px solid var(--busy-line); color: #1d3a7a; }
+.wz-ev--service { background: #f2f4f7; border-left: 3px solid #98a2b3; color: #475467; }
+.wz-ev--tech { background: var(--tech); border: 1px dashed #f5b14c; color: #93370d; font-size: 11px; padding: 2px 6px; }
+.wz-ev--sel { background: rgba(0,122,255,.14); border: 2px solid var(--primary); color: #0b4fa8; z-index: 1; box-shadow: 0 4px 12px rgba(0,122,255,.2); }
+.wz-ev--sel .wz-ev__grip { position: absolute; left: 50%; bottom: 2px; width: 24px; height: 4px; margin-left: -12px; border-radius: 2px; background: var(--primary); cursor: ns-resize; }
+.wz-ghost {
+  position: absolute; left: 4px; right: 4px; height: calc(var(--hh) / 2); border-radius: 6px; pointer-events: none;
+  border: 1px dashed var(--primary); background: rgba(0,122,255,.06); color: var(--primary);
+  font-size: 12px; font-weight: 700; padding: 0 8px; display: none; align-items: center;
+}
+.wz-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #f04438; z-index: 2; pointer-events: none; }
+.wz-now::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #f04438; }
+.wz-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.wz-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+
+/* карточка выбранного слота */
+.wz-slot {
+  position: sticky; top: 140px; display: grid; gap: 12px; padding: 16px; border-radius: 14px;
+  border: 1px solid var(--primary); box-shadow: 0 0 0 1px var(--primary), 0 6px 18px rgba(0,122,255,.10); background: #fff;
+}
+.wz-slot__title { font-size: 16px; font-weight: 700; }
+.wz-slot__when { font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.wz-slot__when small { color: var(--muted); font-size: 14px; font-weight: 600; letter-spacing: 0; }
+.wz-slot__row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wz-dur { display: flex; flex-wrap: wrap; gap: 6px; }
+.wz-dur button { min-height: 34px; padding: 4px 10px; font-size: 13px; border-radius: 999px; }
+.wz-dur button[aria-pressed=true] { border-color: var(--primary); color: var(--primary); background: rgba(0,122,255,.08); }
+.wz-alert { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+.wz-alert--warn { background: var(--warn-bg); color: var(--warn); border: 1px solid #fedf89; }
+.wz-alert--err { background: var(--err-bg); color: var(--err); border: 1px solid #fecdca; }
+.wz-alert--ok { background: var(--ok-bg); color: var(--ok); border: 1px solid #abefc6; }
+.wz-alert--info { background: #eff8ff; color: #175cd3; border: 1px solid #b2ddff; }
+.wz-alert b { font-weight: 700; }
+.wz-alert .wz-alert__act { margin-left: auto; flex: none; min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+
+/* красивый селектор ресурса */
+.wz-res { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.wz-res .wz-card { grid-template-columns: 44px minmax(0,1fr) 16px; align-items: center; column-gap: 12px; }
+.wz-res__ph { grid-row: 1 / span 2; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; font-size: 22px; background: #f2f4f7; }
+.wz-res__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-res__sub { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.wz-res .wz-dot { grid-row: 1 / span 2; grid-column: 3; }
+.wz-card.is-disabled { opacity: .55; cursor: not-allowed; background: #fafafa; }
+
+/* ---------- диалог «В сделке уже заполнены поля» ---------- */
+.wz-dialog {
+  max-width: 620px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff;
+  box-shadow: 0 24px 60px rgba(16,24,40,.18); overflow: hidden; display: flex; flex-direction: column;
+}
+.wz-dialog__head { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+.wz-dialog__head h3 { margin: 0; font-size: 17px; }
+.wz-dialog__head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.wz-dialog__bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 22px; background: #fcfcfd; border-bottom: 1px solid var(--line); font-size: 13px; }
+.wz-dialog__bulk .muted { margin-right: auto; }
+.wz-dialog__bulk button { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+.wz-dialog__list { margin: 0; padding: 4px 22px; list-style: none; max-height: 52vh; overflow: auto; }
+.wz-fv { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.wz-fv:last-child { border-bottom: 0; }
+.wz-fv__name { color: var(--f-label); font-size: 12.5px; font-weight: 500; }
+.wz-fv__val { grid-column: 1; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-fv .wz-seg { grid-row: 1 / span 2; grid-column: 2; }
+.wz-fv.is-clear .wz-fv__val { color: var(--muted); text-decoration: line-through; font-weight: 400; }
+.wz-dialog__foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px calc(12px + var(--safe-b)); border-top: 1px solid var(--line); background: #fcfcfd; }
+.wz-overlay { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; padding: 16px; background: rgba(16,24,40,.42); }
+.wz-overlay.is-open { display: grid; }
+.wz-overlay .wz-dialog { width: 100%; }
+
+/* ---------- товары (pe) ---------- */
+.wz-padd { position: relative; }
+.wz-padd { display: grid; gap: 6px; }
+/* в приложении список подсказок — position:absolute под полем; в макете — в потоке, чтобы не перекрывать таблицу */
+.wz-padd .wz-hits { position: static; }
+.wz-padd .wz-hit { grid-template-columns: minmax(0,1fr) auto; }
+.wz-padd .wz-hit__meta { grid-column: 1; }
+.wz-padd .wz-hit__side { grid-column: 2; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.wz-prods { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.wz-prod {
+  display: grid; grid-template-columns: minmax(0, 1fr) 124px 112px 180px 104px 40px;
+  align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line);
+}
+.wz-prod:last-child { border-bottom: 0; }
+.wz-prod--head { min-height: 36px; padding-top: 6px; padding-bottom: 6px; background: #fcfcfd; color: var(--muted); font-size: 12px; font-weight: 600; }
+.wz-prod--head span:nth-child(n+3) { text-align: right; }
+.wz-prod__name { min-width: 0; }
+.wz-prod__name b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wz-prod__name small { color: var(--muted); font-size: 12px; }
+.wz-prod__price input, .wz-prod__disc input { text-align: right; font-variant-numeric: tabular-nums; }
+.wz-prod__sum { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wz-prod__sum s { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+.wz-prod__del { width: 40px; padding: 0; color: var(--muted); border-color: transparent; background: transparent; font-size: 18px; }
+.wz-prod__del:hover { color: var(--err); background: var(--err-bg); }
+.wz-prod__lbl { display: none; }
+.wz-qty { display: inline-flex; align-items: stretch; height: var(--ctl); border: 1px solid var(--f-border); border-radius: 10px; overflow: hidden; background: #fff; }
+.wz-qty button { min-height: 0; width: 36px; padding: 0; border: 0; border-radius: 0; background: #f9fafb; font-size: 18px; font-weight: 500; color: #475467; }
+.wz-qty button:hover { background: #f2f4f7; }
+.wz-qty input { width: 52px !important; min-height: 0 !important; border: 0 !important; border-radius: 0 !important; text-align: center; padding: 0 !important; box-shadow: none !important; font-variant-numeric: tabular-nums; }
+.wz-disc { display: flex; gap: 6px; }
+.wz-disc .wz-seg { min-height: var(--ctl); }
+.wz-disc .wz-seg button { min-height: 34px; padding: 2px 9px; }
+.wz-totals { display: grid; justify-content: end; gap: 4px; margin-top: 12px; padding: 0 12px; font-variant-numeric: tabular-nums; }
+.wz-totals div { display: flex; justify-content: space-between; gap: 32px; min-width: 260px; color: var(--muted); }
+.wz-totals .is-disc { color: #d92d20; }
+.wz-totals .is-total { color: var(--text); font-size: 18px; font-weight: 800; padding-top: 6px; border-top: 1px solid var(--line); margin-top: 2px; }
+
+/* ---------- поля сделки (df) ---------- */
+.df-grid { display: grid; gap: 14px; }
+.df-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px 16px; }
+.df-row.pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.df-field { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.df-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; color: var(--f-label); font-size: 12.5px; font-weight: 500; }
+.df-req { color: #d92d20; font-style: normal; font-weight: 700; }
+.df-formula { overflow: hidden; max-width: 100%; padding: 1px 6px; border-radius: 6px; background: #f2f4f7; color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.df-hint { color: var(--muted); font-size: 12px; }
+.df-control { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.df-control > input, .df-control > select, .df-control > textarea { flex: 1; }
+.df-control:has(.df-suffix) > input { padding-right: 30px; }
+.df-suffix { position: absolute; right: 12px; color: var(--muted); font-size: 14px; pointer-events: none; }
+.df-control:has(.df-reset) .df-suffix { right: 52px; }
+.df-reset { flex: none; width: 40px; height: 40px; padding: 0; color: var(--muted); }
+.df-ro { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 10px; background: #f9fafb; border: 1px solid transparent; font-size: 14px; font-variant-numeric: tabular-nums; }
+.df-ro .wz-lock { color: var(--muted); margin-left: auto; font-size: 12px; }
+.df-sep { margin: 6px 0 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.df-field.is-error input { border-color: #fda29b; }
+.df-field.is-error .df-hint { color: var(--err); }
+
+/* ---------- нижняя закреплённая панель ---------- */
+.wz-foot {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  background: rgba(252,252,253,.96); backdrop-filter: saturate(1.4) blur(10px);
+  border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(16,24,40,.06);
+}
+.wz-foot__in { position: relative; max-width: 1080px; margin: 0 auto; display: flex; align-items: center; gap: 10px 16px; padding: 12px var(--pad) calc(12px + var(--safe-b)); }
+.wz-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; flex: 1; font-size: 13px; color: var(--f-label); }
+.wz-sum__item { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wz-sum__item b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.wz-sum__item.is-empty { color: #98a2b3; font-style: italic; }
+.wz-sum__item + .wz-sum__item::before, .wz-sum__total::before { content: '·'; margin-right: 6px; color: #d0d5dd; font-weight: 400; }
+.wz-sum__total { font-size: 16px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.wz-actions { display: flex; gap: 8px; flex: none; }
+.wz-actions button { min-height: 40px; padding: 8px 18px; }
+.wz-sending {
+  position: absolute; inset: 0; display: none; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(255,255,255,.9); font-weight: 600; color: var(--primary);
+}
+.wz-foot.is-sending .wz-sending { display: flex; }
+.wz-spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid rgba(0,122,255,.2); border-top-color: var(--primary); animation: wz-spin .8s linear infinite; }
+@keyframes wz-spin { to { transform: rotate(360deg); } }
+.wz-progress { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; display: none; }
+.wz-foot.is-sending .wz-progress { display: block; }
+.wz-progress::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; background: var(--primary); animation: wz-bar 1.2s ease-in-out infinite; }
+@keyframes wz-bar { from { left: -40%; } to { left: 100%; } }
+
+/* ---------- состояния ---------- */
+.wz-states { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.wz-state { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; align-content: start; }
+.wz-state h4 { margin: 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.wz-skel { border-radius: 8px; background: linear-gradient(90deg, #eef1f5 0%, #f7f8fa 40%, #eef1f5 80%); background-size: 200% 100%; animation: wz-shimmer 1.3s linear infinite; }
+@keyframes wz-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.wz-skel-card { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.wz-empty { display: grid; justify-items: center; gap: 6px; padding: 24px 12px; text-align: center; color: var(--muted); }
+.wz-empty__icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: #f2f4f7; font-size: 22px; }
+.wz-empty b { color: var(--text); font-size: 15px; }
+@media (prefers-reduced-motion: reduce) { .wz-skel, .wz-spin, .wz-progress::after { animation: none; } }
+
+/* ---------- дизайн-заметки ---------- */
+.wz-notes { margin: 0; }
+.wz-notes summary { cursor: pointer; font-weight: 700; font-size: 15px; padding: 4px 0; }
+.wz-notes h3 { font-size: 14px; margin: 18px 0 6px; }
+.wz-notes ul, .wz-notes ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13.5px; }
+.wz-notes code { background: #f2f4f7; border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
+.wz-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.wz-swatches span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 8px 4px 4px; border: 1px solid var(--line); border-radius: 999px; }
+.wz-swatches i { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); }
+
+/* =========================== телефон =========================== */
+@media (max-width: 900px) {
+  .wz-dr { grid-template-columns: minmax(0, 1fr); }
+  .wz-slot { position: static; }
+}
+@media (max-width: 720px) {
+  :root { --pad: 16px; --foot-h: 112px; }
+  .wz-head { padding-top: 10px; }
+  .wz-head h1 { font-size: 18px; }
+  .wz-head__tools .wz-mode { display: none; }
+  .wz-stepper { margin-right: calc(-1 * var(--pad)); padding-right: var(--pad); }
+  .wz-stepper li:not(.is-active) button span { display: none; }   /* только номера, подпись — у активного */
+  .wz-stepper li:not(.is-active) button { padding-right: 4px; }
+  .wz-step { padding: 16px; border-radius: 14px; }
+  .wz-body { padding: 12px 12px 0; gap: 14px; }
+  .wz-search__bar { flex-direction: column; align-items: stretch; }
+  .wz-search__bar .wz-seg { align-self: flex-start; }
+  .wz-deals { grid-template-columns: minmax(0, 1fr); }
+  .wz-groups { grid-template-columns: minmax(0, 1fr); }
+  .wz-group { min-height: 0; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .wz-group__name { flex: 1; }
+  .wz-group__stat, .wz-group__foot { flex-basis: 100%; }
+  .wz-res { grid-template-columns: minmax(0, 1fr); }
+  .wz-cal__grid { grid-template-columns: 44px repeat(var(--cols), minmax(132px, 1fr)); min-width: calc(44px + var(--cols) * 132px); }
+  .wz-daynav input[type=date] { display: none; }
+  .df-row.pair { grid-template-columns: minmax(0, 1fr); }
+  /* товары: строка → карточка 2×N */
+  .wz-prod--head { display: none; }
+  .wz-prod { grid-template-columns: minmax(0,1fr) minmax(0,1fr) 40px; gap: 8px 10px; }
+  .wz-prod__name { grid-column: 1 / 3; }
+  .wz-prod__del { grid-column: 3; grid-row: 1; }
+  .wz-prod__qty, .wz-prod__price, .wz-prod__disc { display: grid; gap: 4px; }
+  .wz-prod__disc { grid-column: 1 / -1; }
+  .wz-prod__lbl { display: block; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+  .wz-prod__sum { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline; padding-top: 6px; border-top: 1px dashed var(--line); }
+  .wz-prod__sum s { display: inline; margin-right: 6px; }
+  .wz-totals { justify-content: stretch; padding: 0; }
+  .wz-totals div { min-width: 0; }
+  .wz-fv { grid-template-columns: minmax(0, 1fr); }
+  .wz-fv .wz-seg { grid-row: auto; grid-column: 1; justify-self: start; }
+  .wz-overlay { padding: 0; align-items: end; }
+  .wz-overlay .wz-dialog { border-radius: 16px 16px 0 0; max-width: none; }
+  /* нижняя панель: сводка в 1–2 строки сверху, кнопки во всю ширину */
+  .wz-foot__in { flex-direction: column; align-items: stretch; gap: 8px; padding-top: 10px; }
+  .wz-sum { font-size: 12.5px; }
+  .wz-sum__item { max-width: 46vw; }
+  .wz-sum__item.opt { display: none; }
+  .wz-sum__item.opt + .wz-sum__item::before { content: none; }
+  .wz-actions button { flex: 1; padding: 8px 10px; }
+  .wz-actions .js-back { flex: 0 0 auto; }
+}
+input, select, textarea { font-size: 16px; } /* iOS: без автозума */
+@media (min-width: 721px) { input, select, textarea { font-size: 15px; } }
+</style>
+</head>
+<body>
+<div class="wz" id="wz">
+
+  <!-- ============ ШАПКА + СТЕППЕР ============ -->
+  <header class="wz-head">
+    <div class="wz-head__row">
+      <div>
+        <h1>Новая бронь</h1>
+        <span class="wz-head__sub" id="wzSub">Бани · Ирина Смирнова, +7 916 123-45-67</span>
+      </div>
+      <div class="wz-head__tools">
+        <div class="wz-seg wz-seg--sm wz-mode" role="group" aria-label="Режим макета">
+          <button type="button" aria-pressed="true" data-mode="review">Все шаги</button>
+          <button type="button" aria-pressed="false" data-mode="steps">По шагам</button>
+        </div>
+        <button class="wz-close" type="button" aria-label="Закрыть">×</button>
+      </div>
+    </div>
+    <ol class="wz-stepper" id="wzStepper" aria-label="Шаги">
+      <li class="is-done"><button type="button" data-go="1"><span>Клиент и сделка</span></button></li>
+      <li class="is-done"><button type="button" data-go="2"><span>Группа</span></button></li>
+      <li class="is-active"><button type="button" data-go="3" aria-current="step"><span>Дата и ресурс</span></button></li>
+      <li class="is-cond"><button type="button" data-go="4"><span>Поля сделки <small>· если заполнены</small></span></button></li>
+      <li><button type="button" data-go="5"><span>Товары и поля</span></button></li>
+    </ol>
+  </header>
+
+  <main class="wz-body">
+
+    <!-- ============ ШАГ 1: КЛИЕНТ И СДЕЛКА ============ -->
+    <section class="wz-step" id="step1" data-step="1">
+      <div class="wz-step__head">
+        <span class="wz-step__no">Шаг 1 из 5</span>
+        <h2>Клиент и сделка</h2>
+        <span class="wz-step__hint">Найдите клиента или выберите сделку из последней активности. Бронь всегда привязана к сделке.</span>
+      </div>
+
+      <div class="wz-search">
+        <div class="wz-search__bar">
+          <div class="wz-seg" role="group" aria-label="Что ищем">
+            <button type="button" aria-pressed="true">Клиент</button>
+            <button type="button" aria-pressed="false">Сделка</button>
+          </div>
+          <label class="wz-search__input">
+            <span class="sr-only">Поиск клиента</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>
+            <input type="search" value="смирн" placeholder="Телефон, e-mail или ФИО" autocomplete="off">
+          </label>
+        </div>
+        <ul class="wz-hits" role="listbox" aria-label="Найденные клиенты">
+          <li class="wz-hits__group">Контакты · 3</li>
+          <li><button class="wz-hit is-focus" type="button" role="option" aria-selected="true">
+            <span class="wz-ava">ИС</span><b><mark>Смирн</mark>ова Ирина</b>
+            <span class="wz-hit__meta">+7 916 123-45-67 · irina.s@mail.ru</span>
+            <span class="wz-hit__side">4 сделки<br>посл. 12.10</span></button></li>
+          <li><button class="wz-hit" type="button" role="option">
+            <span class="wz-ava" style="background:linear-gradient(135deg,#7fd1ae,#169a68)">АС</span><b><mark>Смирн</mark>ов Алексей</b>
+            <span class="wz-hit__meta">+7 903 555-10-20</span>
+            <span class="wz-hit__side">1 сделка<br>посл. 03.09</span></button></li>
+          <li><button class="wz-hit" type="button" role="option">
+            <span class="wz-ava" style="background:linear-gradient(135deg,#fdb022,#dc6803)">ОС</span><b>ООО «<mark>Смирн</mark>ов и партнёры»</b>
+            <span class="wz-hit__meta">Компания · info@smirnov-p.ru</span>
+            <span class="wz-hit__side">—</span></button></li>
+        </ul>
+      </div>
+
+      <div class="wz-section">
+        <p class="wz-review-note">После выбора клиента строка поиска сворачивается в «чип»:</p>
+        <div class="wz-client">
+          <span class="wz-ava" style="grid-row:auto">ИС</span>
+          <b>Ирина Смирнова</b>
+          <span class="wz-client__meta">+7 916 123-45-67 · 🤝 4 сделки · ~ 18 400 ₽ · ближайшая бронь 02.11</span>
+          <button class="btn-ghost" type="button">Сменить</button>
+        </div>
+      </div>
+
+      <div class="wz-section">
+        <h3 class="wz-section__title">Последняя активность <span class="muted">· 20 сделок, сначала свежие</span></h3>
+        <div class="wz-deals" id="wzDeals" role="radiogroup" aria-label="Сделка"></div>
+        <div class="wz-more">
+          <button class="btn-dashed" type="button">＋ Новая сделка для клиента</button>
+          <button class="btn-ghost" type="button">Показать ещё 20</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ШАГ 2: ГРУППА ============ -->
+    <section class="wz-step" id="step2" data-step="2">
+      <div class="wz-step__head">
+        <span class="wz-step__no">Шаг 2 из 5</span>
+        <h2>Группа ресурсов</h2>
+        <span class="wz-step__hint">Показаны группы, к которым у вас есть доступ. Если группа одна — шаг пропускается.</span>
+      </div>
+      <div class="wz-groups" role="radiogroup" aria-label="Группа" id="wzGroups">
+        <button class="wz-group" type="button" role="radio" aria-checked="true" data-name="Бани">
+          <span class="wz-group__icon">♨️</span>
+          <span class="wz-group__name">Бани</span>
+          <span class="wz-group__stat"><span><b>4</b>ресурса</span><span><b style="color:var(--ok)">2</b>свободны сегодня</span></span>
+          <span class="wz-group__foot"><span>Часы от клика · от 2 ч</span><span class="wz-dot"></span></span>
+        </button>
+        <button class="wz-group" type="button" role="radio" aria-checked="false" data-name="Домики">
+          <span class="wz-group__icon">🏡</span>
+          <span class="wz-group__name">Домики</span>
+          <span class="wz-group__stat"><span><b>6</b>ресурсов</span><span><b style="color:var(--ok)">5</b>свободны сегодня</span></span>
+          <span class="wz-group__foot"><span>Заезд/выезд · 14:00 / 12:00</span><span class="wz-dot"></span></span>
+        </button>
+        <button class="wz-group" type="button" role="radio" aria-checked="false" data-name="Беседки">
+          <span class="wz-group__icon">⛱️</span>
+          <span class="wz-group__name">Беседки</span>
+          <span class="wz-group__stat"><span><b>3</b>ресурса</span><span><b style="color:var(--muted)">0</b>свободны сегодня</span></span>
+          <span class="wz-group__foot"><span>Часы от клика · от 3 ч</span><span class="wz-dot"></span></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============ ШАГ 3: ДАТА И РЕСУРС ============ -->
+    <section class="wz-step is-active" id="step3" data-step="3">
+      <div class="wz-step__head">
+        <span class="wz-step__no">Шаг 3 из 5</span>
+        <h2>Дата и ресурс</h2>
+        <span class="wz-step__hint">Кликните по свободному месту в колонке ресурса. Тянуть нижний край — изменить длительность.</span>
+      </div>
+
+      <div class="wz-dr">
+        <div>
+          <div class="wz-daynav">
+            <button class="wz-icon-btn" type="button" aria-label="Предыдущий день">‹</button>
+            <div class="wz-days" id="wzDays"></div>
+            <button class="wz-icon-btn" type="button" aria-label="Следующий день">›</button>
+            <input type="date" value="2026-10-25" aria-label="Дата">
+          </div>
+          <div class="wz-cal" id="wzCal"></div>
+          <div class="wz-legend">
+            <span><i style="background:var(--busy);border-left:3px solid var(--busy-line)"></i>Бронь</span>
+            <span><i style="background:#f2f4f7;border-left:3px solid #98a2b3"></i>Служебная</span>
+            <span><i style="background:var(--tech)"></i>Тех. окно</span>
+            <span><i style="background:rgba(0,122,255,.14);border:2px solid var(--primary)"></i>Ваш выбор</span>
+          </div>
+        </div>
+
+        <aside class="wz-slot" aria-live="polite">
+          <div class="wz-slot__title" id="slotTitle">Баня №1</div>
+          <div class="wz-slot__when" id="slotWhen">25.10, 14:00–18:00 <small>(4 ч)</small></div>
+          <div class="wz-slot__row">
+            <label class="df-field"><span class="df-label">Начало</span><input type="time" value="14:00" step="1800" id="slotStart"></label>
+            <label class="df-field"><span class="df-label">Конец</span><input type="time" value="18:00" step="1800" id="slotEnd"></label>
+          </div>
+          <div class="df-field">
+            <span class="df-label">Длительность</span>
+            <div class="wz-dur" id="wzDur">
+              <button type="button" aria-pressed="false" data-h="2">2 ч</button>
+              <button type="button" aria-pressed="false" data-h="3">3 ч</button>
+              <button type="button" aria-pressed="true" data-h="4">4 ч</button>
+              <button type="button" aria-pressed="false" data-h="6">6 ч</button>
+              <button type="button" aria-pressed="false" data-h="0">Другая…</button>
+            </div>
+          </div>
+          <div class="wz-alert wz-alert--warn" id="slotWarn">
+            <span>⚠</span><span>Пересекается с тех. окном <b>18:00–18:30</b> после брони. Можно продолжить — менеджер подтверждает.</span>
+          </div>
+        </aside>
+      </div>
+
+      <div class="wz-section">
+        <h3 class="wz-section__title">Селектор ресурса <span class="muted">· альтернатива сетке: телефон, режим «заезд/выезд», быстрый выбор</span></h3>
+        <div class="wz-res" role="radiogroup" aria-label="Ресурс" id="wzRes">
+          <button class="wz-card is-selected" type="button" role="radio" aria-checked="true" data-name="Баня №1">
+            <span class="wz-res__ph">♨️</span><span class="wz-res__name">Баня №1</span><span class="wz-dot"></span>
+            <span class="wz-res__sub">до 8 гостей · <span class="wz-badge wz-badge--ok">свободен</span></span>
+          </button>
+          <button class="wz-card" type="button" role="radio" aria-checked="false" data-name="Баня №2">
+            <span class="wz-res__ph">♨️</span><span class="wz-res__name">Баня №2</span><span class="wz-dot"></span>
+            <span class="wz-res__sub">до 6 гостей · <span class="wz-badge wz-badge--busy">занят до 16:00</span></span>
+          </button>
+          <button class="wz-card" type="button" role="radio" aria-checked="false" data-name="Баня с купелью">
+            <span class="wz-res__ph">🛁</span><span class="wz-res__name">Баня с купелью</span><span class="wz-dot"></span>
+            <span class="wz-res__sub">до 12 гостей · <span class="wz-badge wz-badge--ok">свободен</span></span>
+          </button>
+          <button class="wz-card is-disabled" type="button" role="radio" aria-checked="false" aria-disabled="true">
+            <span class="wz-res__ph">🪵</span><span class="wz-res__name">Русская баня</span><span class="wz-dot"></span>
+            <span class="wz-res__sub">до 10 гостей · <span class="wz-badge wz-badge--waiting">занят 12:00–20:00</span></span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ШАГ 4: ПОЛЯ СДЕЛКИ (условный) ============ -->
+    <section class="wz-step" id="step4" data-step="4">
+      <div class="wz-step__head">
+        <span class="wz-step__no">Шаг 4 из 5 · условный</span>
+        <h2>Поля сделки</h2>
+        <span class="wz-step__hint">Появляется, только если в выбранной сделке уже заполнены поля, которые форма брони перезапишет. Открывается диалогом поверх мастера.</span>
+      </div>
+      <div class="wz-dialog" id="dlgPreview"></div>
+      <div class="wz-more"><button type="button" id="openDlg">Открыть как диалог</button></div>
+    </section>
+
+    <!-- ============ ШАГ 5: ТОВАРЫ И ПОЛЯ ============ -->
+    <section class="wz-step" id="step5" data-step="5">
+      <div class="wz-step__head">
+        <span class="wz-step__no">Шаг 5 из 5</span>
+        <h2>Товары и поля</h2>
+        <span class="wz-step__hint">Товары попадут в сделку; итог пересчитывает «Сумму» сделки.</span>
+      </div>
+
+      <h3 class="wz-section__title">Товары <span class="muted">· каталог группы «Бани»</span></h3>
+      <div class="wz-padd">
+        <label class="wz-search__input">
+          <span class="sr-only">Добавить товар</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>
+          <input type="search" value="вен" placeholder="Найти или добавить товар: название, раздел" autocomplete="off">
+        </label>
+        <ul class="wz-hits" role="listbox" aria-label="Товары" id="prodHits">
+          <li><button class="wz-hit is-focus" type="button" role="option" data-add="Веник дубовый|Банные аксессуары|450"><b><mark>Вен</mark>ик дубовый</b><span class="wz-hit__meta">Банные аксессуары</span><span class="wz-hit__side">450 ₽</span></button></li>
+          <li><button class="wz-hit" type="button" role="option" data-add="Веник берёзовый|Банные аксессуары|400"><b><mark>Вен</mark>ик берёзовый</b><span class="wz-hit__meta">Банные аксессуары</span><span class="wz-hit__side">400 ₽</span></button></li>
+          <li><button class="wz-hit" type="button" role="option" data-add="Парение с вениками|Услуги банщика|2500"><b>Парение с <mark>вен</mark>иками</b><span class="wz-hit__meta">Услуги банщика · 60 мин</span><span class="wz-hit__side">2 500 ₽</span></button></li>
+        </ul>
+      </div>
+
+      <div class="wz-prods" role="table" aria-label="Товары сделки" id="wzProds">
+        <div class="wz-prod wz-prod--head" role="row">
+          <span>Товар</span><span>Кол-во</span><span>Цена, ₽</span><span>Скидка</span><span>Сумма</span><span></span>
+        </div>
+      </div>
+      <div class="wz-totals" id="wzTotals"></div>
+
+      <div class="wz-section">
+        <h3 class="wz-section__title">Поля сделки <span class="muted">· настроены для группы «Бани»</span></h3>
+        <div class="df-grid">
+          <div class="df-row pair">
+            <div class="df-field">
+              <span class="df-label">Тип брони <em class="df-req">*</em></span>
+              <div class="wz-seg" role="group" aria-label="Тип брони" style="width:100%">
+                <button type="button" aria-pressed="true" style="flex:1">Клиентская</button>
+                <button type="button" aria-pressed="false" style="flex:1">Служебная</button>
+              </div>
+            </div>
+            <div class="df-field">
+              <span class="df-label">Оплата</span>
+              <div class="wz-seg" role="group" aria-label="Оплата" style="width:100%">
+                <button type="button" aria-pressed="false" style="flex:1">Без оплаты</button>
+                <button type="button" aria-pressed="true" style="flex:1">Предоплата</button>
+                <button type="button" aria-pressed="false" style="flex:1">Полная</button>
+              </div>
+            </div>
+          </div>
+          <div class="df-row pair df-sep">
+            <label class="df-field"><span class="df-label">Сумма</span>
+              <span class="df-control"><input inputmode="decimal" value="18 600" id="fSum"><span class="df-suffix">₽</span></span></label>
+            <div class="df-field"><span class="df-label">Сумма внесённых оплат</span>
+              <span class="df-ro num">5 000 ₽ <span class="wz-lock" title="Только чтение">🔒</span></span>
+              <span class="df-hint">по оплаченным счетам</span></div>
+          </div>
+          <div class="df-row pair">
+            <label class="df-field"><span class="df-label">Ручная сумма доплаты</span>
+              <span class="df-control"><input inputmode="decimal" placeholder="авто: 13 600"><span class="df-suffix">₽</span></span></label>
+            <label class="df-field"><span class="df-label">Ручная сумма предоплаты <span class="df-formula" title="Формула группы">ƒ Сумма × 50%</span></span>
+              <span class="df-control"><input inputmode="decimal" value="9 300" id="fPre"><span class="df-suffix">₽</span><button class="df-reset" type="button" title="Вернуть расчёт по формуле">↺</button></span></label>
+          </div>
+          <div class="df-row pair">
+            <label class="df-field is-error"><span class="df-label">Количество гостей <em class="df-req">*</em></span>
+              <span class="df-control"><input inputmode="numeric" value="10"></span>
+              <span class="df-hint">Больше вместимости ресурса (8)</span></label>
+            <label class="df-field"><span class="df-label">Гостей программы</span>
+              <span class="df-control"><input inputmode="numeric" value="4"></span></label>
+          </div>
+          <div class="df-row pair">
+            <label class="df-field"><span class="df-label">Комментарий</span><textarea placeholder="Виден клиенту в подтверждении">Отмечают день рождения</textarea></label>
+            <label class="df-field"><span class="df-label">Комментарий менеджера</span><textarea placeholder="Только для сотрудников"></textarea></label>
+          </div>
+          <div class="df-row pair">
+            <label class="df-field"><span class="df-label">Тип сделки</span>
+              <select><option>Повторная</option><option>Новый клиент</option><option>Корпоратив</option></select></label>
+            <div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ СОСТОЯНИЯ ============ -->
+    <section class="wz-step" id="states" data-step="states">
+      <div class="wz-step__head">
+        <span class="wz-step__no">Справочно</span>
+        <h2>Состояния</h2>
+        <span class="wz-step__hint">Одинаковые на всех шагах: скелетон повторяет форму будущего контента, пустое и ошибка — внутри блока, а не алертом.</span>
+      </div>
+      <div class="wz-states">
+        <div class="wz-state">
+          <h4>Загрузка · карточки сделок</h4>
+          <div class="wz-skel-card"><div class="wz-skel" style="height:14px;width:70%"></div><div class="wz-skel" style="height:12px;width:45%"></div></div>
+          <div class="wz-skel-card"><div class="wz-skel" style="height:14px;width:60%"></div><div class="wz-skel" style="height:12px;width:50%"></div></div>
+          <div class="wz-skel-card"><div class="wz-skel" style="height:14px;width:75%"></div><div class="wz-skel" style="height:12px;width:35%"></div></div>
+        </div>
+        <div class="wz-state">
+          <h4>Загрузка · календарь</h4>
+          <div class="wz-skel" style="height:40px"></div>
+          <div style="display:grid;grid-template-columns:40px repeat(3,1fr);gap:6px">
+            <div class="wz-skel" style="height:160px"></div><div class="wz-skel" style="height:160px"></div><div class="wz-skel" style="height:160px"></div><div class="wz-skel" style="height:160px"></div>
+          </div>
+        </div>
+        <div class="wz-state">
+          <h4>Пустой поиск</h4>
+          <div class="wz-empty">
+            <span class="wz-empty__icon">🔍</span>
+            <b>Никого не нашли по «+7 999 000»</b>
+            <span>Проверьте номер или создайте клиента и сделку</span>
+            <button class="btn-dashed" type="button">＋ Новый клиент «+7 999 000…»</button>
+          </div>
+        </div>
+        <div class="wz-state">
+          <h4>Ошибка</h4>
+          <div class="wz-alert wz-alert--err"><span>✕</span><span><b>Слот уже занят.</b> Пока вы выбирали, Баню №1 на 14:00–18:00 забронировали. Выберите другое время.</span></div>
+          <div class="wz-alert wz-alert--err"><span>✕</span><span><b>Битрикс24 не отвечает.</b> Данные не потеряны.</span><button class="wz-alert__act" type="button">Повторить</button></div>
+          <div class="wz-alert wz-alert--info"><span>i</span><span>Нет прав на сделки этой воронки — сделка откроется только для чтения.</span></div>
+        </div>
+        <div class="wz-state">
+          <h4>Отправка</h4>
+          <p class="muted" style="margin:0;font-size:13px">Нижняя панель блокируется, поверх — «Создаём бронь…» и бегущая полоса. Шаги: сделка → бронь → связь → товары.</p>
+          <button type="button" id="demoSend">Показать на нижней панели</button>
+        </div>
+        <div class="wz-state">
+          <h4>Готово</h4>
+          <div class="wz-alert wz-alert--ok"><span>✓</span><span><b>Бронь создана.</b> Баня №1, 25.10, 14:00–18:00 · сделка «Смирнова — ДР»</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn-primary">Открыть бронь</button><button type="button">Ещё одна бронь</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ДИЗАЙН-РЕШЕНИЯ ============ -->
+    <section class="wz-step" id="notes" data-step="notes">
+      <details class="wz-notes" open>
+        <summary>Дизайн-решения</summary>
+
+        <h3>Сетка и ритм</h3>
+        <ul>
+          <li>Контейнер мастера до <code>1080px</code>, боковой отступ <code>--pad</code>: 22px на ПК, 16px на телефоне (≤720px). Шаг = карточка (<code>--radius</code> 16px, рамка <code>--line</code>, тень 0 1px 2px).</li>
+          <li>Вертикальный ритм кратен 4: 6 / 8 / 12 / 16 / 20px. Между полями 14px, между колонками пары 16px (как <code>.df-row.pair</code>).</li>
+          <li>Списки выбора — CSS grid <code>auto-fill, minmax(…)</code>: сделки ≥300px, ресурсы ≥220px, группы ≥220px — сами раскладываются в 1–3 колонки без медиазапросов.</li>
+          <li>«Дата и ресурс»: <code>1fr + 300px</code> (календарь + липкая карточка слота); ≤900px — карточка уходит под календарь.</li>
+        </ul>
+
+        <h3>Контролы</h3>
+        <ul>
+          <li>Высота любого контрола — <code>40px</code> (<code>--ctl</code>): поля, селекты, кнопки, сегменты, степпер количества. Компактные (внутри строк/диалогов) — 32px.</li>
+          <li>Радиус: поля и кнопки 10px, карточки выбора 12px, плитки групп 14px, шаг/диалог 16px, бейджи и чипы — pill.</li>
+          <li>Подпись поля сверху 12.5px <code>--f-label</code>, текст поля 15px (16px на телефоне — без автозума iOS). Фокус — рамка <code>--primary</code> + кольцо 3px <code>--f-focus</code>.</li>
+          <li>Выбор одного из N — карточки с радиоточкой (<code>.wz-dot</code>), выбранная: рамка 1px + внутренняя тень 1px <code>--primary</code>, фон <code>rgba(0,122,255,.04)</code>. Двоичный/тернарный выбор — сегмент <code>.wz-seg</code>.</li>
+        </ul>
+
+        <h3>Цвета состояний</h3>
+        <div class="wz-swatches">
+          <span><i style="background:#007aff"></i>акцент / выбор #007aff</span>
+          <span><i style="background:#15803d"></i>свободно / успех #15803d</span>
+          <span><i style="background:#b54708"></i>предупреждение / тех. окно #b54708</span>
+          <span><i style="background:#b42318"></i>ошибка #b42318</span>
+          <span><i style="background:#d5444b"></i>ждёт ответа #d5444b на #ffe6e8</span>
+          <span><i style="background:#e8eefc"></i>занято (бронь) #e8eefc</span>
+          <span><i style="background:#f2f4f7"></i>нейтральный фон #f2f4f7</span>
+        </div>
+
+        <h3>Телефон (390px)</h3>
+        <ul>
+          <li>Степпер: только номера, подпись — у активного шага; горизонтальная прокрутка внутри степпера.</li>
+          <li>Все сетки в 1 колонку; пары полей — одна под другой. Календарь прокручивается по горизонтали внутри своего блока (колонка 132px, часы липкие слева) — у страницы горизонтальной прокрутки нет.</li>
+          <li>Строка товара превращается в карточку: название + удалить; кол-во и цена в 2 колонки; скидка; сумма строкой.</li>
+          <li>Нижняя панель: сводка в 1–2 строки (второстепенное скрыто), кнопки во всю ширину; учтён <code>safe-area-inset-bottom</code>. Диалог — bottom sheet.</li>
+        </ul>
+
+        <h3>Компоненты (BEM-подобно, префикс <code>wz-</code>)</h3>
+        <ul>
+          <li><code>WizardShell</code> → <code>.wz</code>, <code>.wz-head</code>, <code>.wz-stepper</code> (li: <code>is-active / is-done / is-cond</code>), <code>.wz-step</code>, <code>.wz-foot</code> (<code>is-sending</code>), <code>.wz-sum</code>, <code>.wz-actions</code>.</li>
+          <li><code>SearchPicker</code> → <code>.wz-search</code>, <code>.wz-hits</code>, <code>.wz-hit</code> (<code>is-focus</code>), <code>.wz-ava</code>; <code>ClientChip</code> → <code>.wz-client</code>.</li>
+          <li><code>ChoiceCard</code> → <code>.wz-card</code> (<code>is-selected</code>/<code>aria-checked</code>, <code>is-disabled</code>) + <code>.wz-dot</code>; варианты <code>DealCard</code>, <code>ResourceCard</code> (<code>.wz-res</code>), <code>GroupTile</code> (<code>.wz-group</code>).</li>
+          <li><code>DayCalendar</code> → <code>.wz-daynav</code>, <code>.wz-days</code>, <code>.wz-cal</code>, <code>.wz-cal__col</code>, <code>.wz-ev--busy|service|tech|sel</code>, <code>.wz-ghost</code>, <code>.wz-now</code>; <code>SlotCard</code> → <code>.wz-slot</code>, <code>.wz-dur</code>.</li>
+          <li><code>Segmented</code> → <code>.wz-seg</code> (<code>--sm</code>), кнопки с <code>aria-pressed</code>. <code>Badge</code> → <code>.wz-badge--waiting|ok|busy|muted|info</code>. <code>Alert</code> → <code>.wz-alert--warn|err|ok|info</code>.</li>
+          <li><code>FieldsConflictDialog</code> → <code>.wz-dialog</code>, <code>.wz-fv</code> (<code>is-clear</code>). <code>ProductsEditor</code> → <code>.wz-padd</code>, <code>.wz-prods</code>, <code>.wz-prod</code>, <code>.wz-qty</code>, <code>.wz-disc</code>, <code>.wz-totals</code>. Поля сделки — существующие <code>.df-*</code>.</li>
+          <li>Состояния: <code>.wz-skel</code>, <code>.wz-skel-card</code>, <code>.wz-empty</code>, <code>.wz-spin</code>, <code>.wz-progress</code>.</li>
+        </ul>
+      </details>
+    </section>
+  </main>
+
+  <!-- ============ НИЖНЯЯ ПАНЕЛЬ ============ -->
+  <footer class="wz-foot" id="wzFoot">
+    <div class="wz-foot__in">
+      <div class="wz-progress" aria-hidden="true"></div>
+      <div class="wz-sum" id="wzSum" aria-live="polite"></div>
+      <div class="wz-actions">
+        <button type="button" class="js-back">‹ Назад</button>
+        <button type="button" class="js-next">Далее ›</button>
+        <button type="button" class="btn-primary js-create">Создать бронь</button>
+      </div>
+      <div class="wz-sending" role="status"><span class="wz-spin"></span>Создаём бронь… <span class="muted" style="font-weight:500">сделка ✓ · бронь…</span></div>
+    </div>
+  </footer>
+
+  <div class="wz-overlay" id="dlgOverlay" role="dialog" aria-modal="true" aria-labelledby="dlgTitle"></div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const rub = (n) => Math.round(n).toLocaleString('ru-RU').replace(/ /g, ' ') + ' ₽';
+  const state = { step: 3, deal: 'Смирнова — день рождения', client: 'Ирина Смирнова', group: 'Бани', res: 'Баня №1', date: '25.10', start: 14 * 60, dur: 240 };
+
+  /* ---------- сегменты (общие) ---------- */
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.wz-seg button');
+    if (!b) return;
+    $$('button', b.parentElement).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  });
+
+  /* ---------- сделки ---------- */
+  const deals = [
+    ['Смирнова — день рождения', 'Ирина Смирнова', 'Бани', '#007aff', 18600, '12 мин назад', 'chat', true],
+    ['Корпоратив «Вектор»', 'ООО «Вектор»', 'Домики', '#7a5af8', 64000, '25 мин назад', 'call', false],
+    ['Петров, выходные', 'Сергей Петров', 'Бани', '#007aff', 9800, '41 мин назад', 'chat', true],
+    ['Девичник 31.10', 'Анна Кузнецова', 'Беседки', '#12b76a', 12500, '1 ч назад', 'chat', false],
+    ['Семья Орловых', 'Дмитрий Орлов', 'Домики', '#7a5af8', 27000, '1 ч назад', 'call', false],
+    ['Баня + купель', 'Мария Лебедева', 'Бани', '#007aff', 14200, '2 ч назад', 'chat', true],
+    ['Новый год, домик №3', 'Олег Фёдоров', 'Домики', '#7a5af8', 88000, '2 ч назад', 'call', false],
+    ['Мальчишник', 'Игорь Соколов', 'Бани', '#007aff', 21000, '3 ч назад', 'chat', false],
+    ['Юбилей 50 лет', 'Татьяна Волкова', 'Беседки', '#12b76a', 33500, '3 ч назад', 'call', true],
+    ['Повторная, Смирнова', 'Ирина Смирнова', 'Бани', '#007aff', 8400, '4 ч назад', 'chat', false],
+    ['Тимбилдинг «Альфа»', 'ООО «Альфа»', 'Домики', '#7a5af8', 120000, '5 ч назад', 'call', false],
+    ['Баня на двоих', 'Никита Морозов', 'Бани', '#007aff', 6000, 'вчера, 21:14', 'chat', false],
+    ['Выпускной', 'Елена Павлова', 'Беседки', '#12b76a', 19000, 'вчера, 19:02', 'chat', true],
+    ['Домик на неделю', 'Артём Зайцев', 'Домики', '#7a5af8', 56000, 'вчера, 17:40', 'call', false],
+    ['Баня, суббота', 'Ольга Новикова', 'Бани', '#007aff', 9600, 'вчера, 15:22', 'chat', false],
+    ['Свадьба, беседка', 'Кирилл Белов', 'Беседки', '#12b76a', 41000, 'вчера, 12:05', 'call', false],
+    ['Баня + парение', 'Ксения Егорова', 'Бани', '#007aff', 12800, '20.10', 'chat', false],
+    ['Командировка', 'Павел Козлов', 'Домики', '#7a5af8', 15000, '20.10', 'call', false],
+    ['Детский праздник', 'Наталья Ильина', 'Беседки', '#12b76a', 8700, '19.10', 'chat', false],
+    ['Баня, будни', 'Роман Гусев', 'Бани', '#007aff', 5400, '19.10', 'call', false],
+  ];
+  const icoChat = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H7l-3.2 2.6c-.3.3-.8 0-.8-.4V11h0a1.5 1.5 0 0 1-1-1.5z"/></svg>';
+  const icoCall = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.2 1.6 5.9 3.4c.4.4.4 1 .1 1.4L5 6.1a8.6 8.6 0 0 0 4.9 4.9l1.3-1c.4-.3 1-.3 1.4.1l1.8 1.7c.4.4.4 1 0 1.4l-1 1c-.6.6-1.5.8-2.3.5A13 13 0 0 1 1.4 4.9c-.3-.8-.1-1.7.5-2.3l1-1c.4-.4 1-.4 1.3 0z"/></svg>';
+  $('#wzDeals').innerHTML = deals.map(([t, c, p, col, s, ago, src, wait], i) => `
+    <button class="wz-card${i === 0 ? ' is-selected' : ''}" type="button" role="radio" aria-checked="${i === 0}" data-deal="${t}" data-client="${c}">
+      <span class="wz-card__row"><span class="wz-dot"></span><span class="wz-card__title">${t}</span><span class="wz-card__sum">${rub(s)}</span></span>
+      <span class="wz-card__row">
+        <span class="wz-card__meta">${c} · <span class="wz-pipe" style="--c:${col}"><i></i>${p}</span></span>
+        ${wait ? '<span class="wz-badge wz-badge--waiting">ждёт ответа</span>' : ''}
+        <span class="wz-card__time" title="${src === 'chat' ? 'Сообщение в чате' : 'Звонок'}"><span class="wz-card__src is-${src}">${src === 'chat' ? icoChat : icoCall}</span>${ago}</span>
+      </span>
+    </button>`).join('');
+  const radio = (root, cb) => root.addEventListener('click', (e) => {
+    const c = e.target.closest('[role=radio]');
+    if (!c || c.getAttribute('aria-disabled') === 'true') return;
+    $$('[role=radio]', root).forEach((x) => { const on = x === c; x.setAttribute('aria-checked', String(on)); x.classList.toggle('is-selected', on); });
+    cb(c);
+  });
+  radio($('#wzDeals'), (c) => { state.deal = c.dataset.deal; state.client = c.dataset.client; renderSum(); });
+  radio($('#wzGroups'), (c) => { state.group = c.dataset.name; renderSum(); });
+  radio($('#wzRes'), (c) => { state.res = c.dataset.name; renderSlot(); });
+
+  /* ---------- дни ---------- */
+  const dn = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  const days = [];
+  for (let i = 0; i < 10; i++) { const d = new Date(2026, 9, 22 + i); days.push(d); }
+  $('#wzDays').innerHTML = days.map((d) => `<button type="button" aria-pressed="${d.getDate() === 25}" class="${[0, 6].includes(d.getDay()) ? 'is-weekend' : ''}">${dn[d.getDay()]}<b>${d.getDate()}</b></button>`).join('');
+  $('#wzDays').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    $$('button', b.parentElement).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    state.date = b.querySelector('b').textContent.padStart(2, '0') + '.10'; renderSlot();
+  });
+
+  /* ---------- календарь ---------- */
+  const H0 = 9, H1 = 24, HH = 44; // px на час
+  const res = [['Баня №1', 'до 8 гостей'], ['Баня №2', 'до 6 гостей'], ['Баня с купелью', 'до 12'], ['Русская баня', 'до 10']];
+  const evs = [
+    [0, 10 * 60, 13 * 60, 'busy', 'Петров С.', '10:00–13:00'], [0, 13 * 60, 13 * 60 + 30, 'tech', 'тех. окно', ''],
+    [0, 18 * 60, 18 * 60 + 30, 'tech', 'тех. окно', ''], [0, 19 * 60, 22 * 60, 'busy', 'Морозов Н.', '19:00–22:00'],
+    [1, 12 * 60, 16 * 60, 'busy', 'Лебедева М.', '12:00–16:00'], [1, 16 * 60, 16 * 60 + 30, 'tech', 'тех. окно', ''],
+    [2, 9 * 60, 11 * 60, 'service', 'Уборка', 'служебная'], [2, 17 * 60, 21 * 60, 'busy', 'Волкова Т.', '17:00–21:00'],
+    [3, 12 * 60, 20 * 60, 'busy', 'Корпоратив «Альфа»', '12:00–20:00'], [3, 20 * 60, 20 * 60 + 30, 'tech', 'тех. окно', ''],
+  ];
+  const y = (m) => ((m - H0 * 60) / 60) * HH;
+  const hm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const cal = $('#wzCal');
+  cal.innerHTML = `<div class="wz-cal__grid" style="--cols:${res.length};--hh:${HH}px">
+    <div class="wz-cal__corner"></div>
+    ${res.map(([n, s]) => `<div class="wz-cal__colhead">${n}<small>${s}</small></div>`).join('')}
+    <div class="wz-cal__hours">${Array.from({ length: H1 - H0 }, (_, i) => `<div class="wz-cal__hour">${i ? (H0 + i) + ':00' : ''}</div>`).join('')}</div>
+    ${res.map((_, ci) => `<div class="wz-cal__col" data-col="${ci}" style="height:${(H1 - H0) * HH}px">
+      ${evs.filter((e) => e[0] === ci).map((e) => `<div class="wz-ev wz-ev--${e[3]}" style="top:${y(e[1])}px;height:${y(e[2]) - y(e[1]) - 2}px"><b>${e[4]}</b>${e[5]}</div>`).join('')}
+      <div class="wz-ghost"></div>${ci === 0 ? '' : ''}
+    </div>`).join('')}
+  </div>`;
+  // линия «сейчас» только для сегодняшнего дня — в макете не показываем на 25.10
+  const sel = document.createElement('div');
+  sel.className = 'wz-ev wz-ev--sel';
+  sel.innerHTML = '<b>Новая бронь</b><span></span><i class="wz-ev__grip"></i>';
+  function renderSlot() {
+    const ci = res.findIndex((r) => r[0] === state.res);
+    const col = $(`.wz-cal__col[data-col="${Math.max(ci, 0)}"]`, cal);
+    col.appendChild(sel);
+    sel.style.top = y(state.start) + 'px';
+    sel.style.height = (state.dur / 60) * HH - 2 + 'px';
+    const end = state.start + state.dur;
+    sel.querySelector('span').textContent = `${hm(state.start)}–${hm(end)}`;
+    $('#slotTitle').textContent = state.res;
+    $('#slotWhen').innerHTML = `${state.date}, ${hm(state.start)}–${hm(end)} <small>(${state.dur / 60} ч)</small>`;
+    $('#slotStart').value = hm(state.start); $('#slotEnd').value = hm(end);
+    $$('#wzDur button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.h * 60 === state.dur)));
+    const overlap = evs.some((e) => e[0] === ci && e[1] < end && e[2] > state.start);
+    const tech = evs.filter((e) => e[0] === ci && e[3] === 'tech' && e[1] < end && e[2] > state.start);
+    const busy = evs.some((e) => e[0] === ci && e[3] !== 'tech' && e[1] < end && e[2] > state.start);
+    const w = $('#slotWarn');
+    if (busy) { w.className = 'wz-alert wz-alert--err'; w.innerHTML = '<span>✕</span><span><b>Время занято.</b> Выберите свободный промежуток или другой ресурс.</span>'; }
+    else if (tech.length) { w.className = 'wz-alert wz-alert--warn'; w.innerHTML = `<span>⚠</span><span>Пересекается с тех. окном <b>${hm(tech[0][1])}–${hm(tech[0][2])}</b>. Можно продолжить — менеджер подтверждает.</span>`; }
+    else { w.className = 'wz-alert wz-alert--ok'; w.innerHTML = '<span>✓</span><span>Свободно</span>'; }
+    void overlap;
+    $$('#wzRes [role=radio]').forEach((x) => { const on = x.dataset.name === state.res; x.setAttribute('aria-checked', String(on)); x.classList.toggle('is-selected', on); });
+    renderSum();
+  }
+  $$('.wz-cal__col', cal).forEach((col) => {
+    const ghost = $('.wz-ghost', col);
+    const at = (e) => { const r = col.getBoundingClientRect(); return Math.max(H0 * 60, Math.min((H1 - 1) * 60 + 30, H0 * 60 + Math.floor(((e.clientY - r.top) / HH) * 2) * 30)); };
+    col.addEventListener('mousemove', (e) => {
+      if (e.target.closest('.wz-ev')) { ghost.style.display = 'none'; return; }
+      const m = at(e); ghost.style.display = 'flex'; ghost.style.top = y(m) + 'px'; ghost.textContent = '+ ' + hm(m);
+    });
+    col.addEventListener('mouseleave', () => { ghost.style.display = 'none'; });
+    col.addEventListener('click', (e) => {
+      if (e.target.closest('.wz-ev')) return;
+      state.res = res[+col.dataset.col][0]; state.start = at(e); ghost.style.display = 'none'; renderSlot();
+    });
+  });
+  $('#wzDur').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || b.dataset.h === '0') return; state.dur = +b.dataset.h * 60; renderSlot(); });
+
+  /* ---------- диалог полей ---------- */
+  const fv = [['Количество гостей', '6'], ['Сумма', '12 400 ₽'], ['Ручная сумма предоплаты', '6 200 ₽'], ['Комментарий', 'Просили веники и чай с травами'], ['Тип сделки', 'Повторная'], ['Дата заезда', '12.10.2026']];
+  const dlgHTML = (id) => `
+    <div class="wz-dialog__head"><h3 id="${id}">В сделке уже заполнены поля</h3>
+      <p>Сделка «Смирнова — день рождения». Отметьте, какие значения оставить для новой брони, а какие очистить.</p></div>
+    <div class="wz-dialog__bulk"><span class="muted">${fv.length} полей</span>
+      <button type="button" data-bulk="keep">Оставить все</button><button type="button" data-bulk="clear">Очистить все</button></div>
+    <ul class="wz-dialog__list">${fv.map(([n, v]) => `<li class="wz-fv"><span class="wz-fv__name">${n}</span><span class="wz-fv__val" title="${v}">${v}</span>
+      <span class="wz-seg wz-seg--sm wz-seg--danger" role="group" aria-label="${n}"><button type="button" aria-pressed="true">Оставить</button><button type="button" aria-pressed="false" class="is-clear">Очистить</button></span></li>`).join('')}</ul>
+    <div class="wz-dialog__foot"><button type="button" data-close>Назад</button><button type="button" class="btn-primary" data-close>Продолжить</button></div>`;
+  $('#dlgPreview').innerHTML = dlgHTML('dlgTitlePrev');
+  const ov = $('#dlgOverlay');
+  ov.innerHTML = `<div class="wz-dialog">${dlgHTML('dlgTitle')}</div>`;
+  const dlgWire = (root) => root.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.bulk) $$('.wz-fv', root).forEach((li) => { const [k, c] = $$('.wz-seg button', li); k.setAttribute('aria-pressed', String(b.dataset.bulk === 'keep')); c.setAttribute('aria-pressed', String(b.dataset.bulk === 'clear')); });
+    setTimeout(() => $$('.wz-fv', root).forEach((li) => li.classList.toggle('is-clear', $('.is-clear', li).getAttribute('aria-pressed') === 'true')));
+    if (b.hasAttribute('data-close') && root === ov) ov.classList.remove('is-open');
+  });
+  dlgWire($('#dlgPreview')); dlgWire(ov);
+  $('#openDlg').addEventListener('click', () => ov.classList.add('is-open'));
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('is-open'); });
+
+  /* ---------- товары ---------- */
+  const prods = [
+    { n: 'Аренда бани, час', s: 'Бани · 4 ч по 3 500 ₽', q: 4, p: 3500, dk: '%', d: 0 },
+    { n: 'Парение с вениками', s: 'Услуги банщика', q: 1, p: 2500, dk: '%', d: 10 },
+    { n: 'Чай травяной, чайник', s: 'Кухня', q: 2, p: 450, dk: '₽', d: 100 },
+  ];
+  const lineSum = (x) => { const base = x.q * x.p; const disc = x.dk === '%' ? base * x.d / 100 : Math.min(base, x.d * x.q); return [base, base - disc]; };
+  function renderProds() {
+    $$('.wz-prod:not(.wz-prod--head)', $('#wzProds')).forEach((r) => r.remove());
+    prods.forEach((x, i) => {
+      const [base, sum] = lineSum(x);
+      const row = document.createElement('div');
+      row.className = 'wz-prod'; row.setAttribute('role', 'row'); row.dataset.i = i;
+      row.innerHTML = `
+        <div class="wz-prod__name"><b>${x.n}</b><small>${x.s}</small></div>
+        <div class="wz-prod__qty"><span class="wz-prod__lbl">Кол-во</span><span class="wz-qty"><button type="button" data-q="-1" aria-label="Меньше">−</button><input inputmode="numeric" value="${x.q}" aria-label="Количество"><button type="button" data-q="1" aria-label="Больше">+</button></span></div>
+        <div class="wz-prod__price"><span class="wz-prod__lbl">Цена, ₽</span><input inputmode="decimal" value="${x.p}" data-f="p" aria-label="Цена"></div>
+        <div class="wz-prod__disc"><span class="wz-prod__lbl">Скидка</span><span class="wz-disc"><span class="wz-seg" role="group" aria-label="Тип скидки"><button type="button" aria-pressed="${x.dk === '%'}" data-dk="%">%</button><button type="button" aria-pressed="${x.dk === '₽'}" data-dk="₽">₽</button></span><input inputmode="decimal" value="${x.d || ''}" placeholder="0" data-f="d" aria-label="Скидка"></span></div>
+        <div class="wz-prod__sum"><span class="wz-prod__lbl">Сумма</span><span>${sum !== base ? `<s>${rub(base)}</s>` : ''}${rub(sum)}</span></div>
+        <button class="wz-prod__del" type="button" aria-label="Удалить" data-del>×</button>`;
+      $('#wzProds').appendChild(row);
+    });
+    const base = prods.reduce((a, x) => a + lineSum(x)[0], 0), total = prods.reduce((a, x) => a + lineSum(x)[1], 0);
+    $('#wzTotals').innerHTML = `<div><span>Без скидки</span><span>${rub(base)}</span></div><div class="is-disc"><span>Скидка</span><span>−${rub(base - total)}</span></div><div class="is-total"><span>Итого</span><span>${rub(total)}</span></div>`;
+    state.total = total;
+    const fs = $('#fSum'); if (fs) fs.value = rub(total).replace(' ₽', '');
+    const fp = $('#fPre'); if (fp) fp.value = rub(total / 2).replace(' ₽', '');
+    renderSum();
+  }
+  $('#wzProds').addEventListener('click', (e) => {
+    const row = e.target.closest('.wz-prod'); if (!row || row.classList.contains('wz-prod--head')) return;
+    const x = prods[+row.dataset.i]; const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.q) x.q = Math.max(1, x.q + +b.dataset.q);
+    else if (b.dataset.dk) x.dk = b.dataset.dk;
+    else if (b.hasAttribute('data-del')) prods.splice(+row.dataset.i, 1);
+    else return;
+    renderProds();
+  });
+  $('#wzProds').addEventListener('change', (e) => {
+    const row = e.target.closest('.wz-prod'); const x = prods[+row.dataset.i];
+    const v = +String(e.target.value).replace(/\s/g, '').replace(',', '.') || 0;
+    if (e.target.dataset.f) x[e.target.dataset.f] = v; else x.q = Math.max(1, v);
+    renderProds();
+  });
+  $('#prodHits').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-add]'); if (!b) return;
+    const [n, s, p] = b.dataset.add.split('|'); prods.push({ n, s, q: 1, p: +p, dk: '%', d: 0 }); renderProds();
+  });
+
+  /* ---------- сводка в нижней панели ---------- */
+  function renderSum() {
+    const it = (ico, v, opt) => `<span class="wz-sum__item${v ? '' : ' is-empty'}${opt ? ' opt' : ''}">${ico} <b>${v || 'не выбрано'}</b></span>`;
+    const end = state.start + state.dur;
+    $('#wzSum').innerHTML = [
+      it('👤', state.client, true), it('🤝', state.deal), it('📍', state.res),
+      it('🗓', `${state.date}, ${hm(state.start)}–${hm(end)}`), it('⏱', `${state.dur / 60} ч`, true),
+      `<span class="wz-sum__total">${rub(state.total || 0)}</span>`,
+    ].join('');
+    $('#wzSub').textContent = `${state.group} · ${state.client}`;
+  }
+
+  /* ---------- шаги / режимы ---------- */
+  const wz = $('#wz');
+  function go(n, scroll = true) {
+    state.step = n;
+    $$('#wzStepper li').forEach((li, i) => {
+      li.classList.toggle('is-active', i + 1 === n);
+      li.classList.toggle('is-done', i + 1 < n);
+      $('button', li).toggleAttribute('aria-current', i + 1 === n);
+    });
+    $$('.wz-step').forEach((s) => s.classList.toggle('is-active', s.dataset.step === String(n)));
+    $('.js-back').disabled = n === 1;
+    $('.js-next').hidden = n === 5;
+    $('.js-create').hidden = n !== 5 && wz.classList.contains('mode-steps');
+    if (scroll) {
+      if (wz.classList.contains('mode-steps')) window.scrollTo({ top: 0, behavior: 'smooth' });
+      else $('#step' + n).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+  $('#wzStepper').addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) go(+b.dataset.go); });
+  $('.js-back').addEventListener('click', () => go(Math.max(1, state.step - 1)));
+  $('.js-next').addEventListener('click', () => go(Math.min(5, state.step + 1)));
+  $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { wz.classList.toggle('mode-steps', b.dataset.mode === 'steps'); go(state.step); }));
+  const send = () => { const f = $('#wzFoot'); f.classList.add('is-sending'); $$('.wz-actions button').forEach((x) => (x.disabled = true)); setTimeout(() => { f.classList.remove('is-sending'); $$('.wz-actions button').forEach((x) => (x.disabled = false)); go(state.step, false); }, 2500); };
+  $('.js-create').addEventListener('click', send);
+  $('#demoSend').addEventListener('click', send);
+
+  renderProds(); renderSlot(); go(3, false);
+  if (new URLSearchParams(location.search).has('sending')) $('#wzFoot').classList.add('is-sending');
+})();
+</script>
+</body>
+</html>

@@ -10,10 +10,10 @@ const HITS = 20;
 type Section = { ID: string; NAME: string; SECTION_ID?: string | null };
 type Product = { ID: string; NAME: string; PRICE?: string | null; CURRENCY_ID?: string | null; SECTION_ID?: string | null };
 type Contact = { ID: string; NAME?: string | null; LAST_NAME?: string | null; SECOND_NAME?: string | null; PHONE?: { VALUE?: string }[]; EMAIL?: { VALUE?: string }[] };
-type Deal = { ID: string; TITLE?: string | null; CATEGORY_ID?: string | null; CLOSED?: string | null; OPPORTUNITY?: string | null; CURRENCY_ID?: string | null; CONTACT_ID?: string | null; DATE_CREATE?: string | null };
+type Deal = { ID: string; TITLE?: string | null; CATEGORY_ID?: string | null; CLOSED?: string | null; OPPORTUNITY?: string | null; CURRENCY_ID?: string | null; CONTACT_ID?: string | null; DATE_CREATE?: string | null; LAST_ACTIVITY_TIME?: string | null };
 
 const CONTACT_SELECT = ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE', 'EMAIL'];
-const DEAL_SELECT = ['ID', 'TITLE', 'CATEGORY_ID', 'CLOSED', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', 'DATE_CREATE'];
+const DEAL_SELECT = ['ID', 'TITLE', 'CATEGORY_ID', 'CLOSED', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', 'DATE_CREATE', 'LAST_ACTIVITY_TIME'];
 
 export const fullName = (c: Pick<Contact, 'NAME' | 'LAST_NAME' | 'SECOND_NAME'>) =>
   [c.LAST_NAME, c.NAME, c.SECOND_NAME].filter((x) => x && String(x).trim()).join(' ').trim();
@@ -85,10 +85,43 @@ export class BookingDirectoryService {
   /** Товары сделки — чтобы форма показала их и не потеряла при полной замене строк. */
   async dealProducts(user: B24UserContext, dealId: number): Promise<DealProductRowDto[]> {
     await this.canCreate(user);
-    const rows = (await user.client.call<{ PRODUCT_ID?: string; PRODUCT_NAME?: string; PRICE?: string; QUANTITY?: string }[]>('crm.deal.productrows.get', { id: dealId })).result ?? [];
+    type Row = { PRODUCT_ID?: string; PRODUCT_NAME?: string; PRICE?: string; QUANTITY?: string; DISCOUNT_TYPE_ID?: string; DISCOUNT_RATE?: string; DISCOUNT_SUM?: string };
+    const rows = (await user.client.call<Row[]>('crm.deal.productrows.get', { id: dealId })).result ?? [];
     return rows
       .filter((r) => Number(r.PRODUCT_ID) > 0)
-      .map((r) => ({ productId: Number(r.PRODUCT_ID), name: r.PRODUCT_NAME ?? `Товар #${r.PRODUCT_ID}`, price: Number(r.PRICE ?? 0), quantity: Number(r.QUANTITY ?? 1) }));
+      .map((r) => {
+        // В Битрикс24 PRICE — уже со скидкой; цена без скидки = PRICE + скидка на единицу.
+        const final = Number(r.PRICE ?? 0);
+        const perUnit = Number(r.DISCOUNT_SUM ?? 0);
+        const percent = String(r.DISCOUNT_TYPE_ID) !== '1';
+        return {
+          productId: Number(r.PRODUCT_ID),
+          name: r.PRODUCT_NAME ?? `Товар #${r.PRODUCT_ID}`,
+          price: Math.round((final + perUnit) * 100) / 100,
+          quantity: Number(r.QUANTITY ?? 1),
+          discountType: percent ? ('percent' as const) : ('sum' as const),
+          discount: percent ? Number(r.DISCOUNT_RATE ?? 0) : perUnit,
+        };
+      });
+  }
+
+  /**
+   * 20 открытых сделок с последней активностью (`LAST_ACTIVITY_TIME`: чаты, звонки, дела) в воронках
+   * групп, где сотрудник может создавать брони — первый шаг мастера брони.
+   */
+  async recentDeals(user: B24UserContext): Promise<CrmDealHit[]> {
+    const a = await this.access.resolve(user);
+    const groups = a.groups.filter((g) => g.permissions.includes('booking.create'));
+    if (!groups.length) throw new ForbiddenException({ code: 'NO_BOOKING_CREATE', message: 'Нет права создавать брони' });
+    const funnels = [...new Set(groups.map((g) => g.group.dealCategoryId).filter((x): x is number => x !== null))];
+    const res = await user.client.call<Deal[]>('crm.deal.list', {
+      filter: { CLOSED: 'N', ...(funnels.length ? { '@CATEGORY_ID': funnels } : {}) },
+      order: { LAST_ACTIVITY_TIME: 'DESC' },
+      select: DEAL_SELECT,
+    });
+    const hits = await this.toHits(user, (res.result ?? []).slice(0, HITS));
+    // toHits сортирует по номеру — здесь важен порядок активности.
+    return hits.sort((x, y) => Date.parse(y.lastActivityAt ?? '0') - Date.parse(x.lastActivityAt ?? '0'));
   }
 
   /**
@@ -169,6 +202,7 @@ export class BookingDirectoryService {
         currency: d.CURRENCY_ID ?? null,
         contact: Number(d.CONTACT_ID) > 0 ? { id: Number(d.CONTACT_ID), name: names.get(Number(d.CONTACT_ID)) ?? null } : null,
         createdAt: d.DATE_CREATE ? new Date(d.DATE_CREATE).toISOString() : null,
+        lastActivityAt: d.LAST_ACTIVITY_TIME ? new Date(d.LAST_ACTIVITY_TIME).toISOString() : null,
       }))
       .sort((a, b) => Number(a.closed) - Number(b.closed) || b.id - a.id)
       .slice(0, HITS);

@@ -190,7 +190,8 @@ export class PaymentsService {
       const res = await user.client.call<{ item?: { id?: number } }>('crm.item.add', {
         entityTypeId: 31,
         fields: {
-          title: `Счёт на ${b.kind === 'prepayment' ? 'предоплату' : 'доплату'} по сделке #${b.dealId}`,
+          // Сделка и бронь — в названии: у одного клиента бывает несколько сделок (в разных воронках).
+          title: `Счёт на ${b.kind === 'prepayment' ? 'предоплату' : 'доплату'} по сделке #${b.dealId}${bookingId ? `, бронь #${bookingId}` : ''}`,
           categoryId: inv.categoryId,
           stageId: b.kind === 'prepayment' ? inv.prepaymentStageId : inv.surchargeStageId,
           assignedById: Number(deal?.ASSIGNED_BY_ID) || user.userId,

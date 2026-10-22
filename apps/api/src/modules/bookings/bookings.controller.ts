@@ -4,6 +4,7 @@ import type {
   BookingCatalogDto,
   CrmSearchDto,
   DealProductRowDto,
+  RecentDealsDto,
   BookingAlertListDto,
   BookingHistoryDto,
   BookingStateDto,
@@ -59,6 +60,12 @@ export class BookingsController {
   @Get('deals/:dealId/products')
   dealProducts(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<DealProductRowDto[]> {
     return this.directory.dealProducts(user, dealId);
+  }
+
+  /** Мастер брони, шаг 1: 20 открытых сделок с последней активностью. */
+  @Get('crm/recent-deals')
+  async recentDeals(@B24User() user: B24UserContext): Promise<RecentDealsDto> {
+    return { deals: await this.directory.recentDeals(user) };
   }
 
   /** Поиск клиента или сделки для брони: от 2 символов; `contactId` — сделки выбранного клиента. */

@@ -3,18 +3,23 @@ import {
   canUsePaymentMode,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
-  type CalendarDay,
+  zonedTimeToUtc,
   type BookingCatalogDto,
+  type CalendarDay,
   type CreateBookingResultDto,
   type CrmContactHit,
   type CrmDealHit,
   type CrmSearchDto,
   type DealFormDto,
+  type DealFormField,
   type DealProductRowDto,
   type MyGroupDto,
   type PaymentMode,
+  type RecentDealsDto,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
+import { DayGrid } from '../calendar/DayGrid.js';
+import { fmtDayTitle, fmtMoney, fmtTime, shiftDate } from '../format.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
 import { ClientPicker } from './ClientPicker.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
@@ -25,15 +30,20 @@ export interface BookingFormContext {
   time?: string;
   groupId?: string | null;
   resourceId?: number | null;
-  /** Сделка, из которой открыли (встройка) — предлагается первой. */
+  /** Сделка, из которой открыли (встройка) — шаг «Клиент и сделка» не нужен. */
   dealId?: number | null;
   contactId?: number | null;
   clientName?: string | null;
-  /** Открытые сделки клиента (из чата). */
+  /** Открытые сделки клиента (из чата или сделки). */
   openDeals?: { id: number; title: string; categoryId?: number | null }[];
 }
 
-type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new'; title: string } | { mode: 'service' };
+/** `none` — ещё не выбрали (мастер из меню: клиента и сделки пока нет). */
+type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new'; title: string } | { mode: 'service' } | { mode: 'none' };
+type Step = 'deal' | 'group' | 'slot' | 'details';
+type DealCard = { id: number; title: string; categoryId?: number | null; closed?: boolean; client?: string | null; opportunity?: number | null; lastActivityAt?: string | null };
+
+const STEP_TITLES: Record<Step, string> = { deal: 'Клиент и сделка', group: 'Группа', slot: 'Дата и ресурс', details: 'Товары и поля' };
 
 /** «4 ч», «1 сут 2 ч», «45 мин» — длительность брони для сводки. */
 export function durationText(ms: number): string {
@@ -44,45 +54,68 @@ export function durationText(ms: number): string {
   return [d ? `${d} сут` : '', h ? `${h} ч` : '', m ? `${m} мин` : ''].filter(Boolean).join(' ') || '0 мин';
 }
 
+/** «12 мин назад», «3 ч назад», «вчера», «5 дн назад» — давность активности сделки. */
+export function agoText(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return '';
+  const min = Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
+  if (min < 1) return 'только что';
+  if (min < 60) return `${min} мин назад`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} ч назад`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'вчера' : `${d} дн назад`;
+}
+
 /**
- * Форма брони (календарь, чат, сделка): когда и где → сделка (последняя клиента / ещё / новая /
- * служебная) → тип и оплата → поля сделки группы (порядок, «2 в линии», значения по умолчанию,
- * формулы — из настроек группы). Товары и цены менеджер ведёт в сделке.
+ * Какие шаги нужны (решение владельца 2026-10-22): из меню/маркетплейса — клиент или сделка →
+ * группа → календарь группы (бронь кликом) → товары и поля; из сделки — без первого шага; клик в
+ * календаре — без шагов группы и даты; одна доступная группа — без шага группы.
+ */
+export function wizardSteps(ctx: Pick<BookingFormContext, 'dealId' | 'resourceId'>, groupsCount: number): Step[] {
+  return [
+    ...(ctx.dealId ? [] : (['deal'] as const)),
+    ...(ctx.resourceId || groupsCount <= 1 ? [] : (['group'] as const)),
+    ...(ctx.resourceId ? [] : (['slot'] as const)),
+    'details' as const,
+  ];
+}
+
+/**
+ * Мастер брони: клиент и сделка (поиск по телефону или 20 сделок с последней активностью) →
+ * группа → календарь группы (дата, ресурсы, бронь кликом) → в сделке уже заполнены поля —
+ * оставить или очистить → товары (скидки) и поля сделки группы → создать.
  */
 export function BookingForm({
   groups,
   timezone,
   context,
-  wizard = false,
   onDone,
   onClose,
 }: {
   groups: MyGroupDto[];
   timezone: string;
   context: BookingFormContext;
-  /** Мастер (из чата): 1) по какой сделке, 2) какая группа, 3) время, ресурсы, оплата. */
-  wizard?: boolean;
   /** paymentMode — чтобы после брони с предоплатой сразу предложить счёт. */
   onDone: (r: CreateBookingResultDto, paymentMode: PaymentMode | null) => void;
   onClose: () => void;
 }) {
   const allowed = groups.filter((g) => g.permissions.includes('booking.create'));
+  const steps = useMemo(() => wizardSteps(context, allowed.length), [context, allowed.length]);
+  const [step, setStep] = useState<Step>(steps[0]);
+  const stepIndex = steps.indexOf(step);
   const [groupId, setGroupId] = useState(
     () => allowed.find((g) => g.id === context.groupId || (context.resourceId && g.resourceIds.includes(context.resourceId)))?.id ?? allowed[0]?.id ?? '',
   );
   const group = allowed.find((g) => g.id === groupId);
-  const canNewDeal = !!group?.permissions.includes('deal.create');
   const modes = useMemo(() => PAYMENT_MODES.filter((m) => canUsePaymentMode(group?.permissions ?? [], m)), [group]);
   const [period, setPeriod] = useState<PeriodFields>(() =>
     group ? defaultPeriod(group, context.date, context.time) : { startDate: context.date, startTime: '14:00', endDate: context.date, endTime: '18:00' },
   );
-  const [resources, setResources] = useState<{ groupId: string; list: { id: number; name: string }[] } | null>(null);
   const [resourceIds, setResourceIds] = useState<number[]>(context.resourceId ? [context.resourceId] : []);
-  // Клиент брони: из чата/сделки — сразу; из календаря — поиском (контакт или сделка).
+  // Клиент брони: из чата/сделки — сразу; из меню — поиском или из сделок с последней активностью.
   const [client, setClient] = useState<{ contactId: number | null; name: string | null }>({ contactId: context.contactId ?? null, name: context.clientName ?? null });
-  const [dealList, setDealList] = useState<{ id: number; title: string; categoryId?: number | null; closed?: boolean }[]>(context.openDeals ?? []);
-  const [searching, setSearching] = useState(!context.contactId && !context.dealId && !(context.openDeals ?? []).length);
-  // Сделки клиента: сделка, из которой открыли, — первой, дальше открытые, самые новые (больший ID).
+  const [dealList, setDealList] = useState<DealCard[]>(context.openDeals ?? []);
+  const [searching, setSearching] = useState(false);
   const deals = [...dealList].sort(
     (a, b) => Number(b.id === context.dealId) - Number(a.id === context.dealId) || Number(!!a.closed) - Number(!!b.closed) || b.id - a.id,
   );
@@ -91,9 +124,9 @@ export function BookingForm({
       ? { mode: 'existing', dealId: context.dealId }
       : deals[0]
         ? { mode: 'existing', dealId: deals[0].id }
-        : canNewDeal
-          ? { mode: 'new', title: '' }
-          : { mode: 'service' },
+        : context.contactId
+          ? { mode: 'new', title: context.clientName ?? '' }
+          : { mode: 'none' },
   );
   const [moreDeals, setMoreDeals] = useState(false);
   const [guests, setGuests] = useState('');
@@ -101,28 +134,46 @@ export function BookingForm({
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('prepayment');
   // '' — определить по товарам сделки (как БП 270).
   const [bookingTypeId, setBookingTypeId] = useState('');
-  const [step, setStep] = useState<'deal' | 'group' | 'details'>(wizard ? 'deal' : 'details');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // Один ключ на открытие формы: повторная отправка (обрыв связи) не создаст вторую бронь.
   const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
 
+  // Шаг 1 без клиента: 20 сделок с последней активностью (чаты, звонки, дела).
+  const needRecent = step === 'deal' && !client.contactId && !dealList.length;
+  const [recent, setRecent] = useState<{ deals: CrmDealHit[] | null; error: string }>({ deals: null, error: '' });
   useEffect(() => {
-    if (!groupId) return;
+    if (!needRecent || recent.deals) return;
     let active = true;
-    apiGet<CalendarDay>(`/calendar?date=${context.date}&groupId=${encodeURIComponent(groupId)}`).then(
-      (d) => active && setResources({ groupId, list: d.resources }),
-      () => active && setResources({ groupId, list: [] }),
+    apiGet<RecentDealsDto>('/crm/recent-deals').then(
+      (r) => active && setRecent({ deals: r.deals, error: '' }),
+      (e) => active && setRecent({ deals: [], error: e instanceof Error ? e.message : 'Не удалось загрузить сделки' }),
     );
     return () => {
       active = false;
     };
-    // Список ресурсов зависит от группы, не от даты (дата — только для запроса).
-  }, [groupId, context.date]);
-  const list = resources?.groupId === groupId ? resources.list : null;
+  }, [needRecent, recent.deals]);
+
+  // День группы: календарь шага «Дата и ресурс» и занятость ресурсов в деталях.
+  const dayKey = `${groupId}:${period.startDate}`;
+  const [day, setDay] = useState<{ key: string; data: CalendarDay | null } | null>(null);
+  useEffect(() => {
+    if (!groupId) return;
+    let active = true;
+    const [gid, date] = dayKey.split(':');
+    apiGet<CalendarDay>(`/calendar?date=${date}&groupId=${encodeURIComponent(gid)}`).then(
+      (d) => active && setDay({ key: dayKey, data: d }),
+      () => active && setDay({ key: dayKey, data: null }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [groupId, dayKey]);
+  const dayData = day?.key === dayKey ? day.data : null;
+  const list = dayData?.resources ?? null;
 
   // Поля сделки группы (флаг «С»); у существующей сделки — с её текущими значениями.
-  const formKey = deal.mode === 'service' || !groupId ? '' : `${groupId}:${deal.mode === 'existing' ? deal.dealId : ''}`;
+  const formKey = deal.mode === 'service' || deal.mode === 'none' || !groupId ? '' : `${groupId}:${deal.mode === 'existing' ? deal.dealId : ''}`;
   const [dealForm, setDealForm] = useState<{ key: string; form: DealFormDto | null; error: string } | null>(null);
   useEffect(() => {
     if (!formKey) return;
@@ -140,8 +191,13 @@ export function BookingForm({
   // Тип брони — отдельным выбором (с автоопределением по товарам).
   const createFields = useMemo(() => (currentForm?.form?.fields ?? []).filter((f) => f.showCreate && f.role !== 'bookingType'), [currentForm]);
   const fieldState = useDealFieldValues(createFields, 'create', currentForm ? formKey : '');
-  // Товары: каталог группы (разделы из настроек группы); у существующей сделки — её товары (строки
-  // заменяются целиком), у новой — товары по умолчанию выбранных ресурсов.
+  // В сделке уже заполнены поля — спросить: оставить или очистить (один раз на сделку).
+  const filled = deal.mode === 'existing' ? createFields.filter((f) => !f.readOnly && f.value.trim()) : [];
+  const [decided, setDecided] = useState<string>('');
+  const askFields = step === 'details' && filled.length > 0 && decided !== formKey;
+
+  // Товары: каталог группы; у существующей сделки — её товары (строки заменяются целиком), у новой —
+  // товары по умолчанию выбранных ресурсов.
   const [catalog, setCatalog] = useState<{ groupId: string; data: BookingCatalogDto | null } | null>(null);
   useEffect(() => {
     if (!groupId) return;
@@ -177,7 +233,7 @@ export function BookingForm({
         (cat.defaults?.[String(rid)] ?? []).flatMap((dp) => {
           const p = cat.products?.find((x) => x.id === dp.productId);
           // В режиме «заезд/выезд» количество — по числу ночей (как в прототипе).
-          return p ? [{ productId: p.id, name: p.name, price: p.price ?? 0, quantity: dp.quantity * nights }] : [];
+          return p ? [{ productId: p.id, name: p.name, price: p.price ?? 0, quantity: dp.quantity * nights, discountType: 'percent' as const, discount: 0 }] : [];
         }),
       )
     : [];
@@ -206,8 +262,8 @@ export function BookingForm({
     setBookingTypeId('');
   };
 
-  // Мастер: группы, где можно создать именно такую бронь (новая сделка — нужно право на сделки);
-  // для существующей сделки сначала — группы её воронки.
+  // Группы, где можно создать именно такую бронь (новая сделка — нужно право на сделки); группа
+  // воронки выбранной сделки — первой.
   const anyNewDeal = allowed.some((g) => g.permissions.includes('deal.create'));
   const chosenDeal = deal.mode === 'existing' ? deals.find((d) => d.id === deal.dealId) : undefined;
   const dealCategory = chosenDeal?.categoryId ?? null;
@@ -215,15 +271,26 @@ export function BookingForm({
     .filter((g) => deal.mode !== 'new' || g.permissions.includes('deal.create'))
     .sort((a, b) => Number(b.dealCategoryId === dealCategory) - Number(a.dealCategoryId === dealCategory));
   const dealLabel =
-    deal.mode === 'service' ? 'служебная (без сделки)' : deal.mode === 'new' ? `новая «${deal.title || '…'}»` : chosenDeal ? `${chosenDeal.title} #${chosenDeal.id}` : `#${deal.dealId}`;
-  const next = () => {
-    if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
+    deal.mode === 'none' ? null : deal.mode === 'service' ? 'служебная' : deal.mode === 'new' ? `новая «${deal.title || '…'}»` : chosenDeal ? `${chosenDeal.title} #${chosenDeal.id}` : `#${deal.dealId}`;
+
+  const goNext = () => {
     setError('');
-    // Группа по воронке сделки — подсказка; выбор остаётся за сотрудником.
-    const preferred =
-      groupChoices.find((g) => dealCategory !== null && g.dealCategoryId === dealCategory) ?? groupChoices.find((g) => g.id === groupId) ?? groupChoices[0];
-    if (preferred && preferred.id !== groupId) chooseGroup(preferred.id);
-    setStep('group');
+    if (step === 'deal') {
+      if (deal.mode === 'none') return setError('Выберите сделку, найдите клиента или создайте новую сделку');
+      if (deal.mode === 'new' && !deal.title.trim()) return setError('Укажите название новой сделки');
+      // Группа по воронке сделки — подсказка; выбор остаётся за сотрудником.
+      const preferred = groupChoices.find((g) => dealCategory !== null && g.dealCategoryId === dealCategory) ?? groupChoices.find((g) => g.id === groupId) ?? groupChoices[0];
+      if (preferred && preferred.id !== groupId) chooseGroup(preferred.id);
+    }
+    if (step === 'group' && !groupChoices.some((g) => g.id === groupId)) return setError('Выберите группу');
+    if (step === 'slot' && !resourceIds.length) return setError('Выберите время и ресурс в календаре');
+    const nextStep = steps[stepIndex + 1];
+    if (nextStep) setStep(nextStep);
+  };
+  const goBack = () => {
+    setError('');
+    const prev = steps[stepIndex - 1];
+    if (prev) setStep(prev);
   };
 
   const values = fieldState.values;
@@ -231,6 +298,7 @@ export function BookingForm({
     const p = periodToUtc(period, timezone);
     if ('error' in p) return setError(p.error);
     if (!resourceIds.length) return setError('Выберите ресурс');
+    if (deal.mode === 'none') return setError('Выберите сделку на первом шаге');
     if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
     if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId && !productRows.length)
       return setError('Выберите тип брони или добавьте товары: у новой сделки ещё нет товаров');
@@ -259,7 +327,11 @@ export function BookingForm({
         ...(deal.mode === 'service' ? {} : { dealFields }),
         // Товары — если их меняли (или у новой сделки есть товары по умолчанию): строки сделки заменяются.
         ...(deal.mode !== 'service' && (loadedProducts?.dirty || (deal.mode === 'new' && productRows.length))
-          ? { products: productRows.filter((r) => r.quantity > 0).map((r) => ({ productId: r.productId, quantity: r.quantity, price: r.price })) }
+          ? {
+              products: productRows
+                .filter((r) => r.quantity > 0)
+                .map((r) => ({ productId: r.productId, quantity: r.quantity, price: r.price, discountType: r.discountType, discount: r.discount })),
+            }
           : {}),
       });
       onDone(r, deal.mode === 'service' ? null : paymentMode);
@@ -274,25 +346,12 @@ export function BookingForm({
     setDeal(d);
     setError('');
   };
-  // Карточки сделок: последняя (или выбранная) видна сразу, остальные — по «Показать ещё».
-  const dealCards = [...(context.dealId && !deals.some((d) => d.id === context.dealId) ? [{ id: context.dealId, title: 'Эта сделка' }] : []), ...deals];
+  // Сделки клиента: последняя открытая видна сразу, остальные — по «Показать ещё».
+  const dealCards: DealCard[] = [...(context.dealId && !deals.some((d) => d.id === context.dealId) ? [{ id: context.dealId, title: 'Эта сделка' }] : []), ...deals];
   const selectedId = deal.mode === 'existing' ? deal.dealId : null;
-  const visibleDeals = moreDeals ? dealCards : dealCards.filter((d, i) => i === 0 || d.id === selectedId);
+  const visibleDeals = moreDeals ? dealCards : dealCards.filter((d, i) => i < 3 || d.id === selectedId);
   const hiddenCount = dealCards.length - visibleDeals.length;
-
-  // Ресурсы: основной — выпадающим списком; дополнительные (редко) — «＋ ещё ресурс».
-  const setResourceAt = (i: number, id: number) => setResourceIds((prev) => prev.map((r, k) => (k === i ? id : r)).filter((r, k, a) => a.indexOf(r) === k));
-  const resourceRows = resourceIds.length ? resourceIds : [0];
-  const freeResources = (list ?? []).filter((r) => !resourceIds.includes(r.id));
   const names = new Map((list ?? []).map((r) => [r.id, r.name]));
-
-  // Сводка внизу: что и когда бронируем.
-  const utc = periodToUtc(period, timezone);
-  const summary = [
-    resourceIds.map((id) => names.get(id)).filter(Boolean).join(', ') || null,
-    `${period.startDate.slice(8, 10)}.${period.startDate.slice(5, 7)} ${period.startTime} — ${period.endDate !== period.startDate ? `${period.endDate.slice(8, 10)}.${period.endDate.slice(5, 7)} ` : ''}${period.endTime}`,
-    'error' in utc ? null : durationText(Date.parse(utc.end) - Date.parse(utc.start)),
-  ].filter(Boolean);
 
   // Выбран клиент поиском — его сделки (последняя открытая — первой); нет открытых — новая сделка.
   const chooseContact = async (c: CrmContactHit) => {
@@ -301,71 +360,160 @@ export function BookingForm({
     setMoreDeals(false);
     try {
       const r = await apiGet<CrmSearchDto>(`/crm/search?contactId=${c.id}`);
-      setDealList(r.deals.map((d) => ({ id: d.id, title: d.title, categoryId: d.categoryId, closed: d.closed })));
+      setDealList(r.deals.map(toCard));
       const open = r.deals.find((d) => !d.closed);
-      pick(open ? { mode: 'existing', dealId: open.id } : canNewDeal ? { mode: 'new', title: c.name } : { mode: 'service' });
+      pick(open ? { mode: 'existing', dealId: open.id } : anyNewDeal ? { mode: 'new', title: c.name } : { mode: 'service' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить сделки клиента');
     }
   };
   const chooseDeal = (d: CrmDealHit) => {
-    setDealList((prev) => [{ id: d.id, title: d.title, categoryId: d.categoryId, closed: d.closed }, ...prev.filter((x) => x.id !== d.id)]);
+    setDealList((prev) => [toCard(d), ...prev.filter((x) => x.id !== d.id)]);
     if (d.contact) setClient({ contactId: d.contact.id, name: d.contact.name });
     setSearching(false);
     pick({ mode: 'existing', dealId: d.id });
   };
+  const resetClient = () => {
+    setClient({ contactId: null, name: null });
+    setDealList([]);
+    setSearching(false);
+    setDeal({ mode: 'none' });
+  };
 
-  const dealBlock = (
+  // Слот выбран в календаре группы: ресурс и время, конец — по режиму группы.
+  const pickSlot = (resourceId: number, startIso: string) => {
+    if (!group) return;
+    const d = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(new Date(startIso));
+    setResourceIds([resourceId]);
+    setPeriod(defaultPeriod(group, d, fmtTime(startIso, timezone)));
+    setError('');
+  };
+  /** Длительность в часах — конец от начала (быстрые кнопки карточки слота). */
+  const setHours = (h: number) => {
+    const start = zonedTimeToUtc(period.startDate, period.startTime, timezone).getTime();
+    const end = new Date(start + h * 3_600_000);
+    setPeriod({ ...period, endDate: new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(end), endTime: fmtTime(end.toISOString(), timezone) });
+  };
+
+  // Занятость ресурса на выбранное время — для селектора ресурса.
+  const startMs = Date.parse(zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).toISOString());
+  const endMs = Date.parse(zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).toISOString());
+  const busyUntil = (rid: number): string | null => {
+    const b = (dayData?.bookings ?? []).filter((x) => x.resourceIds.includes(rid) && Date.parse(x.start) < endMs && Date.parse(x.end) > startMs);
+    return b.length ? fmtTime(b.reduce((m, x) => (Date.parse(x.end) > Date.parse(m) ? x.end : m), b[0].end), timezone) : null;
+  };
+
+  // Слот: пересекается с бронью — занято (Битрикс24 не даст), с тех. окном — можно, с предупреждением.
+  const slotState: 'free' | 'tech' | 'busy' | null = resourceIds.length
+    ? resourceIds.some((rid) => busyUntil(rid))
+      ? 'busy'
+      : (dayData?.techWindows ?? []).some((t) => resourceIds.includes(t.resourceId) && Date.parse(t.start) < endMs && Date.parse(t.end) > startMs)
+        ? 'tech'
+        : 'free'
+    : null;
+  const durationMs = endMs - startMs;
+  const days = Array.from({ length: 7 }, (_, i) => shiftDate(period.startDate, i - 2));
+
+  // Сводка внизу: клиент · сделка · ресурс · дата/время · длительность · сумма.
+  const utc = periodToUtc(period, timezone);
+  const total = productsTotal(productRows);
+  const summary = [
+    client.name,
+    deal.mode === 'existing' ? `сделка #${deal.dealId}` : deal.mode === 'new' ? 'новая сделка' : deal.mode === 'service' ? 'служебная' : null,
+    step === 'details' || step === 'slot' ? resourceIds.map((id) => names.get(id)).filter(Boolean).join(', ') || null : null,
+    (step === 'details' || step === 'slot') && resourceIds.length
+      ? `${period.startDate.slice(8, 10)}.${period.startDate.slice(5, 7)} ${period.startTime}–${period.endDate !== period.startDate ? `${period.endDate.slice(8, 10)}.${period.endDate.slice(5, 7)} ` : ''}${period.endTime}`
+      : null,
+    (step === 'details' || step === 'slot') && resourceIds.length && !('error' in utc) ? durationText(Date.parse(utc.end) - Date.parse(utc.start)) : null,
+    step === 'details' && total ? fmtMoney(total, 'RUB') : null,
+  ].filter(Boolean);
+
+  const dealCardButton = (d: DealCard, meta: string) => (
+    <button
+      key={d.id}
+      type="button"
+      role="radio"
+      aria-checked={selectedId === d.id}
+      className={`bk-choice wz-deal${selectedId === d.id ? ' selected' : ''}`}
+      onClick={() => {
+        pick({ mode: 'existing', dealId: d.id });
+        if (d.client !== undefined) setClient((c) => (c.contactId ? c : { contactId: null, name: d.client ?? null }));
+      }}
+    >
+      <span className="bk-dot" aria-hidden="true" />
+      <span className="wz-deal-main">
+        <b>{d.title}</b>
+        <span className="wz-deal-sub">
+          {[d.client, d.opportunity ? fmtMoney(d.opportunity, 'RUB') : null, `#${d.id}${meta}`].filter(Boolean).join(' · ')}
+        </span>
+      </span>
+    </button>
+  );
+
+  const dealStep = (
     <section className="bk-section">
-      <h4 className="bk-title">{wizard ? 'По какой сделке бронь?' : 'Клиент и сделка'}</h4>
-      {searching ? (
-        <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus={!wizard} />
+      {client.contactId || client.name || dealList.length ? (
+        <>
+          <p className="bk-client">
+            Клиент: <b>{client.name ?? `#${client.contactId}`}</b>
+            {client.contactId && <span className="muted"> · контакт #{client.contactId}</span>}
+            <button type="button" className="bk-more" onClick={() => setSearching(!searching)}>
+              Другой клиент или сделка
+            </button>
+            {!context.contactId && (
+              <button type="button" className="bk-more" onClick={resetClient}>
+                Сбросить
+              </button>
+            )}
+          </p>
+          {searching && <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />}
+          <h4 className="bk-title">Сделки клиента</h4>
+          <div className="bk-choices" role="radiogroup" aria-label="Сделка">
+            {visibleDeals.map((d) => dealCardButton(d, d.id === context.dealId ? ' · открыта сейчас' : d.closed ? ' · закрыта' : ''))}
+            {hiddenCount > 0 && (
+              <button type="button" className="bk-more" onClick={() => setMoreDeals(true)}>
+                Показать ещё ({hiddenCount})
+              </button>
+            )}
+            {!dealCards.length && <p className="cp-hint">У клиента нет открытых сделок — создайте новую.</p>}
+          </div>
+        </>
       ) : (
-        <p className="bk-client">
-          {client.name || client.contactId ? (
-            <>
-              Клиент: <b>{client.name ?? `#${client.contactId}`}</b>
-              {client.contactId && <span className="muted"> · контакт #{client.contactId}</span>}
-            </>
-          ) : (
-            <span className="muted">Клиент не выбран</span>
-          )}
-          <button type="button" className="bk-more" onClick={() => setSearching(true)}>
-            {client.contactId ? 'Другой клиент или сделка' : 'Найти клиента или сделку'}
-          </button>
-        </p>
+        <>
+          <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />
+          <h4 className="bk-title">Последняя активность</h4>
+          {!recent.deals && <p className="cp-hint">Загрузка сделок…</p>}
+          {recent.error && <p className="cp-hint error">{recent.error}</p>}
+          {recent.deals && !recent.deals.length && !recent.error && <p className="cp-hint">Открытых сделок нет.</p>}
+          <div className="bk-choices wz-recent" role="radiogroup" aria-label="Сделки с последней активностью">
+            {recent.deals?.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                role="radio"
+                aria-checked={selectedId === d.id}
+                className={`bk-choice wz-deal${selectedId === d.id ? ' selected' : ''}`}
+                onClick={() => chooseDeal(d)}
+              >
+                <span className="bk-dot" aria-hidden="true" />
+                <span className="wz-deal-main">
+                  <b>{d.title}</b>
+                  <span className="wz-deal-sub">{[d.contact?.name, d.opportunity ? fmtMoney(d.opportunity, d.currency) : null, `#${d.id}`].filter(Boolean).join(' · ')}</span>
+                </span>
+                {d.lastActivityAt && <span className="wz-ago">{agoText(d.lastActivityAt)}</span>}
+              </button>
+            ))}
+          </div>
+        </>
       )}
-      <div className="bk-choices" role="radiogroup" aria-label="Сделка">
-        {visibleDeals.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            role="radio"
-            aria-checked={selectedId === d.id}
-            className={`bk-choice${selectedId === d.id ? ' selected' : ''}`}
-            onClick={() => pick({ mode: 'existing', dealId: d.id })}
-          >
-            <span className="bk-dot" aria-hidden="true" />
-            <b>{d.title}</b>
-            <span className="bk-meta">
-              #{d.id}
-              {d.id === context.dealId ? ' · открыта сейчас' : 'closed' in d && d.closed ? ' · закрыта' : d.id === dealCards[0]?.id ? ' · последняя' : ''}
-            </span>
-          </button>
-        ))}
-        {hiddenCount > 0 && (
-          <button type="button" className="bk-more" onClick={() => setMoreDeals(true)}>
-            Показать ещё ({hiddenCount})
-          </button>
-        )}
-        {(wizard ? anyNewDeal : canNewDeal) &&
+      <div className="bk-choices wz-other">
+        {anyNewDeal &&
           (deal.mode === 'new' ? (
             <div className="bk-choice selected bk-new">
               <span className="bk-dot" aria-hidden="true" />
               <input
                 aria-label="Название новой сделки"
-                placeholder="Название новой сделки"
-                autoFocus
+                placeholder={client.contactId ? 'Название новой сделки для клиента' : 'Название новой сделки'}
                 value={deal.title}
                 maxLength={255}
                 onChange={(e) => setDeal({ mode: 'new', title: e.target.value })}
@@ -373,7 +521,7 @@ export function BookingForm({
             </div>
           ) : (
             <button type="button" className="bk-choice bk-add-deal" onClick={() => pick({ mode: 'new', title: client.name ?? '' })}>
-              ＋ Создать новую сделку
+              ＋ {client.contactId ? 'Новая сделка для клиента' : 'Новая сделка'}
             </button>
           ))}
         <button type="button" role="radio" aria-checked={deal.mode === 'service'} className={`bk-service${deal.mode === 'service' ? ' selected' : ''}`} onClick={() => pick({ mode: 'service' })}>
@@ -383,35 +531,258 @@ export function BookingForm({
     </section>
   );
 
+  const groupStep = (
+    <section className="bk-section">
+      <div className="wz-groups" role="radiogroup" aria-label="Группа">
+        {groupChoices.map((g) => (
+          <button key={g.id} type="button" role="radio" aria-checked={g.id === groupId} className={`wz-group${g.id === groupId ? ' selected' : ''}`} onClick={() => chooseGroup(g.id)}>
+            <b>{g.name}</b>
+            <span className="muted">
+              ресурсов: {g.resourceIds.length}
+              {dealCategory !== null && g.dealCategoryId === dealCategory ? ' · воронка сделки' : ''}
+            </span>
+          </button>
+        ))}
+      </div>
+      {!groupChoices.length && <p className="notice error">Нет групп, где вам можно создать такую бронь.</p>}
+    </section>
+  );
+
+  const slotStep = (
+    <section className="bk-section wz-slot">
+      <div className="wz-daynav">
+        <button type="button" aria-label="Раньше" onClick={() => setPeriod({ ...period, startDate: shiftDate(period.startDate, -1), endDate: shiftDate(period.endDate, -1) })}>
+          ‹
+        </button>
+        <div className="wz-days" role="group" aria-label="Дни">
+          {days.map((d) => {
+            const wd = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short' }).format(new Date(`${d}T12:00:00Z`));
+            const weekend = [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay());
+            return (
+              <button
+                key={d}
+                type="button"
+                aria-pressed={d === period.startDate}
+                className={`wz-day${d === period.startDate ? ' active' : ''}${weekend ? ' weekend' : ''}`}
+                onClick={() => group && setPeriod(defaultPeriod(group, d, period.startTime))}
+              >
+                <small>{wd}</small>
+                <b>{Number(d.slice(8, 10))}</b>
+              </button>
+            );
+          })}
+        </div>
+        <button type="button" aria-label="Позже" onClick={() => setPeriod({ ...period, startDate: shiftDate(period.startDate, 1), endDate: shiftDate(period.endDate, 1) })}>
+          ›
+        </button>
+        <input
+          type="date"
+          aria-label="Дата брони"
+          value={period.startDate}
+          onChange={(e) => {
+            if (!e.target.value || !group) return;
+            setPeriod(defaultPeriod(group, e.target.value, period.startTime));
+          }}
+        />
+      </div>
+      <p className="cp-hint">{fmtDayTitle(period.startDate, timezone)} · кликните по свободному месту в колонке ресурса</p>
+      <div className="wz-slot-layout">
+        <div className="wz-slot-grid">
+          {!dayData && <p className="cp-hint">Загрузка календаря…</p>}
+          {dayData && <DayGrid day={dayData} highlightDealId={existingDealId} onSelect={() => undefined} onCreate={pickSlot} />}
+        </div>
+        <aside className={`wz-slot-card${resourceIds.length ? ' active' : ''}`} aria-label="Выбранное время">
+          {resourceIds.length ? (
+            <>
+              <b className="wz-slot-res">{resourceIds.map((id) => names.get(id) ?? `#${id}`).join(', ')}</b>
+              <div className="wz-slot-when">
+                {Number(period.startDate.slice(8, 10))}.{period.startDate.slice(5, 7)}, {period.startTime}–{period.endTime}
+                {durationMs > 0 && <span className="muted"> ({durationText(durationMs)})</span>}
+              </div>
+              <div className="df-row pair">
+                <label className="df-field">
+                  <span className="df-label">Начало</span>
+                  <input type="time" aria-label="Время начала" value={period.startTime} onChange={(e) => setPeriod({ ...period, startTime: e.target.value })} />
+                </label>
+                <label className="df-field">
+                  <span className="df-label">Конец</span>
+                  <input type="time" aria-label="Время конца" value={period.endTime} onChange={(e) => setPeriod({ ...period, endTime: e.target.value })} />
+                </label>
+              </div>
+              {group?.bookingMode !== 'interval' && (
+                <div className="wz-durations" role="group" aria-label="Длительность">
+                  {[2, 3, 4, 6].map((h) => (
+                    <button key={h} type="button" aria-pressed={durationMs === h * 3_600_000} className={durationMs === h * 3_600_000 ? 'active' : ''} onClick={() => setHours(h)}>
+                      {h} ч
+                    </button>
+                  ))}
+                </div>
+              )}
+              {slotState && (
+                <p className={`wz-slot-state ${slotState}`}>
+                  {slotState === 'free' ? '✓ Свободно' : slotState === 'tech' ? '⚠ Тех. окно — можно продолжить' : '✕ Занято другой бронью — выберите другое время'}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="cp-hint">Выберите время в календаре — здесь появится бронь.</p>
+          )}
+        </aside>
+      </div>
+    </section>
+  );
+
+  const detailsStep = (
+    <>
+      <section className="bk-section">
+        <h4 className="bk-title">Где и когда</h4>
+        <div className="wz-resources" role="radiogroup" aria-label="Ресурс">
+          {(list ?? []).map((r) => {
+            const until = busyUntil(r.id);
+            const on = resourceIds.includes(r.id);
+            return (
+              <button
+                key={r.id}
+                type="button"
+                role="checkbox"
+                aria-checked={on}
+                className={`wz-resource${on ? ' selected' : ''}${until ? ' busy' : ''}`}
+                onClick={() => setResourceIds(on ? resourceIds.filter((x) => x !== r.id) : [...resourceIds, r.id])}
+              >
+                <b>{r.name}</b>
+                <span className={`wz-res-state${until ? ' busy' : ''}`}>{until ? `занят до ${until}` : 'свободен'}</span>
+              </button>
+            );
+          })}
+          {!list && <p className="cp-hint">Загрузка ресурсов…</p>}
+        </div>
+        <div className="df-grid wz-time">
+          <div className="df-row pair">
+            <label className="df-field">
+              <span className="df-label">Начало</span>
+              <span className="bk-dt">
+                <input type="date" aria-label="Дата начала" required value={period.startDate} onChange={(e) => setPeriod({ ...period, startDate: e.target.value })} />
+                <input type="time" aria-label="Время начала" required value={period.startTime} onChange={(e) => setPeriod({ ...period, startTime: e.target.value })} />
+              </span>
+            </label>
+            <label className="df-field">
+              <span className="df-label">Конец</span>
+              <span className="bk-dt">
+                <input type="date" aria-label="Дата конца" required value={period.endDate} onChange={(e) => setPeriod({ ...period, endDate: e.target.value })} />
+                <input type="time" aria-label="Время конца" required value={period.endTime} onChange={(e) => setPeriod({ ...period, endTime: e.target.value })} />
+              </span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {deal.mode !== 'service' && (
+        <section className="bk-section">
+          <h4 className="bk-title">
+            Товары
+            {deal.mode === 'existing' && <span className="bk-title-hint"> · изменения заменят товары сделки</span>}
+          </h4>
+          <ProductsEditor catalog={cat} rows={productRows} onChange={setProductRows} loading={productsLoading} />
+        </section>
+      )}
+
+      {deal.mode !== 'service' && (
+        <section className="bk-section">
+          <h4 className="bk-title">Бронь и оплата</h4>
+          <div className="df-grid">
+            <div className="df-row pair">
+              {group && (group.bookingTypes ?? []).length > 0 && (
+                <label className="df-field">
+                  <span className="df-label">
+                    Тип брони{group.bookingTypeRequired && <i className="df-req">*</i>}
+                  </span>
+                  <select value={bookingTypeId} onChange={(e) => setBookingTypeId(e.target.value)}>
+                    {!(group.bookingTypeRequired && deal.mode === 'new' && !productRows.length) && <option value="">По товарам сделки</option>}
+                    {group.bookingTypeRequired && deal.mode === 'new' && !productRows.length && !bookingTypeId && <option value="">Выберите…</option>}
+                    {(group.bookingTypes ?? []).map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="df-field">
+                <span className="df-label">Оплата</span>
+                <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
+                  {modes.map((m) => (
+                    <option key={m} value={m}>
+                      {PAYMENT_MODE_LABELS[m]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {!guestsField && (
+              <div className="df-row pair">
+                <label className="df-field">
+                  <span className="df-label">Гостей</span>
+                  <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
+                </label>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {deal.mode !== 'service' && createFields.length > 0 && (
+        <section className="bk-section">
+          <h4 className="bk-title">Поля сделки</h4>
+          <DealFieldsEditor fields={createFields} values={values} auto={fieldState.auto} onChange={fieldState.set} onResetFormula={fieldState.resetFormula} />
+        </section>
+      )}
+      {deal.mode !== 'service' && formKey && !currentForm && <p className="bk-loading">Загрузка полей сделки…</p>}
+      {currentForm?.error && <p className="notice error">{currentForm.error}</p>}
+      {(deal.mode === 'service' || !commentField) && (
+        <section className="bk-section">
+          <label className="df-field">
+            <span className="df-label">Комментарий</span>
+            <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
+          </label>
+        </section>
+      )}
+    </>
+  );
+
   return (
     <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
       <form
-        className="sheet bk"
+        className="sheet bk wz"
         role="dialog"
         aria-modal="true"
         aria-label="Новая бронь"
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          if (step === 'deal') return next();
-          if (step === 'group') return setStep('details');
-          void submit();
+          if (step === 'details') void submit();
+          else goNext();
         }}
       >
         <header className="bk-head">
           <div>
             <h3>Новая бронь</h3>
-            <span className="bk-sub">{[group?.name, client.name].filter(Boolean).join(' · ')}</span>
+            <span className="bk-sub">{[group?.name, client.name, deal.mode !== 'new' || step !== 'deal' ? dealLabel : null].filter(Boolean).join(' · ')}</span>
           </div>
           <button type="button" className="bk-close" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
         </header>
-        {wizard && (
-          <ol className="bk-steps">
-            {(['deal', 'group', 'details'] as const).map((s, i) => (
-              <li key={s} className={s === step ? 'active' : ['deal', 'group', 'details'].indexOf(step) > i ? 'done' : ''}>
-                {['Сделка', 'Группа', 'Детали'][i]}
+        {steps.length > 1 && (
+          <ol className="bk-steps wz-steps">
+            {steps.map((s, i) => (
+              <li key={s} className={s === step ? 'active' : stepIndex > i ? 'done' : ''}>
+                {stepIndex > i ? (
+                  <button type="button" className="wz-step-back" onClick={() => setStep(s)}>
+                    {STEP_TITLES[s]}
+                  </button>
+                ) : (
+                  STEP_TITLES[s]
+                )}
               </li>
             ))}
           </ol>
@@ -421,196 +792,10 @@ export function BookingForm({
             <p className="notice error">Нет права создавать брони ни в одной группе.</p>
           ) : (
             <>
-              {step === 'deal' && dealBlock}
-              {step === 'group' && (
-                <section className="bk-section">
-                  <h4 className="bk-title">Группа для брони</h4>
-                  <div className="bk-choices" role="radiogroup" aria-label="Группа">
-                    {groupChoices.map((g) => (
-                      <button
-                        key={g.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={g.id === groupId}
-                        className={`bk-choice${g.id === groupId ? ' selected' : ''}`}
-                        onClick={() => chooseGroup(g.id)}
-                      >
-                        <span className="bk-dot" aria-hidden="true" />
-                        <b>{g.name}</b>
-                        {dealCategory !== null && g.dealCategoryId === dealCategory && <span className="bk-meta">воронка сделки</span>}
-                      </button>
-                    ))}
-                  </div>
-                  {!groupChoices.length && <p className="notice error">Нет групп, где вам можно создать такую бронь.</p>}
-                </section>
-              )}
-              {step === 'details' && wizard && (
-                <p className="wizard-summary">
-                  <span>
-                    Сделка: <b>{dealLabel}</b>{' '}
-                    <button type="button" className="link" onClick={() => setStep('deal')}>
-                      изменить
-                    </button>
-                  </span>
-                  <span>
-                    Группа: <b>{group?.name}</b>{' '}
-                    <button type="button" className="link" onClick={() => setStep('group')}>
-                      изменить
-                    </button>
-                  </span>
-                </p>
-              )}
-              {step === 'details' && (
-                <>
-                  <section className="bk-section">
-                    <h4 className="bk-title">Когда и где</h4>
-                    <div className="df-grid">
-                      {!wizard && allowed.length > 1 && (
-                        <div className="df-row">
-                          <label className="df-field">
-                            <span className="df-label">Группа</span>
-                            <select value={groupId} onChange={(e) => chooseGroup(e.target.value)}>
-                              {allowed.map((g) => (
-                                <option key={g.id} value={g.id}>
-                                  {g.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-                      )}
-                      <div className="df-row">
-                        <div className="df-field">
-                          <span className="df-label">{resourceRows.length > 1 ? 'Ресурсы' : 'Ресурс'}</span>
-                          <div className="bk-resources">
-                            {resourceRows.map((rid, i) => (
-                              <span key={i} className="df-control">
-                                <select
-                                  aria-label={i === 0 ? 'Ресурс' : `Ресурс ${i + 1}`}
-                                  value={rid || ''}
-                                  disabled={!list}
-                                  onChange={(e) => (resourceIds.length ? setResourceAt(i, Number(e.target.value)) : setResourceIds([Number(e.target.value)]))}
-                                >
-                                  {!rid && <option value="">{list ? 'Выберите…' : 'Загрузка…'}</option>}
-                                  {(list ?? [])
-                                    .filter((r) => r.id === rid || !resourceIds.includes(r.id))
-                                    .map((r) => (
-                                      <option key={r.id} value={r.id}>
-                                        {r.name}
-                                      </option>
-                                    ))}
-                                </select>
-                                {i > 0 && (
-                                  <button type="button" className="df-reset" aria-label="Убрать ресурс" onClick={() => setResourceIds(resourceIds.filter((_, k) => k !== i))}>
-                                    ×
-                                  </button>
-                                )}
-                              </span>
-                            ))}
-                            {resourceIds.length > 0 && freeResources.length > 0 && (
-                              <button type="button" className="bk-more" onClick={() => setResourceIds([...resourceIds, freeResources[0].id])}>
-                                ＋ ещё ресурс
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="df-row pair">
-                        <label className="df-field">
-                          <span className="df-label">Начало</span>
-                          <span className="bk-dt">
-                            <input type="date" aria-label="Дата начала" required value={period.startDate} onChange={(e) => setPeriod({ ...period, startDate: e.target.value })} />
-                            <input type="time" aria-label="Время начала" required value={period.startTime} onChange={(e) => setPeriod({ ...period, startTime: e.target.value })} />
-                          </span>
-                        </label>
-                        <label className="df-field">
-                          <span className="df-label">Конец</span>
-                          <span className="bk-dt">
-                            <input type="date" aria-label="Дата конца" required value={period.endDate} onChange={(e) => setPeriod({ ...period, endDate: e.target.value })} />
-                            <input type="time" aria-label="Время конца" required value={period.endTime} onChange={(e) => setPeriod({ ...period, endTime: e.target.value })} />
-                          </span>
-                        </label>
-                      </div>
-                    </div>
-                  </section>
-
-                  {!wizard && dealBlock}
-
-                  {deal.mode !== 'service' && (
-                    <section className="bk-section">
-                      <h4 className="bk-title">Бронь и оплата</h4>
-                      <div className="df-grid">
-                        <div className="df-row pair">
-                          {group && (group.bookingTypes ?? []).length > 0 && (
-                            <label className="df-field">
-                              <span className="df-label">
-                                Тип брони{group.bookingTypeRequired && <i className="df-req">*</i>}
-                              </span>
-                              <select value={bookingTypeId} onChange={(e) => setBookingTypeId(e.target.value)}>
-                                {!(group.bookingTypeRequired && deal.mode === 'new' && !productRows.length) && <option value="">По товарам сделки</option>}
-                                {group.bookingTypeRequired && deal.mode === 'new' && !productRows.length && !bookingTypeId && <option value="">Выберите…</option>}
-                                {(group.bookingTypes ?? []).map((t) => (
-                                  <option key={t.id} value={t.id}>
-                                    {t.title}
-                                  </option>
-                                ))}
-                              </select>
-                              {group.bookingTypeRequired && !bookingTypeId && deal.mode === 'existing' && (
-                                <small className="df-hint">Не определится по товарам — бронь не создастся.</small>
-                              )}
-                            </label>
-                          )}
-                          <label className="df-field">
-                            <span className="df-label">Оплата</span>
-                            <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
-                              {modes.map((m) => (
-                                <option key={m} value={m}>
-                                  {PAYMENT_MODE_LABELS[m]}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-                        {!guestsField && (
-                          <div className="df-row pair">
-                            <label className="df-field">
-                              <span className="df-label">Гостей</span>
-                              <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                    </section>
-                  )}
-
-                  {deal.mode !== 'service' && (
-                    <section className="bk-section">
-                      <h4 className="bk-title">
-                        Товары
-                        {deal.mode === 'existing' && <span className="bk-title-hint"> · изменения заменят товары сделки</span>}
-                      </h4>
-                      <ProductsEditor catalog={cat} rows={productRows} onChange={setProductRows} loading={productsLoading} />
-                    </section>
-                  )}
-
-                  {deal.mode !== 'service' && createFields.length > 0 && (
-                    <section className="bk-section">
-                      <h4 className="bk-title">Поля сделки</h4>
-                      <DealFieldsEditor fields={createFields} values={values} auto={fieldState.auto} onChange={fieldState.set} onResetFormula={fieldState.resetFormula} />
-                    </section>
-                  )}
-                  {deal.mode !== 'service' && formKey && !currentForm && <p className="bk-loading">Загрузка полей сделки…</p>}
-                  {currentForm?.error && <p className="notice error">{currentForm.error}</p>}
-                  {(deal.mode === 'service' || !commentField) && (
-                    <section className="bk-section">
-                      <label className="df-field">
-                        <span className="df-label">Комментарий</span>
-                        <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
-                      </label>
-                    </section>
-                  )}
-                </>
-              )}
+              {step === 'deal' && dealStep}
+              {step === 'group' && groupStep}
+              {step === 'slot' && slotStep}
+              {step === 'details' && detailsStep}
               {error && (
                 <p className="notice error" role="alert">
                   {error}
@@ -621,23 +806,103 @@ export function BookingForm({
         </div>
         {allowed.length > 0 && (
           <footer className="bk-foot">
-            <span className="bk-summary">{step === 'details' ? summary.join(' · ') : 'Товары и цены — в сделке'}</span>
+            <span className="bk-summary">{summary.join(' · ')}</span>
             <span className="bk-actions">
-              {step !== 'deal' && wizard && (
-                <button type="button" disabled={busy} onClick={() => setStep(step === 'details' ? 'group' : 'deal')}>
+              {stepIndex > 0 && (
+                <button type="button" disabled={busy} onClick={goBack}>
                   Назад
                 </button>
               )}
               <button type="button" disabled={busy} onClick={onClose}>
                 Отмена
               </button>
-              <button type="submit" className="primary" disabled={busy || (step === 'group' && !groupChoices.some((g) => g.id === groupId))}>
-                {step !== 'details' ? 'Далее' : busy ? 'Создаю…' : 'Создать бронь'}
-              </button>
+              {step !== 'slot' && (
+                <button type="submit" className="primary" disabled={busy}>
+                  {step !== 'details' ? 'Далее' : busy ? 'Создаю…' : 'Создать бронь'}
+                </button>
+              )}
+              {step === 'slot' && resourceIds.length > 0 && (
+                <button type="submit" className="primary">
+                  Далее
+                </button>
+              )}
             </span>
           </footer>
         )}
+        {askFields && (
+          <FieldsDecision
+            fields={filled}
+            onDone={(clear) => {
+              for (const code of clear) fieldState.set(code, '');
+              setDecided(formKey);
+            }}
+          />
+        )}
       </form>
+    </div>
+  );
+}
+
+const toCard = (d: CrmDealHit): DealCard => ({
+  id: d.id,
+  title: d.title,
+  categoryId: d.categoryId,
+  closed: d.closed,
+  client: d.contact?.name ?? null,
+  opportunity: d.opportunity,
+  lastActivityAt: d.lastActivityAt,
+});
+
+/**
+ * В сделке уже заполнены поля формы — что с ними делать: оставить (по умолчанию) или очистить.
+ * Переключатель на каждое поле и «Оставить все / Очистить все».
+ */
+function FieldsDecision({ fields, onDone }: { fields: DealFormField[]; onDone: (clear: string[]) => void }) {
+  const [clear, setClear] = useState<Set<string>>(new Set());
+  const toggle = (code: string, on: boolean) =>
+    setClear((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(code);
+      else next.delete(code);
+      return next;
+    });
+  return (
+    <div className="wz-modal-backdrop" role="presentation">
+      <div className="wz-modal" role="dialog" aria-modal="true" aria-label="В сделке уже заполнены поля">
+        <h4>В сделке уже заполнены поля</h4>
+        <p className="muted">Оставить значения или очистить перед новой бронью?</p>
+        <div className="wz-modal-all">
+          <button type="button" onClick={() => setClear(new Set())}>
+            Оставить все
+          </button>
+          <button type="button" onClick={() => setClear(new Set(fields.map((f) => f.code)))}>
+            Очистить все
+          </button>
+        </div>
+        <ul className="wz-filled">
+          {fields.map((f) => (
+            <li key={f.code}>
+              <span className="wz-filled-name">
+                <b>{f.label}</b>
+                <span className="muted">{f.display || f.value}</span>
+              </span>
+              <span className="segmented wz-keep" role="group" aria-label={f.label}>
+                <button type="button" className={!clear.has(f.code) ? 'active' : ''} aria-pressed={!clear.has(f.code)} onClick={() => toggle(f.code, false)}>
+                  Оставить
+                </button>
+                <button type="button" className={clear.has(f.code) ? 'active' : ''} aria-pressed={clear.has(f.code)} onClick={() => toggle(f.code, true)}>
+                  Очистить
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="form-actions">
+          <button type="button" className="primary" onClick={() => onDone([...clear])}>
+            Продолжить
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

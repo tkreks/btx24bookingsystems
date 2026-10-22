@@ -117,6 +117,8 @@ export const DEAL_FIELD_ROLES = {
   prepaymentLink: 'Ссылка на предоплату',
   surchargeInvoiceId: 'ID Счёта на доплату',
   surchargeLink: 'Ссылка на доплату',
+  /** Пересчитывается приложением: сумма проведённых оплат по всем счетам сделки. */
+  paidAmount: 'Сумма внесённых оплат',
 } as const;
 export type DealFieldRole = keyof typeof DEAL_FIELD_ROLES;
 export type DealFieldMapDto = Partial<Record<DealFieldRole, string>>;
@@ -185,7 +187,7 @@ export interface CreateBookingDto {
   guests?: number | null;
   comment?: string;
   /** Товары сделки (заменяют строки сделки, как в прототипе); цена — вручную. Пусто — не трогать. */
-  products?: { productId: number; quantity: number; price: number }[];
+  products?: BookingProductInput[];
   paymentMode: PaymentMode;
   /** Тип брони, выбранный менеджером (id правила группы); не задан — по товарам сделки, как в БП 270. */
   bookingTypeId?: string | null;
@@ -261,12 +263,38 @@ export interface BookingCatalogDto {
   restricted: boolean;
 }
 
+/** Скидка строки товара: в процентах или суммой (на единицу), как в Битрикс24. */
+export type ProductDiscountType = 'percent' | 'sum';
+
+/**
+ * Товар брони: `price` — цена за единицу без скидки; скидка — процент или сумма на единицу. В
+ * Битрикс24 уходит итоговая цена (`PRICE`) и поля скидки (`DISCOUNT_TYPE_ID/RATE/SUM`).
+ */
+export interface BookingProductInput {
+  productId: number;
+  quantity: number;
+  price: number;
+  discountType?: ProductDiscountType;
+  /** Процент (0–100) или сумма на единицу — по `discountType`. */
+  discount?: number;
+}
+
 /** Строка товаров сделки (`GET /api/deals/:dealId/products`) — форма брони заменяет строки целиком. */
 export interface DealProductRowDto {
   productId: number;
   name: string;
+  /** Цена за единицу без скидки. */
   price: number;
   quantity: number;
+  discountType: ProductDiscountType;
+  discount: number;
+}
+
+/** Итоговая цена за единицу после скидки (до копеек, не меньше 0). */
+export function discountedPrice(p: Pick<BookingProductInput, 'price' | 'discountType' | 'discount'>): number {
+  const d = Math.max(0, p.discount ?? 0);
+  const net = p.discountType === 'sum' ? p.price - d : p.price * (1 - Math.min(d, 100) / 100);
+  return Math.max(0, Math.round(net * 100) / 100);
 }
 
 /** Поиск клиента в форме брони (`GET /api/crm/search?kind=contact&q=`): ID, телефон, e-mail, ФИО. */
@@ -287,9 +315,16 @@ export interface CrmDealHit {
   currency: string | null;
   contact: { id: number; name: string | null } | null;
   createdAt: string | null;
+  /** Последняя активность по сделке (чаты, звонки, дела — `LAST_ACTIVITY_TIME`). */
+  lastActivityAt: string | null;
 }
 
 export interface CrmSearchDto {
   contacts: CrmContactHit[];
+  deals: CrmDealHit[];
+}
+
+/** `GET /api/crm/recent-deals` — 20 открытых сделок с последней активностью (воронки групп сотрудника). */
+export interface RecentDealsDto {
   deals: CrmDealHit[];
 }

@@ -28,6 +28,7 @@ export const APP_FILLED_ROLES: readonly DealFieldRole[] = [
   'prepaymentLink',
   'surchargeInvoiceId',
   'surchargeLink',
+  'paidAmount',
 ];
 
 const KINDS: Record<string, DealFormFieldKind> = {

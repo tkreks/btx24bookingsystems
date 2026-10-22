@@ -1,11 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   canUsePaymentMode,
+  discountedPrice,
   detectBookingType,
   PROGRAM_FROM_KEYWORD,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
   type CreateBookingDto,
+  type BookingProductInput,
   type CreateBookingResultDto,
   type DealFormField,
   type GroupOptionsDto,
@@ -37,7 +39,18 @@ export const createSchema = z
     guests: z.number().int().min(0).max(1000).nullable().optional(),
     comment: z.string().max(2000).optional(),
     products: z
-      .array(z.object({ productId: z.number().int().positive(), quantity: z.number().positive().max(10000), price: z.number().min(0).max(100_000_000) }).strict())
+      .array(
+        z
+          .object({
+            productId: z.number().int().positive(),
+            quantity: z.number().positive().max(10000),
+            price: z.number().min(0).max(100_000_000),
+            discountType: z.enum(['percent', 'sum']).optional(),
+            discount: z.number().min(0).max(100_000_000).optional(),
+          })
+          .strict()
+          .refine((p) => p.discountType !== 'percent' || (p.discount ?? 0) <= 100, { message: 'Скидка больше 100%' }),
+      )
       .max(50)
       .optional(),
     paymentMode: z.enum(PAYMENT_MODES),
@@ -243,7 +256,7 @@ export class BookingCreateService {
 
       // 5. Товары (полная замена строк сделки)
       if (dealId && products.length) {
-        const rows = products.map((p) => ({ PRODUCT_ID: p.productId, PRICE: p.price, QUANTITY: p.quantity }));
+        const rows = products.map(productRow);
         if (await this.dealWrite(() => user.client.call('crm.deal.productrows.set', { id: dealId, rows }), createdDeal, log, 'productrows.set'))
           await log('productrows.set', true, { count: products.length });
         else warnings.push(`Товары сделки #${dealId} не записаны: изменять существующие сделки приложению пока не разрешено`);
@@ -362,4 +375,21 @@ export function zonedIso(d: Date, timeZone: string): string {
   const hh = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0');
   const mm = String(Math.abs(off) % 60).padStart(2, '0');
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${sign}${hh}:${mm}`;
+}
+
+/**
+ * Строка товара для `crm.deal.productrows.set`: итоговая цена за единицу и скидка — процентом
+ * (`DISCOUNT_TYPE_ID = 2`) или суммой на единицу (`1`), как хранит Битрикс24.
+ */
+export function productRow(p: BookingProductInput) {
+  const final = discountedPrice(p);
+  const perUnit = Math.round((p.price - final) * 100) / 100;
+  return {
+    PRODUCT_ID: p.productId,
+    QUANTITY: p.quantity,
+    PRICE: final,
+    DISCOUNT_TYPE_ID: p.discountType === 'sum' ? 1 : 2,
+    DISCOUNT_RATE: p.discountType === 'sum' ? (p.price ? Math.round((perUnit / p.price) * 10000) / 100 : 0) : Math.min(p.discount ?? 0, 100),
+    DISCOUNT_SUM: perUnit,
+  };
 }

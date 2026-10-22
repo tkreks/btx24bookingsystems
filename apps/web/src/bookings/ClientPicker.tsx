@@ -45,7 +45,7 @@ export function ClientPicker({
   return (
     <div className="cp">
       <div className="cp-bar">
-        <div className="segmented cp-kind" role="group" aria-label="Что ищем">
+        <div className="wz-seg cp-kind" role="group" aria-label="Что ищем">
           {(
             [
               ['contact', 'Клиент'],
