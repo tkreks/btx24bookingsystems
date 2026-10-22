@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { CalendarBooking, CalendarDay, CancelBookingResultDto, DealFormDto } from '@btx24/shared';
 import { apiGet, apiPost, apiPut } from '../api.js';
-import { DealFieldsEditor, initialValues } from '../bookings/DealFieldsEditor.js';
+import { DealFieldsEditor, initialValues, useDealFieldValues } from '../bookings/DealFieldsEditor.js';
 import { fmtDateTime, fmtMoney } from '../format.js';
 
 export function BookingDetails({
@@ -30,7 +30,9 @@ export function BookingDetails({
 }) {
   const names = new Map(day.resources.map((r) => [r.id, r.name]));
   // Правка полей сделки: форма с сервера (поля группы и текущие значения) и введённые значения.
-  const [editing, setEditing] = useState<{ form: DealFormDto; values: Record<string, string> } | null>(null);
+  const [editing, setEditing] = useState<{ form: DealFormDto; n: number } | null>(null);
+  const editFields = editing?.form.fields ?? [];
+  const fieldState = useDealFieldValues(editFields, 'edit', editing ? `edit:${editing.n}` : '');
   // После сохранения показываем свежие значения, пока календарь перечитывает день.
   const [saved, setSaved] = useState<DealFormDto | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,7 +49,8 @@ export function BookingDetails({
     setError('');
     try {
       const form = await apiGet<DealFormDto>(`/deal-form?groupId=${encodeURIComponent(groupId!)}&dealId=${booking.dealId}`);
-      setEditing({ form, values: initialValues(form.fields) });
+      // Каждое открытие правки — свежие значения сделки (ключ состояния полей).
+      setEditing({ form, n: Date.now() });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить поля сделки');
     } finally {
@@ -57,8 +60,8 @@ export function BookingDetails({
   const save = async () => {
     if (!editing) return;
     const before = initialValues(editing.form.fields);
-    const changed = Object.fromEntries(Object.entries(editing.values).filter(([code, v]) => v !== before[code]));
-    const missing = editing.form.fields.find((f) => f.required && !f.readOnly && !editing.values[f.code]?.trim());
+    const changed = Object.fromEntries(Object.entries(fieldState.values).filter(([code, v]) => v !== before[code]));
+    const missing = editing.form.fields.find((f) => f.required && !f.readOnly && !fieldState.values[f.code]?.trim());
     if (missing) return setError(`Заполните поле «${missing.label}»`);
     if (!Object.keys(changed).length) return setEditing(null);
     setBusy(true);
@@ -147,8 +150,10 @@ export function BookingDetails({
             {editing.form.fields.length ? (
               <DealFieldsEditor
                 fields={editing.form.fields}
-                values={editing.values}
-                onChange={(code, v) => setEditing((prev) => prev && { ...prev, values: { ...prev.values, [code]: v } })}
+                values={fieldState.values}
+                auto={fieldState.auto}
+                onChange={fieldState.set}
+                onResetFormula={fieldState.resetFormula}
               />
             ) : (
               <p className="muted">В группе не настроены поля сделки (⚙ → группа → «Поля сделки»).</p>

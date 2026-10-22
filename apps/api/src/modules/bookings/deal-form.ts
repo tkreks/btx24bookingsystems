@@ -70,6 +70,8 @@ export function dealFormFields(
         showView: c.showView,
         ...(kind === 'enum' ? { items: (m?.items ?? []).map((i) => ({ id: String(i.ID), value: i.VALUE })) } : {}),
         role,
+        ...(c.defaultValue ? { defaultValue: c.defaultValue } : {}),
+        ...(c.formula?.trim() && (kind === 'number' || kind === 'money') ? { formula: c.formula.trim() } : {}),
         value: kind && !m?.isMultiple ? toFormValue(raw, kind, timezone) : '',
         display: formatDealValue(raw, m, timezone) ?? '',
       };

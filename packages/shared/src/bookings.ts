@@ -224,6 +224,9 @@ export interface DealFormField {
   items?: { id: string; value: string }[];
   /** Системная роль поля (⚙ → «Приложение»): гости, комментарий менеджера… */
   role: DealFieldRole | null;
+  /** Из настроек группы: значение по умолчанию и формула (форма создания и правки). */
+  defaultValue?: string;
+  formula?: string;
   value: string;
   /** Значение для показа, если поле не редактируется (списки, составные). */
   display: string;

@@ -120,6 +120,7 @@ export class GroupDirectoryService {
       title?: string;
       formLabel?: string;
       listLabel?: string;
+      items?: { ID: string | number; VALUE: string }[];
     };
     const res = await user.client.call<Record<string, Meta>>('crm.deal.fields');
     return Object.entries(res.result ?? {})
@@ -129,6 +130,7 @@ export class GroupDirectoryService {
         type: m.type ?? 'string',
         multiple: Boolean(m.isMultiple),
         readOnly: Boolean(m.isReadOnly),
+        ...(m.type === 'enumeration' ? { items: (m.items ?? []).map((i) => ({ id: String(i.ID), value: i.VALUE })) } : {}),
       }))
       .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
   }

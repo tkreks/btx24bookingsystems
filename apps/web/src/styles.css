@@ -1218,96 +1218,13 @@ main.loading {
 
 /* ---------- форма брони и брони клиента ---------- */
 
-.booking-form {
-  display: grid;
-  gap: 4px;
-  max-width: 640px;
-}
-
-.booking-form header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.booking-form h3 {
-  margin: 0;
-}
-
-.booking-form input[type='date'],
-.booking-form input[type='time'],
-.booking-form input[type='number'],
-.booking-form select,
-.booking-form textarea {
-  font: inherit;
-  font-size: 16px;
-  color: var(--text);
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
-}
-
-.booking-form legend {
-  font-size: 13px;
-  color: var(--muted);
-  padding: 0 4px;
-}
-
-.dt-pair {
-  display: flex;
-  gap: 6px;
-}
-
-.dt-pair input {
-  min-width: 0;
-}
-.bf-grid .dt-pair input[type='time'] {
-  flex: 0 0 104px;
-}
-
-/* Поля сделки группы: форма брони и правка в карточке брони. «Два в строку» — половины. */
-.deal-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 14px;
-}
-.deal-fields > label {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.deal-fields > label.half {
-  grid-column: auto;
-}
-.deal-fields input,
-.deal-fields select,
-.deal-fields textarea {
-  min-width: 0;
-  font: inherit;
-  font-size: 16px;
-  color: var(--text);
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
-}
-.deal-field-ro {
-  color: var(--text);
-  font-size: 14px;
-  padding: 7px 0;
-}
+/* Правка полей сделки в карточке брони. */
 .deal-edit {
   display: grid;
-  gap: 10px;
-  margin-top: 8px;
-}
-@media (max-width: 480px) {
-  .deal-fields > label.half {
-    grid-column: 1 / -1;
-  }
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .client-bookings {
@@ -3333,174 +3250,391 @@ button.msg-media-ph {
   font-size: 12.5px;
 }
 
-/* ---------- форма брони: секции, карточки выбора, футер ---------- */
-.booking-form.sheet {
-  max-width: 620px;
-  max-height: 92dvh;
-  overflow-y: auto;
-  padding-bottom: 0;
+/* ---------- форма брони (bk) и поля сделки (df): строгий вид, единая сетка ---------- */
+.sheet.bk {
+  --f-border: #d0d5dd;
+  --f-focus: rgba(0, 122, 255, 0.16);
+  --f-label: #475467;
+  display: flex;
+  flex-direction: column;
+  max-width: 720px;
+  max-height: min(92dvh, 960px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px;
 }
-.bf-section {
-  display: grid;
-  gap: 8px;
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
+.bk-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
 }
-.bf-section h4 {
+.bk-head h3 {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+.bk-sub {
+  display: block;
+  margin-top: 2px;
   color: var(--muted);
-}
-.bf-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 12px;
-  align-items: end;
-}
-.bf-grid > label,
-.bf-comment {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
   font-size: 13px;
+}
+.bk-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+.bk-steps {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 22px 0;
+  list-style: none;
+  counter-reset: step;
+  font-size: 12.5px;
   color: var(--muted);
 }
-.bf-grid select,
-.bf-grid input,
-.bf-comment textarea,
-.bf-new input {
-  width: 100%;
-  min-width: 0;
-  font: inherit;
-  font-size: 15px;
-  color: var(--text);
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+.bk-steps li {
+  counter-increment: step;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: #f2f4f7;
+}
+.bk-steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
   background: #fff;
+  font-weight: 700;
+  font-size: 11px;
 }
-.bf-resources {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 4px;
+.bk-steps li.active {
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--primary);
+  font-weight: 600;
 }
-.bf-label {
+.bk-steps li.done::before {
+  content: '✓';
+  color: var(--ok);
+}
+.bk-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 22px 8px;
+  overscroll-behavior: contain;
+}
+.bk-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.bk-section:last-of-type {
+  border-bottom: 0;
+}
+.bk-title {
+  margin: 0 0 12px;
   font-size: 13px;
-  color: var(--muted);
+  font-weight: 700;
+  color: var(--text);
 }
-.bf-resource-row {
+.bk-loading {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.bk-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 22px calc(12px + var(--safe-b));
+  border-top: 1px solid var(--line);
+  background: #fcfcfd;
 }
-.bf-resource-row .bf-row {
-  flex: 1 1 200px;
+.bk-summary {
+  min-width: 0;
+  color: var(--f-label);
+  font-size: 13px;
+  font-weight: 500;
+}
+.bk-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.bk-actions button {
+  min-height: 38px;
+  padding: 8px 16px;
+  border-radius: 10px;
+}
+
+/* Поля: подпись сверху, контрол 40 px, «2 в линии» — две равные колонки. */
+.df-grid {
+  display: grid;
+  gap: 14px;
+}
+.df-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px 16px;
+}
+.df-row.pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.df-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
   min-width: 0;
 }
-.bf-resource-row select {
+.df-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  color: var(--f-label);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.df-req {
+  color: #d92d20;
+  font-style: normal;
+  font-weight: 700;
+}
+.df-formula {
+  overflow: hidden;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.df-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+.df-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.df-control > input,
+.df-control > select,
+.df-control > textarea {
+  flex: 1;
+}
+.sheet.bk input:not([type='checkbox']):not([type='radio']),
+.sheet.bk select,
+.sheet.bk textarea,
+.deal-edit input,
+.deal-edit select,
+.deal-edit textarea {
   width: 100%;
   min-width: 0;
-  font: inherit;
-  font-size: 15px;
-  color: var(--text);
-  padding: 8px 10px;
-  border: 1px solid var(--line);
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--f-border, #d0d5dd);
   border-radius: 10px;
   background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
-.bf-row {
+.sheet.bk textarea,
+.deal-edit textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+.sheet.bk input:focus,
+.sheet.bk select:focus,
+.sheet.bk textarea:focus,
+.deal-edit input:focus,
+.deal-edit select:focus,
+.deal-edit textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--f-focus, rgba(0, 122, 255, 0.16));
+}
+.df-control:has(.df-suffix) > input {
+  padding-right: 30px;
+}
+.df-suffix {
+  position: absolute;
+  right: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  pointer-events: none;
+}
+.df-control:has(.df-reset) .df-suffix {
+  right: 52px;
+}
+.df-reset {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  color: var(--muted);
+}
+.df-ro {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: #f9fafb;
+  color: var(--text);
+  font-size: 14px;
+}
+.bk-dt {
   display: flex;
   gap: 6px;
+}
+.sheet.bk .bk-dt input[type='time'] {
+  flex: 0 0 104px;
+  width: 104px;
+}
+.bk-resources {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 8px 12px;
 }
-.bf-icon {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  padding: 0;
+.bk-resources > .df-control {
+  flex: 1 1 220px;
 }
-.bf-add {
-  justify-self: start;
-  align-self: center;
-  font-size: 13px;
-}
-.bf-choices {
+
+/* Выбор сделки/группы: строки с маркером, выбранная — рамка цвета акцента. */
+.bk-choices {
   display: grid;
   gap: 6px;
 }
-.bf-choice {
+.bk-choice {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid var(--f-border, #d0d5dd);
+  border-radius: 10px;
+  background: #fff;
   text-align: left;
   font-weight: 400;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
-.bf-choice b {
+.bk-choice:hover {
+  border-color: #98a2b3;
+}
+.bk-choice b {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  font-weight: 600;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.bf-choice .muted {
+.bk-meta {
   flex: none;
+  color: var(--muted);
   font-size: 12px;
 }
-.bf-choice.selected {
+.bk-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid #98a2b3;
+  border-radius: 50%;
+  background: #fff;
+}
+.bk-choice.selected {
   border-color: var(--primary);
-  background: rgba(0, 122, 255, 0.06);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
+  background: rgba(0, 122, 255, 0.04);
+  box-shadow: 0 0 0 1px var(--primary);
 }
-.bf-new {
+.bk-choice.selected .bk-dot {
+  border: 5px solid var(--primary);
+}
+.bk-new input {
+  min-height: 30px !important;
+  padding: 2px 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.bk-add-deal {
+  justify-content: center;
   border-style: dashed;
-  padding: 6px 8px;
+  color: var(--primary);
+  font-weight: 600;
 }
-.bf-new.selected {
-  border-style: solid;
-}
-.bf-new.selected input {
-  border: 0;
-  background: transparent;
-  padding: 4px 4px;
-}
-.bf-more,
-.bf-service {
+.bk-more,
+.bk-service {
   justify-self: start;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--primary);
   font-size: 13px;
+  font-weight: 600;
 }
-.bf-service {
+.bk-service {
   color: var(--muted);
+  font-weight: 500;
 }
-.bf-service.selected {
+.bk-service.selected {
   color: var(--text);
   font-weight: 600;
 }
-.bf-comment {
-  padding-bottom: 4px;
-}
-.bf-footer {
-  position: sticky;
-  bottom: 0;
-  margin: 0 -18px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-}
-.bf-hint {
-  margin-left: auto;
-  font-size: 12px;
-}
-@media (max-width: 520px) {
-  .bf-grid {
-    grid-template-columns: 1fr;
+
+@media (max-width: 600px) {
+  .sheet.bk {
+    max-height: 100dvh;
+    border-radius: 16px 16px 0 0;
+  }
+  .bk-head,
+  .bk-body,
+  .bk-foot,
+  .bk-steps {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .df-row.pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bk-summary {
+    flex-basis: 100%;
+  }
+  .bk-actions {
+    width: 100%;
+  }
+  .bk-actions button {
+    flex: 1;
   }
 }
 
@@ -3693,4 +3827,241 @@ input[role='switch']:checked::after {
   background: var(--surface);
   color: #2455df;
   max-width: 100%;
+}
+
+/* ---------- настройки группы: поля сделки (dfs) ---------- */
+.dfs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 4px 0 10px;
+  font-size: 12.5px;
+}
+.dfs-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.dfs-row {
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+.dfs-row:first-child {
+  border-top: 0;
+}
+/* Пара «2 в линии» — общая цветная полоса слева. */
+.dfs-row.pairs-next,
+.dfs-row.paired {
+  box-shadow: inset 3px 0 0 rgba(0, 122, 255, 0.55);
+}
+.dfs-row.paired {
+  border-top-style: dashed;
+}
+.dfs-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 10px;
+}
+.dfs-order {
+  display: flex;
+  gap: 2px;
+}
+.dfs-order button,
+.dfs-del {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.dfs-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.dfs-name strong {
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dfs-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dfs-tags:empty {
+  display: none;
+}
+.dfs-tag {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 11.5px;
+}
+.dfs-tag.req {
+  background: #fef3f2;
+  color: #b42318;
+}
+.dfs-tag.bad {
+  background: #fef3f2;
+  color: #b42318;
+  text-decoration: line-through;
+}
+.dfs-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.dfs-toggle,
+.dfs-flag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.dfs-toggle input,
+.dfs-flag input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.dfs-toggle:has(input:focus-visible),
+.dfs-flag:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.dfs-toggle.on,
+.dfs-flag.on {
+  border-color: rgba(0, 122, 255, 0.45);
+  background: rgba(0, 122, 255, 0.08);
+  color: var(--primary);
+}
+.dfs-flags {
+  display: inline-flex;
+  gap: 2px;
+}
+.dfs-flags .dfs-flag {
+  padding: 0;
+  width: 28px;
+}
+.dfs-more {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.dfs-more.on {
+  background: #f2f4f7;
+}
+.dfs-extra {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding: 10px 12px 14px 74px;
+  background: #fafbfc;
+  border-top: 1px solid var(--line);
+}
+.dfs-extra > label {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #475467;
+}
+.dfs-extra input,
+.dfs-extra select {
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+.dfs-extra input[aria-invalid='true'] {
+  border-color: #d92d20;
+}
+.dfs-formula {
+  display: flex;
+  gap: 6px;
+}
+.dfs-formula input {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+.dfs-formula select {
+  flex: 0 0 auto;
+  max-width: 130px;
+}
+.dfs-err {
+  color: #b42318;
+}
+.dfs-preview {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: #fcfcfd;
+  font-size: 12.5px;
+}
+.dfs-preview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.dfs-preview-row.pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.dfs-preview-row span {
+  overflow: hidden;
+  padding: 6px 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fff;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dfs-preview-row i {
+  margin-left: 2px;
+  color: #d92d20;
+  font-style: normal;
+}
+@media (max-width: 640px) {
+  .dfs-main {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .dfs-toggles {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+  .dfs-extra {
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: 12px;
+  }
 }

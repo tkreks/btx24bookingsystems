@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { DEFAULT_SURCHARGE_MESSAGE, type CatalogDto, type DealFieldInfo, type DealStageItem, type GroupOptionsDto, type NamedBitrixItem } from '@btx24/shared';
+import { checkFormula, DEFAULT_SURCHARGE_MESSAGE, type CatalogDto, type DealFieldConfig, type DealFieldInfo, type DealStageItem, type GroupOptionsDto, type NamedBitrixItem } from '@btx24/shared';
 import { DEFAULT_CLIENT_MESSAGE, DEFAULT_FAIL_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
 import { CatalogSections, sectionSummary } from './CatalogSections.js';
 import { InvoiceSettings } from './InvoiceSettings.js';
@@ -362,7 +362,12 @@ const FLAGS = [
   ['showList', 'О', 'Общий список и календарь'],
 ] as const;
 
-/** Поля сделки группы: обязательность, «2 в линии», порядок и видимость (С / П / О). */
+const NUMERIC = new Set(['integer', 'double', 'money']);
+
+/**
+ * Поля сделки группы: порядок, обязательность, «2 в линии» (поле и следующее — в одном ряду),
+ * видимость (С / П / О), значение по умолчанию и формула. Ниже — как ляжет карточка создания.
+ */
 export function DealFieldsSection({
   fields,
   available,
@@ -373,10 +378,24 @@ export function DealFieldsSection({
   onChange: (f: GroupOptionsDto['dealFields']) => void;
 }) {
   const [pick, setPick] = useState('');
-  const label = (code: string) =>
-    fields.find((f) => f.name === code)?.title || available.data?.find((f) => f.code === code)?.label || code;
-  const patch = (i: number, p: Partial<GroupOptionsDto['dealFields'][number]>) =>
-    onChange(fields.map((f, j) => (j === i ? { ...f, ...p } : f)));
+  const [open, setOpen] = useState<string | null>(null);
+  const info = (code: string) => available.data?.find((f) => f.code === code);
+  const label = (code: string) => fields.find((f) => f.name === code)?.title || info(code)?.label || code;
+  const patch = (i: number, p: Partial<DealFieldConfig>) => onChange(fields.map((f, j) => (j === i ? { ...f, ...p } : f)));
+  const codes = fields.map((f) => f.name.toUpperCase());
+  const formulaText = (fx: string) => fx.replace(/\{([A-Z0-9_]+)\}/gi, (_, c: string) => label(c.toUpperCase())).replace(/\*/g, '×').replace(/\//g, '÷');
+  const defaultText = (f: DealFieldConfig) => {
+    const i = info(f.name);
+    if (!f.defaultValue) return '';
+    if (i?.type === 'enumeration') return i.items?.find((x) => x.id === f.defaultValue)?.value ?? f.defaultValue;
+    if (i?.type === 'boolean') return f.defaultValue === 'Y' ? 'Да' : 'Нет';
+    return f.defaultValue;
+  };
+  // Предпросмотр: строки карточки создания с учётом «2 в линии».
+  const createRows: DealFieldConfig[][] = [];
+  const shown = fields.filter((f) => f.showCreate);
+  for (let i = 0; i < shown.length; i++) createRows.push(shown[i].inlineNext && shown[i + 1] ? [shown[i], shown[++i]] : [shown[i]]);
+
   return (
     <Section title="Поля сделки" hint={`полей: ${fields.length}`} open={false}>
       <RefNotice r={available} loading="Загрузка полей сделки…" />
@@ -402,62 +421,150 @@ export function DealFieldsSection({
           Добавить поле
         </button>
       </div>
-      <p className="muted">С — карточка создания, П — карточка просмотра, О — общий список и календарь.</p>
-      <ul className="deal-field-rows">
-        {fields.map((f, i) => (
-          <li key={f.name}>
-            <strong>{label(f.name)}</strong>
-            <span className="deal-field-actions">
-              <button
-                type="button"
-                aria-label={`Выше: ${label(f.name)}`}
-                disabled={i === 0}
-                onClick={() => onChange(move(fields, i, -1))}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                aria-label={`Ниже: ${label(f.name)}`}
-                disabled={i === fields.length - 1}
-                onClick={() => onChange(move(fields, i, 1))}
-              >
-                ↓
-              </button>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={f.required}
-                  onChange={(e) => patch(i, { required: e.target.checked })}
-                />
-                обязательно
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={f.inlineNext}
-                  onChange={(e) => patch(i, { inlineNext: e.target.checked })}
-                />
-                2 в линии
-              </label>
-              {FLAGS.map(([key, short, title]) => (
-                <label className="check" key={key} title={title}>
-                  <input
-                    type="checkbox"
-                    aria-label={`${title}: ${label(f.name)}`}
-                    checked={f[key]}
-                    onChange={(e) => patch(i, { [key]: e.target.checked })}
-                  />
-                  {short}
-                </label>
+      <div className="dfs-legend muted">
+        <span>
+          <b>2 в линии</b> — поле и следующее за ним в одном ряду
+        </span>
+        <span>
+          <b>С</b> — карточка создания · <b>П</b> — карточка просмотра · <b>О</b> — общий календарь
+        </span>
+      </div>
+      <ol className="dfs-list">
+        {fields.map((f, i) => {
+          const fi = info(f.name);
+          const numeric = NUMERIC.has(fi?.type ?? '');
+          const err = f.formula?.trim() ? checkFormula(f.formula, codes) : null;
+          const expanded = open === f.name;
+          const pairedWithPrev = i > 0 && fields[i - 1].inlineNext;
+          return (
+            <li key={f.name} className={`dfs-row${pairedWithPrev ? ' paired' : ''}${f.inlineNext && i < fields.length - 1 ? ' pairs-next' : ''}`}>
+              <div className="dfs-main">
+                <span className="dfs-order">
+                  <button type="button" aria-label={`Выше: ${label(f.name)}`} disabled={i === 0} onClick={() => onChange(move(fields, i, -1))}>
+                    ↑
+                  </button>
+                  <button type="button" aria-label={`Ниже: ${label(f.name)}`} disabled={i === fields.length - 1} onClick={() => onChange(move(fields, i, 1))}>
+                    ↓
+                  </button>
+                </span>
+                <span className="dfs-name">
+                  <strong>{label(f.name)}</strong>
+                  <span className="dfs-tags">
+                    {f.required && <span className="dfs-tag req">обязательно</span>}
+                    {f.defaultValue && <span className="dfs-tag">по умолч.: {defaultText(f)}</span>}
+                    {f.formula && <span className={`dfs-tag${err ? ' bad' : ''}`}>ƒ {formulaText(f.formula)}</span>}
+                  </span>
+                </span>
+                <span className="dfs-toggles">
+                  <label className={`dfs-toggle${f.required ? ' on' : ''}`} title="Обязательное поле">
+                    <input type="checkbox" checked={f.required} onChange={(e) => patch(i, { required: e.target.checked })} />
+                    обяз.
+                  </label>
+                  <label className={`dfs-toggle${f.inlineNext ? ' on' : ''}`} title="Поле и следующее за ним — в одном ряду">
+                    <input type="checkbox" checked={f.inlineNext} onChange={(e) => patch(i, { inlineNext: e.target.checked })} />2 в линии
+                  </label>
+                  <span className="dfs-flags">
+                    {FLAGS.map(([key, short, title]) => (
+                      <label key={key} className={`dfs-flag${f[key] ? ' on' : ''}`} title={title}>
+                        <input type="checkbox" aria-label={`${title}: ${label(f.name)}`} checked={f[key]} onChange={(e) => patch(i, { [key]: e.target.checked })} />
+                        {short}
+                      </label>
+                    ))}
+                  </span>
+                  <button type="button" className={`dfs-more${expanded ? ' on' : ''}`} aria-expanded={expanded} onClick={() => setOpen(expanded ? null : f.name)}>
+                    Значение
+                  </button>
+                  <button type="button" className="dfs-del" aria-label={`Удалить: ${label(f.name)}`} onClick={() => onChange(fields.filter((_, j) => j !== i))}>
+                    ×
+                  </button>
+                </span>
+              </div>
+              {expanded && (
+                <div className="dfs-extra">
+                  <label>
+                    По умолчанию
+                    {fi?.type === 'enumeration' ? (
+                      <select value={f.defaultValue ?? ''} onChange={(e) => patch(i, { defaultValue: e.target.value || undefined })}>
+                        <option value="">— нет —</option>
+                        {(fi.items ?? []).map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.value}
+                          </option>
+                        ))}
+                      </select>
+                    ) : fi?.type === 'boolean' ? (
+                      <select value={f.defaultValue ?? ''} onChange={(e) => patch(i, { defaultValue: e.target.value || undefined })}>
+                        <option value="">— нет —</option>
+                        <option value="Y">Да</option>
+                        <option value="N">Нет</option>
+                      </select>
+                    ) : (
+                      <input
+                        value={f.defaultValue ?? ''}
+                        inputMode={numeric ? 'decimal' : undefined}
+                        placeholder="не задано"
+                        maxLength={500}
+                        onChange={(e) => patch(i, { defaultValue: e.target.value || undefined })}
+                      />
+                    )}
+                    <small className="muted">Ставится при создании брони, если в сделке поле пустое.</small>
+                  </label>
+                  {numeric && (
+                    <label>
+                      Формула
+                      <span className="dfs-formula">
+                        <input
+                          value={f.formula ?? ''}
+                          placeholder="{OPPORTUNITY} * 50%"
+                          maxLength={300}
+                          aria-invalid={!!err}
+                          onChange={(e) => patch(i, { formula: e.target.value || undefined })}
+                        />
+                        <select
+                          aria-label="Вставить поле в формулу"
+                          value=""
+                          onChange={(e) => e.target.value && patch(i, { formula: `${f.formula ?? ''}{${e.target.value}}` })}
+                        >
+                          <option value="">＋ поле</option>
+                          {fields
+                            .filter((x) => x.name !== f.name && NUMERIC.has(info(x.name)?.type ?? ''))
+                            .map((x) => (
+                              <option key={x.name} value={x.name}>
+                                {label(x.name)}
+                              </option>
+                            ))}
+                        </select>
+                      </span>
+                      {err ? (
+                        <small className="dfs-err">{err}</small>
+                      ) : f.formula ? (
+                        <small className="muted">= {formulaText(f.formula)} · пересчитывается сама, пока менеджер не изменит значение</small>
+                      ) : (
+                        <small className="muted">Например, 50% от суммы: {'{OPPORTUNITY} * 50%'}. Знаки + − * / ( ) %.</small>
+                      )}
+                    </label>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {createRows.length > 0 && (
+        <div className="dfs-preview" aria-label="Как выглядит карточка создания">
+          <span className="muted">Карточка создания:</span>
+          {createRows.map((row) => (
+            <div key={row[0].name} className={`dfs-preview-row${row.length > 1 ? ' pair' : ''}`}>
+              {row.map((f) => (
+                <span key={f.name}>
+                  {label(f.name)}
+                  {f.required && <i>*</i>}
+                </span>
               ))}
-              <button type="button" onClick={() => onChange(fields.filter((_, j) => j !== i))}>
-                Удалить
-              </button>
-            </span>
-          </li>
-        ))}
-      </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </Section>
   );
 }

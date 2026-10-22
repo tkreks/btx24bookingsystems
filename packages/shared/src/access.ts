@@ -89,6 +89,13 @@ export interface DealFieldConfig {
   showCreate: boolean;
   showView: boolean;
   showList: boolean;
+  /**
+   * Значение по умолчанию в форме создания брони (как в поле ввода: число, ID варианта списка,
+   * «Y»/«N»). Ставится, только если в сделке поле пустое; менеджер может поменять.
+   */
+  defaultValue?: string;
+  /** Формула для чисел и сумм: `{OPPORTUNITY} * 50%` (см. `deal-formula.ts`). */
+  formula?: string;
 }
 
 export interface PaymentStepConfig {

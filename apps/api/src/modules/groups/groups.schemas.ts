@@ -1,4 +1,4 @@
-import { GROUP_FEATURES, ROLES } from '@btx24/shared';
+import { checkFormula, GROUP_FEATURES, ROLES } from '@btx24/shared';
 import { z } from 'zod';
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
@@ -49,10 +49,20 @@ export const groupOptionsSchema = z
             showCreate: z.boolean(),
             showView: z.boolean(),
             showList: z.boolean(),
+            defaultValue: z.string().max(500).optional(),
+            formula: z.string().max(300).optional(),
           })
           .strict(),
       )
-      .max(80),
+      .max(80)
+      .superRefine((fields, ctx) => {
+        // Формула ссылается только на поля этой же группы и разбирается без ошибок.
+        const codes = fields.map((f) => f.name.toUpperCase());
+        fields.forEach((f, i) => {
+          const err = f.formula?.trim() ? checkFormula(f.formula, codes) : null;
+          if (err) ctx.addIssue({ code: 'custom', path: [i, 'formula'], message: `Формула поля «${f.title || f.name}»: ${err}` });
+        });
+      }),
     productSectionIds: z.array(z.string().max(32)).max(500),
     resourceDefaults: z.record(z.string().regex(/^\d+$/), z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().positive() }).strict()).max(50)),
     views: z.object({ desktop: view, mobile: view }).strict(),

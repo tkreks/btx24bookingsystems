@@ -38,6 +38,8 @@ export interface DealFieldInfo {
   type: string;
   multiple: boolean;
   readOnly: boolean;
+  /** Варианты списка (для значения по умолчанию). */
+  items?: { id: string; value: string }[];
 }
 /** Стадия воронки (`GET /api/admin/deal-stages?categoryId=`). */
 export interface DealStageItem {

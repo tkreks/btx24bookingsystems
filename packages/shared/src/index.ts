@@ -11,3 +11,4 @@ export * from './bookings.js';
 export * from './client-messages.js';
 export * from './payments.js';
 export * from './template-engine.js';
+export * from './deal-formula.js';
