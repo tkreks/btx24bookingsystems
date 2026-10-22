@@ -119,10 +119,11 @@ export class DashboardService {
     // Завтра — следующий день портала (а не +24 часа: переход на летнее время).
     const tomorrow = zonedDayRange(todayIn(tz, today.end), tz);
     const [a, b] = await Promise.all([
-      this.journal.activeBetween(user.portal.id, today.start, today.end, resourceIds),
-      this.journal.activeBetween(user.portal.id, tomorrow.start, tomorrow.end, resourceIds),
+      this.journal.activeListBetween(user.portal.id, today.start, today.end, resourceIds),
+      this.journal.activeListBetween(user.portal.id, tomorrow.start, tomorrow.end, resourceIds),
     ]);
-    return { today: a, tomorrow: b };
+    const rows = await this.toRows(user, [...a, ...b], new Set());
+    return { today: a.length, tomorrow: b.length, todayItems: rows.slice(0, a.length), tomorrowItems: rows.slice(a.length) };
   }
 
   /** Клиенты выбранного вида звонков за период — для окна со сделками. */
@@ -267,14 +268,14 @@ export class DashboardService {
             ...(scope === 'mine' ? { ASSIGNED_BY_ID: user.userId } : {}),
           },
           order: { DATE_CREATE: 'DESC' },
-          select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID'],
+          select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID', 'SOURCE_ID'],
         },
         { max: MAX_NEW_DEALS },
       );
       const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
       const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
       // Сделки клиентов — пачками параллельно (темп держит ограничитель портала), имена — заодно.
-      const [earlierChunks, names] = await Promise.all([
+      const [earlierChunks, names, bookingState, sources] = await Promise.all([
         Promise.all(
           chunks(contactIds, CONTACT_CHUNK).map((ids) =>
             user.client.listAll<Row>(
@@ -288,6 +289,8 @@ export class DashboardService {
           ),
         ),
         this.contactNames(user, contactIds),
+        this.journal.dealBookingState(user.portal.id, rows.map((d) => Number(d.ID))),
+        rows.some((d) => d.SOURCE_ID) ? this.sourceNames(user) : new Map<string, string>(),
       ]);
       const earlier = earlierChunks.flat();
       const items: DashboardNewDeal[] = rows.map((d) => {
@@ -311,6 +314,8 @@ export class DashboardService {
           currency: d.CURRENCY_ID ?? null,
           contact: contactId ? { id: contactId, name: names.get(contactId) ?? null } : null,
           repeat,
+          booking: bookingState.get(Number(d.ID)) ?? 'none',
+          source: d.SOURCE_ID ? { id: d.SOURCE_ID, name: sources.get(d.SOURCE_ID) ?? d.SOURCE_ID } : null,
         };
       });
       return { total: items.length, repeat: items.filter((i) => i.repeat).length, items, truncated: rows.length >= MAX_NEW_DEALS };
@@ -368,6 +373,20 @@ export class DashboardService {
       }
     }
     return ids.map((id) => ({ id, name: hit!.names.get(id) ?? `Воронка ${id}` }));
+  }
+
+  /** Справочник источников сделок CRM (SOURCE): код → название; кэш на портал 10 минут. */
+  private readonly sourcesCache = new Map<string, { at: number; names: Promise<Map<string, string>> }>();
+  private sourceNames(user: B24UserContext): Promise<Map<string, string>> {
+    const hit = this.sourcesCache.get(user.portal.id);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.names;
+    // Справочник — для подписи; недоступен — коды источников вместо названий.
+    const names = (async () => {
+      const r = await user.client.call<{ STATUS_ID: string; NAME: string }[]>('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' } });
+      return new Map((r?.result ?? []).map((x) => [x.STATUS_ID, x.NAME]));
+    })().catch(() => new Map<string, string>());
+    this.sourcesCache.set(user.portal.id, { at: Date.now(), names });
+    return names;
   }
 
   private async contactNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
@@ -432,7 +451,15 @@ export class DashboardService {
    */
   private async bookings(user: B24UserContext, start: Date, end: Date, scope: CallScope, resourceIds: number[] | null): Promise<DashboardDto['bookings']> {
     const j = await this.journal.forPeriod(user.portal.id, start, end, { resourceIds, userId: scope === 'mine' ? user.userId : null });
-    const records = [...j.created, ...j.removed];
+    const rows = await this.toRows(user, [...j.created, ...j.removed], j.pending);
+    return {
+      created: { total: j.created.length, items: rows.slice(0, j.created.length) },
+      removed: { total: j.removed.length, items: rows.slice(j.created.length) },
+    };
+  }
+
+  /** Строки броней для дашборда: сделка (видимая пользователю) с клиентом, ресурсы, кто создал/снял. */
+  private async toRows(user: B24UserContext, records: BookingRecord[], pending: Set<number>): Promise<DashboardBookingRow[]> {
     const [deals, resources, people] = records.length
       ? await Promise.all([
           this.deals(user, [...new Set(records.flatMap((r) => (r.dealId ? [r.dealId] : [])))]),
@@ -456,12 +483,9 @@ export class DashboardService {
       title: r.title,
       createdBy: who(r.createdByUserId),
       cancelledBy: who(r.cancelledByUserId),
-      pendingRemoval: j.pending.has(r.bookingId),
+      pendingRemoval: pending.has(r.bookingId),
     });
-    return {
-      created: { total: j.created.length, items: j.created.map(row) },
-      removed: { total: j.removed.length, items: j.removed.map(row) },
-    };
+    return records.map(row);
   }
 
   /** Сделки, видимые пользователю в CRM; недоступные в ответ не попадают. */
@@ -470,13 +494,15 @@ export class DashboardService {
     if (!ids.length) return out;
     const rows = await user.client.listAll<Record<string, string | null>>('crm.deal.list', {
       filter: { '@ID': ids },
-      select: ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID'],
+      select: ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID'],
     });
+    const names = await this.contactNames(user, rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0)).catch(() => new Map<number, string>());
     for (const d of rows)
       out.set(Number(d.ID), {
         title: d.TITLE ?? '',
         opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
         currency: d.CURRENCY_ID ?? null,
+        client: names.get(Number(d.CONTACT_ID)) ?? null,
       });
     return out;
   }

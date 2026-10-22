@@ -7,6 +7,8 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 const emptyJournal = {
   forPeriod: vi.fn(async () => ({ created: [], removed: [], pending: new Set<number>() })),
   activeBetween: vi.fn(async () => 0),
+  activeListBetween: vi.fn(async () => []),
+  dealBookingState: vi.fn(async () => new Map()),
 } as unknown as BookingJournalService;
 
 describe('DashboardService', () => {
@@ -140,6 +142,8 @@ describe('DashboardService', () => {
         pending: new Set([3]),
       })),
       activeBetween: vi.fn(async () => 0),
+  activeListBetween: vi.fn(async () => []),
+  dealBookingState: vi.fn(async () => new Map()),
     } as unknown as BookingJournalService;
     const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) =>
       method === 'crm.deal.list' && params?.filter?.['@ID']

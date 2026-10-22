@@ -216,6 +216,29 @@ export class BookingJournalService {
     return rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id)))).length;
   }
 
+  /** Активные брони, пересекающие [from, to) — по ресурсам (null — все), по началу. */
+  async activeListBetween(portalId: string, from: Date, to: Date, resourceIds: number[] | null): Promise<BookingRecord[]> {
+    const rows = await this.prisma.bookingRecord.findMany({
+      where: { portalId, status: 'active', startsAt: { lt: to }, endsAt: { gt: from } },
+      orderBy: { startsAt: 'asc' },
+      take: PERIOD_LIMIT,
+    });
+    return rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id))));
+  }
+
+  /** Бронь по сделкам: есть активная — booked, и оплачен счёт приложения по сделке — paid. */
+  async dealBookingState(portalId: string, dealIds: number[]): Promise<Map<number, 'booked' | 'paid'>> {
+    const out = new Map<number, 'booked' | 'paid'>();
+    if (!dealIds.length) return out;
+    const [booked, paid] = await Promise.all([
+      this.prisma.bookingRecord.findMany({ where: { portalId, status: 'active', dealId: { in: dealIds } }, select: { dealId: true } }),
+      this.prisma.paymentRequest.findMany({ where: { portalId, status: 'paid', dealId: { in: dealIds } }, select: { dealId: true } }),
+    ]);
+    const paidIds = new Set(paid.map((p) => p.dealId));
+    for (const b of booked) if (b.dealId) out.set(b.dealId, paidIds.has(b.dealId) ? 'paid' : 'booked');
+    return out;
+  }
+
   /**
    * Брони за период для дашборда — любого источника (приложение и найденные в Битрикс24): новые
    * (появились в журнале за период) и удалённые (отменены за период), плюс брони приложения, пропавшие

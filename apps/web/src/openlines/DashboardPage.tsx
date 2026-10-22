@@ -78,6 +78,7 @@ export function DashboardPage({
   const [callsScope, setCallsScope] = useState<CallScope>('all');
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
   const [dealsOpen, setDealsOpen] = useState<'all' | 'repeat' | null>(null);
+  const [daysOpen, setDaysOpen] = useState(false);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
   const [callsFunnel, setCallsFunnel] = useState<number | null>(null);
 
@@ -309,7 +310,7 @@ export function DashboardPage({
             {n(d?.bookingDays?.today)}
             <small> / {n(d?.bookingDays?.tomorrow)}</small>
           </span>
-          <button className="dash-tile-action" onClick={onBack}>
+          <button className="dash-tile-action" disabled={!d?.bookingDays} onClick={() => setDaysOpen(true)}>
             Календарь
           </button>
         </div>
@@ -340,6 +341,7 @@ export function DashboardPage({
       </div>
       {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
 
+      <div className={`dash-pair${openlines ? '' : ' single'}`}>
       {openlines && (
         <section className="day-panel dash-attention">
           <p className="dash-attention-title muted">
@@ -381,6 +383,8 @@ export function DashboardPage({
             ))}
         </section>
       )}
+        <DealsToday d={d} tz={tz} word={word} />
+      </div>
 
       <div className="dash-lists">
         <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings?.created} tz={tz} variant="created" />
@@ -391,6 +395,7 @@ export function DashboardPage({
         воронки. Брони — все на ресурсах ваших групп: созданные в приложении и в самом Битрикс24 (их находит сверка раз в
         10 минут); удалённые остаются в истории приложения.
       </p>
+      {daysOpen && d?.bookingDays && <DayBookingsModal days={d.bookingDays} tz={tz} onClose={() => setDaysOpen(false)} />}
       {dealsOpen && d?.newDeals && (
         <NewDealsModal
           title={dealsOpen === 'repeat' ? 'Повторные клиенты' : `Новые сделки ${word}`}
@@ -449,6 +454,7 @@ function NewDealsModal({
                 <span className="muted">без контакта</span>
               )}
               <span className={`pill${i.repeat ? '' : ' muted-pill'}`}>{i.repeat ? 'повторный' : 'новый'}</span>
+              <BookingMark state={i.booking} />
               <span className="muted">
                 создана {fmtDateTime(i.createdAt, tz)}
                 {i.opportunity ? ` · ${fmtMoney(i.opportunity, i.currency)}` : ''}
@@ -536,5 +542,131 @@ function BookingList({
         ))}
       </ul>
     </section>
+  );
+}
+
+/** Бронь по сделке: 🪙 — есть и оплачена, 📅 — есть, не оплачена, иначе — «без брони». */
+function BookingMark({ state }: { state: DashboardNewDeal['booking'] }) {
+  if (state === 'paid')
+    return (
+      <span className="deal-mark paid" title="Есть бронь, оплачена" aria-label="Бронь оплачена">
+        🪙
+      </span>
+    );
+  if (state === 'booked')
+    return (
+      <span className="deal-mark booked" title="Есть бронь, ещё не оплачена" aria-label="Есть бронь">
+        📅
+      </span>
+    );
+  return <span className="deal-mark none">без брони</span>;
+}
+
+/**
+ * «Сделки сегодня» (рядом с «Требуют внимания»): сверху зелёным — сделки с бронью на сегодня,
+ * ниже — созданные за период, со значком брони (🪙 — оплачена).
+ */
+function DealsToday({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: string; word: string }) {
+  const booked = [...new Map((d?.bookingDays?.todayItems ?? []).filter((r) => r.dealId).map((r) => [r.dealId!, r])).values()];
+  const created = d?.newDeals?.items ?? [];
+  return (
+    <section className="day-panel dash-deals-today">
+      <p className="dash-attention-title muted">Сделки сегодня</p>
+      {!d?.bookingDays && <p className="muted">Загрузка…</p>}
+      <ul className="dt-rows">
+        {booked.map((r) => (
+          <li key={`b${r.bookingId}`}>
+            <button className="dt-row today" onClick={() => openCrm('deal', r.dealId!)}>
+              <span className="dt-main">
+                <b>{r.deal?.client || r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
+                <span className="muted">{r.resources.join(', ')}</span>
+              </span>
+              <span className="dt-side">
+                <span>{bookingRange(r.start, r.end, tz)}</span>
+                {r.deal?.opportunity ? <span className="muted">{fmtMoney(r.deal.opportunity, r.deal.currency)}</span> : null}
+              </span>
+            </button>
+          </li>
+        ))}
+        {d?.bookingDays && !booked.length && <li className="muted dt-empty">Броней по сделкам на сегодня нет.</li>}
+      </ul>
+      <p className="dt-sub muted">
+        Созданы {word}
+        {d?.newDeals ? ` · ${d.newDeals.total}` : ''}
+      </p>
+      {d && d.newDeals === undefined && <p className="muted">Загрузка…</p>}
+      {d?.newDeals === null && <p className="muted">Нет доступа к сделкам CRM.</p>}
+      <ul className="dt-rows">
+        {created.map((i) => (
+          <li key={`n${i.id}`}>
+            <button className="dt-row" onClick={() => openCrm('deal', i.id)}>
+              <span className="dt-main">
+                <b>{i.contact?.name || i.title}</b>
+                <span className="muted">
+                  {fmtTime(i.createdAt, tz)}
+                  {i.source ? ` · ${i.source.name}` : ''}
+                  {i.repeat ? ' · повторный' : ''}
+                </span>
+              </span>
+              <span className="dt-side">
+                <BookingMark state={i.booking} />
+                {i.opportunity ? <span className="muted">{fmtMoney(i.opportunity, i.currency)}</span> : null}
+              </span>
+            </button>
+          </li>
+        ))}
+        {d?.newDeals && !created.length && <li className="muted dt-empty">Новых сделок нет.</li>}
+      </ul>
+    </section>
+  );
+}
+
+/** «Календарь» на плитке броней: сделки с бронями на сегодня и на завтра. */
+function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDays']; tz: string; onClose: () => void }) {
+  const [tab, setTab] = useState<'today' | 'tomorrow'>(days.today || !days.tomorrow ? 'today' : 'tomorrow');
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+  const rows = tab === 'today' ? days.todayItems : days.tomorrowItems;
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet calls-modal" role="dialog" aria-modal="true" aria-label="Брони на сегодня и завтра" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>Брони</h3>
+          <button aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <div className="wz-seg dbm-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'today'} className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')}>
+            Сегодня · {days.today}
+          </button>
+          <button role="tab" aria-selected={tab === 'tomorrow'} className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')}>
+            Завтра · {days.tomorrow}
+          </button>
+        </div>
+        {!rows.length && <p className="muted">Броней нет.</p>}
+        <ul className="dt-rows">
+          {rows.map((r) => (
+            <li key={r.bookingId}>
+              <button className="dt-row" disabled={!r.dealId} onClick={() => r.dealId && openCrm('deal', r.dealId)}>
+                <span className="dt-main">
+                  <b>{r.dealId ? r.deal?.title || r.title || `Сделка #${r.dealId}` : r.title || 'Служебная бронь'}</b>
+                  <span className="muted">
+                    {[r.deal?.client, r.resources.join(', ')].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                <span className="dt-side">
+                  <span>{bookingRange(r.start, r.end, tz)}</span>
+                  {r.deal?.opportunity ? <span className="muted">{fmtMoney(r.deal.opportunity, r.deal.currency)}</span> : null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }

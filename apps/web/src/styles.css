@@ -5324,3 +5324,98 @@ input[role='switch']:checked::after {
 .dash-calendar-btn:hover {
   background: #0062cc;
 }
+
+/* Дашборд: «Требуют внимания» и «Сделки сегодня» — в один ряд, одной высоты; на телефоне — друг под другом. */
+.dash-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 12px;
+}
+.dash-pair.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dash-pair > .day-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .dash-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.dt-rows {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dt-row {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+}
+.dt-row:hover:not(:disabled) {
+  background: #f8fafc;
+}
+.dt-row.today {
+  border-color: #a6e9c3;
+  background: #ecfdf3;
+}
+.dt-row.today:hover {
+  background: #dcfae6;
+}
+.dt-main {
+  display: grid;
+  min-width: 0;
+}
+.dt-main b,
+.dt-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dt-main span {
+  font-size: 12px;
+}
+.dt-side {
+  display: grid;
+  flex: none;
+  justify-items: end;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.dt-sub {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.dt-empty {
+  padding: 6px 2px;
+  font-size: 13px;
+}
+.deal-mark {
+  font-size: 15px;
+  line-height: 1;
+}
+.deal-mark.none {
+  color: var(--muted);
+  font-size: 11px;
+}
+.dbm-tabs {
+  margin: 0 0 10px;
+}

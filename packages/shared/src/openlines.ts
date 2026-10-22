@@ -152,7 +152,7 @@ export interface DashboardBookingRow {
   bookingId: number;
   dealId: number | null;
   /** null — сделка недоступна пользователю в CRM (или служебная бронь). */
-  deal: { title: string; opportunity: number | null; currency: string | null } | null;
+  deal: { title: string; opportunity: number | null; currency: string | null; client: string | null } | null;
   resources: string[];
   /** Начало и конец брони (UTC, ISO). */
   start: string;
@@ -182,8 +182,8 @@ export interface DashboardDto {
    * клиентов, на которые ещё не ответили (новые сверху).
    */
   chats: { waitingReply: number; attention: AttentionChatDto[] } | null;
-  /** Активные брони на ресурсах групп пользователя: на сегодня и на завтра (пересекают день). */
-  bookingDays: { today: number; tomorrow: number };
+  /** Активные брони на ресурсах групп пользователя: на сегодня и на завтра (пересекают день) — и сами брони. */
+  bookingDays: { today: number; tomorrow: number; todayItems: DashboardBookingRow[]; tomorrowItems: DashboardBookingRow[] };
   /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
   calls: Record<CallKind, number> | null;
   /** Все звонки за период (входящие и исходящие, по `callsScope`); null — нет доступа к делам CRM. */
@@ -214,6 +214,10 @@ export interface DashboardNewDeal {
   currency: string | null;
   contact: { id: number; name: string | null } | null;
   repeat: boolean;
+  /** Бронь по сделке (журнал приложения): нет, есть, есть и оплачена (счёт приложения оплачен). */
+  booking: 'none' | 'booked' | 'paid';
+  /** Источник сделки (SOURCE_ID и название из справочника CRM); null — не указан. */
+  source: { id: string; name: string } | null;
 }
 
 /**
