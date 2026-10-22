@@ -10,11 +10,16 @@ const group = {
   id: 'g1',
   resourceIds: [10, 11],
   dealCategoryId: 0,
-  options: { bookingTypes: [{ id: 'programs', title: 'Программы', keywords: ['Алатырь'], dealTypeValue: '86', program: '@keyword', confirmation: [] }] },
+  options: {
+    bookingTypes: [
+      { id: 'programs', title: 'Программы', keywords: ['Алатырь'], dealTypeValue: '86', program: '@keyword', confirmation: [] },
+      { id: 'hourly', title: 'Почасовая', keywords: ['Почасовая'], dealTypeValue: '88', program: '', confirmation: [] },
+    ],
+  } as { bookingTypes: unknown[]; bookingTypeRequired?: boolean },
 };
 const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
 
-function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown> } = {}) {
+function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[] } = {}) {
   const ops: Record<string, unknown>[] = [];
   const prisma = {
     bookingOperation: {
@@ -32,13 +37,14 @@ function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions
     pick: vi.fn(() => (o.can === false ? null : { group, permissions: o.permissions ?? ['booking.create', 'deal.create'] })),
   } as unknown as AccessService;
   const journal = { recordCreated: vi.fn(async () => ({})) };
-  const fieldMap = { get: vi.fn(async () => map) } as unknown as DealFieldMapService;
+  const fieldMap = { get: vi.fn(async () => map), enumId: vi.fn(async (_p: string, _c: unknown, _f: string, v: string) => (v === 'xml-88' ? '88' : v)) } as unknown as DealFieldMapService;
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
     if (o.fail === method) throw new Bitrix24Error(o.failCode ?? (method === 'booking.v1.booking.add' ? '1018' : 'ERR'), `${method} failed`);
     if (method === 'crm.deal.add') return { result: 900 };
     if (method === 'booking.v1.booking.add') return { result: 555 };
+    if (method === 'crm.deal.productrows.get') return { result: (o.dealProducts ?? []).map((n) => ({ PRODUCT_NAME: n })) };
     return { result: true };
   });
   const listAll = vi.fn(async () => [{ NAME: 'Программа «Алатырь» 4 часа' }]);
@@ -170,5 +176,55 @@ describe('date helpers and field detection', () => {
         TITLE: { listLabel: 'Тип бронирования' },
       }),
     ).toEqual({ bookingId: 'UF_CRM_1', visitDateStart: 'UF_CRM_2', guests: 'UF_CRM_3' });
+  });
+});
+
+describe('BookingCreateService: тип брони', () => {
+  const dealUpdate = (t: ReturnType<typeof setup>) => t.calls.find((c) => c[0] === 'crm.deal.update')![1] as { fields: Record<string, unknown> };
+
+  it('by the deal products when the manager did not choose (как БП 270)', async () => {
+    const t = setup({ dealProducts: ['Баня. Почасовая аренда'] });
+    const r = await t.svc.create(t.user, body({ products: undefined }));
+    expect(r.bookingType).toBe('Почасовая');
+    expect(dealUpdate(t).fields.UF_TYPE).toBe('88');
+  });
+
+  it('the manager’s choice wins over products', async () => {
+    const t = setup({ dealProducts: ['Баня. Почасовая аренда'] });
+    const r = await t.svc.create(t.user, body({ products: undefined, bookingTypeId: 'programs' }));
+    expect(r.bookingType).toBe('Программы');
+    expect(dealUpdate(t).fields.UF_TYPE).toBe('86');
+    await expect(t.svc.create(t.user, body({ idempotencyKey: 'key-99999999', bookingTypeId: 'nope' }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('required in the group: not chosen and not found by products → 400 before anything is created', async () => {
+    group.options.bookingTypeRequired = true;
+    try {
+      const t = setup({ dealProducts: ['Что-то другое'] });
+      await expect(t.svc.create(t.user, body({ products: undefined }))).rejects.toMatchObject({ status: 400 });
+      expect(t.calls.map((c) => c[0])).toEqual(['crm.deal.productrows.get']);
+      // новая сделка без товаров — тип нужно выбрать
+      await expect(t.svc.create(t.user, body({ idempotencyKey: 'key-88888888', dealId: undefined, newDeal: { title: 'x' }, products: undefined }))).rejects.toMatchObject({ status: 400 });
+      expect(await t.svc.create(t.user, body({ idempotencyKey: 'key-77777777', dealId: undefined, newDeal: { title: 'x' }, products: undefined, bookingTypeId: 'hourly' }))).toMatchObject({ bookingType: 'Почасовая' });
+      // служебная бронь — без типа
+      expect(await t.svc.create(t.user, body({ idempotencyKey: 'key-66666666', kind: 'service', dealId: undefined, products: [] }))).toMatchObject({ bookingType: null });
+    } finally {
+      delete group.options.bookingTypeRequired;
+    }
+  });
+});
+
+
+describe('DealFieldMapService.enumId', () => {
+  it('BP variant code (XML_ID) or title → variant ID; unknown → null', async () => {
+    const { DealFieldMapService } = await import('./deal-field-map.service.js');
+    const svc = new DealFieldMapService({} as never);
+    const call = vi.fn(async () => ({ result: [{ LIST: [{ ID: '86', XML_ID: '3af19224', VALUE: 'Программа' }, { ID: '88', XML_ID: '9829f9e5', VALUE: 'Почасовка' }] }] }));
+    const client = { call } as never;
+    expect(await svc.enumId('p1', client, 'UF_T', '3af19224')).toBe('86');
+    expect(await svc.enumId('p1', client, 'UF_T', '88')).toBe('88');
+    expect(await svc.enumId('p1', client, 'UF_T', 'Почасовка')).toBe('88');
+    expect(await svc.enumId('p1', client, 'UF_T', 'нет')).toBeNull();
+    expect(call).toHaveBeenCalledTimes(1); // кэш
   });
 });

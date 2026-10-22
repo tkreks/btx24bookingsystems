@@ -100,8 +100,13 @@ export class MessageContextService {
 
     // Программа и тип брони — по товарам сделки и правилам групп с воронкой сделки.
     try {
-      const rows = (await client.call<{ PRODUCT_NAME?: string }[]>('crm.deal.productrows.get', { id: dealId })).result ?? [];
+      const rows = (await client.call<{ PRODUCT_NAME?: string; QUANTITY?: number | string }[]>('crm.deal.productrows.get', { id: dealId })).result ?? [];
       const names = rows.map((r) => r.PRODUCT_NAME ?? '').filter(Boolean);
+      // «Товары брони» для клиента: название, количество — если больше одного.
+      ctx.variables.products = rows
+        .filter((r) => r.PRODUCT_NAME)
+        .map((r) => (Number(r.QUANTITY) > 1 ? `${r.PRODUCT_NAME} × ${num(Number(r.QUANTITY))}` : r.PRODUCT_NAME!))
+        .join(', ');
       const groups = await this.prisma.workGroup.findMany({ where: { portalId: portal.id, archivedAt: null, dealCategoryId: Number(deal.CATEGORY_ID ?? 0) } });
       for (const g of groups) {
         const hit = detectBookingType((g.options as GroupOptionsDto | null)?.bookingTypes ?? [], names);
@@ -127,6 +132,8 @@ export class MessageContextService {
       guests: raw(map.guests),
       amount: d.byCode.OPPORTUNITY ?? '',
       program: ctx.variables.programm ?? '',
+      products: ctx.variables.products ?? '',
+      deal_type: ctx.variables.dealtype ?? '',
     };
     // Дом для клиента: альтернативное имя ресурса брони сделки.
     const bookingId = Number(map.bookingId ? deal[map.bookingId] : 0) || 0;

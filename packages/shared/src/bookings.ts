@@ -187,6 +187,8 @@ export interface CreateBookingDto {
   /** Товары сделки (заменяют строки сделки, как в прототипе); цена — вручную. Пусто — не трогать. */
   products?: { productId: number; quantity: number; price: number }[];
   paymentMode: PaymentMode;
+  /** Тип брони, выбранный менеджером (id правила группы); не задан — по товарам сделки, как в БП 270. */
+  bookingTypeId?: string | null;
 }
 
 export interface CreateBookingResultDto {

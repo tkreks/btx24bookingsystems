@@ -57,6 +57,7 @@ export const groupOptionsSchema = z
     resourceDefaults: z.record(z.string().regex(/^\d+$/), z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().positive() }).strict()).max(50)),
     views: z.object({ desktop: view, mobile: view }).strict(),
     bookingTypes: z.array(bookingTypeRule).max(30).optional(),
+    bookingTypeRequired: z.boolean().optional(),
     payments: z
       .object({
         prepayment: payStep,

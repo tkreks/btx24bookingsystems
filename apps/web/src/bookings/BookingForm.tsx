@@ -73,6 +73,8 @@ export function BookingForm({
   const [guests, setGuests] = useState('');
   const [comment, setComment] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('prepayment');
+  // '' — определить по товарам сделки (как БП 270).
+  const [bookingTypeId, setBookingTypeId] = useState('');
   const [step, setStep] = useState<'deal' | 'group' | 'details'>(wizard ? 'deal' : 'details');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -101,6 +103,7 @@ export function BookingForm({
     // Другая группа — другие права: недоступный выбор сбрасывается.
     if (deal.mode === 'new' && !g?.permissions.includes('deal.create')) setDeal({ mode: 'service' });
     if (!PAYMENT_MODES.filter((m) => canUsePaymentMode(g?.permissions ?? [], m)).includes(paymentMode)) setPaymentMode('prepayment');
+    setBookingTypeId('');
   };
 
   // Мастер: группы, где можно создать именно такую бронь (новая сделка — нужно право на сделки);
@@ -128,6 +131,7 @@ export function BookingForm({
     if ('error' in p) return setError(p.error);
     if (!resourceIds.length) return setError('Выберите ресурс');
     if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
+    if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId) return setError('Выберите тип брони: у новой сделки ещё нет товаров');
     setBusy(true);
     setError('');
     try {
@@ -144,6 +148,7 @@ export function BookingForm({
         guests: guests ? Number(guests) : null,
         comment: comment.trim() || undefined,
         paymentMode,
+        bookingTypeId: deal.mode === 'service' ? null : bookingTypeId || null,
       });
       onDone(r, deal.mode === 'service' ? null : paymentMode);
     } catch (e) {
@@ -300,6 +305,23 @@ export function BookingForm({
                     Гостей
                     <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
                   </label>
+                  {group && (group.bookingTypes ?? []).length > 0 && (
+                    <label>
+                      Тип брони{group.bookingTypeRequired ? ' *' : ''}
+                      <select value={bookingTypeId} onChange={(e) => setBookingTypeId(e.target.value)}>
+                        {!(group.bookingTypeRequired && deal.mode === 'new') && <option value="">Определить по товарам сделки</option>}
+                        {group.bookingTypeRequired && deal.mode === 'new' && !bookingTypeId && <option value="">Выберите…</option>}
+                        {(group.bookingTypes ?? []).map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.title}
+                          </option>
+                        ))}
+                      </select>
+                      {group.bookingTypeRequired && !bookingTypeId && deal.mode === 'existing' && (
+                        <span className="muted">Не определится по товарам сделки — бронь не создастся, выберите тип.</span>
+                      )}
+                    </label>
+                  )}
                   <label>
                     Оплата
                     <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>

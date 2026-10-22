@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import {
   canUsePaymentMode,
   detectBookingType,
+  PROGRAM_FROM_KEYWORD,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
   type CreateBookingDto,
@@ -36,6 +37,7 @@ export const createSchema = z
       .max(50)
       .optional(),
     paymentMode: z.enum(PAYMENT_MODES),
+    bookingTypeId: z.string().min(1).max(40).nullable().optional(),
   })
   .strict()
   .refine((b) => Date.parse(b.end) > Date.parse(b.start), { message: 'Конец брони раньше начала', path: ['end'] })
@@ -80,6 +82,22 @@ export class BookingCreateService {
         code: 'PAYMENT_MODE_FORBIDDEN',
         message: `«${PAYMENT_MODE_LABELS[b.paymentMode]}» — только с правами создавать брони и сделки`,
       });
+    // Тип брони — до любых записей в Битрикс24: выбор менеджера, иначе по товарам сделки (как БП 270).
+    const options = (g.group.options ?? null) as GroupOptionsDto | null;
+    const rules = options?.bookingTypes ?? [];
+    let type: ReturnType<typeof detectBookingType> = null;
+    if (b.kind === 'client') {
+      if (b.bookingTypeId) {
+        const rule = rules.find((r) => r.id === b.bookingTypeId);
+        if (!rule) throw new BadRequestException({ code: 'UNKNOWN_BOOKING_TYPE', message: 'Такого типа брони нет в группе' });
+        type = { rule, program: rule.program === PROGRAM_FROM_KEYWORD ? (detectBookingType([rule], await this.namesFor(user, b))?.program ?? '') : rule.program };
+      } else type = detectBookingType(rules, await this.namesFor(user, b));
+      if (!type && options?.bookingTypeRequired)
+        throw new BadRequestException({
+          code: 'BOOKING_TYPE_REQUIRED',
+          message: 'Укажите тип брони: по товарам сделки он не определился (добавьте товары в сделку или выберите тип)',
+        });
+    }
     const outside = b.resourceIds.filter((id) => !g.group.resourceIds.includes(id));
     if (outside.length) throw new BadRequestException({ code: 'RESOURCE_NOT_IN_GROUP', message: `Ресурсы не из группы: ${outside.join(', ')}` });
 
@@ -112,7 +130,6 @@ export class BookingCreateService {
     };
 
     const tz = user.portal.timezone;
-    const options = (g.group.options ?? null) as GroupOptionsDto | null;
     const warnings: string[] = [];
     let dealId = b.dealId ?? null;
     let createdDeal = false;
@@ -136,8 +153,6 @@ export class BookingCreateService {
 
       // 2. Бронь
       const products = b.products ?? [];
-      const names = products.length ? await this.productNames(user, products.map((p) => p.productId)) : [];
-      const type = detectBookingType(options?.bookingTypes ?? [], names);
       const name = b.kind === 'service' ? `Служебная: ${b.comment?.slice(0, 80) || 'блокировка'}` : b.newDeal?.title ?? `Сделка #${dealId}`;
       try {
         const res = await user.client.call<number | { id?: number }>('booking.v1.booking.add', {
@@ -183,7 +198,11 @@ export class BookingCreateService {
 
       // 4. Системные поля сделки
       if (dealId) {
-        const fields = await this.systemFields(user.portal.id, b, bookingId, tz, type?.rule.dealTypeValue ?? '');
+        const map = await this.fieldMap.get(user.portal.id);
+        const typeValue =
+          type?.rule.dealTypeValue && map.bookingType ? await this.fieldMap.enumId(user.portal.id, user.client, map.bookingType, type.rule.dealTypeValue) : null;
+        if (type && type.rule.dealTypeValue && map.bookingType && !typeValue) warnings.push(`Тип «${type.rule.title}»: значение не найдено в поле «Тип бронирования» — поле не заполнено`);
+        const fields = await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '');
         if (Object.keys(fields).length) {
           if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update'))
             await log('deal.update', true, { fields: Object.keys(fields) });
@@ -248,6 +267,18 @@ export class BookingCreateService {
       if (createdDeal || !(err instanceof Bitrix24Error) || err.code !== 'READ_ONLY_MODE') throw err;
       await log(step, false, msg(err));
       return false;
+    }
+  }
+
+  /** Названия товаров: из заявки, иначе — товары существующей сделки (менеджер ведёт их в сделке). */
+  private async namesFor(user: B24UserContext, b: CreateBookingDto): Promise<string[]> {
+    if (b.products?.length) return this.productNames(user, b.products.map((p) => p.productId));
+    if (!b.dealId) return [];
+    try {
+      const rows = (await user.client.call<{ PRODUCT_NAME?: string }[]>('crm.deal.productrows.get', { id: b.dealId })).result ?? [];
+      return rows.map((r) => r.PRODUCT_NAME ?? '').filter(Boolean);
+    } catch {
+      return [];
     }
   }
 

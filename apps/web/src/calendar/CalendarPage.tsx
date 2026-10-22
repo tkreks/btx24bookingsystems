@@ -182,7 +182,7 @@ export function CalendarPage({
   // Бронь сделки в другой группе — переключаемся на неё один раз (выбор сотрудника не сохраняем).
   if (dealTarget && groups && !targetGroupApplied) {
     setTargetGroupApplied(true);
-    const g = groups.find((x) => dealTarget.resourceIds.some((id) => x.resourceIds.includes(id)));
+    const g = groups.find((x) => (dealTarget.resourceIds ?? []).some((id) => x.resourceIds.includes(id)));
     if (g && g.id !== activeGroup?.id) setGroupId(g.id);
   }
 

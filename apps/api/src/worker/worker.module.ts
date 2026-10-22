@@ -11,6 +11,8 @@ import { BookingSyncJob } from './booking-sync.job.js';
 import { HeartbeatService } from './heartbeat.service.js';
 import { OpenlineIndexJob } from './openline-index.job.js';
 import { PaymentJob } from './payment.job.js';
+import { BookingTypeJob } from './booking-type.job.js';
+import { BookingTypeFillService } from '../modules/bookings/booking-type-fill.service.js';
 import { PaymentFlow } from '../modules/payments/payment-flow.js';
 import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
 import { MessageContextService } from '../modules/bookings/message-context.service.js';
@@ -31,6 +33,8 @@ import { MessageContextService } from '../modules/bookings/message-context.servi
     MessageContextService,
     PaymentFlow,
     PaymentJob,
+    BookingTypeFillService,
+    BookingTypeJob,
   ],
 })
 export class WorkerModule {}

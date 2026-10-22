@@ -224,6 +224,8 @@ export function GroupForm({
         <BookingTypesSection
           rules={options.bookingTypes ?? []}
           onChange={(bookingTypes) => updateOptions({ bookingTypes })}
+          required={options.bookingTypeRequired === true}
+          onRequired={(bookingTypeRequired) => updateOptions({ bookingTypeRequired })}
         />
 
         <PaymentsSection

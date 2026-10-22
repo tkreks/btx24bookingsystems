@@ -3,6 +3,7 @@ import { DEAL_FIELD_ROLES, type DealFieldMapDto, type DealFieldRole } from '@btx
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 
 interface FieldMeta {
   title?: string;
@@ -18,6 +19,29 @@ const CODE = /^UF_CRM_[A-Z0-9_]{1,60}$/;
 @Injectable()
 export class DealFieldMapService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly enumCache = new Map<string, { items: { ID: string; XML_ID?: string; VALUE?: string }[]; expiresAt: number }>();
+
+  /**
+   * Значение поля-списка сделки для записи через REST — номер варианта (ID). БП хранит варианты
+   * по внутреннему коду (XML_ID, «3af19224…»), а `crm.deal.update` принимает только номер: код и
+   * название варианта переводим в номер. Не нашли — null (не записываем мусор).
+   */
+  async enumId(portalId: string, client: Bitrix24RestClient, fieldCode: string, value: string): Promise<string | null> {
+    const v = value.trim();
+    if (!v) return null;
+    const key = `${portalId}:${fieldCode}`;
+    let hit = this.enumCache.get(key);
+    if (!hit || hit.expiresAt < Date.now()) {
+      const r = await client.call<{ LIST?: { ID: string; XML_ID?: string; VALUE?: string }[] }[]>('crm.deal.userfield.list', { filter: { FIELD_NAME: fieldCode } });
+      hit = { items: (Array.isArray(r.result) ? r.result[0]?.LIST : undefined) ?? [], expiresAt: Date.now() + 10 * 60_000 };
+      this.enumCache.set(key, hit);
+    }
+    // Не список (строка, число) — пишем как есть.
+    if (!hit.items.length) return v;
+    const item = hit.items.find((i) => String(i.ID) === v) ?? hit.items.find((i) => i.XML_ID === v) ?? hit.items.find((i) => i.VALUE === v);
+    return item ? String(item.ID) : null;
+  }
 
   async get(portalId: string): Promise<DealFieldMapDto> {
     const s = await this.prisma.portalSettings.findUnique({ where: { portalId } });

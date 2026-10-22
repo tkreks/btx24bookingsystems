@@ -112,6 +112,8 @@ export interface GroupOptionsDto {
   views: { desktop: CalendarViewSetting; mobile: CalendarViewSetting };
   /** Типы брони по товарам и подтверждение клиенту для каждого (замена БП 270). */
   bookingTypes?: BookingTypeRule[];
+  /** Тип брони обязателен при создании брони (решение владельца 2026-10-22 — для «Бань»). */
+  bookingTypeRequired?: boolean;
   payments: {
     prepayment: PaymentStepConfig;
     surcharge: PaymentStepConfig;
@@ -185,6 +187,10 @@ export interface MyGroupDto {
   defaultNights: number;
   /** Вид календаря по умолчанию на ПК и на телефоне ('' — авто). */
   views: GroupOptionsDto['views'];
+  /** Типы брони группы (для выбора в форме брони). */
+  bookingTypes: { id: string; title: string }[];
+  /** Тип брони обязателен: не указан и не определился по товарам — бронь не создаётся. */
+  bookingTypeRequired: boolean;
 }
 
 export interface AppSettingsDto {

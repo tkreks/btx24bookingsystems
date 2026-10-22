@@ -107,6 +107,7 @@ export function TemplatesManager({
               {'{=Variable:programm}'} и др.) подставятся по сделке чата при вставке шаблона.
             </p>
             <StepsEditor
+              variables
               steps={editing.steps}
               disabled={busy}
               onChange={(steps) => setEditing({ ...editing, steps })}

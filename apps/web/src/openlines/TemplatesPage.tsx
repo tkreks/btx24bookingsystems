@@ -3,6 +3,7 @@ import {
   DEFAULT_CLIENT_MESSAGE,
   DEFAULT_FAIL_MESSAGE,
   DEFAULT_SURCHARGE_MESSAGE,
+  VARIABLE_MENU,
   type GroupDto,
   type GroupOptionsDto,
   type MessageTemplateDto,
@@ -211,6 +212,8 @@ function VariablesAndPreview({ templates }: { templates: MessageTemplateDto[] })
       <section className="day-panel">
         <h3>Переменные</h3>
         <p className="muted">Нажмите, чтобы скопировать. Поля сделки и контакта — по названию, как в Битрикс24.</p>
+        <h4>Простые переменные</h4>
+        <div className="var-chips">{VARIABLE_MENU.map((v) => chip(v.token, v.label))}</div>
         <h4>Приложение и БП</h4>
         <div className="var-chips">{vars?.app.map((v) => chip(v.token, v.label))}</div>
         <h4>Поля сделки</h4>

@@ -95,6 +95,8 @@ export class AccessService {
       checkOutTime: g.group.checkOutTime,
       defaultNights: g.group.defaultNights,
       views: (g.group.options as GroupOptionsDto | null)?.views ?? { desktop: '', mobile: '' },
+      bookingTypes: ((g.group.options as GroupOptionsDto | null)?.bookingTypes ?? []).map((t) => ({ id: t.id, title: t.title })),
+      bookingTypeRequired: (g.group.options as GroupOptionsDto | null)?.bookingTypeRequired === true,
     };
   }
 

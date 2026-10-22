@@ -3445,3 +3445,24 @@ input[role='switch']:checked::after {
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* Вставка переменных в текст сообщения. */
+.var-textarea {
+  display: grid;
+  gap: 4px;
+}
+.var-textarea textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.var-menu {
+  justify-self: start;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #2455df;
+  max-width: 100%;
+}

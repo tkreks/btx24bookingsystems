@@ -52,6 +52,8 @@ export const TEMPLATE_VARIABLES: Record<string, string> = {
   time_end: 'время завершения',
   program: 'программа (по типу брони)',
   guests: 'количество гостей',
+  products: 'товары брони (из сделки)',
+  deal_type: 'тип брони (по товарам или выбранный)',
   house: 'дом: альтернативное имя ресурса, если задано, иначе название ресурса',
   amount: 'стоимость (сумма сделки)',
   prepayment: 'сумма к оплате (предоплата или доплата)',
@@ -59,6 +61,28 @@ export const TEMPLATE_VARIABLES: Record<string, string> = {
   minutes: 'минут на оплату',
   deadline: 'оплатить до',
 };
+
+/**
+ * Меню «＋ Переменная» в редакторах сообщений — простые названия (как вставка полей в шаблонизаторе
+ * Битрикс24). `payment` — только в сообщениях об оплате.
+ */
+export const VARIABLE_MENU: { token: string; label: string; payment?: boolean }[] = [
+  { token: '{client_name}', label: 'Имя клиента' },
+  { token: '{amount}', label: 'Сумма сделки' },
+  { token: '{date_start}', label: 'Дата брони' },
+  { token: '{time_start}', label: 'Время брони' },
+  { token: '{date_end}', label: 'Дата окончания' },
+  { token: '{time_end}', label: 'Время окончания' },
+  { token: '{products}', label: 'Товары брони' },
+  { token: '{guests}', label: 'Количество гостей' },
+  { token: '{program}', label: 'Программа' },
+  { token: '{deal_type}', label: 'Тип брони' },
+  { token: '{house}', label: 'Дом (имя ресурса для клиента)' },
+  { token: '{prepayment}', label: 'Сумма к оплате', payment: true },
+  { token: '{link}', label: 'Ссылка на оплату', payment: true },
+  { token: '{deadline}', label: 'Оплатить до', payment: true },
+  { token: '{minutes}', label: 'Минут на оплату', payment: true },
+];
 
 /** Тип брони по названиям товаров сделки; null — не определён (сообщение не отправляем). */
 export function detectBookingType(

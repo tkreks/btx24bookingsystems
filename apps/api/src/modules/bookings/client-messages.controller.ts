@@ -7,6 +7,7 @@ import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { rulesFromBizproc } from './bizproc-import.js';
+import { DealFieldMapService } from './deal-field-map.service.js';
 
 const clientNameSchema = z.object({ clientName: z.string().trim().max(255).nullable() }).strict();
 const diskQuery = z
@@ -27,7 +28,10 @@ interface RawDiskItem {
 @Controller('admin')
 @UseGuards(B24AuthGuard, AppAdminGuard)
 export class ClientMessagesAdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fieldMap: DealFieldMapService,
+  ) {}
 
   @Get('resources')
   async resources(@B24User() user: B24UserContext): Promise<ResourceAdminDto[]> {
@@ -100,6 +104,11 @@ export class ClientMessagesAdminController {
     const t = res.result?.[0];
     if (!t) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: `БП ${id} не найден` });
     const rules = rulesFromBizproc(t.TEMPLATE);
+    // Значения «Тип бронирования» в БП — внутренние коды вариантов; для REST нужны номера.
+    const field = (await this.fieldMap.get(user.portal.id)).bookingType;
+    if (field)
+      for (const r of rules)
+        if (r.dealTypeValue) r.dealTypeValue = (await this.fieldMap.enumId(user.portal.id, user.client, field, r.dealTypeValue).catch(() => null)) ?? r.dealTypeValue;
     await this.fileNames(user, rules.flatMap((r) => r.confirmation.flatMap((s) => s.files)));
     return { templateName: t.NAME ?? `БП ${id}`, rules };
   }

@@ -3,6 +3,7 @@ import { DEFAULT_SURCHARGE_MESSAGE, type CatalogDto, type DealFieldInfo, type De
 import { DEFAULT_CLIENT_MESSAGE, DEFAULT_FAIL_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
 import { CatalogSections, sectionSummary } from './CatalogSections.js';
 import { InvoiceSettings } from './InvoiceSettings.js';
+import { VarTextarea } from './VarTextarea.js';
 
 type Ref<T> = { data: T | null; error: string };
 
@@ -147,11 +148,12 @@ export function PaymentsSection({
       </div>
       <label className="settings-block">
         Сообщение клиенту со ссылкой на оплату
-        <textarea
+        <VarTextarea
+          payment
           rows={4}
           maxLength={4000}
           value={payments.clientMessage ?? DEFAULT_CLIENT_MESSAGE}
-          onChange={(e) => onChange({ ...payments, clientMessage: e.target.value })}
+          onChange={(clientMessage) => onChange({ ...payments, clientMessage })}
         />
         <span className="muted">
           Переменные: {'{link}'} — ссылка на оплату, {'{prepayment}'} — сумма предоплаты, {'{client_name}'}, {'{house}'}, {'{date_start}'}, {'{minutes}'} — минут на оплату,{' '}
@@ -160,21 +162,23 @@ export function PaymentsSection({
       </label>
       <label className="settings-block">
         Сообщение клиенту со ссылкой на доплату
-        <textarea
+        <VarTextarea
+          payment
           rows={3}
           maxLength={4000}
           value={payments.surchargeMessage ?? DEFAULT_SURCHARGE_MESSAGE}
-          onChange={(e) => onChange({ ...payments, surchargeMessage: e.target.value })}
+          onChange={(surchargeMessage) => onChange({ ...payments, surchargeMessage })}
         />
         <span className="muted">{'{prepayment}'} — сумма доплаты (из «ручной суммы доплаты» сделки или указанная сотрудником).</span>
       </label>
       <label className="settings-block">
         Сообщение клиенту, если бронь снята из-за неоплаты (пусто — не отправлять)
-        <textarea
+        <VarTextarea
+          payment
           rows={3}
           maxLength={4000}
           value={payments.failMessage ?? DEFAULT_FAIL_MESSAGE}
-          onChange={(e) => onChange({ ...payments, failMessage: e.target.value })}
+          onChange={(failMessage) => onChange({ ...payments, failMessage })}
         />
       </label>
       <h4>Действия после оплаты</h4>

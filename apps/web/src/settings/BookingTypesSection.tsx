@@ -10,6 +10,7 @@ import {
 } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { DiskPicker } from './DiskPicker.js';
+import { VarTextarea } from './VarTextarea.js';
 import { move } from './group-form.js';
 import { Section } from './GroupOptions.js';
 
@@ -25,6 +26,8 @@ const SAMPLE: Record<string, string> = {
   house: 'Дом знахаря',
   amount: '45000',
   prepayment: '25000',
+  products: 'Программа «Алатырь» (4 часа), Веник × 2',
+  deal_type: 'Программы',
 };
 
 const newRule = (n: number): BookingTypeRule => ({
@@ -43,9 +46,14 @@ const newRule = (n: number): BookingTypeRule => ({
 export function BookingTypesSection({
   rules,
   onChange,
+  required = false,
+  onRequired,
 }: {
   rules: BookingTypeRule[];
   onChange: (rules: BookingTypeRule[]) => void;
+  /** Тип брони обязателен при создании брони. */
+  required?: boolean;
+  onRequired?: (v: boolean) => void;
 }) {
   const [templateId, setTemplateId] = useState('270');
   const [importing, setImporting] = useState(false);
@@ -79,8 +87,17 @@ export function BookingTypesSection({
       <p className="muted">
         Тип брони определяется по названиям товаров сделки: правила проверяются сверху вниз, подходит первое, в товарах
         которого есть любое ключевое слово. После оплаты клиенту в открытую линию уходит цепочка сообщений этого типа.
-        Тип не определён — сообщение не отправляется, менеджер получает предупреждение.
+        Тип не определён — сообщение не отправляется, менеджер получает предупреждение. Менеджер может выбрать тип в
+        форме брони; не выбрал — тип определяется по товарам, а если товары добавили позже, поле «Тип бронирования» в сделке
+        заполнится само.
       </p>
+      {onRequired && (
+        <label className="check switch-row">
+          <input type="checkbox" role="switch" checked={required} onChange={(e) => onRequired(e.target.checked)} />
+          <b>Тип брони обязателен</b>
+          <span className="muted"> — не выбран и не определился по товарам: бронь не создаётся</span>
+        </label>
+      )}
       <div className="bp-import">
         <label>
           Перенести из бизнес-процесса №
@@ -169,13 +186,13 @@ export function BookingTypesSection({
               const unknown = unknownVariables(s.text);
               return (
                 <li key={k}>
-                  <textarea
+                  <VarTextarea
                     rows={Math.min(12, Math.max(2, s.text.split('\n').length))}
                     maxLength={4000}
                     value={s.text}
                     aria-label={`${r.title}: сообщение ${k + 1}`}
                     placeholder="Текст (можно пустой, если только файлы)"
-                    onChange={(e) => patchStep(i, k, { text: e.target.value })}
+                    onChange={(text) => patchStep(i, k, { text })}
                   />
                   {unknown.length > 0 && (
                     <p className="error">Неизвестные переменные: {unknown.map((u) => `{${u}}`).join(', ')}</p>
