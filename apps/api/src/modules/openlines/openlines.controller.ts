@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  ActivityDayDto,
   ChatChannelDto,
   ChatReplyStatusDto,
   CallListDto,
@@ -31,9 +32,11 @@ import type {
   StoredFileDto,
 } from '@btx24/shared';
 import { AccessService, type UserAccess } from '../access/access.service.js';
+import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { ActionLogService } from '../audit/action-log.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { ActivityService } from './activity.service.js';
 import { ChatFoldersService } from './chat-folders.service.js';
 import { ChatsService } from './chats.service.js';
 import { DashboardService } from './dashboard.service.js';
@@ -60,7 +63,15 @@ export class OpenlinesController {
     private readonly dashboard: DashboardService,
     private readonly folderService: ChatFoldersService,
     private readonly actions: ActionLogService,
+    private readonly activity: ActivityService,
   ) {}
+
+  /** «Активность сотрудников» за день — только администраторам приложения. */
+  @Get('dashboard/activity')
+  @UseGuards(AppAdminGuard)
+  employeeActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<ActivityDayDto> {
+    return this.activity.day(user, query);
+  }
 
   @Get('dashboard')
   async summary(

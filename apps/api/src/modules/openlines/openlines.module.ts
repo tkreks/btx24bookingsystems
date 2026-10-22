@@ -2,6 +2,7 @@ import { Bitrix24Module } from '../bitrix24/bitrix24.module.js';
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module.js';
 import { BookingsModule } from '../bookings/bookings.module.js';
+import { ActivityService } from './activity.service.js';
 import { ChatFoldersService } from './chat-folders.service.js';
 import { ChatsService } from './chats.service.js';
 import { DashboardService } from './dashboard.service.js';
@@ -13,6 +14,6 @@ import { TemplatesService } from './templates.service.js';
 @Module({
   imports: [AccessModule, BookingsModule, Bitrix24Module],
   controllers: [OpenlinesController],
-  providers: [ChatFoldersService, ChatsService, DashboardService, FilesService, OpenlineIndexService, TemplatesService],
+  providers: [ActivityService, ChatFoldersService, ChatsService, DashboardService, FilesService, OpenlineIndexService, TemplatesService],
 })
 export class OpenlinesModule {}

@@ -337,3 +337,55 @@ export interface ChatChannelDto {
  */
 export const DASHBOARD_PARTS = ['base', 'calls', 'deals'] as const;
 export type DashboardPart = (typeof DASHBOARD_PARTS)[number];
+
+/**
+ * «Активность сотрудников» (дашборд, только администраторам приложения): что сотрудники групп
+ * делали по часам дня — звонки, сообщения в чатах (свои и с телефона на смене), новые сделки,
+ * брони и действия в приложении. Смена — по учёту рабочего времени Битрикс24 (timeman).
+ */
+export const ACTIVITY_KINDS = ['call', 'chat', 'phone', 'deal', 'booking', 'app'] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+export const ACTIVITY_KIND_LABELS: Record<ActivityKind, string> = {
+  call: 'Звонки',
+  chat: 'Сообщения в чатах',
+  phone: 'Сообщения с телефона',
+  deal: 'Новые сделки',
+  booking: 'Брони',
+  app: 'Действия в приложении',
+};
+
+export interface ActivityEventDto {
+  at: string;
+  kind: ActivityKind;
+  text: string;
+  /** Длительность звонка, секунд. */
+  durationSec: number | null;
+  dealId: number | null;
+  chatId: number | null;
+}
+
+export interface EmployeeActivityDto {
+  userId: number;
+  name: string;
+  /** Рабочий день по timeman в этот день; null — не начинал (или нет доступа к учёту времени). */
+  shift: { start: string; end: string | null } | null;
+  /** По часам с `fromHour` до `toHour` (не включая): число событий каждого вида. */
+  hours: Record<ActivityKind, number>[];
+  totals: Record<ActivityKind, number>;
+  /** Минут разговоров (по началу и концу звонков). */
+  callMinutes: number;
+  /** Оценка минут работы в чатах: сообщения с перерывами до 10 минут — одна сессия. */
+  chatMinutes: number;
+  events: ActivityEventDto[];
+}
+
+export interface ActivityDayDto {
+  date: string;
+  timezone: string;
+  fromHour: number;
+  toHour: number;
+  employees: EmployeeActivityDto[];
+  /** Сообщения с телефона, которые некому приписать (никто не на смене). */
+  unattributedPhone: number;
+  notes: string[];
+}

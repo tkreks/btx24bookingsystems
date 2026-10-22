@@ -5479,3 +5479,134 @@ input[role='switch']:checked::after {
     grid-row: 2;
   }
 }
+
+/* Дашборд: активность сотрудников по часам (администраторам). */
+.dash-activity {
+  margin-bottom: 12px;
+}
+.act-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.act-head .dash-attention-title {
+  margin: 0;
+}
+.act-date {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.act-date button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+}
+.act-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 8px;
+  font-size: 12px;
+}
+.act-scroll {
+  overflow-x: auto;
+}
+.act-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.act-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.act-table td {
+  height: 34px;
+  min-width: 30px;
+  border-radius: 6px;
+  background: #f5f7fb;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+.act-who {
+  width: 260px;
+  text-align: left;
+}
+.act-who button {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.act-who button:hover,
+.act-table tr.open .act-who button {
+  background: #eef4ff;
+}
+.act-shift {
+  justify-self: start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.act-shift.on {
+  background: #ecfdf3;
+  color: #15803d;
+}
+.act-totals {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.act-events-row td {
+  height: auto;
+  padding: 6px 10px;
+  background: #fafbfd;
+  font-weight: 400;
+  text-align: left;
+}
+.act-events {
+  display: grid;
+  gap: 2px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.act-events li {
+  display: grid;
+  grid-template-columns: 44px 22px minmax(0, 1fr);
+  gap: 4px;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+.act-events li > span:last-child,
+.act-events li > button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.act-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+.act-who button b {
+  font-size: 13px;
+}

@@ -22,6 +22,7 @@ import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
 import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
+import { EmployeeActivity } from './EmployeeActivity.js';
 import { Icon } from './icons.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
@@ -385,6 +386,8 @@ export function DashboardPage({
       )}
         <DealsToday d={d} tz={tz} word={word} />
       </div>
+
+      {session.canManageApp && <EmployeeActivity timezone={tz} />}
 
       {d?.newDeals && d.newDeals.total > 0 && <DealSources items={d.newDeals.items} word={word} onOpen={(source) => setDealsOpen({ source })} />}
 

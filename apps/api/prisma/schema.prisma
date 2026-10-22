@@ -58,6 +58,7 @@ model Portal {
   bookingAlerts        BookingAlert[]
   actionLogs           ActionLog[]
   webSessions          WebSession[]
+  systemMessages       SystemMessage[]
 }
 
 enum PortalStatus {
@@ -664,6 +665,25 @@ model PaymentRequest {
   @@unique([portalId, idempotencyKey])
   @@index([portalId, dealId])
   @@index([status, deadlineAt])
+}
+
+// ---------- Системные сообщения ----------
+
+/// Сообщения клиенту, которые приложение отправило само (ссылка на оплату, подтверждение — часто
+/// от имени сотрудника): в «Активности сотрудников» не считаются его работой.
+model SystemMessage {
+  id        String   @id @default(cuid())
+  portalId  String
+  portal    Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  chatId    Int
+  /// ID сообщения, если метод его вернул; иначе сверка по чату, отправителю и времени.
+  messageId Int?
+  /// От чьего имени ушло (USER_ID); null — от имени приложения.
+  userId    Int?
+  source    String   @db.VarChar(32)
+  sentAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([portalId, sentAt])
 }
 
 // ---------- Журнал действий ----------

@@ -309,7 +309,8 @@ export class PaymentFlow {
     for (const chatId of chats) {
       for (const userId of senders) {
         try {
-          await ctx.client.call('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
+          const r = await ctx.client.call<unknown>('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
+          await this.markSystem(ctx, chatId, userId, r.result);
           return true;
         } catch (e) {
           last = msg(e);
@@ -323,7 +324,8 @@ export class PaymentFlow {
       try {
         const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
         if (dealOfBindings(d.result?.entity_data_2) !== req.dealId) continue;
-        await ctx.client.call('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
+        const r = await ctx.client.call<unknown>('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
+        await this.markSystem(ctx, chatId, null, r.result);
         return true;
       } catch (e) {
         last = msg(e);
@@ -379,12 +381,28 @@ export class PaymentFlow {
         const ok = await this.safe(warnings, `файл «${f.name}»`, async () => {
           const file = (await ctx.client.call<{ DOWNLOAD_URL?: string; NAME?: string }>('disk.file.get', { id: f.id })).result;
           const { data } = await ctx.client.download(String(file?.DOWNLOAD_URL ?? ''));
-          await ctx.client.call('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name: file?.NAME ?? f.name, content: data.toString('base64') } });
+          const r = await ctx.client.call<{ messageId?: number }>('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name: file?.NAME ?? f.name, content: data.toString('base64') } });
+          await this.markSystem(ctx, chatId!, null, r.result?.messageId);
         });
         if (!ok) return false;
       }
     }
     return true;
+  }
+
+  /**
+   * Автосообщение клиенту (ссылка, подтверждение) — в SystemMessage: в «Активности сотрудников» оно
+   * не считается работой того, от чьего имени ушло. Сбой записи не мешает отправке.
+   */
+  private async markSystem(ctx: FlowContext, chatId: number, userId: number | null, result: unknown): Promise<void> {
+    const messageId = Number(result);
+    try {
+      await this.prisma.systemMessage.create({
+        data: { portalId: ctx.portal.id, chatId, userId, messageId: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null, source: 'payment' },
+      });
+    } catch (e) {
+      this.logger.warn(`system message mark failed: ${msg(e)}`);
+    }
   }
 
   /** Самый новый чат открытой линии, который сейчас привязан к сделке. */
