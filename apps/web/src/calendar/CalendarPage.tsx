@@ -11,7 +11,7 @@ import {
 } from '@btx24/shared';
 import { apiGet, ApiRequestError } from '../api.js';
 import { fitFrame, type PlacementContext } from '../b24.js';
-import { fmtDayTitle, shiftDate } from '../format.js';
+import { fmtDateTime, fmtDayTitle, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
 import { BookingForm } from '../bookings/BookingForm.js';
@@ -152,8 +152,10 @@ export function CalendarPage({
     }
   };
 
+  const [dealTarget, setDealTarget] = useState<ClientBookingDto | null>(null);
+  const [targetGroupApplied, setTargetGroupApplied] = useState(false);
   // Встройка в сделку: календарь открывается на дате брони этой сделки (ближайшей предстоящей,
-  // иначе последней), а не на сегодня.
+  // иначе последней) и в группе её ресурса; брони нет — сегодня.
   useEffect(() => {
     if (!placement.dealId) return;
     let active = true;
@@ -162,7 +164,10 @@ export function CalendarPage({
         if (!active) return;
         const own = (list: ClientBookingDto[]) => list.find((b) => b.dealId === placement.dealId);
         const b = own(r.upcoming) ?? own(r.recent);
-        if (b) setDate(dayKey(b.start, tz));
+        if (b) {
+          setDate(dayKey(b.start, tz));
+          setDealTarget(b);
+        }
         setDealBookings(r);
       },
       () => undefined,
@@ -171,6 +176,13 @@ export function CalendarPage({
       active = false;
     };
   }, [placement.dealId, tz]);
+
+  // Бронь сделки в другой группе — переключаемся на неё один раз (выбор сотрудника не сохраняем).
+  if (dealTarget && groups && !targetGroupApplied) {
+    setTargetGroupApplied(true);
+    const g = groups.find((x) => dealTarget.resourceIds.some((id) => x.resourceIds.includes(id)));
+    if (g && g.id !== activeGroup?.id) setGroupId(g.id);
+  }
 
   useEffect(() => fitFrame(), [day, view, selected, adminOpen, screen]);
 
@@ -331,7 +343,20 @@ export function CalendarPage({
       )}
       {placement.dealId && (
         <div className="notice deal">
-          Сделка #{placement.dealId}: {dealBookings ? `броней на эту дату — ${dealBookings}` : 'на эту дату броней нет'}
+          {dealTarget ? (
+            <>
+              Бронь сделки #{placement.dealId}: <b>{fmtDateTime(dealTarget.start, tz)} — {fmtDateTime(dealTarget.end, tz)}</b>
+              {dealTarget.resources.length > 0 && ` · ${dealTarget.resources.join(', ')}`}
+              {dayKey(dealTarget.start, tz) !== date && (
+                <button className="link" onClick={() => setDate(dayKey(dealTarget.start, tz))}>
+                  Показать
+                </button>
+              )}
+              {dayKey(dealTarget.start, tz) === date && !dealBookings && ' · в этой группе её не видно — выберите группу ресурса'}
+            </>
+          ) : (
+            <>Сделка #{placement.dealId}: брони нет — показан сегодняшний день.</>
+          )}
         </div>
       )}
       {groupsError && (
@@ -352,7 +377,7 @@ export function CalendarPage({
           />
         )}
         {day && view === 'availability' && (
-          <DayAvailability day={day} groupName={activeGroup?.name ?? ''} onSelect={setSelected} />
+          <DayAvailability day={day} groupName={activeGroup?.name ?? ''} highlightDealId={placement.dealId} onSelect={setSelected} />
         )}
         {!day && loading && <div className="muted pad">Загрузка броней…</div>}
       </main>

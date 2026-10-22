@@ -182,3 +182,35 @@ describe('DashboardService', () => {
     });
   });
 });
+
+describe('DashboardService.callLog', () => {
+  it('lists calls of the day newest first with direction, status, phone and employee; scope mine', async () => {
+    const calls = [
+      { ID: '1', OWNER_ID: '678', OWNER_TYPE_ID: '2', DIRECTION: '1', START_TIME: '2026-10-22T10:15:36+03:00', END_TIME: '2026-10-22T10:16:39+03:00', RESPONSIBLE_ID: '236', COMMUNICATIONS: [{ VALUE: '79260000051', ENTITY_TYPE_ID: '3', ENTITY_ID: '140' }] },
+      { ID: '2', OWNER_ID: '140', OWNER_TYPE_ID: '3', DIRECTION: '2', START_TIME: '2026-10-22T09:16:14+03:00', END_TIME: '2026-10-22T09:16:14+03:00', RESPONSIBLE_ID: '236', COMMUNICATIONS: [{ VALUE: '+79800000044', ENTITY_TYPE_ID: '3', ENTITY_ID: '140' }] },
+      { ID: '3', OWNER_ID: '5', OWNER_TYPE_ID: '1', DIRECTION: '1', START_TIME: '2026-10-22T11:00:00+03:00', RESPONSIBLE_ID: '99', SETTINGS: { MISSED_CALL: true }, COMMUNICATIONS: [] },
+    ];
+    const listAll = vi.fn(async (method: string, params: { filter?: Record<string, unknown> }) => {
+      if (method === 'crm.activity.list') {
+        expect(params.filter).toMatchObject({ '>=START_TIME': '2026-10-21T21:00:00.000Z', '<START_TIME': '2026-10-22T21:00:00.000Z' });
+        return calls;
+      }
+      if (method === 'crm.contact.list') return [{ ID: '140', NAME: 'Анна' }];
+      if (method === 'user.get') return [{ ID: '236', NAME: 'Елена', LAST_NAME: 'Агула' }, { ID: '99', NAME: 'Пётр' }];
+      return [];
+    });
+    const batch = vi.fn(async () => ({ result: { t2: [{ ID: '678', TITLE: 'Баня' }], t3: [{ ID: '140', NAME: 'Анна' }], t1: [{ ID: '5', TITLE: 'Лид' }] } }));
+    const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 236, client: { listAll, batch } } as unknown as B24UserContext;
+    const svc = new DashboardService({} as ChatsService, emptyJournal);
+    const all = await svc.callLog(user, { date: '2026-10-22', scope: 'all' });
+    expect(all.items.map((i) => [i.activityId, i.direction, i.status, i.durationSec, i.clientPhone, i.employee?.name])).toEqual([
+      [3, 'incoming', 'missed', 0, null, 'Пётр'],
+      [1, 'incoming', 'success', 63, '79260000051', 'Елена Агула'],
+      [2, 'outgoing', 'no_answer', 0, '+79800000044', 'Елена Агула'],
+    ]);
+    expect(all.items[1]).toMatchObject({ contact: { id: 140, name: 'Анна' }, owner: { typeId: 2, id: 678, title: 'Баня' } });
+    const mine = await svc.callLog(user, { date: '2026-10-22', scope: 'mine' });
+    expect(mine.items.map((i) => i.activityId)).toEqual([1, 2]);
+    await expect(svc.callLog(user, { date: '22.10.2026' })).rejects.toMatchObject({ status: 400 });
+  });
+});

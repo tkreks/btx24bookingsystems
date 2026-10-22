@@ -157,6 +157,8 @@ export interface DashboardDto {
   contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
   /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
   calls: Record<CallKind, number> | null;
+  /** Все звонки за сегодня (входящие и исходящие, по `callsScope`); null — нет доступа к делам CRM. */
+  callsToday: number | null;
   callsScope: CallScope;
   /** Воронка для «повторных» и доступные воронки (из групп пользователя). */
   callsFunnel: number | null;
@@ -215,3 +217,32 @@ export interface CallListDto {
   /** Обрезано по лимиту выборки (очень много звонков за период). */
   truncated: boolean;
 }
+
+export type CallDirection = 'incoming' | 'outgoing';
+/** Успешный; пропущен (входящий без ответа сотрудника); нет ответа (исходящий, клиент не взял трубку). */
+export type CallStatus = 'success' | 'missed' | 'no_answer';
+export const CALL_STATUS_LABELS: Record<CallStatus, string> = { success: 'Успешный', missed: 'Пропущен', no_answer: 'Нет ответа' };
+
+/** Звонок в журнале дня. Номер линии портала без права `telephony` недоступен — вместо него сотрудник. */
+export interface CallLogRowDto {
+  activityId: number;
+  at: string;
+  durationSec: number;
+  direction: CallDirection;
+  status: CallStatus;
+  /** Номер клиента: кто звонил (входящий) или куда звонили (исходящий). */
+  clientPhone: string | null;
+  /** Сотрудник: кто принял (входящий) или кто звонил (исходящий). */
+  employee: { id: number; name: string | null } | null;
+  contact: { id: number; name: string | null } | null;
+  owner: { typeId: number; id: number; title: string | null };
+}
+
+/** `GET /api/dashboard/call-log?date=&scope=` — все звонки дня, новые сверху. */
+export interface CallLogDto {
+  date: string;
+  scope: CallScope;
+  items: CallLogRowDto[];
+  truncated: boolean;
+}
+

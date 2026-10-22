@@ -1,4 +1,4 @@
-import { callClients, clientKey, type CallActivity } from './call-stats.js';
+import { callClients, callDurationSec, callStatus, clientKey, type CallActivity } from './call-stats.js';
 
 let id = 0;
 const call = (
@@ -65,5 +65,19 @@ describe('callClients', () => {
     expect(clientKey(call(1, '2026-10-21T10:00:00Z', '+79850000000', { contact: 9 }))).toBe('contact:9');
     expect(clientKey(call(1, '2026-10-21T10:00:00Z', '8 (985) 000-00-00'))).toBe('phone:9850000000');
     expect(clientKey(call(1, '2026-10-21T10:00:00Z', null, { owner: [3, 5] }))).toBe('crm:3:5');
+  });
+});
+
+describe('callStatus / callDurationSec', () => {
+  const call = (o: Partial<CallActivity>): CallActivity => ({ ID: '1', OWNER_ID: '1', OWNER_TYPE_ID: '3', DIRECTION: '1', START_TIME: '2026-10-22T10:15:36+03:00', RESPONSIBLE_ID: '236', ...o });
+  it('incoming: missed only by the telephony flag', () => {
+    expect(callStatus(call({ END_TIME: '2026-10-22T10:16:39+03:00' }))).toBe('success');
+    expect(callDurationSec(call({ END_TIME: '2026-10-22T10:16:39+03:00' }))).toBe(63);
+    expect(callStatus(call({ SETTINGS: { MISSED_CALL: true }, END_TIME: '2026-10-22T10:15:36+03:00' }))).toBe('missed');
+  });
+  it('outgoing without talk time — no answer', () => {
+    expect(callStatus(call({ DIRECTION: '2', END_TIME: '2026-10-22T10:15:36+03:00' }))).toBe('no_answer');
+    expect(callStatus(call({ DIRECTION: '2' }))).toBe('no_answer');
+    expect(callStatus(call({ DIRECTION: '2', END_TIME: '2026-10-22T10:15:42+03:00' }))).toBe('success');
   });
 });

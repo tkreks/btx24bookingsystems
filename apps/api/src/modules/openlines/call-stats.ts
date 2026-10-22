@@ -6,6 +6,8 @@ export interface CallActivity {
   /** 1 — входящий, 2 — исходящий. */
   DIRECTION: string;
   START_TIME: string;
+  /** Конец разговора: у неотвеченного звонка совпадает с началом. */
+  END_TIME?: string;
   RESPONSIBLE_ID: string;
   SETTINGS?: { MISSED_CALL?: boolean } | unknown[];
   COMMUNICATIONS?: { VALUE?: string; ENTITY_TYPE_ID?: string | number; ENTITY_ID?: string | number }[];
@@ -14,6 +16,21 @@ export interface CallActivity {
 export const isMissed = (c: CallActivity) =>
   !Array.isArray(c.SETTINGS) && (c.SETTINGS as { MISSED_CALL?: boolean } | undefined)?.MISSED_CALL === true;
 const incoming = (c: CallActivity) => String(c.DIRECTION) === '1';
+
+/** Длительность разговора, секунд (по делу CRM: конец − начало). */
+export function callDurationSec(c: CallActivity): number {
+  const d = (Date.parse(c.END_TIME ?? '') - Date.parse(c.START_TIME)) / 1000;
+  return Number.isFinite(d) && d > 0 ? Math.round(d) : 0;
+}
+
+/**
+ * Статус для журнала: входящий — пропущен по признаку телефонии (как на плитках дашборда);
+ * исходящий без разговора (длительность 0) — «нет ответа». Без права `telephony` точнее не узнать.
+ */
+export function callStatus(c: CallActivity): 'success' | 'missed' | 'no_answer' {
+  if (incoming(c)) return isMissed(c) ? 'missed' : 'success';
+  return callDurationSec(c) === 0 ? 'no_answer' : 'success';
+}
 const t = (c: CallActivity) => Date.parse(c.START_TIME);
 
 /** Контакт звонка (CRM, тип 3) — если есть. */

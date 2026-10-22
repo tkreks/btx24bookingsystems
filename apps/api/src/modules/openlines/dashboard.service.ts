@@ -4,6 +4,7 @@ import {
   DASHBOARD_MAX_DAYS,
   type CallKind,
   type CallListDto,
+  type CallLogDto,
   type CallFunnelDto,
   type CallScope,
   isIsoDate,
@@ -18,7 +19,7 @@ import { BookingJournalService } from '../bookings/booking-journal.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { dealHappened } from '../bookings/deal-outcome.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { callClients, isMissed, type CallActivity, type CallClient } from './call-stats.js';
+import { callClients, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
 
 /** CRM: OWNER_TYPE_ID дела → тип элемента. */
@@ -56,15 +57,16 @@ export class DashboardService {
     const { from, to, start, end } = parsePeriod(user.portal.timezone, query);
     const callsScope = parseScope(query.callsScope);
     const callsFunnel = pickFunnel(query.callsFunnel, funnelIds);
-    const [bookings, calls, callFunnels, chats] = await Promise.all([
+    const [bookings, calls, callsToday, callFunnels, chats] = await Promise.all([
       this.bookings(user, start, end),
       this.callCounts(user, start, end, callsScope, callsFunnel),
+      this.callsToday(user, callsScope),
       this.funnelNames(user, funnelIds),
       openlines
         ? Promise.all([this.chats.list(user, { scope: 'mine' }), this.unreadMessages(user), this.contacts(user, start, end)])
         : null,
     ]);
-    const callInfo = { calls, callsScope, callsFunnel, callFunnels };
+    const callInfo = { calls, callsToday, callsScope, callsFunnel, callFunnels };
     if (!chats) return { from, to, chats: null, contacts: null, ...callInfo, bookings };
     const [mine, unread, contacts] = chats;
     return {
@@ -126,6 +128,69 @@ export class DashboardService {
         responsibleId: Number(call.RESPONSIBLE_ID) || null,
       })),
     };
+  }
+
+  /** Журнал звонков дня: дата и время, номер клиента, сотрудник, направление, статус. */
+  async callLog(user: B24UserContext, query: { date?: unknown; scope?: unknown }): Promise<CallLogDto> {
+    const tz = user.portal.timezone;
+    const date = query.date === undefined || query.date === '' ? todayIn(tz) : String(query.date);
+    if (!isIsoDate(date)) throw new BadRequestException({ code: 'INVALID_DATE', message: 'date: YYYY-MM-DD' });
+    const scope = parseScope(query.scope);
+    const { start, end } = zonedDayRange(date, tz);
+    const { rows, truncated } = await this.fetchCalls(user, start, end);
+    const mine = rows.filter((c) => scope !== 'mine' || Number(c.RESPONSIBLE_ID) === user.userId);
+    mine.sort((a, b) => Date.parse(b.START_TIME) - Date.parse(a.START_TIME));
+    const contactIds = mine.map((c) => Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0).filter((x) => x > 0);
+    const [titles, contacts, employees] = await Promise.all([
+      this.ownerTitles(user, mine),
+      this.contactNames(user, contactIds),
+      this.employeeNames(user, mine.map((c) => Number(c.RESPONSIBLE_ID) || 0)),
+    ]);
+    return {
+      date,
+      scope,
+      truncated,
+      items: mine.map((c) => {
+        const contactId = Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0;
+        const emp = Number(c.RESPONSIBLE_ID) || 0;
+        return {
+          activityId: Number(c.ID),
+          at: new Date(c.START_TIME).toISOString(),
+          durationSec: callDurationSec(c),
+          direction: String(c.DIRECTION) === '1' ? 'incoming' : 'outgoing',
+          status: callStatus(c),
+          clientPhone: c.COMMUNICATIONS?.find((x) => x.VALUE)?.VALUE ?? null,
+          employee: emp ? { id: emp, name: employees.get(emp) ?? null } : null,
+          contact: contactId ? { id: contactId, name: contacts.get(contactId) ?? null } : null,
+          owner: { typeId: Number(c.OWNER_TYPE_ID), id: Number(c.OWNER_ID), title: titles.get(`${c.OWNER_TYPE_ID}:${c.OWNER_ID}`) ?? null },
+        };
+      }),
+    };
+  }
+
+  /** Все звонки за сегодня (входящие и исходящие); нет доступа к делам CRM — null. */
+  private async callsToday(user: B24UserContext, scope: CallScope): Promise<number | null> {
+    try {
+      const { start, end } = zonedDayRange(todayIn(user.portal.timezone), user.portal.timezone);
+      const { rows } = await this.fetchCalls(user, start, end);
+      return rows.filter((c) => scope !== 'mine' || Number(c.RESPONSIBLE_ID) === user.userId).length;
+    } catch (err) {
+      if (err instanceof Bitrix24Error) return null;
+      throw err;
+    }
+  }
+
+  private async employeeNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    const unique = [...new Set(ids.filter((x) => x > 0))].slice(0, 200);
+    if (!unique.length) return out;
+    try {
+      const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string }>('user.get', { FILTER: { ID: unique } });
+      for (const r of rows) out.set(Number(r.ID), [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `#${r.ID}`);
+    } catch {
+      /* без имён — покажем номер сотрудника */
+    }
+    return out;
   }
 
   /** Клиенты по видам; нет доступа к делам CRM — null (дашборд работает без них). */
@@ -211,12 +276,17 @@ export class DashboardService {
   }
 
   /** Звонки телефонии с начала периода по сейчас — токеном пользователя (его права в CRM). */
-  private async fetchCalls(user: B24UserContext, start: Date): Promise<{ rows: CallActivity[]; truncated: boolean }> {
+  private async fetchCalls(user: B24UserContext, start: Date, end?: Date): Promise<{ rows: CallActivity[]; truncated: boolean }> {
     const rows = await user.client.listAll<CallActivity>(
       'crm.activity.list',
       {
-        filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', '>=START_TIME': start.toISOString() },
-        select: ['ID', 'OWNER_ID', 'OWNER_TYPE_ID', 'DIRECTION', 'START_TIME', 'RESPONSIBLE_ID', 'SETTINGS', 'COMMUNICATIONS'],
+        filter: {
+          TYPE_ID: 2,
+          PROVIDER_ID: 'VOXIMPLANT_CALL',
+          '>=START_TIME': start.toISOString(),
+          ...(end ? { '<START_TIME': end.toISOString() } : {}),
+        },
+        select: ['ID', 'OWNER_ID', 'OWNER_TYPE_ID', 'DIRECTION', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'SETTINGS', 'COMMUNICATIONS'],
       },
       { max: MAX_CALLS },
     );

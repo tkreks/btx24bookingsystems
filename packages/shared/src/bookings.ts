@@ -130,6 +130,8 @@ export interface ClientBookingDto {
   start: string;
   end: string;
   resources: string[];
+  /** ID ресурсов Битрикс24 — встройка сделки выбирает по ним группу календаря. */
+  resourceIds: number[];
   when: 'past' | 'now' | 'future';
 }
 

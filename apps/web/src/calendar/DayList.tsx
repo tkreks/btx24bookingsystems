@@ -35,7 +35,7 @@ export function DayList({
         </span>
       </DayHeader>
       {!entries.length && <div className="empty">На выбранную дату бронирований и технологических окон нет.</div>}
-      <ul className="list">
+      <ul className={`list${highlightDealId && day.bookings.some((b) => b.dealId === highlightDealId) ? ' has-highlight' : ''}`}>
         {entries.map((e) =>
           e.kind === 'tech' ? (
             <li key={`t${e.item.bookingId}:${e.item.resourceId}`} className="list-item tech">
@@ -58,6 +58,7 @@ export function DayList({
               >
                 <span className="list-top">
                   <strong>{bookingTitle(e.item)}</strong>
+                  {e.item.dealId && e.item.dealId === highlightDealId && <span className="mine-badge">Эта сделка</span>}
                   <span className="pill">{e.item.resourceIds.map((id) => names.get(id) ?? `#${id}`).join(', ')}</span>
                 </span>
                 <span className="list-time">

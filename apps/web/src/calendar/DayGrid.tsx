@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { zonedDayRange, type CalendarBooking, type CalendarDay } from '@btx24/shared';
 import { fmtDateTime, fmtTime } from '../format.js';
 import { layoutResourceDay } from './layout.js';
@@ -19,11 +20,15 @@ export function DayGrid({
   const dayEnd = end.getTime();
   const minutes = (dayEnd - dayStart) / 60_000;
   const hours = Array.from({ length: Math.round(minutes / 60) }, (_, i) => i);
+  const mine = useRef<HTMLButtonElement | null>(null);
+  const hasMine = !!highlightDealId && day.bookings.some((b) => b.dealId === highlightDealId);
+  // Бронь сделки — в поле зрения (сетка суток длинная).
+  useEffect(() => mine.current?.scrollIntoView({ block: 'center', inline: 'center' }), [day, highlightDealId]);
   if (!day.resources.length)
     return <div className="empty">В выбранной группе нет ресурсов. Откройте ⚙ и добавьте ресурсы в группу.</div>;
 
   return (
-    <div className="grid-scroll">
+    <div className={`grid-scroll${hasMine ? ' has-highlight' : ''}`}>
       <div className="grid" style={{ gridTemplateColumns: `56px repeat(${day.resources.length}, minmax(170px, 1fr))` }}>
         <div className="grid-corner" />
         {day.resources.map((r) => (
@@ -68,6 +73,7 @@ export function DayGrid({
             {layoutResourceDay(day.bookings, r.id, dayStart, dayEnd).map((p) => (
               <button
                 key={p.booking.id}
+                ref={p.booking.dealId && p.booking.dealId === highlightDealId ? mine : undefined}
                 className={`booking${p.booking.dealId && p.booking.dealId === highlightDealId ? ' highlight' : ''}${p.continuesBefore ? ' cont-before' : ''}${p.continuesAfter ? ' cont-after' : ''}`}
                 style={{
                   top: p.top * PX_PER_MIN,
@@ -81,6 +87,7 @@ export function DayGrid({
                 <small>
                   {fmtDateTime(p.booking.start, day.timezone)} — {fmtDateTime(p.booking.end, day.timezone)}
                 </small>
+                {p.booking.dealId && p.booking.dealId === highlightDealId && <span className="mine-badge">Эта сделка</span>}
                 {p.booking.dealId && <small>Сделка #{p.booking.dealId}</small>}
                 {p.booking.fields
                   .filter((f) => f.inList)

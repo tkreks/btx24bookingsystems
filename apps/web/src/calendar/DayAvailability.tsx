@@ -7,10 +7,12 @@ import { availabilityPieces } from './layout.js';
 export function DayAvailability({
   day,
   groupName,
+  highlightDealId = null,
   onSelect,
 }: {
   day: CalendarDay;
   groupName: string;
+  highlightDealId?: number | null;
   onSelect: (b: CalendarBooking) => void;
 }) {
   const { start, end } = zonedDayRange(day.date, day.timezone);
@@ -61,7 +63,7 @@ export function DayAvailability({
                     return (
                       <button
                         key={i}
-                        className="piece booked"
+                        className={`piece booked${booking.dealId && booking.dealId === highlightDealId ? ' highlight' : ''}`}
                         style={style}
                         title={`${fmtDateTime(booking.start, day.timezone)} → ${fmtDateTime(booking.end, day.timezone)}`}
                         aria-label={`Бронь ${fmtDateTime(booking.start, day.timezone)} — ${fmtDateTime(booking.end, day.timezone)}`}

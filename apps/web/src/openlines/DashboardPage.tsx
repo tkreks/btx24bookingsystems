@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   todayIn,
   CALL_KINDS,
@@ -15,6 +15,7 @@ import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
+import { CallLogModal } from './CallLogModal.js';
 import { CallsModal } from './CallsModal.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
@@ -55,6 +56,8 @@ export function DashboardPage({
   const [alertCount, setAlertCount] = useState<number | null>(null);
   const [askCode, setAskCode] = useState(false);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
+  const [logOpen, setLogOpen] = useState(false);
+  const closeLog = useCallback(() => setLogOpen(false), []);
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
   const [callsFunnel, setCallsFunnel] = useState<number | null>(null);
@@ -255,6 +258,13 @@ export function DashboardPage({
           <p className="muted">Статистика звонков недоступна: нет доступа к делам CRM.</p>
         ) : (
           <div className={`tiles call-tiles${d ? '' : ' loading'}`}>
+            <div className="tile call-today">
+              <span className="tile-value">{n(d?.callsToday)}</span>
+              <span className="tile-label">Все звонки сегодня</span>
+              <button className="tile-action" disabled={!d} onClick={() => setLogOpen(true)}>
+                Показать звонки
+              </button>
+            </div>
             {CALL_KINDS.map((k) => (
               <button
                 key={k}
@@ -275,6 +285,7 @@ export function DashboardPage({
           исходящих станет видно после выдачи приложению права «Телефония»).
         </p>
       </section>
+      {logOpen && <CallLogModal scope={callsScope} timezone={tz} onClose={closeLog} />}
       {callsOpen && (
         <CallsModal
           kind={callsOpen}

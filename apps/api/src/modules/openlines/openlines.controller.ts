@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
   CallListDto,
+  CallLogDto,
   ChatFolderDto,
   ChatHistoryDto,
   ChatListDto,
@@ -81,6 +82,15 @@ export class OpenlinesController {
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
     return this.dashboard.callList(user, query, funnelsOf(a));
+  }
+
+  /** Журнал звонков дня (окно «Показать звонки» на дашборде). */
+  @Get('dashboard/call-log')
+  async callLog(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<CallLogDto> {
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
+    return this.dashboard.callLog(user, query);
   }
 
   @Get('openlines/chats')

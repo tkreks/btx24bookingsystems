@@ -80,6 +80,7 @@ export class ClientBookingsService {
         start: new Date(start).toISOString(),
         end: new Date(end).toISOString(),
         resources: resourceIds.map((id) => resources.get(id) ?? `Ресурс ${id}`),
+        resourceIds,
         when: end <= now.getTime() ? 'past' : start <= now.getTime() ? 'now' : 'future',
       };
     };
