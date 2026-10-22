@@ -24,6 +24,8 @@ const ACTION_LABELS: Record<string, string> = {
   accepted_bitrix: 'Принято как в Битрикс24',
   deleted_in_bitrix: 'Удалена в Битрикс24 по решению',
   cancelled: 'Отменена',
+  paid: 'Оплата получена',
+  payment_cancelled: 'Счёт закрыт как неоплаченный (вручную)',
 };
 
 /**

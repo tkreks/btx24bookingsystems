@@ -161,27 +161,33 @@ describe('ChatsService.list', () => {
 });
 
 describe('ChatsService.send', () => {
-  it('sends steps in order: text via im.message.add, files via im.v2.File.upload with the text on the first file', async () => {
+  it('sends steps in order: text first, then each file as its own message, with a pause between messages', async () => {
     const { svc, user, call, files } = setup();
+    const pauses: number[] = [];
+    svc.sleep = async (ms) => void pauses.push(ms);
     const res = await svc.send(user, 101, {
       steps: [
         { text: 'Здравствуйте', fileIds: [] },
         { text: 'Прайс', fileIds: ['f1', 'f2'] },
+        { text: '', fileIds: ['f1'] },
       ],
     });
-    expect(res).toEqual({ sent: 2, messageIds: [912, 800, 800], error: null });
+    expect(res).toEqual({ sent: 3, messageIds: [912, 905, 800, 800, 800], error: null });
     const calls = call.mock.calls.map((c) => [c[0], c[1]]);
-    expect(calls[0]).toEqual(['im.message.add', { DIALOG_ID: 'chat101', MESSAGE: 'Здравствуйте' }]);
-    expect(calls[1]).toEqual([
-      'im.v2.File.upload',
-      { dialogId: 'chat101', fields: { FILE: { name: 'f1.jpg', content: 'eA==', message: 'Прайс' } } },
+    expect(calls).toEqual([
+      ['im.message.add', { DIALOG_ID: 'chat101', MESSAGE: 'Здравствуйте' }],
+      ['im.message.add', { DIALOG_ID: 'chat101', MESSAGE: 'Прайс' }],
+      ['im.v2.File.upload', { dialogId: 'chat101', fields: { name: 'f1.jpg', content: 'eA==' } }],
+      ['im.v2.File.upload', { dialogId: 'chat101', fields: { name: 'f2.jpg', content: 'eA==' } }],
+      ['im.v2.File.upload', { dialogId: 'chat101', fields: { name: 'f1.jpg', content: 'eA==' } }],
     ]);
-    expect(calls[2][1]).toEqual({ dialogId: 'chat101', fields: { FILE: { name: 'f2.jpg', content: 'eA==' } } });
+    expect(pauses).toEqual([1500, 1500, 1500, 1500]);
     expect(files.dropUnused).toHaveBeenCalledWith(user, ['f1', 'f2']);
   });
 
   it('stops at the first failing step and reports how far it got', async () => {
     const { svc, user, call } = setup();
+    svc.sleep = async () => {};
     call.mockImplementation(async (method: string) => {
       if (method === 'im.message.add' && call.mock.calls.length > 1)
         throw new Bitrix24Error('READ_ONLY_MODE', 'blocked');

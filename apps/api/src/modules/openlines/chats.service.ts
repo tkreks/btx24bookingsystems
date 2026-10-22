@@ -354,10 +354,16 @@ export class ChatsService {
     await user.client.call('imopenlines.session.join', { CHAT_ID: chatId });
   }
 
+  /** Пауза между сообщениями цепочки: каналы (WhatsApp через Wazzup и др.) доставляют асинхронно. */
+  sendGapMs = 1500;
+  sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
   /**
-   * Цепочка сообщений по порядку. Шаг с вложениями — `im.v2.File.upload` (текст уходит с
-   * первым файлом), без вложений — `im.message.add`. На ошибке останавливаемся и сообщаем,
-   * сколько шагов ушло: повтор отправит только оставшиеся (интерфейс убирает отправленные).
+   * Цепочка сообщений по порядку. У шага сначала текст (`im.message.add`), потом каждый файл
+   * отдельным сообщением (`im.v2.File.upload`, поля `fields.name/content` — вложенный `FILE` портал
+   * отвергает как FILE_EMPTY). Между сообщениями — пауза: иначе канал может доставить клиенту
+   * второе раньше первого. На ошибке останавливаемся и сообщаем, сколько шагов ушло: повтор
+   * отправит только оставшиеся (интерфейс убирает отправленные).
    */
   async send(user: B24UserContext, chatId: number, body: unknown): Promise<SendResultDto> {
     const parsed = sendBody.safeParse(body);
@@ -367,24 +373,24 @@ export class ChatsService {
     const files = await this.files.loadOwned(user, [...new Set(steps.flatMap((s) => s.fileIds))]);
     const dialogId = `chat${chatId}`;
     const messageIds: number[] = [];
+    let first = true;
+    const gap = async () => {
+      if (!first && this.sendGapMs > 0) await this.sleep(this.sendGapMs);
+      first = false;
+    };
     for (const [i, step] of steps.entries()) {
       try {
-        if (!step.fileIds.length) {
+        if (step.text.trim()) {
+          await gap();
           const res = await user.client.call<number>('im.message.add', { DIALOG_ID: dialogId, MESSAGE: step.text });
           messageIds.push(Number(res.result));
-          continue;
         }
-        for (const [j, id] of step.fileIds.entries()) {
+        for (const id of step.fileIds) {
           const f = files.get(id)!;
+          await gap();
           const res = await user.client.call<{ messageId?: number }>('im.v2.File.upload', {
             dialogId,
-            fields: {
-              FILE: {
-                name: f.name,
-                content: f.data.toString('base64'),
-                ...(j === 0 && step.text ? { message: step.text } : {}),
-              },
-            },
+            fields: { name: f.name, content: f.data.toString('base64') },
           });
           messageIds.push(Number(res.result?.messageId ?? 0));
         }

@@ -131,6 +131,17 @@ describe('PaymentFlow', () => {
     expect(m.indexOf('crm.item.payment.delete')).toBeLessThan(m.indexOf('booking.v1.booking.delete'));
   });
 
+  it('invoice set to «not paid» by hand → waiting stops at once, link annulled, booking and client untouched', async () => {
+    const t = setup({ stage: 'DT31_2:D', booking: true, payments: [{ id: 9001, paid: 'N' }] });
+    const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60 * 60_000) }));
+    expect(r.status).toBe('cancelled');
+    expect(r.error).toContain('«Не оплачен»');
+    expect(t.calls.filter((c) => c[0] === 'crm.item.payment.delete').map((c) => c[1].id)).toEqual([9001]);
+    expect(t.calls.map((c) => c[0])).not.toContain('booking.v1.booking.delete');
+    expect(t.calls.map((c) => c[0])).not.toContain('imopenlines.crm.message.add');
+    expect(t.journal.note).toHaveBeenCalledWith('r1', 'payment_cancelled', expect.anything(), { invoiceId: 6001 }, 'worker');
+  });
+
   it('still waiting before the deadline — nothing changes', async () => {
     const t = setup();
     const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60_000) }));

@@ -162,6 +162,9 @@ export interface DealInvoicesDto {
 
 /** Счёт «в работе» — ждёт оплаты: заявка приложения ещё идёт или счёт в Битрикс24 не закрыт. */
 export function invoiceInWork(i: DealInvoiceDto): boolean {
+  // Стадия в Битрикс24 важнее заявки: счёт закрыли вручную — он уже не «в работе», даже если
+  // worker ещё не успел это отметить.
+  if (i.state !== 'open') return false;
   if (i.request) return i.request.status === 'link_pending' || i.request.status === 'sent';
-  return i.state === 'open';
+  return true;
 }

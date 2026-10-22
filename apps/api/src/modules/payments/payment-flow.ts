@@ -120,8 +120,7 @@ export class PaymentFlow {
     if (!req.invoiceId) return req;
     const invoice = await this.invoice(ctx, req.invoiceId);
     if (invoice && invoicePaid(invoice.stageId)) return this.paid(ctx, req);
-    if (invoice && invoiceFailed(invoice.stageId) && !req.deadlineAt)
-      return this.close(req, 'cancelled', 'Счёт переведён в «Не оплачен» в Битрикс24');
+    if (invoice && invoiceFailed(invoice.stageId)) return this.failedInBitrix(ctx, req);
     if (req.deadlineAt && req.deadlineAt.getTime() <= Date.now()) return this.expire(ctx, req, invoice);
     if (!req.deadlineAt && Date.now() - req.createdAt.getTime() > WATCH_LIMIT_MS) return this.close(req, 'cancelled', 'Оплата не поступила за 60 дней — больше не отслеживаем');
     return req;
@@ -139,6 +138,29 @@ export class PaymentFlow {
     return this.prisma.paymentRequest.update({
       where: { id: req.id },
       data: { status: 'paid', paidAt: new Date(), closedAt: new Date(), warnings: warnings as Prisma.InputJsonValue },
+    });
+  }
+
+  /**
+   * Счёт вручную переведён в «Не оплачен» в Битрикс24: ожидание и таймер снимаются сразу, ссылка
+   * аннулируется. Бронь не трогаем и клиенту не пишем — это решение сотрудника, а не неоплата в срок.
+   */
+  private async failedInBitrix(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    const warnings = this.warningsOf(req);
+    if (req.invoiceId) await this.annulPayments(ctx, req.invoiceId, warnings);
+    if (req.bookingId) {
+      const rec = await this.journal.find(ctx.portal.id, req.bookingId);
+      if (rec)
+        await this.journal.note(rec.id, 'payment_cancelled', { kind: 'bitrix', name: 'Битрикс24: счёт переведён в «Не оплачен»' }, { invoiceId: req.invoiceId }, 'worker');
+    }
+    return this.prisma.paymentRequest.update({
+      where: { id: req.id },
+      data: {
+        status: 'cancelled',
+        error: `Счёт переведён в «Не оплачен» в Битрикс24 — ожидание оплаты снято${req.bookingId ? ', бронь не снималась' : ''}`,
+        closedAt: new Date(),
+        warnings: warnings as Prisma.InputJsonValue,
+      },
     });
   }
 
