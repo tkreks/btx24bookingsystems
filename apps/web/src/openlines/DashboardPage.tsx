@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   todayIn,
   CALL_KINDS,
@@ -17,13 +17,13 @@ import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
-import { CallLogModal } from './CallLogModal.js';
+import { CallLog } from './CallLog.js';
 import { CallsModal } from './CallsModal.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
-  payment_timeout: 'не оплачена в срок',
-  manual: 'отменена вручную',
+  payment_timeout: 'не оплачена — снята системой',
+  manual: 'снята сотрудником',
   removed_in_bitrix: 'удалена в Битрикс24',
 };
 
@@ -68,8 +68,6 @@ export function DashboardPage({
   const [alertCount, setAlertCount] = useState<number | null>(null);
   const [askCode, setAskCode] = useState(false);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
-  const [logOpen, setLogOpen] = useState(false);
-  const closeLog = useCallback(() => setLogOpen(false), []);
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
   const [dealsOpen, setDealsOpen] = useState<'all' | 'repeat' | null>(null);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
@@ -191,9 +189,6 @@ export function DashboardPage({
                 </select>
               </label>
             )}
-            <button onClick={() => setLogOpen(true)} disabled={!d}>
-              Журнал звонков за сегодня
-            </button>
           </div>
         </header>
         {periodBar}
@@ -219,7 +214,7 @@ export function DashboardPage({
             </p>
           </>
         )}
-        {logOpen && <CallLogModal scope={callsScope} timezone={tz} onClose={closeLog} />}
+        <CallLog scope={callsScope} timezone={tz} />
         {callsOpen && (
           <CallsModal
             kind={callsOpen}
@@ -322,12 +317,13 @@ export function DashboardPage({
       {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
 
       <div className="dash-lists">
-        <BookingList title="Сделки с бронью" empty="За период вы не создавали броней со сделками." rows={d?.bookings.deals} tz={tz} variant="created" />
-        <BookingList title="Отменённые брони" empty="Отменённых броней за период нет." rows={d?.bookings.cancelledList} tz={tz} variant="cancelled" />
+        <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings.created} tz={tz} variant="created" />
+        <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings.removed} tz={tz} variant="removed" />
       </div>
       <p className="muted dash-note">
         Новые сделки — созданные {word} в воронках ваших групп; повторный клиент — у контакта уже была состоявшаяся сделка той же
-        воронки. Брони — созданные через приложение.
+        воронки. Брони — все на ресурсах ваших групп: созданные в приложении и в самом Битрикс24 (их находит сверка раз в
+        10 минут); удалённые остаются в истории приложения.
       </p>
       {dealsOpen && d?.newDeals && (
         <NewDealsModal
@@ -409,22 +405,23 @@ function bookingRange(start: string, end: string, tz: string): string {
 function BookingList({
   title,
   empty,
-  rows,
+  list,
   tz,
   variant,
 }: {
   title: string;
   empty: string;
-  rows: DashboardBookingRow[] | undefined;
+  list: { total: number; items: DashboardBookingRow[] } | undefined;
   tz: string;
-  variant: 'created' | 'cancelled';
+  variant: 'created' | 'removed';
 }) {
   const openDeal = (id: number) => window.BX24?.openPath?.(`/crm/deal/details/${id}/`);
+  const rows = list?.items;
   return (
     <section className="day-panel dash-list">
       <div className="day-header">
         <b>{title}</b>
-        {rows && <span className="pill">{rows.length}</span>}
+        {list && <span className="pill">{list.total}</span>}
       </div>
       {!rows && <p className="muted">Загрузка…</p>}
       {rows && !rows.length && <p className="muted">{empty}</p>}
@@ -434,10 +431,10 @@ function BookingList({
             <div className="booking-row-main">
               {r.dealId ? (
                 <button className="link" onClick={() => openDeal(r.dealId!)}>
-                  {r.deal?.title || `Сделка #${r.dealId}`}
+                  {r.deal?.title || r.title || `Сделка #${r.dealId}`}
                 </button>
               ) : (
-                <span>Служебная бронь</span>
+                <span>{r.title || 'Служебная бронь'}</span>
               )}
               {r.deal && <span className="muted">{fmtMoney(r.deal.opportunity, r.deal.currency)}</span>}
             </div>
@@ -446,15 +443,26 @@ function BookingList({
               <span className="muted">{r.resources.join(', ')}</span>
             </div>
             <div className="booking-row-tags">
-              {variant === 'cancelled' && r.cancelReason ? (
-                <>
-                  <span className={`pill${r.cancelReason === 'payment_timeout' ? ' waiting' : ' muted-pill'}`}>{CANCEL_REASON[r.cancelReason]}</span>
-                  {r.cancelledAt && <span className="muted">отменена {fmtDateTime(r.cancelledAt, tz)}</span>}
-                </>
+              {r.source === 'bitrix' && <span className="pill muted-pill">из Битрикс24</span>}
+              {variant === 'removed' ? (
+                r.pendingRemoval ? (
+                  <span className="pill waiting">пропала в Битрикс24 — ждёт решения</span>
+                ) : (
+                  <>
+                    {r.cancelReason && <span className={`pill${r.cancelReason === 'payment_timeout' ? ' waiting' : ' muted-pill'}`}>{CANCEL_REASON[r.cancelReason]}</span>}
+                    <span className="muted">
+                      {r.cancelledAt && `удалена ${fmtDateTime(r.cancelledAt, tz)}`}
+                      {r.cancelledBy && ` · ${r.cancelledBy}`}
+                    </span>
+                  </>
+                )
               ) : (
                 <>
-                  {r.status === 'cancelled' && <span className="pill muted-pill">отменена</span>}
-                  <span className="muted">создана {fmtDateTime(r.createdAt, tz)}</span>
+                  {r.status === 'cancelled' && <span className="pill muted-pill">уже удалена</span>}
+                  <span className="muted">
+                    {r.source === 'bitrix' ? 'найдена' : 'создана'} {fmtDateTime(r.createdAt, tz)}
+                    {r.createdBy && ` · ${r.createdBy}`}
+                  </span>
                 </>
               )}
             </div>

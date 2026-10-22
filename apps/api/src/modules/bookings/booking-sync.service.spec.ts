@@ -146,3 +146,27 @@ describe('BookingSyncService', () => {
     expect(t.journal.note).not.toHaveBeenCalled();
   });
 });
+
+describe('BookingSyncService — прошедшие брони (31 день назад)', () => {
+  it('сверяет с запасом назад: прошедшую неизвестную бронь пишет в журнал на дату брони без уведомления', async () => {
+    const past = booking(7, '2026-10-10T10:00:00Z', '2026-10-10T12:00:00Z', [10]);
+    const t = setup({ bookings: [past], records: [], baseline: true });
+    await t.svc.reconcile(portal, t.client, now);
+    const list = (t.client.call as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[0] === 'booking.v1.booking.list')![1];
+    expect(list.filter.within.dateFrom).toBe(ts('2026-09-19T21:00:00Z')); // начало сегодняшнего дня (МСК) − 31 день
+    expect(t.journal.recordImported).toHaveBeenCalledWith('p1', expect.objectContaining({ bookingId: 7, createdAt: new Date('2026-10-10T10:00:00Z') }));
+    expect(t.alerts.raise).not.toHaveBeenCalled();
+  });
+
+  it('известная прошедшая бронь из Битрикс24, которую там удалили, отмечается удалённой', async () => {
+    const t = setup({
+      bookings: [],
+      records: [record({ bookingId: 8, source: 'bitrix', startsAt: new Date('2026-10-12T10:00:00Z'), endsAt: new Date('2026-10-12T12:00:00Z') })],
+      baseline: true,
+    });
+    const r = await t.svc.reconcile(portal, t.client, now);
+    expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 8, expect.objectContaining({ reason: 'removed_in_bitrix' }));
+    expect(r.bookings.removed).toBe(1);
+    expect((t.prisma.bookingRecord.findMany as ReturnType<typeof vi.fn>).mock.calls[0][0].where.OR[1].endsAt.gt).toEqual(new Date('2026-09-19T21:00:00Z'));
+  });
+});

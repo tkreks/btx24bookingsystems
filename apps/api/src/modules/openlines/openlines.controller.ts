@@ -74,6 +74,8 @@ export class OpenlinesController {
       { from, to, callsScope, callsFunnel },
       await this.can(user, 'openlines.read'),
       funnelsOf(a),
+      // Брони — по ресурсам групп сотрудника; администратору приложения — все.
+      a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))],
     );
   }
 

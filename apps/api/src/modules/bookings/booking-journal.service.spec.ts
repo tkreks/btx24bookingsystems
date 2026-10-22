@@ -74,3 +74,37 @@ describe('BookingJournalService', () => {
     ]);
   });
 });
+
+describe('BookingJournalService.forPeriod — новые и удалённые брони для дашборда', () => {
+  const rec = (bookingId: number, resourceIds: number[], over: object = {}) => ({ bookingId, resourceIds, status: 'active', ...over });
+  function setup() {
+    const findMany = vi.fn(async (args: { where: Record<string, unknown> }) => {
+      if (args.where.createdAt) return [rec(1, [10]), rec(2, [99])];
+      if (args.where.cancelledAt) return [rec(3, [10], { status: 'cancelled' }), rec(4, [99], { status: 'cancelled' })];
+      return [rec(5, [10])]; // активная бронь приложения, пропавшая в Битрикс24
+    });
+    const prisma = {
+      bookingRecord: { findMany },
+      bookingAlert: { findMany: vi.fn(async () => [{ bookingId: 5 }]) },
+    } as unknown as PrismaService;
+    return { svc: new BookingJournalService(prisma), findMany };
+  }
+  const from = new Date('2026-10-20T21:00:00Z');
+  const to = new Date('2026-10-21T21:00:00Z');
+
+  it('только ресурсы групп; пропавшие в Битрикс24 брони приложения — среди удалённых, с отметкой', async () => {
+    const { svc } = setup();
+    const r = await svc.forPeriod('p1', from, to, { resourceIds: [10], userId: null });
+    expect(r.created.map((x) => x.bookingId)).toEqual([1]);
+    expect(r.removed.map((x) => x.bookingId)).toEqual([5, 3]);
+    expect([...r.pending]).toEqual([5]);
+  });
+
+  it('«Мои» — создал или снял сотрудник; администратор (null) видит все ресурсы', async () => {
+    const { svc, findMany } = setup();
+    const r = await svc.forPeriod('p1', from, to, { resourceIds: null, userId: 7 });
+    expect(r.created).toHaveLength(2);
+    expect(findMany.mock.calls[0][0].where).toMatchObject({ createdByUserId: 7 });
+    expect(findMany.mock.calls[1][0].where).toMatchObject({ OR: [{ createdByUserId: 7 }, { cancelledByUserId: 7 }] });
+  });
+});

@@ -16,10 +16,16 @@ export interface SyncReport {
 
 type Actual = BookingStateDto & { title: string | null };
 const DAY_MS = 86_400_000;
+/**
+ * Сколько дней назад сверять брони с Битрикс24 (дашборд показывает новые и удалённые за период до
+ * 30 дней): известные — не удалили ли; неизвестные прошедшие — в журнал без уведомления.
+ */
+export const SYNC_LOOKBACK_DAYS = 31;
 
 /**
  * Сверка с Битрикс24 (ADR 0007), токеном приложения, в worker:
- * ресурсы → зеркало `Resource`; брони на горизонте `[сегодня, +syncHorizonDays)` → журнал.
+ * ресурсы → зеркало `Resource`; брони на горизонте `[сегодня, +syncHorizonDays)` → журнал; известные
+ * брони за `SYNC_LOOKBACK_DAYS` назад — в журнал (без уведомлений) и проверка, не удалили ли их.
  * - бронь не из приложения, новая — записывается (`source = bitrix`) и даёт уведомление
  *   «найдено новое бронирование»; первый проход (`bookingSyncBaselineAt` пуст) принимает всё молча;
  * - бронь приложения не совпала / пропала — уведомление о расхождении; запись не меняется,
@@ -44,14 +50,15 @@ export class BookingSyncService {
     const baseline = settings.bookingSyncBaselineAt !== null;
     const from = zonedDayRange(todayIn(portal.timezone, now), portal.timezone).start;
     const to = new Date(from.getTime() + settings.syncHorizonDays * DAY_MS);
+    const pastFrom = new Date(from.getTime() - SYNC_LOOKBACK_DAYS * DAY_MS);
 
-    const raw = await listBookings(client, sec(from), sec(to));
+    const raw = await listBookings(client, sec(pastFrom), sec(to));
     const links = await dealLinks(client, raw.map((b) => Number(b.id)));
     const actual = new Map(raw.map((b) => [Number(b.id), toActual(b, links.get(Number(b.id)) ?? null)]));
     const records = await this.prisma.bookingRecord.findMany({
       where: {
         portalId: portal.id,
-        OR: [{ bookingId: { in: [...actual.keys()] } }, { status: 'active', endsAt: { gt: from }, startsAt: { lt: to } }],
+        OR: [{ bookingId: { in: [...actual.keys()] } }, { status: 'active', endsAt: { gt: pastFrom }, startsAt: { lt: to } }],
       },
     });
     const byBooking = new Map(records.map((r) => [r.bookingId, r]));
@@ -60,6 +67,13 @@ export class BookingSyncService {
     for (const [bookingId, a] of actual) {
       const r = byBooking.get(bookingId);
       if (!r) {
+        // Прошедшая бронь, которой нет в журнале (создали задним числом или до приложения): в журнал
+        // для истории, но без уведомления и с «созданием» на дату брони — не как новая сегодня.
+        if (Date.parse(a.endsAt) <= from.getTime()) {
+          const { created } = await this.journal.recordImported(portal.id, { ...importInput(bookingId, a), createdAt: new Date(a.startsAt) });
+          if (created) report.imported++;
+          continue;
+        }
         const { created } = await this.journal.recordImported(portal.id, importInput(bookingId, a));
         if (created) report.imported++;
         if (created && baseline && (await this.alerts.raise(portal.id, newBooking(bookingId, a)))) report.alerts++;

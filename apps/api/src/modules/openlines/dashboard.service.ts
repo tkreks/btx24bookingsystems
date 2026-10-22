@@ -56,12 +56,14 @@ export class DashboardService {
     openlines: boolean,
     /** Воронки групп пользователя — для «повторных» клиентов. */
     funnelIds: number[] = [],
+    /** Ресурсы групп пользователя — какие брони показывать; null — все (администратор). */
+    resourceIds: number[] | null = null,
   ): Promise<DashboardDto> {
     const { from, to, start, end } = parsePeriod(user.portal.timezone, query);
     const callsScope = parseScope(query.callsScope);
     const callsFunnel = pickFunnel(query.callsFunnel, funnelIds);
     const [bookings, calls, callsTotal, newDeals, callFunnels, chats] = await Promise.all([
-      this.bookings(user, start, end),
+      this.bookings(user, start, end, callsScope, resourceIds),
       this.callCounts(user, start, end, callsScope, callsFunnel),
       this.callsTotal(user, start, end, callsScope),
       this.newDeals(user, start, end, callsScope, funnelIds),
@@ -389,16 +391,21 @@ export class DashboardService {
     return out;
   }
 
-  /** Свои брони из журнала: сделки с бронью и отменённые — с названиями сделок и ресурсов (токеном пользователя). */
-  private async bookings(user: B24UserContext, start: Date, end: Date): Promise<DashboardDto['bookings']> {
-    const j = await this.journal.forManager(user.portal.id, user.userId, start, end);
-    const records = [...j.createdClient, ...j.cancelled];
-    const [deals, resources] = records.length
+  /**
+   * Новые и удалённые брони за период из журнала (приложение и найденные сверкой в Битрикс24), с
+   * названиями сделок, ресурсов и сотрудников — токеном пользователя (недоступная сделка → null).
+   */
+  private async bookings(user: B24UserContext, start: Date, end: Date, scope: CallScope, resourceIds: number[] | null): Promise<DashboardDto['bookings']> {
+    const j = await this.journal.forPeriod(user.portal.id, start, end, { resourceIds, userId: scope === 'mine' ? user.userId : null });
+    const records = [...j.created, ...j.removed];
+    const [deals, resources, people] = records.length
       ? await Promise.all([
           this.deals(user, [...new Set(records.flatMap((r) => (r.dealId ? [r.dealId] : [])))]),
           this.resourceNames(user),
+          this.employeeNames(user, records.flatMap((r) => [r.createdByUserId ?? 0, r.cancelledByUserId ?? 0])),
         ])
-      : [new Map<number, DealInfo>(), new Map<number, string>()];
+      : [new Map<number, DealInfo>(), new Map<number, string>(), new Map<number, string>()];
+    const who = (id: number | null) => (id ? (people.get(id) ?? `Сотрудник #${id}`) : null);
     const row = (r: BookingRecord): DashboardBookingRow => ({
       bookingId: r.bookingId,
       dealId: r.dealId,
@@ -410,12 +417,15 @@ export class DashboardService {
       cancelReason: r.cancelReason,
       createdAt: r.createdAt.toISOString(),
       cancelledAt: r.cancelledAt?.toISOString() ?? null,
+      source: r.source,
+      title: r.title,
+      createdBy: who(r.createdByUserId),
+      cancelledBy: who(r.cancelledByUserId),
+      pendingRemoval: j.pending.has(r.bookingId),
     });
     return {
-      created: j.created,
-      cancelled: j.cancelled.length,
-      deals: j.createdClient.map(row),
-      cancelledList: j.cancelled.map(row),
+      created: { total: j.created.length, items: j.created.map(row) },
+      removed: { total: j.removed.length, items: j.removed.map(row) },
     };
   }
 

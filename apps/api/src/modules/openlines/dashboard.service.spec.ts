@@ -5,7 +5,7 @@ import type { DealFieldMapService } from '../bookings/deal-field-map.service.js'
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 
 const emptyJournal = {
-  forManager: vi.fn(async () => ({ created: 0, createdClient: [], cancelled: [] })),
+  forPeriod: vi.fn(async () => ({ created: [], removed: [], pending: new Set<number>() })),
 } as unknown as BookingJournalService;
 
 describe('DashboardService', () => {
@@ -53,7 +53,7 @@ describe('DashboardService', () => {
       to: '2026-10-21',
       chats: { waitingReply: 2, unreadMessages: 57 },
       contacts: { leads: 1, contacts: 1, deals: 1, companies: 0 },
-      bookings: { created: 0, cancelled: 0, deals: [], cancelledList: [] },
+      bookings: { created: { total: 0, items: [] }, removed: { total: 0, items: [] } },
     });
     expect(listAll.mock.calls.find((c) => (c[1] as { filter: { PROVIDER_ID: string } }).filter.PROVIDER_ID === 'IMOPENLINES_SESSION')?.[1]).toMatchObject({
       filter: {
@@ -114,7 +114,7 @@ describe('DashboardService', () => {
     await expect(svc.callList(user, { kind: 'all' })).rejects.toMatchObject({ status: 400 });
   });
 
-  it('lists own bookings with deal and resource names; inaccessible deal → null', async () => {
+  it('new and removed bookings of the period (app and Bitrix24) with deal, resource and employee names', async () => {
     const rec = (over: object) => ({
       bookingId: 1,
       kind: 'client',
@@ -126,21 +126,29 @@ describe('DashboardService', () => {
       cancelReason: null,
       createdAt: new Date('2026-10-21T08:00:00Z'),
       cancelledAt: null,
+      source: 'app',
+      title: null,
+      createdByUserId: 7,
+      cancelledByUserId: null,
       ...over,
     });
     const journal = {
-      forManager: vi.fn(async () => ({
-        created: 2,
-        createdClient: [rec({})],
-        cancelled: [
+      forPeriod: vi.fn(async () => ({
+        created: [rec({})],
+        removed: [
+          rec({ bookingId: 3, source: 'app', createdByUserId: 7 }),
           rec({
             bookingId: 2,
             dealId: 999,
+            source: 'bitrix',
+            title: 'Бронь из Битрикс24',
+            createdByUserId: null,
             status: 'cancelled',
-            cancelReason: 'payment_timeout',
+            cancelReason: 'removed_in_bitrix',
             cancelledAt: new Date('2026-10-21T09:00:00Z'),
           }),
         ],
+        pending: new Set([3]),
       })),
     } as unknown as BookingJournalService;
     const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) =>
@@ -148,20 +156,26 @@ describe('DashboardService', () => {
         ? [{ ID: '678', TITLE: 'Баня', OPPORTUNITY: '5000.00', CURRENCY_ID: 'RUB' }]
         : method === 'crm.deal.list'
           ? []
-        : [{ id: 10, name: 'Баня 1' }],
+        : method === 'user.get'
+          ? [{ ID: '7', NAME: 'Анна', LAST_NAME: 'Петрова' }]
+          : [{ id: 10, name: 'Баня 1' }],
     );
     const user = {
       portal: { id: 'p1', timezone: 'Europe/Moscow' },
       userId: 7,
       client: { call: vi.fn(), listAll },
     } as unknown as B24UserContext;
-    const d = await new DashboardService({} as ChatsService, journal).get(user, {}, false);
-    expect(journal.forManager).toHaveBeenCalledWith('p1', 7, expect.any(Date), expect.any(Date));
+    const d = await new DashboardService({} as ChatsService, journal).get(user, { callsScope: 'mine' }, false, [], [10]);
+    expect(journal.forPeriod).toHaveBeenCalledWith('p1', expect.any(Date), expect.any(Date), { resourceIds: [10], userId: 7 });
     expect(d.bookings).toMatchObject({
-      created: 2,
-      cancelled: 1,
-      deals: [{ bookingId: 1, deal: { title: 'Баня', opportunity: 5000 }, resources: ['Баня 1', 'Ресурс 11'] }],
-      cancelledList: [{ bookingId: 2, deal: null, cancelReason: 'payment_timeout' }],
+      created: { total: 1, items: [{ bookingId: 1, deal: { title: 'Баня', opportunity: 5000 }, resources: ['Баня 1', 'Ресурс 11'], createdBy: 'Анна Петрова', source: 'app' }] },
+      removed: {
+        total: 2,
+        items: [
+          { bookingId: 3, pendingRemoval: true },
+          { bookingId: 2, deal: null, title: 'Бронь из Битрикс24', source: 'bitrix', createdBy: null, cancelReason: 'removed_in_bitrix', pendingRemoval: false },
+        ],
+      },
     });
     expect(listAll.mock.calls.find((c) => c[0] === 'crm.deal.list' && c[1]?.filter?.['@ID'])?.[1]).toMatchObject({
       filter: { '@ID': [678, 999] },
@@ -177,7 +191,7 @@ describe('DashboardService', () => {
       client: { call, listAll },
     } as unknown as B24UserContext;
     const d = await new DashboardService({} as ChatsService, emptyJournal).get(user, {}, false);
-    expect(d).toMatchObject({ chats: null, contacts: null, calls: { incoming: 0, new: 0, repeat: 0, lost: 0 }, callsScope: 'all', callsFunnel: null, callFunnels: [], bookings: { created: 0 } });
+    expect(d).toMatchObject({ chats: null, contacts: null, calls: { incoming: 0, new: 0, repeat: 0, lost: 0 }, callsScope: 'all', callsFunnel: null, callFunnels: [], bookings: { created: { total: 0 } } });
     expect(call).not.toHaveBeenCalled();
     expect(listAll).toHaveBeenCalledWith('crm.activity.list', expect.objectContaining({ filter: expect.objectContaining({ PROVIDER_ID: 'VOXIMPLANT_CALL' }) }), expect.anything());
     await expect(new DashboardService({} as ChatsService, emptyJournal).get(user, { from: 'x' }, false)).rejects.toMatchObject({

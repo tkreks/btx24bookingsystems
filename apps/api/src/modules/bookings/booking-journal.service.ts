@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { BookingRecord, Prisma } from '../../generated/prisma/client.js';
 
-/** Больше — не для экрана менеджера за день-месяц. */
-export const LIST_LIMIT = 200;
+/** Броней за период на дашборде: больше — не для экрана менеджера за день-месяц (список обрезается). */
+export const PERIOD_LIMIT = 1000;
 
 /** Кто действует: сотрудник (через приложение), автоматизация приложения или сам Битрикс24. */
 export type BookingActor =
@@ -36,6 +36,8 @@ export interface BookingCreatedInput {
   endsAt: Date;
   title?: string | null;
   paymentMode?: 'prepayment' | 'cash_on_site' | 'postpay' | 'free' | 'certificate' | null;
+  /** Когда бронь появилась (импорт): Битрикс24 дату создания не отдаёт; по умолчанию — сейчас. */
+  createdAt?: Date;
 }
 
 export interface BookingCancelInput {
@@ -130,6 +132,7 @@ export class BookingJournalService {
         startsAt: input.startsAt,
         endsAt: input.endsAt,
         syncedAt: new Date(),
+        ...(input.createdAt ? { createdAt: input.createdAt } : {}),
       },
     });
     await this.history(record.id, 'imported', SYSTEM.bitrix, { after: stateOf(record), via: 'reconcile' });
@@ -199,28 +202,40 @@ export class BookingJournalService {
   }
 
   /** Брони сотрудника: клиентские, созданные в `[from, to)`, и отменённые в `[from, to)` — новые сверху. */
-  async forManager(
+  /**
+   * Брони за период для дашборда — любого источника (приложение и найденные в Битрикс24): новые
+   * (появились в журнале за период) и удалённые (отменены за период), плюс брони приложения, пропавшие
+   * в Битрикс24 и ждущие решения. `resourceIds` — ресурсы групп пользователя (null — все); `userId` —
+   * «Мои»: создал или снял этот сотрудник.
+   */
+  async forPeriod(
     portalId: string,
-    userId: number,
     from: Date,
     to: Date,
-  ): Promise<{ created: number; createdClient: BookingRecord[]; cancelled: BookingRecord[] }> {
-    const [created, createdClient, cancelled] = await Promise.all([
-      this.prisma.bookingRecord.count({
-        where: { portalId, createdByUserId: userId, createdAt: { gte: from, lt: to } },
-      }),
+    o: { resourceIds: number[] | null; userId: number | null },
+  ): Promise<{ created: BookingRecord[]; removed: BookingRecord[]; pending: Set<number> }> {
+    const mine = o.userId === null ? {} : { createdByUserId: o.userId };
+    const [created, cancelled, missing] = await Promise.all([
+      this.prisma.bookingRecord.findMany({ where: { portalId, ...mine, createdAt: { gte: from, lt: to } }, orderBy: { createdAt: 'desc' }, take: PERIOD_LIMIT }),
       this.prisma.bookingRecord.findMany({
-        where: { portalId, createdByUserId: userId, kind: 'client', createdAt: { gte: from, lt: to } },
-        orderBy: { createdAt: 'desc' },
-        take: LIST_LIMIT,
-      }),
-      this.prisma.bookingRecord.findMany({
-        where: { portalId, createdByUserId: userId, status: 'cancelled', cancelledAt: { gte: from, lt: to } },
+        where: { portalId, status: 'cancelled', cancelledAt: { gte: from, lt: to }, ...(o.userId === null ? {} : { OR: [{ createdByUserId: o.userId }, { cancelledByUserId: o.userId }] }) },
         orderBy: { cancelledAt: 'desc' },
-        take: LIST_LIMIT,
+        take: PERIOD_LIMIT,
+      }),
+      this.prisma.bookingAlert.findMany({
+        where: { portalId, kind: 'discrepancy', problem: { contains: 'missing' }, status: { in: ['new', 'viewed'] }, createdAt: { gte: from, lt: to } },
+        select: { bookingId: true },
       }),
     ]);
-    return { created, createdClient, cancelled };
+    const gone = missing.length
+      ? await this.prisma.bookingRecord.findMany({ where: { portalId, ...mine, status: 'active', bookingId: { in: missing.map((m) => m.bookingId) } } })
+      : [];
+    const inScope = (r: BookingRecord) => o.resourceIds === null || (r.resourceIds as number[]).some((id) => o.resourceIds!.includes(Number(id)));
+    return {
+      created: created.filter(inScope),
+      removed: [...gone, ...cancelled].filter(inScope),
+      pending: new Set(gone.map((r) => r.bookingId)),
+    };
   }
 
   private async history(

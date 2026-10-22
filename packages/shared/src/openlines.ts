@@ -155,6 +155,15 @@ export interface DashboardBookingRow {
   cancelReason: 'payment_timeout' | 'manual' | 'removed_in_bitrix' | null;
   createdAt: string;
   cancelledAt: string | null;
+  /** Откуда бронь: создана приложением или найдена в Битрикс24 (сверкой). */
+  source: 'app' | 'bitrix';
+  /** Название брони в Битрикс24 (снимок) — если сделки нет или она недоступна. */
+  title: string | null;
+  /** Кто создал / снял (сотрудник); null — Битрикс24 или система. */
+  createdBy: string | null;
+  cancelledBy: string | null;
+  /** Бронь приложения пропала в Битрикс24 — ждёт решения в «Уведомлениях о бронях». */
+  pendingRemoval: boolean;
 }
 
 export interface DashboardDto {
@@ -178,8 +187,12 @@ export interface DashboardDto {
   /** Воронка для «повторных» и доступные воронки (из групп пользователя). */
   callsFunnel: number | null;
   callFunnels: CallFunnelDto[];
-  /** Свои брони из журнала приложения: созданные за период (клиентские — со сделками) и отменённые за период. */
-  bookings: { created: number; cancelled: number; deals: DashboardBookingRow[]; cancelledList: DashboardBookingRow[] };
+  /**
+   * Брони из журнала за период — все, что видит сверка, а не только созданные приложением (ресурсы групп
+   * пользователя; «Мои» — создал или снял я): новые (появились за период) и удалённые (сняты, не оплачены,
+   * удалены в Битрикс24 — в журнале остаются навсегда).
+   */
+  bookings: { created: { total: number; items: DashboardBookingRow[] }; removed: { total: number; items: DashboardBookingRow[] } };
 }
 
 /** Новая сделка за период: повторный клиент — у контакта есть состоявшаяся сделка той же воронки раньше. */

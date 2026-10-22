@@ -14,8 +14,8 @@ type Dir = 'all' | 'incoming' | 'outgoing';
 
 const duration = (s: number) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—');
 
-/** Журнал звонков дня: дата и время, кто звонил, куда, тип, статус (окно «Показать звонки»). */
-export function CallLogModal({ scope, timezone, onClose }: { scope: CallScope; timezone: string; onClose: () => void }) {
+/** Журнал звонков дня: дата и время, кто звонил, куда, тип, статус (страница «Звонки», под плитками). */
+export function CallLog({ scope, timezone }: { scope: CallScope; timezone: string }) {
   const [date, setDate] = useState(() => todayIn(timezone));
   const [data, setData] = useState<CallLogDto | null>(null);
   const [error, setError] = useState('');
@@ -32,21 +32,17 @@ export function CallLogModal({ scope, timezone, onClose }: { scope: CallScope; t
       },
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить звонки'),
     );
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', esc);
     return () => {
       active = false;
-      document.removeEventListener('keydown', esc);
     };
-  }, [date, scope, onClose]);
+  }, [date, scope]);
 
   const shown = (data?.date === date ? data.items : []).filter((c) => (dir === 'all' || c.direction === dir) && (!status || c.status === status));
   const today = todayIn(timezone);
   const count = (f: (c: CallLogRowDto) => boolean) => (data?.date === date ? data.items.filter(f).length : 0);
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet call-log" role="dialog" aria-modal="true" aria-label="Журнал звонков" onClick={(e) => e.stopPropagation()}>
+    <section className="day-panel call-log" aria-label="Журнал звонков">
         <header>
           <h3>
             Журнал звонков{' '}
@@ -55,9 +51,6 @@ export function CallLogModal({ scope, timezone, onClose }: { scope: CallScope; t
               {data?.date === date && ` · ${data.items.length}`}
             </span>
           </h3>
-          <button aria-label="Закрыть" onClick={onClose}>
-            ×
-          </button>
         </header>
         <div className="call-log-bar">
           <div className="date-nav">
@@ -162,7 +155,6 @@ export function CallLogModal({ scope, timezone, onClose }: { scope: CallScope; t
           «Куда звонил» для входящих — сотрудник, принявший звонок: номер линии компании станет виден после выдачи приложению права
           «Телефония». Исходящий без разговора — «нет ответа».
         </p>
-      </div>
-    </div>
+    </section>
   );
 }
