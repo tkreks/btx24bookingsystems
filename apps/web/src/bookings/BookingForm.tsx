@@ -62,7 +62,8 @@ export function BookingForm({
   );
   const [resources, setResources] = useState<{ groupId: string; list: { id: number; name: string }[] } | null>(null);
   const [resourceIds, setResourceIds] = useState<number[]>(context.resourceId ? [context.resourceId] : []);
-  const deals = context.openDeals ?? [];
+  // Сделки клиента: сделка, из которой открыли, — первой, дальше самые новые (больший ID).
+  const deals = [...(context.openDeals ?? [])].sort((a, b) => Number(b.id === context.dealId) - Number(a.id === context.dealId) || b.id - a.id);
   const [deal, setDeal] = useState<DealChoice>(() =>
     context.dealId
       ? { mode: 'existing', dealId: context.dealId }
@@ -194,42 +195,75 @@ export function BookingForm({
     }
   };
 
+  const [moreDeals, setMoreDeals] = useState(false);
+  const pick = (d: DealChoice) => {
+    setDeal(d);
+    setError('');
+  };
+  // Карточки сделок: последняя (или выбранная) видна сразу, остальные — по «Показать ещё».
+  const dealCards = [
+    ...(context.dealId && !deals.some((d) => d.id === context.dealId) ? [{ id: context.dealId, title: 'Эта сделка' }] : []),
+    ...deals,
+  ];
+  const selectedId = deal.mode === 'existing' ? deal.dealId : null;
+  const visibleDeals = moreDeals ? dealCards : dealCards.filter((d, i) => i === 0 || d.id === selectedId);
+  const hiddenCount = dealCards.length - visibleDeals.length;
+
   const dealBlock = (
-            <fieldset className="form-deal">
-              <legend>{wizard ? 'По какой сделке бронь?' : 'Сделка'}</legend>
-              {context.dealId && !deals.some((d) => d.id === context.dealId) && (
-                <label className="check">
-                  <input type="radio" name="deal" checked={deal.mode === 'existing' && deal.dealId === context.dealId} onChange={() => setDeal({ mode: 'existing', dealId: context.dealId! })} />
-                  Эта сделка #{context.dealId}
-                </label>
-              )}
-              {deals.map((d) => (
-                <label key={d.id} className="check">
-                  <input type="radio" name="deal" checked={deal.mode === 'existing' && deal.dealId === d.id} onChange={() => setDeal({ mode: 'existing', dealId: d.id })} />
-                  {d.title} <span className="muted">#{d.id}</span>
-                </label>
-              ))}
-              {(wizard ? anyNewDeal : canNewDeal) && (
-                <label className="check">
-                  <input type="radio" name="deal" checked={deal.mode === 'new'} onChange={() => setDeal({ mode: 'new', title: context.clientName ?? '' })} />
-                  Новая сделка
-                </label>
-              )}
-              {deal.mode === 'new' && (
-                <input
-                  aria-label="Название новой сделки"
-                  placeholder="Название сделки"
-                  value={deal.title}
-                  maxLength={255}
-                  onChange={(e) => setDeal({ mode: 'new', title: e.target.value })}
-                />
-              )}
-              <label className="check">
-                <input type="radio" name="deal" checked={deal.mode === 'service'} onChange={() => setDeal({ mode: 'service' })} />
-                Служебная бронь (без сделки — ремонт, уборка…)
-              </label>
-            </fieldset>
+    <section className="bf-section">
+      <h4>{wizard ? 'По какой сделке бронь?' : 'Сделка'}</h4>
+      <div className="bf-choices" role="radiogroup" aria-label="Сделка">
+        {visibleDeals.map((d) => (
+          <button
+            key={d.id}
+            type="button"
+            role="radio"
+            aria-checked={selectedId === d.id}
+            className={`bf-choice${selectedId === d.id ? ' selected' : ''}`}
+            onClick={() => pick({ mode: 'existing', dealId: d.id })}
+          >
+            <b>{d.title}</b>
+            <span className="muted">#{d.id}{d.id === context.dealId ? ' · открыта сейчас' : d.id === dealCards[0]?.id ? ' · последняя' : ''}</span>
+          </button>
+        ))}
+        {hiddenCount > 0 && (
+          <button type="button" className="link bf-more" onClick={() => setMoreDeals(true)}>
+            Показать ещё ({hiddenCount})
+          </button>
+        )}
+        {(wizard ? anyNewDeal : canNewDeal) && (
+          <div className={`bf-choice bf-new${deal.mode === 'new' ? ' selected' : ''}`}>
+            {deal.mode === 'new' ? (
+              <input
+                aria-label="Название новой сделки"
+                placeholder="Название новой сделки"
+                autoFocus
+                value={deal.title}
+                maxLength={255}
+                onChange={(e) => setDeal({ mode: 'new', title: e.target.value })}
+              />
+            ) : (
+              <button type="button" className="link" onClick={() => pick({ mode: 'new', title: context.clientName ?? '' })}>
+                ＋ Создать новую сделку
+              </button>
+            )}
+          </div>
+        )}
+        <button
+          type="button"
+          className={`link bf-service${deal.mode === 'service' ? ' selected' : ''}`}
+          onClick={() => pick({ mode: 'service' })}
+        >
+          {deal.mode === 'service' ? '✓ Служебная бронь — без сделки (ремонт, уборка…)' : 'Служебная бронь без сделки'}
+        </button>
+      </div>
+    </section>
   );
+
+  // Ресурсы: основной — выпадающим списком; дополнительные (редко) — «＋ ещё ресурс».
+  const setResourceAt = (i: number, id: number) => setResourceIds((prev) => prev.map((r, k) => (k === i ? id : r)).filter((r, k, a) => a.indexOf(r) === k));
+  const resourceRows = resourceIds.length ? resourceIds : [0];
+  const freeResources = (list ?? []).filter((r) => !resourceIds.includes(r.id));
 
   return (
     <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
@@ -258,17 +292,25 @@ export function BookingForm({
           <>
             {step === 'deal' && dealBlock}
             {step === 'group' && (
-              <fieldset className="form-groups">
-                <legend>Группа для брони</legend>
-                {groupChoices.map((g) => (
-                  <label key={g.id} className={`group-choice${g.id === groupId ? ' selected' : ''}`}>
-                    <input type="radio" name="group" checked={g.id === groupId} onChange={() => chooseGroup(g.id)} />
-                    <b>{g.name}</b>
-                    {dealCategory !== null && g.dealCategoryId === dealCategory && <span className="muted"> · воронка сделки</span>}
-                  </label>
-                ))}
+              <section className="bf-section">
+                <h4>Группа для брони</h4>
+                <div className="bf-choices" role="radiogroup" aria-label="Группа">
+                  {groupChoices.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={g.id === groupId}
+                      className={`bf-choice${g.id === groupId ? ' selected' : ''}`}
+                      onClick={() => chooseGroup(g.id)}
+                    >
+                      <b>{g.name}</b>
+                      {dealCategory !== null && g.dealCategoryId === dealCategory && <span className="muted">воронка сделки</span>}
+                    </button>
+                  ))}
+                </div>
                 {!groupChoices.length && <p className="notice error">Нет групп, где вам можно создать такую бронь.</p>}
-              </fieldset>
+              </section>
             )}
             {step === 'details' && wizard && (
               <p className="wizard-summary">
@@ -287,115 +329,138 @@ export function BookingForm({
               </p>
             )}
             {step === 'details' && (
-            <>
-            <div className="settings-grid">
-              {!wizard && allowed.length > 1 && (
-                <label>
-                  Группа
-                  <select value={groupId} onChange={(e) => chooseGroup(e.target.value)}>
-                    {allowed.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label>
-                Начало
-                <span className="dt-pair">
-                  <input type="date" required value={period.startDate} onChange={(e) => setPeriod({ ...period, startDate: e.target.value })} />
-                  <input type="time" required value={period.startTime} onChange={(e) => setPeriod({ ...period, startTime: e.target.value })} />
-                </span>
-              </label>
-              <label>
-                Конец
-                <span className="dt-pair">
-                  <input type="date" required value={period.endDate} onChange={(e) => setPeriod({ ...period, endDate: e.target.value })} />
-                  <input type="time" required value={period.endTime} onChange={(e) => setPeriod({ ...period, endTime: e.target.value })} />
-                </span>
-              </label>
-            </div>
-
-            <fieldset className="form-resources">
-              <legend>Ресурсы</legend>
-              {!list && <span className="muted">Загрузка…</span>}
-              {list?.map((r) => (
-                <label key={r.id} className="check">
-                  <input
-                    type="checkbox"
-                    checked={resourceIds.includes(r.id)}
-                    onChange={(e) => setResourceIds(e.target.checked ? [...resourceIds, r.id] : resourceIds.filter((x) => x !== r.id))}
-                  />
-                  {r.name}
-                </label>
-              ))}
-            </fieldset>
-
-            {!wizard && dealBlock}
-
-            <div className="settings-grid">
-              {deal.mode !== 'service' && (
-                <>
-                  {!guestsField && (
-                    <label>
-                      Гостей
-                      <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
-                    </label>
-                  )}
-                  {group && (group.bookingTypes ?? []).length > 0 && (
-                    <label>
-                      Тип брони{group.bookingTypeRequired ? ' *' : ''}
-                      <select value={bookingTypeId} onChange={(e) => setBookingTypeId(e.target.value)}>
-                        {!(group.bookingTypeRequired && deal.mode === 'new') && <option value="">Определить по товарам сделки</option>}
-                        {group.bookingTypeRequired && deal.mode === 'new' && !bookingTypeId && <option value="">Выберите…</option>}
-                        {(group.bookingTypes ?? []).map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.title}
-                          </option>
+              <>
+                <section className="bf-section">
+                  <h4>Когда и где</h4>
+                  <div className="bf-grid">
+                    {!wizard && allowed.length > 1 && (
+                      <label>
+                        Группа
+                        <select value={groupId} onChange={(e) => chooseGroup(e.target.value)}>
+                          {allowed.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <div className="bf-resources">
+                      <span className="bf-label">{resourceRows.length > 1 ? 'Ресурсы' : 'Ресурс'}</span>
+                      <div className="bf-resource-row">
+                        {resourceRows.map((rid, i) => (
+                          <span key={i} className="bf-row">
+                            <select
+                              aria-label={i === 0 ? 'Ресурс' : `Ресурс ${i + 1}`}
+                              value={rid || ''}
+                              disabled={!list}
+                              onChange={(e) => (resourceIds.length ? setResourceAt(i, Number(e.target.value)) : setResourceIds([Number(e.target.value)]))}
+                            >
+                              {!rid && <option value="">{list ? 'Выберите…' : 'Загрузка…'}</option>}
+                              {(list ?? [])
+                                .filter((r) => r.id === rid || !resourceIds.includes(r.id))
+                                .map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name}
+                                  </option>
+                                ))}
+                            </select>
+                            {i > 0 && (
+                              <button type="button" className="bf-icon" aria-label="Убрать ресурс" onClick={() => setResourceIds(resourceIds.filter((_, k) => k !== i))}>
+                                ×
+                              </button>
+                            )}
+                          </span>
                         ))}
-                      </select>
-                      {group.bookingTypeRequired && !bookingTypeId && deal.mode === 'existing' && (
-                        <span className="muted">Не определится по товарам сделки — бронь не создастся, выберите тип.</span>
-                      )}
+                        {resourceIds.length > 0 && freeResources.length > 0 && (
+                          <button type="button" className="link bf-add" onClick={() => setResourceIds([...resourceIds, freeResources[0].id])}>
+                            ＋ ещё ресурс
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <label>
+                      Начало
+                      <span className="dt-pair">
+                        <input type="date" required value={period.startDate} onChange={(e) => setPeriod({ ...period, startDate: e.target.value })} />
+                        <input type="time" required value={period.startTime} onChange={(e) => setPeriod({ ...period, startTime: e.target.value })} />
+                      </span>
                     </label>
-                  )}
-                  <label>
-                    Оплата
-                    <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
-                      {modes.map((m) => (
-                        <option key={m} value={m}>
-                          {PAYMENT_MODE_LABELS[m]}
-                        </option>
-                      ))}
-                    </select>
+                    <label>
+                      Конец
+                      <span className="dt-pair">
+                        <input type="date" required value={period.endDate} onChange={(e) => setPeriod({ ...period, endDate: e.target.value })} />
+                        <input type="time" required value={period.endTime} onChange={(e) => setPeriod({ ...period, endTime: e.target.value })} />
+                      </span>
+                    </label>
+                  </div>
+                </section>
+
+                {!wizard && dealBlock}
+
+                {deal.mode !== 'service' && (
+                  <section className="bf-section">
+                    <h4>Бронь и оплата</h4>
+                    <div className="bf-grid">
+                      {group && (group.bookingTypes ?? []).length > 0 && (
+                        <label>
+                          Тип брони{group.bookingTypeRequired ? ' *' : ''}
+                          <select value={bookingTypeId} onChange={(e) => setBookingTypeId(e.target.value)}>
+                            {!(group.bookingTypeRequired && deal.mode === 'new') && <option value="">По товарам сделки</option>}
+                            {group.bookingTypeRequired && deal.mode === 'new' && !bookingTypeId && <option value="">Выберите…</option>}
+                            {(group.bookingTypes ?? []).map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.title}
+                              </option>
+                            ))}
+                          </select>
+                          {group.bookingTypeRequired && !bookingTypeId && deal.mode === 'existing' && (
+                            <small className="muted">Не определится по товарам — бронь не создастся.</small>
+                          )}
+                        </label>
+                      )}
+                      <label>
+                        Оплата
+                        <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
+                          {modes.map((m) => (
+                            <option key={m} value={m}>
+                              {PAYMENT_MODE_LABELS[m]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!guestsField && (
+                        <label>
+                          Гостей
+                          <input type="number" min={0} max={1000} value={guests} onChange={(e) => setGuests(e.target.value)} />
+                        </label>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {deal.mode !== 'service' && createFields.length > 0 && (
+                  <section className="bf-section">
+                    <h4>Поля сделки</h4>
+                    <DealFieldsEditor fields={createFields} values={values} onChange={(code, v) => setValues((prev) => ({ ...prev, [code]: v }))} />
+                  </section>
+                )}
+                {deal.mode !== 'service' && formKey && !currentForm && <p className="muted">Загрузка полей сделки…</p>}
+                {currentForm?.error && <p className="notice error">{currentForm.error}</p>}
+                {(deal.mode === 'service' || !commentField) && (
+                  <label className="bf-comment">
+                    Комментарий
+                    <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
                   </label>
-                </>
-              )}
-            </div>
-            {deal.mode !== 'service' && createFields.length > 0 && (
-              <fieldset className="form-deal-fields">
-                <legend>Поля сделки</legend>
-                <DealFieldsEditor fields={createFields} values={values} onChange={(code, v) => setValues((prev) => ({ ...prev, [code]: v }))} />
-              </fieldset>
-            )}
-            {deal.mode !== 'service' && formKey && !currentForm && <p className="muted">Загрузка полей сделки…</p>}
-            {currentForm?.error && <p className="notice error">{currentForm.error}</p>}
-            {(deal.mode === 'service' || !commentField) && (
-              <label className="settings-block">
-                Комментарий
-                <textarea rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
-              </label>
-            )}
-            <p className="muted">Товары и цены — в сделке; тип брони и сообщение клиенту приложение определит по товарам.</p>
-            </>
+                )}
+              </>
             )}
             {error && (
               <p className="notice error" role="alert">
                 {error}
               </p>
             )}
-            <div className="form-actions">
+            <div className="form-actions bf-footer">
               {step !== 'deal' && wizard && (
                 <button type="button" disabled={busy} onClick={() => setStep(step === 'details' ? 'group' : 'deal')}>
                   Назад
@@ -407,6 +472,7 @@ export function BookingForm({
               <button type="button" disabled={busy} onClick={onClose}>
                 Отмена
               </button>
+              {step === 'details' && <span className="muted bf-hint">Товары и цены — в сделке</span>}
             </div>
           </>
         )}

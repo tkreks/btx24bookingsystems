@@ -1220,7 +1220,7 @@ main.loading {
 
 .booking-form {
   display: grid;
-  gap: 10px;
+  gap: 4px;
   max-width: 640px;
 }
 
@@ -1232,19 +1232,6 @@ main.loading {
 
 .booking-form h3 {
   margin: 0;
-}
-
-.booking-form .settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px 14px;
-}
-
-.booking-form .settings-grid > label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
 }
 
 .booking-form input[type='date'],
@@ -1275,27 +1262,11 @@ main.loading {
 .dt-pair input {
   min-width: 0;
 }
-
-.form-resources,
-.form-deal {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 8px 12px;
-}
-
-.form-deal {
-  flex-direction: column;
+.bf-grid .dt-pair input[type='time'] {
+  flex: 0 0 104px;
 }
 
 /* Поля сделки группы: форма брони и правка в карточке брони. «Два в строку» — половины. */
-.form-deal-fields {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 8px 12px 12px;
-}
 .deal-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1337,14 +1308,6 @@ main.loading {
   .deal-fields > label.half {
     grid-column: 1 / -1;
   }
-}
-
-.form-deal input:not([type]) {
-  font: inherit;
-  font-size: 16px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
 }
 
 .client-bookings {
@@ -3370,32 +3333,206 @@ button.msg-media-ph {
   font-size: 12.5px;
 }
 
-/* Мастер брони из чата: сделка → группа → детали. */
-.form-groups {
+/* ---------- форма брони: секции, карточки выбора, футер ---------- */
+.booking-form.sheet {
+  max-width: 620px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  padding-bottom: 0;
+}
+.bf-section {
   display: grid;
   gap: 8px;
-  border: 0;
-  padding: 0;
-  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
 }
-.form-groups legend {
+.bf-section h4 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  align-items: end;
+}
+.bf-grid > label,
+.bf-comment {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
   font-size: 13px;
   color: var(--muted);
-  margin-bottom: 6px;
 }
-.group-choice {
+.bf-grid select,
+.bf-grid input,
+.bf-comment textarea,
+.bf-new input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.bf-resources {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+}
+.bf-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.bf-resource-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 6px 10px;
+}
+.bf-resource-row .bf-row {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.bf-resource-row select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.bf-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.bf-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+.bf-add {
+  justify-self: start;
+  align-self: center;
+  font-size: 13px;
+}
+.bf-choices {
+  display: grid;
+  gap: 6px;
+}
+.bf-choice {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
+  width: 100%;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  cursor: pointer;
+  background: var(--surface);
+  text-align: left;
+  font-weight: 400;
 }
-.group-choice.selected {
-  border-color: #2455df;
-  box-shadow: 0 0 0 2px rgba(36, 85, 223, 0.15);
+.bf-choice b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.bf-choice .muted {
+  flex: none;
+  font-size: 12px;
+}
+.bf-choice.selected {
+  border-color: var(--primary);
+  background: rgba(0, 122, 255, 0.06);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
+}
+.bf-new {
+  border-style: dashed;
+  padding: 6px 8px;
+}
+.bf-new.selected {
+  border-style: solid;
+}
+.bf-new.selected input {
+  border: 0;
+  background: transparent;
+  padding: 4px 4px;
+}
+.bf-more,
+.bf-service {
+  justify-self: start;
+  font-size: 13px;
+}
+.bf-service {
+  color: var(--muted);
+}
+.bf-service.selected {
+  color: var(--text);
+  font-weight: 600;
+}
+.bf-comment {
+  padding-bottom: 4px;
+}
+.bf-footer {
+  position: sticky;
+  bottom: 0;
+  margin: 0 -18px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.bf-hint {
+  margin-left: auto;
+  font-size: 12px;
+}
+@media (max-width: 520px) {
+  .bf-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Снятие брони в карточке. */
+button.danger {
+  background: #dc2626;
+  border-color: transparent;
+  color: #fff;
+}
+button.danger-outline {
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #b91c1c;
+}
+.cancel-confirm {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  border-radius: 12px;
+  background: rgba(254, 242, 242, 0.7);
+}
+.cancel-confirm textarea {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.cancel-confirm .form-actions {
+  margin: 4px 0 0;
+}
+
 .wizard-summary {
   display: flex;
   flex-wrap: wrap;

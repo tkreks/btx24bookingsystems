@@ -242,3 +242,9 @@ export interface UpdateDealFieldsDto {
   groupId: string;
   values: Record<string, string>;
 }
+
+/** `POST /api/bookings/:bookingId/cancel` `{ groupId, comment? }` — снять бронь (Битрикс24 + журнал). */
+export interface CancelBookingResultDto {
+  bookingId: number;
+  warnings: string[];
+}

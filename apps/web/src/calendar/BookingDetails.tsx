@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { CalendarBooking, CalendarDay, DealFormDto } from '@btx24/shared';
-import { apiGet, apiPut } from '../api.js';
+import type { CalendarBooking, CalendarDay, CancelBookingResultDto, DealFormDto } from '@btx24/shared';
+import { apiGet, apiPost, apiPut } from '../api.js';
 import { DealFieldsEditor, initialValues } from '../bookings/DealFieldsEditor.js';
 import { fmtDateTime, fmtMoney } from '../format.js';
 
@@ -9,8 +9,10 @@ export function BookingDetails({
   day,
   groupId,
   canEdit,
+  canCancel,
   onClose,
   onChanged,
+  onCancelled,
 }: {
   booking: CalendarBooking;
   day: CalendarDay;
@@ -18,9 +20,13 @@ export function BookingDetails({
   groupId: string | null;
   /** Право `booking.edit` в группе (подсказка; проверяет сервер). */
   canEdit: boolean;
+  /** Право `booking.cancel` в группе (подсказка; проверяет сервер). */
+  canCancel: boolean;
   onClose: () => void;
   /** Поля сделки сохранены — календарь перечитывает день. */
   onChanged: () => void;
+  /** Бронь снята — календарь закрывает карточку, показывает итог и перечитывает день. */
+  onCancelled: (r: CancelBookingResultDto) => void;
 }) {
   const names = new Map(day.resources.map((r) => [r.id, r.name]));
   // Правка полей сделки: форма с сервера (поля группы и текущие значения) и введённые значения.
@@ -28,6 +34,8 @@ export function BookingDetails({
   // После сохранения показываем свежие значения, пока календарь перечитывает день.
   const [saved, setSaved] = useState<DealFormDto | null>(null);
   const [busy, setBusy] = useState(false);
+  // Снятие брони: подтверждение и причина (необязательно).
+  const [cancelling, setCancelling] = useState<{ comment: string } | null>(null);
   const [error, setError] = useState('');
   const openDeal = () => {
     if (booking.dealId) window.BX24?.openPath?.(`/crm/deal/details/${booking.dealId}/`);
@@ -63,6 +71,22 @@ export function BookingDetails({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить сделку');
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (!cancelling || !groupId) return;
+    setBusy(true);
+    setError('');
+    try {
+      const r = await apiPost<CancelBookingResultDto>(`/bookings/${booking.id}/cancel`, {
+        groupId,
+        ...(cancelling.comment.trim() ? { comment: cancelling.comment.trim() } : {}),
+      });
+      onCancelled(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось снять бронь');
       setBusy(false);
     }
   };
@@ -144,19 +168,45 @@ export function BookingDetails({
             </div>
           </form>
         )}
-        {!editing && editable && (
-          <>
-            {error && (
-              <p className="notice error" role="alert">
-                {error}
-              </p>
-            )}
+        {cancelling && (
+          <div className="cancel-confirm" role="group" aria-label="Снять бронь">
+            <b>Снять бронь?</b>
+            <span className="muted">Бронь удалится из календаря и из Битрикс24, слот освободится. В истории брони останется запись.</span>
+            <textarea
+              rows={2}
+              maxLength={500}
+              placeholder="Причина (необязательно)"
+              value={cancelling.comment}
+              onChange={(e) => setCancelling({ comment: e.target.value })}
+            />
             <div className="form-actions">
+              <button type="button" className="danger" disabled={busy} onClick={() => void cancel()}>
+                {busy ? 'Снимаю…' : 'Да, снять бронь'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => (setCancelling(null), setError(''))}>
+                Не снимать
+              </button>
+            </div>
+          </div>
+        )}
+        {!editing && error && (
+          <p className="notice error" role="alert">
+            {error}
+          </p>
+        )}
+        {!editing && !cancelling && (editable || (canCancel && !!groupId)) && (
+          <div className="form-actions">
+            {editable && (
               <button className="primary" disabled={busy} onClick={() => void startEdit()}>
                 {busy ? 'Загрузка…' : 'Редактировать'}
               </button>
-            </div>
-          </>
+            )}
+            {canCancel && groupId && (
+              <button className="danger-outline" disabled={busy} onClick={() => (setCancelling({ comment: '' }), setError(''))}>
+                Снять бронь
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

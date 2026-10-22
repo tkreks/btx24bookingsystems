@@ -4,6 +4,7 @@ import type {
   BookingAlertListDto,
   BookingHistoryDto,
   BookingStateDto,
+  CancelBookingResultDto,
   BookingSyncSettingsDto,
   ClientBookingsDto,
   CreateBookingResultDto,
@@ -18,6 +19,7 @@ import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
+import { BookingCancelService } from './booking-cancel.service.js';
 import { BookingCreateService } from './booking-create.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
@@ -38,6 +40,7 @@ export class BookingsController {
     private readonly creator: BookingCreateService,
     private readonly clients: ClientBookingsService,
     private readonly dealForm: DealFormService,
+    private readonly canceller: BookingCancelService,
   ) {}
 
   @Get('booking-alerts')
@@ -63,6 +66,12 @@ export class BookingsController {
   @Post('bookings')
   create(@B24User() user: B24UserContext, @Body() body: unknown): Promise<CreateBookingResultDto> {
     return this.creator.create(user, body);
+  }
+
+  /** Снять бронь: удалить в Битрикс24 и отменить в журнале (`booking.cancel` в группе — проверяет сервис). */
+  @Post('bookings/:bookingId/cancel')
+  cancel(@B24User() user: B24UserContext, @Param('bookingId', ParseIntPipe) bookingId: number, @Body() body: unknown): Promise<CancelBookingResultDto> {
+    return this.canceller.cancel(user, bookingId, body);
   }
 
   /** Поля сделки группы для формы брони и карточки (значения — если указана сделка). Права проверяет сервис. */

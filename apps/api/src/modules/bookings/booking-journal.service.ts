@@ -42,6 +42,8 @@ export interface BookingCancelInput {
   reason: 'payment_timeout' | 'manual' | 'removed_in_bitrix';
   actor: BookingActor;
   via?: string;
+  /** Причина словами (снятие брони сотрудником). */
+  comment?: string;
 }
 
 export function stateOf(r: Pick<BookingRecord, 'startsAt' | 'endsAt' | 'resourceIds' | 'dealId'>): BookingState {
@@ -173,7 +175,7 @@ export class BookingJournalService {
     if (!count || !record) return null;
     await this.history(record.id, 'cancelled', input.actor, {
       before: stateOf(record),
-      details: { reason: input.reason },
+      details: { reason: input.reason, ...(input.comment ? { comment: input.comment } : {}) },
       via: input.via ?? 'app',
       at,
     });

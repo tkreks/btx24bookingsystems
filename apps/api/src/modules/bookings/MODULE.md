@@ -9,6 +9,7 @@
 | `POST /api/booking-alerts/:id/resolve` `{resolution}` | `booking.edit` / `booking.cancel` | `accept_bitrix` — принять как в Битрикс24; `cancel_booking` — удалить в Битрикс24 и отменить |
 | `GET /api/bookings/:bookingId/history` | `booking.details` | история брони (аудит) |
 | `POST /api/bookings` | `booking.create` в группе | создать бронь — сага `booking-create.service.ts` (журнал `BookingOperation`, ключ идемпотентности, компенсация) |
+| `POST /api/bookings/:bookingId/cancel` `{groupId, comment?}` | `booking.cancel` в группе | снять бронь: удалить в Битрикс24 и отменить в журнале (`manual` + причина); ожидание оплаты по брони закрывается |
 | `GET /api/deal-form?groupId=&dealId=` | `booking.create` или `booking.edit` в группе (+ `booking.details` со сделкой) | поля сделки группы для формы брони и карточки: тип, варианты, «два в строку», значения сделки |
 | `PUT /api/deals/:dealId/fields` `{groupId, values}` | `booking.edit` + `booking.details` в группе | правка полей сделки из карточки брони (только изменённые; режим «только чтение» → 403 `DEAL_READ_ONLY`) |
 | `GET /api/deals/:dealId/bookings` | `calendar.view` | брони сделки и её клиента (встройка открывается на дате брони) |
@@ -79,3 +80,10 @@
 («required») проверяются до записей в Битрикс24. Деньги пишутся «сумма|валюта сделки» (при
 создании — RUB), да/нет — 1/0, дата и время — из пояса портала в UTC. При создании системные поля
 важнее полей формы.
+
+**Снятие брони** (`BookingCancelService`, кнопка «Снять бронь» в карточке): бронь должна быть на
+ресурсе группы; нет в журнале — сначала `recordImported`, затем `booking.delete` (токен сотрудника:
+режим «только чтение» пускает только брони приложения → 403 `BOOKING_READ_ONLY`) и
+`recordCancelled('manual', comment)`. Активные `PaymentRequest` брони → `cancelled` (иначе по сроку
+клиенту уйдёт «не оплачено»); счёт остаётся — предупреждение. Повтор: бронь уже удалена — отмена у
+нас без ошибки.

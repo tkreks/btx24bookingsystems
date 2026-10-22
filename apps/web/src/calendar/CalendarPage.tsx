@@ -429,8 +429,14 @@ export function CalendarPage({
           day={day}
           groupId={activeGroup?.id ?? null}
           canEdit={!!activeGroup?.permissions.includes('booking.edit')}
+          canCancel={!!activeGroup?.permissions.includes('booking.cancel')}
           onClose={() => setSelected(null)}
           onChanged={() => setSettingsRevision((n) => n + 1)}
+          onCancelled={(r) => {
+            setSelected(null);
+            setCreatedNote(`Бронь #${r.bookingId} снята.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`);
+            setSettingsRevision((n) => n + 1);
+          }}
         />
       )}
       {bookingForm && (
@@ -442,7 +448,7 @@ export function CalendarPage({
             groupId: activeGroup?.id ?? null,
             dealId: placement.dealId,
             contactId: dealBookingsInfo?.contactId ?? null,
-            openDeals: dealBookingsInfo?.openDeals.filter((d) => d.id !== placement.dealId) ?? [],
+            openDeals: dealBookingsInfo?.openDeals ?? [],
           }}
           onClose={() => setBookingForm(null)}
           onDone={(r, mode) => {

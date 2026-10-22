@@ -4,6 +4,7 @@ import { Bitrix24Module } from '../bitrix24/bitrix24.module.js';
 import { BookingsController, BookingSyncAdminController } from './bookings.controller.js';
 import { ClientMessagesAdminController } from './client-messages.controller.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
+import { BookingCancelService } from './booking-cancel.service.js';
 import { BookingCreateService } from './booking-create.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
@@ -20,6 +21,7 @@ import { MessageContextService } from './message-context.service.js';
     BookingAlertsService,
     BookingSyncService,
     BookingCreateService,
+    BookingCancelService,
     ClientBookingsService,
     DealFieldMapService,
     DealFormService,
