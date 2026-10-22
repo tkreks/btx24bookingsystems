@@ -35,7 +35,10 @@ export class OpenlineIndexJob implements OnModuleInit, OnApplicationShutdown {
       const portals = await this.prisma.portal.findMany({ where: { status: 'ACTIVE' }, include: { settings: true } });
       for (const portal of portals) {
         try {
-          if (portal.settings?.dialogMetadataEnabled) await this.index.refresh(portal, this.portals.clientFor(portal));
+          if (portal.settings?.dialogMetadataEnabled) {
+            if (!portal.settings.dialogTextsEnabled) await this.index.purgeTexts(portal.id);
+            await this.index.refresh(portal, this.portals.clientFor(portal));
+          }
           else {
             const removed = await this.index.purge(portal.id);
             if (removed) this.logger.log(`portal ${portal.id}: metadata collection off, ${removed} index rows removed`);

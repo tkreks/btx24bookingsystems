@@ -75,6 +75,8 @@ export interface ChatMessageDto {
   author: { id: number; name: string; kind: MessageAuthorKind };
   text: string;
   files: ChatFileDto[];
+  /** Отправлено менеджером с телефона (рабочий WhatsApp через Wazzup) — наше сообщение. */
+  viaPhone?: boolean;
 }
 
 export interface ChatHistoryDto {

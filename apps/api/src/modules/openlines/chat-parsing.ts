@@ -54,6 +54,32 @@ export function authorKind(authorId: number, users: ImUser[]): MessageAuthorKind
   return 'employee';
 }
 
+/**
+ * Сообщение, отправленное менеджером с телефона из рабочего WhatsApp: Wazzup кладёт его в чат от
+ * имени клиента (коннектора) с первой строкой `=== Исходящее сообщение, автор: <кто> ===`
+ * (сверено на портале 2026-10-22: 282 таких сообщения в 40 чатах, все — от коннектора).
+ */
+const PHONE_OUTGOING = /(^|\r?\n)[ \t]*===\s*Исходящее сообщение,\s*автор:\s*(.*?)\s*===[ \t]*(?:\r?\n|$)/i;
+
+/** Метка — в начале текста или строки (ответ с цитатой: `>>цитата клиента`, затем метка и ответ). */
+export function phoneOutgoing(text: string | null | undefined): { author: string; text: string } | null {
+  const t = String(text ?? '');
+  const m = PHONE_OUTGOING.exec(t);
+  if (!m) return null;
+  const before = t.slice(0, m.index).trimEnd();
+  const after = t.slice(m.index + m[0].length);
+  return { author: m[2].trim(), text: before ? `${before}\n${after}` : after };
+}
+
+/** Текст без служебной строки Wazzup. */
+export const messageText = (text: string | null | undefined): string => phoneOutgoing(text)?.text ?? String(text ?? '');
+
+/** Автор с учётом сообщений с телефона: они — наши (сотрудник), а не клиента. */
+export function messageKind(m: Pick<ImMessage, 'author_id' | 'text'>, users: ImUser[]): MessageAuthorKind {
+  const kind = authorKind(m.author_id, users);
+  return kind === 'client' && phoneOutgoing(m.text) ? 'employee' : kind;
+}
+
 /** BB-коды мессенджера → простой текст (для превью и показа без разметки). */
 export function plainText(text: string | null | undefined): string {
   return String(text ?? '')
@@ -80,21 +106,27 @@ export function lastMeaningful(
 ): { message: ImMessage; kind: MessageAuthorKind; human: boolean } | null {
   const sorted = [...messages].sort((a, b) => b.id - a.id);
   for (const m of sorted) {
-    const kind = authorKind(m.author_id, users);
+    const kind = messageKind(m, users);
     if (kind === 'client' || kind === 'employee') return { message: m, kind, human: true };
   }
-  return sorted[0] ? { message: sorted[0], kind: authorKind(sorted[0].author_id, users), human: false } : null;
+  return sorted[0] ? { message: sorted[0], kind: messageKind(sorted[0], users), human: false } : null;
 }
 
 export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): ChatMessageDto {
   const ids = new Set((m.params?.FILE_ID ?? []).map(Number));
-  const kind = authorKind(m.author_id, users);
+  const phone = authorKind(m.author_id, users) === 'client' ? phoneOutgoing(m.text) : null;
+  const kind = phone ? 'employee' : authorKind(m.author_id, users);
   const user = users.find((u) => Number(u.id) === Number(m.author_id));
   return {
     id: Number(m.id),
     date: m.date,
-    author: { id: Number(m.author_id), name: kind === 'system' ? 'Система' : (user?.name ?? `#${m.author_id}`), kind },
-    text: plainText(m.text),
+    author: {
+      id: Number(m.author_id),
+      name: phone ? phone.author || 'Телефон' : kind === 'system' ? 'Система' : (user?.name ?? `#${m.author_id}`),
+      kind,
+    },
+    ...(phone ? { viaPhone: true } : {}),
+    text: plainText(phone ? phone.text : m.text),
     files: files
       .filter((f) => ids.has(Number(f.id)))
       .map((f) => ({

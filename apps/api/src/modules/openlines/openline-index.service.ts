@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OpenlineChat, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
-import { connectorOf, lastMeaningful, type ImMessage, type ImUser } from './chat-parsing.js';
+import type { Prisma } from '../../generated/prisma/client.js';
+import { connectorOf, crmLinksOf, lastMeaningful, messageText, preview, type ImMessage, type ImUser } from './chat-parsing.js';
 
 /** Индекс считается живым, если обновлялся не позже этого (иначе — запасной способ без индекса). */
 const FRESH_MS = 15 * 60_000;
@@ -14,6 +15,7 @@ const MESSAGES_PER_CHAT = 20;
 const BATCH = 50;
 
 export interface IndexedSession {
+  chatId: number;
   sessionId: number;
   responsibleId: number | null;
   completed: boolean;
@@ -66,14 +68,21 @@ export class OpenlineIndexService {
       orderBy: [{ lastMessageAt: 'desc' }, { chatId: 'desc' }],
       skip: offset,
       take,
-      select: { sessionId: true, responsibleId: true, completed: true, lastMessageAt: true },
+      select: { chatId: true, sessionId: true, responsibleId: true, completed: true, lastMessageAt: true },
     });
     return rows;
+  }
+
+  /** Сбор текстов выключен — тексты превью в кэше списка чатов удаляем. */
+  async purgeTexts(portalId: string): Promise<number> {
+    const { count } = await this.prisma.openlineChat.updateMany({ where: { portalId, lastPreview: { not: null } }, data: { lastPreview: null } });
+    return count;
   }
 
   /** Сбор выключен — собранные метаданные удаляем. */
   async purge(portalId: string): Promise<number> {
     const { count } = await this.prisma.openlineChat.deleteMany({ where: { portalId } });
+    await this.prisma.openlineChatAccess.deleteMany({ where: { portalId } });
     return count;
   }
 
@@ -107,7 +116,7 @@ export class OpenlineIndexService {
       if (Number(a.ASSOCIATED_ENTITY_ID) > 0) sessions.set(Number(a.ASSOCIATED_ENTITY_ID), a);
 
     // Сессия → чат; у чата берём последнюю (наибольшую) сессию.
-    const chats = new Map<number, { session: number; activity: Activity; connector: string }>();
+    const chats = new Map<number, { session: number; activity: Activity; connector: string; title: string | null; entityData2: string | null }>();
     const list = [...sessions.entries()];
     for (let i = 0; i < list.length; i += BATCH) {
       const part = list.slice(i, i + BATCH);
@@ -117,16 +126,18 @@ export class OpenlineIndexService {
         ),
       );
       for (const [sid, a] of part) {
-        const d = res.result[`s${sid}`] as { id?: number; entity_id?: string } | undefined;
+        const d = res.result[`s${sid}`] as { id?: number; entity_id?: string; name?: string; entity_data_2?: string } | undefined;
         if (!d?.id) continue;
         const prev = chats.get(d.id);
         if (!prev || prev.session < sid)
-          chats.set(d.id, { session: sid, activity: a, connector: connectorOf(d.entity_id) });
+          chats.set(d.id, { session: sid, activity: a, connector: connectorOf(d.entity_id), title: d.name ?? null, entityData2: d.entity_data_2 ?? null });
       }
     }
 
     const ids = [...chats.keys()];
     let updated = 0;
+    // Сводка для кэша списка чатов; текст превью — только при включённом «сборе текстов».
+    const texts = (await this.prisma.portalSettings.findUnique({ where: { portalId: portal.id }, select: { dialogTextsEnabled: true } }))?.dialogTextsEnabled === true;
     for (let i = 0; i < ids.length; i += BATCH) {
       const part = ids.slice(i, i + BATCH);
       const res = await client.batch(
@@ -149,6 +160,16 @@ export class OpenlineIndexService {
           checkedAt: now,
           // Среди последних сообщений нет человеческих — прежнюю дату не затираем.
           ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
+          ...(c.title !== null ? { title: c.title.slice(0, 255) } : {}),
+          crm: crmLinksOf(c.entityData2) as unknown as Prisma.InputJsonValue,
+          ...(last
+            ? {
+                lastMessageId: Number(last.message.id),
+                lastPreview: texts ? preview(messageText(last.message.text)).slice(0, 500) : null,
+                lastHasFiles: Boolean(last.message.params?.FILE_ID?.length),
+              }
+            : {}),
+          summaryAt: now,
         };
         await this.prisma.openlineChat.upsert({
           where: { portalId_chatId: { portalId: portal.id, chatId } },

@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
   ChatListDto,
   ChatScope,
   ChatSummary,
+  MessageAuthorKind,
   SendResultDto,
   TemplateStepDto,
 } from '@btx24/shared';
@@ -16,12 +17,14 @@ import {
   connectorOf,
   crmLinksOf,
   lastMeaningful,
+  messageText,
   preview,
   toMessageDto,
   type ImFile,
   type ImMessage,
   type ImUser,
 } from './chat-parsing.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { dealOfBindings, PortalService } from '../bitrix24/portals/portal.service.js';
 import { MessageContextService } from '../bookings/message-context.service.js';
@@ -71,6 +74,10 @@ const MAX_FOLDER_CHATS = 100;
 const PAGE = 50;
 /** Сообщений на чат в сводке: среди них ищем последнее от клиента или оператора. */
 const SUMMARY_MESSAGES = 20;
+/** Кэш списка чатов: сводку старше этого сверяем с Битрикс24 в фоне (ответ — сразу из базы). */
+const SUMMARY_STALE_MS = 30_000;
+/** Доступ сотрудника к чату перепроверяем (его токеном) не реже этого. */
+const ACCESS_STALE_MS = 5 * 60_000;
 const listQuery = z
   .object({
     scope: z.enum(['mine', 'department', 'all']).default('mine'),
@@ -90,6 +97,8 @@ const sendBody = z.object({ steps: stepsSchema }).strict();
  */
 @Injectable()
 export class ChatsService {
+  private readonly logger = new Logger(ChatsService.name);
+
   constructor(
     private readonly files: FilesService,
     private readonly index: OpenlineIndexService,
@@ -192,6 +201,12 @@ export class ChatsService {
   /** Сводки чатов по их ID (папка, поиск): порядок — по последнему сообщению. */
   async summariesByChat(user: B24UserContext, chatIds: number[]): Promise<ChatSummary[]> {
     const indexed = await this.index.byChat(user.portal.id, chatIds);
+    const refs = chatIds.map((chatId) => {
+      const r = indexed.get(chatId);
+      return { chatId, sessionId: r?.sessionId ?? 0, responsibleId: r?.responsibleId ?? null, completed: r?.completed ?? false, indexedAt: r?.lastMessageAt ?? null };
+    });
+    const cached = await this.cachedSummaries(user, refs);
+    if (cached) return cached;
     return this.summaries(
       user,
       chatIds.map((chatId) => {
@@ -226,15 +241,15 @@ export class ChatsService {
     // диалогов Битрикс24. Видимость всё равно проверяется токеном пользователя в summaries().
     if (await this.index.isActive(user.portal.id)) {
       const rows = await this.index.page(user.portal.id, responsible, offset, PAGE);
-      const items = await this.summaries(
-        user,
-        rows.map((r) => ({
-          sessionId: r.sessionId,
-          responsibleId: r.responsibleId,
-          completed: r.completed,
-          indexedAt: r.lastMessageAt,
-        })),
-      );
+      const refs = rows.map((r) => ({
+        chatId: r.chatId,
+        sessionId: r.sessionId,
+        responsibleId: r.responsibleId,
+        completed: r.completed,
+        indexedAt: r.lastMessageAt,
+      }));
+      // Кэш: второй и следующие заходы — из базы; первый (холодный) — живьём, он же заполнит кэш.
+      const items = (await this.cachedSummaries(user, refs)) ?? (await this.summaries(user, refs));
       return { items: outside(items), nextOffset: rows.length === PAGE ? offset + PAGE : null, exactOrder: true };
     }
 
@@ -311,9 +326,9 @@ export class ChatsService {
         lastMessage: last
           ? {
               id: Number(last.message.id),
-              date: last.message.date,
+              date: new Date(last.message.date).toISOString(),
               author: last.kind,
-              preview: preview(last.message.text),
+              preview: preview(messageText(last.message.text)),
               hasFiles: Boolean(last.message.params?.FILE_ID?.length),
             }
           : null,
@@ -325,9 +340,169 @@ export class ChatsService {
         unread: unread.get(Number(d.id)) ?? 0,
         folderId: folders.get(Number(d.id)) ?? null,
       };
-      return { summary, sortKey };
+      return { summary, sortKey, last, s, d };
     });
+    await this.persist(
+      user,
+      summaries,
+      sessions.filter((s) => s.chatId && !pairs.some((p) => p.s === s)).map((s) => s.chatId!),
+    ).catch((e) => this.logger.warn(`chat cache write failed: ${e instanceof Error ? e.message : String(e)}`));
     return summaries.sort((a, b) => b.sortKey - a.sortKey).map((x) => x.summary);
+  }
+
+  /**
+   * Кэш после живой загрузки: сводка чата — одна строка на чат (общая: чат, видимый двум
+   * сотрудникам, хранится один раз), доступ — своя строка у каждого сотрудника. Чаты, к которым
+   * Битрикс24 не пустил (`denied`), запоминаем как недоступные.
+   */
+  private async persist(
+    user: B24UserContext,
+    rows: { summary: ChatSummary; last: ReturnType<typeof lastMeaningful>; s: SessionRef }[],
+    denied: number[],
+  ): Promise<void> {
+    if (!this.prisma) return;
+    const prisma = this.prisma;
+    const portalId = user.portal.id;
+    const texts = (await prisma.portalSettings.findUnique({ where: { portalId }, select: { dialogTextsEnabled: true } }))?.dialogTextsEnabled === true;
+    const now = new Date();
+    const ops = rows.flatMap(({ summary: c, last, s }) => {
+      const summary = {
+        title: c.title.slice(0, 255),
+        crm: c.crm as unknown as Prisma.InputJsonValue,
+        phones: c.phones as unknown as Prisma.InputJsonValue,
+        lastMessageId: c.lastMessage?.id ?? null,
+        lastPreview: texts ? (c.lastMessage?.preview.slice(0, 500) ?? null) : null,
+        lastHasFiles: c.lastMessage?.hasFiles ?? false,
+        summaryAt: now,
+        ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
+      };
+      return [
+        prisma.openlineChat.upsert({
+          where: { portalId_chatId: { portalId, chatId: c.chatId } },
+          // checkedAt — отметка прохода worker'а; живой запрос её не двигает (иначе worker пропустит изменения).
+          create: { portalId, chatId: c.chatId, sessionId: s.sessionId, responsibleId: s.responsibleId, completed: s.completed, connector: c.connector.slice(0, 64), checkedAt: new Date(0), ...summary },
+          update: summary,
+        }),
+        prisma.openlineChatAccess.upsert({
+          where: { portalId_userId_chatId: { portalId, userId: user.userId, chatId: c.chatId } },
+          create: { portalId, userId: user.userId, chatId: c.chatId, allowed: true, joined: c.joined, checkedAt: now },
+          update: { allowed: true, joined: c.joined, checkedAt: now },
+        }),
+      ];
+    });
+    for (const chatId of denied)
+      ops.push(
+        prisma.openlineChatAccess.upsert({
+          where: { portalId_userId_chatId: { portalId, userId: user.userId, chatId } },
+          create: { portalId, userId: user.userId, chatId, allowed: false, checkedAt: now },
+          update: { allowed: false, joined: false, checkedAt: now },
+        }) as never,
+      );
+    if (ops.length) await prisma.$transaction(ops);
+  }
+
+  /**
+   * Список из кэша — быстро: сводки чатов (общие) и доступы сотрудника (свои) из базы, вживую —
+   * только непрочитанные. Нет сводки или доступа хоть у одного чата страницы — null (живая
+   * загрузка заполнит кэш). Устаревшее сверяется с Битрикс24 в фоне, следующее обновление
+   * списка уже свежее.
+   */
+  async cachedSummaries(user: B24UserContext, refs: SessionRef[]): Promise<ChatSummary[] | null> {
+    if (!this.prisma || !refs.length || refs.some((r) => !r.chatId)) return null;
+    const portalId = user.portal.id;
+    const ids = refs.map((r) => r.chatId!);
+    const [rows, access, settings] = await Promise.all([
+      this.prisma.openlineChat.findMany({ where: { portalId, chatId: { in: ids } } }),
+      this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, chatId: { in: ids } } }),
+      this.prisma.portalSettings.findUnique({ where: { portalId }, select: { dialogTextsEnabled: true } }),
+    ]);
+    const byChat = new Map(rows.map((r) => [r.chatId, r]));
+    const acc = new Map(access.map((a) => [a.chatId, a]));
+    const texts = settings?.dialogTextsEnabled === true;
+    const complete = ids.every((id) => {
+      const r = byChat.get(id);
+      const a = acc.get(id);
+      if (!a) return false;
+      if (!a.allowed) return true;
+      return !!r?.summaryAt && r.title !== null && (!texts || r.lastMessageId === null || r.lastPreview !== null);
+    });
+    if (!complete) return null;
+
+    const now = Date.now();
+    const stale = ids.some((id) => {
+      const r = byChat.get(id);
+      const a = acc.get(id)!;
+      return now - a.checkedAt.getTime() > ACCESS_STALE_MS || (a.allowed && now - (r?.summaryAt?.getTime() ?? 0) > SUMMARY_STALE_MS);
+    });
+    if (stale) this.revalidate(user, refs);
+
+    const [unread, folders] = await Promise.all([this.unreadByChat(user), this.myFolders(user)]);
+    return ids
+      .filter((id) => acc.get(id)!.allowed && byChat.has(id))
+      .map((id) => {
+        const r = byChat.get(id)!;
+        const crm = (r.crm as ChatSummary['crm'] | null) ?? { leadId: null, contactId: null, companyId: null, dealId: null };
+        return {
+          chatId: id,
+          sessionId: r.sessionId,
+          title: r.title ?? `Чат #${id}`,
+          connector: r.connector,
+          responsibleId: r.responsibleId,
+          lastMessage:
+            r.lastMessageId && r.lastMessageAt
+              ? { id: r.lastMessageId, date: r.lastMessageAt.toISOString(), author: (r.lastAuthor ?? 'client') as MessageAuthorKind, preview: r.lastPreview ?? '', hasFiles: r.lastHasFiles }
+              : null,
+          waitingReply: !r.completed && r.lastAuthor === 'client',
+          joined: acc.get(id)!.joined,
+          sessionClosed: r.completed,
+          crm,
+          phones: Array.isArray(r.phones) ? (r.phones as string[]) : [],
+          unread: unread.get(id) ?? 0,
+          folderId: folders.get(id) ?? null,
+        } satisfies ChatSummary;
+      })
+      .sort((a, b) => Date.parse(b.lastMessage?.date ?? '0') - Date.parse(a.lastMessage?.date ?? '0'));
+  }
+
+  private async touch(user: B24UserContext, chatId: number, dialog: ImDialog, messages: ImMessage[], users: ImUser[], joined: boolean): Promise<void> {
+    if (!this.prisma) return;
+    const row = await this.prisma.openlineChat.findUnique({ where: { portalId_chatId: { portalId: user.portal.id, chatId } } });
+    const now = new Date();
+    await this.prisma.openlineChatAccess.upsert({
+      where: { portalId_userId_chatId: { portalId: user.portal.id, userId: user.userId, chatId } },
+      create: { portalId: user.portal.id, userId: user.userId, chatId, allowed: true, joined, checkedAt: now },
+      update: { allowed: true, joined, checkedAt: now },
+    });
+    if (!row) return; // строки нет — её создаст список или worker (нужна сессия)
+    const last = lastMeaningful(messages, users);
+    const texts = (await this.prisma.portalSettings.findUnique({ where: { portalId: user.portal.id }, select: { dialogTextsEnabled: true } }))?.dialogTextsEnabled === true;
+    await this.prisma.openlineChat.update({
+      where: { id: row.id },
+      data: {
+        title: (dialog.name ?? row.title ?? '').slice(0, 255) || null,
+        crm: crmLinksOf(dialog.entity_data_2) as unknown as Prisma.InputJsonValue,
+        ...(last
+          ? {
+              lastMessageId: Number(last.message.id),
+              lastPreview: texts ? preview(messageText(last.message.text)).slice(0, 500) : null,
+              lastHasFiles: Boolean(last.message.params?.FILE_ID?.length),
+            }
+          : {}),
+        ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
+        summaryAt: now,
+      },
+    });
+  }
+
+  /** Фоновая сверка страницы с Битрикс24 (токеном сотрудника); одна на сотрудника и страницу. */
+  private readonly revalidating = new Set<string>();
+  private revalidate(user: B24UserContext, refs: SessionRef[]): void {
+    const key = `${user.portal.id}:${user.userId}:${refs.map((r) => r.chatId).join(',')}`;
+    if (this.revalidating.has(key)) return;
+    this.revalidating.add(key);
+    void this.summaries(user, refs)
+      .catch((e) => this.logger.warn(`chat cache revalidate failed: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => this.revalidating.delete(key));
   }
 
   /**
@@ -407,6 +582,9 @@ export class ChatsService {
     const files = res.result?.files ?? [];
     const raw = res.result?.messages ?? [];
     const joined = isMember(dialog.role);
+    // Открытая переписка — самые свежие данные: обновляем строку чата в кэше списка (например,
+    // после ответа чат сразу уходит из «Ждут ответа»), и свой доступ.
+    if (!parsed.data.beforeId) await this.touch(user, chatId, dialog, raw, users, joined).catch(() => undefined);
     return {
       chatId,
       title: dialog.name ?? `Чат #${chatId}`,

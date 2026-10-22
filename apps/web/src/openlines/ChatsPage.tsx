@@ -40,7 +40,7 @@ const TABS: { key: ChatTab; label: string }[] = [
   { key: 'answered', label: 'Отвечены' },
 ];
 /** Список чатов обновляем раз в 30 секунд, пока страница открыта. */
-const POLL_MS = 30_000;
+const POLL_MS = 15_000;
 /** Чаты открытых линий: сверху — с самыми новыми сообщениями. Клик — открыть диалог. */
 export function ChatsPage({
   timezone,

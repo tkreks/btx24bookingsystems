@@ -23,6 +23,9 @@ function setup(
     indexed?: unknown[];
     /** Чаты в моей папке. */
     foldered?: number[];
+    /** Общий кэш (несколько «сотрудников» на одной базе). */
+    cache?: { chats: Map<number, Record<string, unknown>>; access: Map<string, Record<string, unknown>> };
+    userId?: number;
   } = {},
 ) {
   const call = vi.fn(async (method: string, params?: Record<string, unknown>) => {
@@ -66,10 +69,33 @@ function setup(
     page: vi.fn(async () => opts.indexed ?? []),
     byChat: vi.fn(async () => new Map()),
   } as unknown as OpenlineIndexService;
+  // Кэш списка чатов в памяти: сводки — по чату, доступы — по сотруднику и чату.
+  const chats = opts.cache?.chats ?? new Map<number, Record<string, unknown>>();
+  const access = opts.cache?.access ?? new Map<string, Record<string, unknown>>();
+  type W = { portalId_chatId?: { chatId: number }; portalId_userId_chatId?: { userId: number; chatId: number } };
   const prisma = {
     chatFolderItem: { findMany: vi.fn(async () => (opts.foldered ?? []).map((chatId) => ({ chatId, folderId: 'f1' }))) },
+    portalSettings: { findUnique: vi.fn(async () => ({ dialogTextsEnabled: true })) },
+    openlineChat: {
+      findMany: vi.fn(async ({ where }: { where: { chatId: { in: number[] } } }) => where.chatId.in.flatMap((id) => (chats.has(id) ? [chats.get(id)] : []))),
+      upsert: vi.fn(async ({ where, create, update }: { where: W; create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        const id = where.portalId_chatId!.chatId;
+        chats.set(id, { ...(chats.get(id) ?? create), ...update });
+      }),
+    },
+    openlineChatAccess: {
+      findMany: vi.fn(async ({ where }: { where: { userId: number; chatId: { in: number[] } } }) =>
+        where.chatId.in.flatMap((id) => (access.has(`${where.userId}:${id}`) ? [access.get(`${where.userId}:${id}`)] : [])),
+      ),
+      upsert: vi.fn(async ({ where, create, update }: { where: W; create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        const k = `${where.portalId_userId_chatId!.userId}:${where.portalId_userId_chatId!.chatId}`;
+        access.set(k, { ...(access.get(k) ?? create), ...update });
+      }),
+    },
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   } as unknown as PrismaService;
-  return { svc: new ChatsService(files, index, prisma), user, call, batch, listAll, files, index };
+  if (opts.userId) (user as { userId: number }).userId = opts.userId;
+  return { svc: new ChatsService(files, index, prisma), user, call, batch, listAll, files, index, cache: { chats, access } };
 }
 
 const client = { id: 50, name: 'Клиент', connector: true };
@@ -268,7 +294,7 @@ describe('ChatsService.list with the metadata index', () => {
     expect(res.items.map((c) => c.sessionId)).toEqual([19248, 19286, 19216, 19282]);
     expect(res.items[1]).toMatchObject({
       waitingReply: true,
-      lastMessage: { author: 'client', date: '2026-10-21T17:39:02+03:00' },
+      lastMessage: { author: 'client', date: '2026-10-21T14:39:02.000Z' },
     });
     expect(res.nextOffset).toBeNull();
   });
@@ -316,3 +342,57 @@ describe('ChatsService phone search', () => {
     await expect(new ChatsService({} as FilesService, index).searchByPhone(user, { q: '123' })).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe('ChatsService: кэш списка чатов', () => {
+  const indexed = [
+    { chatId: 101, sessionId: 11, responsibleId: 7, completed: false, lastMessageAt: new Date('2026-10-22T09:00:00Z') },
+    { chatId: 102, sessionId: 12, responsibleId: 8, completed: false, lastMessageAt: new Date('2026-10-22T08:00:00Z') },
+  ];
+  const base = {
+    indexed,
+    dialogs: {
+      c101: { id: 101, name: 'Анна', role: 'member', entity_id: 'wa|1|A|50', entity_data_2: 'CONTACT|140|DEAL|678' },
+      c102: { id: 102, name: 'Олег', role: 'guest', entity_id: 'wa|1|B|51', entity_data_2: '' },
+    },
+    messages: {
+      c101: { messages: [{ id: 5, author_id: 50, date: '2026-10-22T12:00:00+03:00', text: 'Есть баня?' }], users: [client] },
+      c102: { messages: [{ id: 6, author_id: 50, date: '2026-10-22T11:00:00+03:00', text: '=== Исходящее сообщение, автор: Телефон ===\nДа' }], users: [client] },
+    },
+  };
+
+  it('cold first open goes to Bitrix24 and fills the cache; the next open is served from the database', async () => {
+    const t = setup(base);
+    (t.index.isActive as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    const first = await t.svc.list(t.user, { scope: 'all' });
+    expect(t.batch).toHaveBeenCalled();
+    expect(first.items.map((c) => c.chatId)).toEqual([101, 102]);
+    expect(t.cache.chats.size).toBe(2);
+
+    const warm = setup({ ...base, cache: t.cache });
+    (warm.index.isActive as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    const second = await warm.svc.list(warm.user, { scope: 'all' });
+    expect(warm.batch).not.toHaveBeenCalled(); // ни диалогов, ни сообщений из Битрикс24
+    expect(second.items).toEqual(first.items);
+    expect(second.items[1]).toMatchObject({ waitingReply: false, joined: false, lastMessage: { author: 'employee', preview: 'Да' } });
+  });
+
+  it('one row per chat for everyone, access per employee: a colleague is checked by Bitrix24 with own token', async () => {
+    const mine = setup(base);
+    (mine.index.isActive as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    await mine.svc.list(mine.user, { scope: 'all' });
+    // Коллеге Битрикс24 не показывает чат 102.
+    const colleague = setup({ ...base, userId: 8, cache: mine.cache, dialogs: { c101: base.dialogs.c101 } });
+    (colleague.index.isActive as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    const r = await colleague.svc.list(colleague.user, { scope: 'all' });
+    expect(colleague.batch).toHaveBeenCalled(); // своих доступов в кэше нет — живая проверка
+    expect(r.items.map((c) => c.chatId)).toEqual([101]);
+    expect(mine.cache.chats.size).toBe(2); // сводки не задвоились
+    expect(mine.cache.access.get('8:102')).toMatchObject({ allowed: false });
+    // Повторно — из кэша, и недоступный чат по-прежнему скрыт.
+    const again = setup({ ...base, userId: 8, cache: mine.cache });
+    (again.index.isActive as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    expect((await again.svc.list(again.user, { scope: 'all' })).items.map((c) => c.chatId)).toEqual([101]);
+    expect(again.batch).not.toHaveBeenCalled();
+  });
+});
+

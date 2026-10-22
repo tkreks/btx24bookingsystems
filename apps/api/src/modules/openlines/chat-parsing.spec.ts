@@ -3,6 +3,9 @@ import {
   connectorOf,
   crmLinksOf,
   lastMeaningful,
+  messageKind,
+  messageText,
+  phoneOutgoing,
   plainText,
   preview,
   toMessageDto,
@@ -72,5 +75,36 @@ describe('chat parsing', () => {
       text: 'Фото',
       files: [{ id: 44, name: 'a.jpg', size: 10, type: 'image', previewUrl: 'p', url: 'u' }],
     });
+  });
+});
+
+describe('сообщения менеджера с телефона (Wazzup)', () => {
+  const users = [{ id: 900, name: 'Клиент Иван', connector: true }, { id: 42, name: 'Елена' }];
+  const msg = (id: number, author_id: number, text: string) => ({ id, author_id, date: `2026-10-22T10:0${id}:00+03:00`, text });
+
+  it('recognizes the marker and keeps the text', () => {
+    expect(phoneOutgoing('=== Исходящее сообщение, автор: Телефон ===\nДобрый день!')).toEqual({ author: 'Телефон', text: 'Добрый день!' });
+    expect(phoneOutgoing('=== Исходящее сообщение, автор: Елена ===')).toEqual({ author: 'Елена', text: '' });
+    expect(phoneOutgoing('Здравствуйте, === Исходящее сообщение')).toBeNull();
+    // ответ с телефона цитатой: сначала цитата клиента, потом метка и ответ
+    expect(phoneOutgoing('>>У нас перенос, возможно то же самое?\n \n \n=== Исходящее сообщение, автор: Телефон ===\nхорошо')).toEqual({
+      author: 'Телефон',
+      text: '>>У нас перенос, возможно то же самое?\nхорошо',
+    });
+  });
+
+  it('a phone reply is ours: no longer «waiting reply», shown as outgoing with a phone mark', () => {
+    const messages = [msg(1, 900, 'Есть свободная баня?'), msg(2, 900, '=== Исходящее сообщение, автор: Телефон ===\nДа, на субботу есть')];
+    const last = lastMeaningful(messages, users);
+    expect(last).toMatchObject({ kind: 'employee', human: true });
+    expect(messageText(last!.message.text)).toBe('Да, на субботу есть');
+    expect(toMessageDto(messages[1], users, [])).toMatchObject({ author: { kind: 'employee', name: 'Телефон' }, viaPhone: true, text: 'Да, на субботу есть' });
+    expect(toMessageDto(messages[0], users, [])).toMatchObject({ author: { kind: 'client', name: 'Клиент Иван' } });
+    expect(toMessageDto(messages[0], users, [])).not.toHaveProperty('viaPhone');
+  });
+
+  it('an employee message with the same text is not affected', () => {
+    expect(messageKind(msg(3, 42, '=== Исходящее сообщение, автор: Телефон ===\nx'), users)).toBe('employee');
+    expect(toMessageDto(msg(3, 42, '=== Исходящее сообщение, автор: Телефон ===\nx'), users, [])).not.toHaveProperty('viaPhone');
   });
 });

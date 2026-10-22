@@ -333,6 +333,11 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
       <div className="cv-bubble">
         <div className="cv-bubble-meta">
           <strong>{m.author.name}</strong>
+          {m.viaPhone && (
+            <span className="via-phone" title="Отправлено менеджером с телефона из рабочего WhatsApp (Wazzup)">
+              📱 с телефона
+            </span>
+          )}
           <time dateTime={m.date} title={fmtDateTime(m.date, timezone)}>
             {fmtTime(m.date, timezone)}
           </time>

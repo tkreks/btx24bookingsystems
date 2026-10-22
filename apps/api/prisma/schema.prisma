@@ -48,6 +48,7 @@ model Portal {
   messageTemplates     MessageTemplate[]
   storedFiles          StoredFile[]
   openlineChats        OpenlineChat[]
+  openlineChatAccess   OpenlineChatAccess[]
   chatFolders          ChatFolder[]
   bookingRecords       BookingRecord[]
   settingsAccessCodes  SettingsAccessCode[]
@@ -312,10 +313,37 @@ model OpenlineChat {
   lastMessageAt DateTime? @db.DateTime(3)
   lastAuthor    String?   @db.VarChar(10)
   checkedAt     DateTime  @db.DateTime(3)
+  /// Сводка для списка чатов (кэш, одна строка на чат — общая для всех сотрудников; кто её видит,
+  /// решает OpenlineChatAccess). Текст превью — только при включённом «сборе текстов».
+  title         String?   @db.VarChar(255)
+  /// Привязки к CRM: { leadId, contactId, companyId, dealId }.
+  crm           Json?
+  phones        Json?
+  lastMessageId Int?
+  lastPreview   String?   @db.VarChar(500)
+  lastHasFiles  Boolean   @default(false)
+  /// Когда сводку обновили (worker или живой запрос сотрудника).
+  summaryAt     DateTime? @db.DateTime(3)
 
   @@unique([portalId, chatId])
   @@index([portalId, lastMessageAt])
   @@index([portalId, responsibleId, lastMessageAt])
+}
+
+/// Доступ сотрудника к чату — как решил Битрикс24 (imopenlines.dialog.get его токеном): кэш, чтобы
+/// список чатов строился из базы. Сводка чата общая (OpenlineChat), доступ — свой у каждого.
+model OpenlineChatAccess {
+  id        String   @id @default(cuid())
+  portalId  String
+  portal    Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId    Int
+  chatId    Int
+  allowed   Boolean
+  /// Сотрудник — участник чата (может писать без «Присоединиться»).
+  joined    Boolean  @default(false)
+  checkedAt DateTime @db.DateTime(3)
+
+  @@unique([portalId, userId, chatId])
 }
 
 // ---------- Журнал броней ----------
