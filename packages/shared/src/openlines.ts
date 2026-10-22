@@ -167,14 +167,30 @@ export interface DashboardDto {
   contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
   /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
   calls: Record<CallKind, number> | null;
-  /** Все звонки за сегодня (входящие и исходящие, по `callsScope`); null — нет доступа к делам CRM. */
-  callsToday: number | null;
+  /** Все звонки за период (входящие и исходящие, по `callsScope`); null — нет доступа к делам CRM. */
+  callsTotal: number | null;
+  /**
+   * Новые сделки — созданные за период в воронках групп пользователя (по `callsScope`: мои — где я
+   * ответственный), и сколько из них от повторных клиентов. null — нет доступа к сделкам CRM.
+   */
+  newDeals: { total: number; repeat: number; items: DashboardNewDeal[]; truncated: boolean } | null;
   callsScope: CallScope;
   /** Воронка для «повторных» и доступные воронки (из групп пользователя). */
   callsFunnel: number | null;
   callFunnels: CallFunnelDto[];
   /** Свои брони из журнала приложения: созданные за период (клиентские — со сделками) и отменённые за период. */
   bookings: { created: number; cancelled: number; deals: DashboardBookingRow[]; cancelledList: DashboardBookingRow[] };
+}
+
+/** Новая сделка за период: повторный клиент — у контакта есть состоявшаяся сделка той же воронки раньше. */
+export interface DashboardNewDeal {
+  id: number;
+  title: string;
+  createdAt: string;
+  opportunity: number | null;
+  currency: string | null;
+  contact: { id: number; name: string | null } | null;
+  repeat: boolean;
 }
 
 /**

@@ -35,7 +35,7 @@ describe('DashboardService', () => {
       })),
     } as unknown as ChatsService;
     const call = vi.fn(async () => ({ result: { items: [{ counter: 3 }, { counter: 54 }, {}] } }));
-    const listAll = vi.fn(async (_method: string, params?: { filter?: { PROVIDER_ID?: string } }) => params?.filter?.PROVIDER_ID === 'VOXIMPLANT_CALL' ? [] : [
+    const listAll = vi.fn(async (_method: string, params?: { filter?: { PROVIDER_ID?: string } }) => params?.filter?.PROVIDER_ID !== 'IMOPENLINES_SESSION' ? [] : [
       { OWNER_TYPE_ID: '1', OWNER_ID: '5' },
       { OWNER_TYPE_ID: '1', OWNER_ID: '5' },
       { OWNER_TYPE_ID: '3', OWNER_ID: '140' },
@@ -80,6 +80,7 @@ describe('DashboardService', () => {
     const dealFilters: Record<string, unknown>[] = [];
     const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) => {
       if (method === 'crm.activity.list') return calls;
+      if (method === 'crm.deal.list' && params?.filter?.['>=DATE_CREATE']) return [];
       if (method === 'crm.deal.list') {
         dealFilters.push(params?.filter ?? {});
         return [
@@ -142,9 +143,11 @@ describe('DashboardService', () => {
         ],
       })),
     } as unknown as BookingJournalService;
-    const listAll = vi.fn(async (method: string, _params?: unknown) =>
-      method === 'crm.deal.list'
+    const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) =>
+      method === 'crm.deal.list' && params?.filter?.['@ID']
         ? [{ ID: '678', TITLE: 'Баня', OPPORTUNITY: '5000.00', CURRENCY_ID: 'RUB' }]
+        : method === 'crm.deal.list'
+          ? []
         : [{ id: 10, name: 'Баня 1' }],
     );
     const user = {
@@ -160,7 +163,7 @@ describe('DashboardService', () => {
       deals: [{ bookingId: 1, deal: { title: 'Баня', opportunity: 5000 }, resources: ['Баня 1', 'Ресурс 11'] }],
       cancelledList: [{ bookingId: 2, deal: null, cancelReason: 'payment_timeout' }],
     });
-    expect(listAll.mock.calls.find((c) => c[0] === 'crm.deal.list')?.[1]).toMatchObject({
+    expect(listAll.mock.calls.find((c) => c[0] === 'crm.deal.list' && c[1]?.filter?.['@ID'])?.[1]).toMatchObject({
       filter: { '@ID': [678, 999] },
     });
   });
@@ -212,5 +215,37 @@ describe('DashboardService.callLog', () => {
     const mine = await svc.callLog(user, { date: '2026-10-22', scope: 'mine' });
     expect(mine.items.map((i) => i.activityId)).toEqual([1, 2]);
     await expect(svc.callLog(user, { date: '22.10.2026' })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('DashboardService — новые сделки за период', () => {
+  it('сделки, созданные за период, в воронках групп; повторный — была состоявшаяся сделка той же воронки раньше', async () => {
+    const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) => {
+      if (method === 'crm.deal.list' && params?.filter?.['>=DATE_CREATE'])
+        return [
+          { ID: '900', TITLE: 'Анна, баня', CATEGORY_ID: '0', CONTACT_ID: '140', DATE_CREATE: '2026-10-21T12:00:00+03:00', OPPORTUNITY: '45000', CURRENCY_ID: 'RUB' },
+          { ID: '901', TITLE: 'Олег, баня', CATEGORY_ID: '0', CONTACT_ID: '150', DATE_CREATE: '2026-10-21T13:00:00+03:00', OPPORTUNITY: null, CURRENCY_ID: 'RUB' },
+          { ID: '902', TITLE: 'Без контакта', CATEGORY_ID: '0', CONTACT_ID: null, DATE_CREATE: '2026-10-21T14:00:00+03:00', OPPORTUNITY: null, CURRENCY_ID: null },
+        ];
+      if (method === 'crm.deal.list' && params?.filter?.['@CONTACT_ID'])
+        return [
+          { ID: '900', CONTACT_ID: '140', CATEGORY_ID: '0', DATE_CREATE: '2026-10-21T12:00:00+03:00', STAGE_SEMANTIC_ID: 'P', CLOSEDATE: null },
+          // Анна была в сентябре — бронь прошла
+          { ID: '700', CONTACT_ID: '140', CATEGORY_ID: '0', DATE_CREATE: '2026-09-01T10:00:00+03:00', STAGE_SEMANTIC_ID: 'P', CLOSEDATE: null, UF_END: '2026-09-05T14:00:00+03:00' },
+          // у Олега — сделка в другой воронке
+          { ID: '701', CONTACT_ID: '150', CATEGORY_ID: '14', DATE_CREATE: '2026-08-01T10:00:00+03:00', STAGE_SEMANTIC_ID: 'S', CLOSEDATE: '2026-08-02T10:00:00+03:00' },
+        ];
+      if (method === 'crm.contact.list') return [{ ID: '140', NAME: 'Анна', LAST_NAME: null }];
+      return [];
+    });
+    const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call: vi.fn(async () => ({ result: {} })), listAll } } as unknown as B24UserContext;
+    const fieldMap = { get: vi.fn(async () => ({ bookingEnd: 'UF_END' })) } as unknown as DealFieldMapService;
+    const d = await new DashboardService({} as ChatsService, emptyJournal, fieldMap).get(user, { from: '2026-10-21', to: '2026-10-21', callsScope: 'mine' }, false, [0]);
+    expect(d.newDeals).toMatchObject({ total: 3, repeat: 1, truncated: false });
+    expect(d.newDeals?.items.map((i) => [i.id, i.repeat])).toEqual([[900, true], [901, false], [902, false]]);
+    expect(d.newDeals?.items[0].contact).toEqual({ id: 140, name: expect.stringContaining('Анна') });
+    expect(listAll.mock.calls.find((c) => c[1]?.filter?.['>=DATE_CREATE'])?.[1]).toMatchObject({
+      filter: { '>=DATE_CREATE': '2026-10-20T21:00:00.000Z', '<DATE_CREATE': '2026-10-21T21:00:00.000Z', '@CATEGORY_ID': [0], ASSIGNED_BY_ID: 7 },
+    });
   });
 });

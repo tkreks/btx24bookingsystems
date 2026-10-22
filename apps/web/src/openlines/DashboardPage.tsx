@@ -8,9 +8,11 @@ import {
   type CallScope,
   type DashboardBookingRow,
   type DashboardDto,
+  type DashboardNewDeal,
   type SessionInfo,
 } from '@btx24/shared';
 import { apiGet } from '../api.js';
+import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
@@ -25,7 +27,13 @@ const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, st
   removed_in_bitrix: 'удалена в Битрикс24',
 };
 
-/** Дашборд менеджера: его показатели за выбранный период в рамках его прав; вход в чаты. */
+/** «сегодня» / «вчера» / «за период» — подпись плиток по выбранному периоду. */
+const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p === 'yesterday' ? 'вчера' : 'за период');
+
+/**
+ * Дашборд менеджера: в одном ряду — чаты ждут ответа, все звонки, новые сделки и повторные клиенты
+ * среди них; ниже — сделки с бронью и отменённые. «Показать звонки» — страница статистики звонков.
+ */
 export function DashboardPage({
   session,
   openlines,
@@ -51,6 +59,7 @@ export function DashboardPage({
   onSession?: (s: SessionInfo) => void;
 }) {
   const tz = session.portal.timezone;
+  const [view, setView] = useState<'main' | 'calls'>('main');
   const [preset, setPreset] = useState<PeriodPreset>('today');
   const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
   const [draft, setDraft] = useState(range);
@@ -62,6 +71,7 @@ export function DashboardPage({
   const [logOpen, setLogOpen] = useState(false);
   const closeLog = useCallback(() => setLogOpen(false), []);
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
+  const [dealsOpen, setDealsOpen] = useState<'all' | 'repeat' | null>(null);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
   const [callsFunnel, setCallsFunnel] = useState<number | null>(null);
 
@@ -110,6 +120,119 @@ export function DashboardPage({
       : null;
   const funnels = data?.callFunnels ?? [];
   const n = (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v));
+  const word = periodWord(preset);
+
+  const periodBar = (
+    <div className="period-bar">
+      <div className="segmented period-presets" role="group" aria-label="Период">
+        {PERIOD_PRESETS.map((p) => (
+          <button key={p.key} className={preset === p.key ? 'active' : ''} onClick={() => choose(p.key)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {preset === 'custom' && (
+        <form
+          className="period-custom"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!draftError) setRange(draft);
+          }}
+        >
+          <label>
+            с <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
+          </label>
+          <label>
+            по <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
+          </label>
+          <button className="primary" type="submit" disabled={!!draftError}>
+            Показать
+          </button>
+          {draftError && <span className="muted">{draftError}</span>}
+        </form>
+      )}
+      <div className="segmented period-presets dash-scope" role="group" aria-label="Чьи звонки и сделки">
+        {(['all', 'mine'] as const).map((s) => (
+          <button key={s} className={callsScope === s ? 'active' : ''} onClick={() => setCallsScope(s)}>
+            {s === 'all' ? 'Все' : 'Мои'}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const errorBox = error && (
+    <div className="notice error" role="alert">
+      {error}
+    </div>
+  );
+
+  if (view === 'calls')
+    return (
+      <div className="page dashboard">
+        <header className="toolbar">
+          <div className="toolbar-title">
+            <button aria-label="К дашборду" onClick={() => setView('main')}>
+              ‹
+            </button>
+            <h1>Звонки</h1>
+            <span className="muted">клиенты {word}</span>
+          </div>
+          <div className="toolbar-controls">
+            {funnels.length > 1 && (
+              <label className="calls-funnel">
+                Повторные по воронке{' '}
+                <select value={callsFunnel ?? data?.callsFunnel ?? ''} onChange={(e) => setCallsFunnel(Number(e.target.value))}>
+                  {funnels.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button onClick={() => setLogOpen(true)} disabled={!d}>
+              Журнал звонков за сегодня
+            </button>
+          </div>
+        </header>
+        {periodBar}
+        {errorBox}
+        {d && d.calls === null ? (
+          <p className="notice">Статистика звонков недоступна: нет доступа к делам CRM.</p>
+        ) : (
+          <>
+            <div className={`dash-row dash-row-6${d ? '' : ' loading'}`}>
+              {CALL_KINDS.map((k) => (
+                <button key={k} className={`dash-tile clickable${k === 'lost' && d?.calls?.lost ? ' warn' : ''}`} disabled={!d} onClick={() => setCallsOpen(k)}>
+                  <span className="dash-tile-label">{CALL_KIND_LABELS[k]}</span>
+                  <span className="dash-tile-value">{n(d?.calls?.[k])}</span>
+                  <span className="dash-tile-link">Список →</span>
+                </button>
+              ))}
+            </div>
+            <p className="muted dash-note">
+              Всего звонков {word}: <b>{n(d?.callsTotal)}</b> (входящие и исходящие). Плитки считают клиентов, а не звонки:
+              несколько звонков от клиента и ему — один клиент. Повторный — есть состоявшаяся сделка в воронке{' '}
+              {funnels.find((f) => f.id === d?.callsFunnel)?.name ?? 'группы'} до его первого звонка в периоде (не проиграна и бронь
+              уже прошла; без брони — выигранная). Упущенный — после пропущенного не перезвонили и он сам не дозвонился.
+            </p>
+          </>
+        )}
+        {logOpen && <CallLogModal scope={callsScope} timezone={tz} onClose={closeLog} />}
+        {callsOpen && (
+          <CallsModal
+            kind={callsOpen}
+            from={range.from}
+            to={range.to}
+            scope={callsScope}
+            funnel={d?.callsFunnel ?? null}
+            timezone={tz}
+            onClose={() => setCallsOpen(null)}
+          />
+        )}
+      </div>
+    );
 
   return (
     <div className="page dashboard">
@@ -122,21 +245,27 @@ export function DashboardPage({
           <span className="muted">{session.user.name}</span>
         </div>
         <div className="toolbar-controls">
-        <WorkdayButton timezone={tz} />
-        {onTemplates && (
-          <button className="settings-button" onClick={onTemplates} title="Шаблоны сообщений: свои, общие и автоматические">
-            <span aria-hidden="true">✉</span> Шаблоны
-          </button>
-        )}
-        {onSettings && (
-          <button
-            className="settings-button"
-            onClick={() => (session.canManageApp ? onSettings() : setAskCode(true))}
-            title={session.canManageApp ? 'Настройки приложения' : 'Настройки — для администраторов или по временному паролю'}
-          >
-            <span aria-hidden="true">⚙</span> Настройки
-          </button>
-        )}
+          <WorkdayButton timezone={tz} />
+          {bookingAlerts && (
+            <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} title="Уведомления о бронях">
+              <span aria-hidden="true">🔔</span> Уведомления
+              {!!alertCount && <span className="badge">{alertCount}</span>}
+            </button>
+          )}
+          {onTemplates && (
+            <button className="settings-button" onClick={onTemplates} title="Шаблоны сообщений: свои, общие и автоматические">
+              <span aria-hidden="true">✉</span> Шаблоны
+            </button>
+          )}
+          {onSettings && (
+            <button
+              className="settings-button"
+              onClick={() => (session.canManageApp ? onSettings() : setAskCode(true))}
+              title={session.canManageApp ? 'Настройки приложения' : 'Настройки — для администраторов или по временному паролю'}
+            >
+              <span aria-hidden="true">⚙</span> Настройки
+            </button>
+          )}
         </div>
       </header>
       {askCode && (
@@ -150,179 +279,122 @@ export function DashboardPage({
         />
       )}
 
-      <div className="period-bar">
-        <div className="segmented period-presets" role="group" aria-label="Период">
-          {PERIOD_PRESETS.map((p) => (
-            <button key={p.key} className={preset === p.key ? 'active' : ''} onClick={() => choose(p.key)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-        {preset === 'custom' && (
-          <form
-            className="period-custom"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!draftError) setRange(draft);
-            }}
-          >
-            <label>
-              с <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
-            </label>
-            <label>
-              по <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
-            </label>
-            <button className="primary" type="submit" disabled={!!draftError}>
-              Показать
-            </button>
-            {draftError && <span className="muted">{draftError}</span>}
-          </form>
-        )}
-      </div>
+      {periodBar}
+      {errorBox}
 
-      {error && (
-        <div className="notice error" role="alert">
-          {error}
-        </div>
-      )}
-
-      <div className={`tiles${d ? '' : ' loading'}`}>
-        {openlines && (
-          <>
-            <div className="tile accent">
-              <span className="tile-value">{n(d?.chats?.waitingReply)}</span>
-              <span className="tile-label">Чатов ждут ответа</span>
-              <button className="primary tile-action" onClick={() => onChats({})}>
-                Открыть чаты
-              </button>
-            </div>
-            <div className="tile">
-              <span className="tile-value">{n(d?.chats?.unreadMessages)}</span>
-              <span className="tile-label">Непрочитанных сообщений</span>
-            </div>
-            <div className="tile">
-              <span className="tile-value">{n(d?.contacts?.leads)}</span>
-              <span className="tile-label">Лидов — было общение</span>
-            </div>
-            <div className="tile">
-              <span className="tile-value">{n(d?.contacts?.contacts)}</span>
-              <span className="tile-label">Контактов — было общение</span>
-            </div>
-            <div className="tile">
-              <span className="tile-value">{n(d?.contacts?.deals)}</span>
-              <span className="tile-label">Сделок — было общение</span>
-            </div>
-          </>
-        )}
-        {bookingAlerts && (
-          <div className={`tile${alertCount ? ' accent' : ''}`}>
-            <span className="tile-value">{n(alertCount)}</span>
-            <span className="tile-label">Новых уведомлений о бронях</span>
-            <button className="tile-action" onClick={onAlerts}>
-              Открыть уведомления
+      <div className={`dash-row${d ? '' : ' loading'}`}>
+        <div className={`dash-tile${openlines && d?.chats?.waitingReply ? ' warn' : ''}`}>
+          <span className="dash-tile-label">Чатов ждут ответа</span>
+          <span className="dash-tile-value">{openlines ? n(d?.chats?.waitingReply) : '—'}</span>
+          {openlines ? (
+            <button className="primary dash-tile-action" onClick={() => onChats({})}>
+              Открыть чаты
             </button>
-          </div>
-        )}
-        <div className="tile" title="Брони, созданные вами через приложение">
-          <span className="tile-value">{n(d?.bookings.created)}</span>
-          <span className="tile-label">Создано броней</span>
-        </div>
-        <div className="tile" title="Ваши брони, отменённые за период">
-          <span className="tile-value">{n(d?.bookings.cancelled)}</span>
-          <span className="tile-label">Отменено броней</span>
-        </div>
-      </div>
-      {!openlines && (
-        <p className="notice">Открытые линии недоступны: в ваших группах не включено право на них.</p>
-      )}
-
-      <section className="day-panel calls-panel">
-        <div className="day-header">
-          <b>Звонки — клиенты</b>
-          {funnels.length > 1 && (
-            <label className="calls-funnel">
-              Повторные по воронке{' '}
-              <select
-                value={callsFunnel ?? data?.callsFunnel ?? ''}
-                onChange={(e) => setCallsFunnel(Number(e.target.value))}
-              >
-                {funnels.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          ) : (
+            <span className="dash-tile-hint">Открытые линии не включены в ваших группах</span>
           )}
-          <div className="segmented period-presets" role="group" aria-label="Чьи звонки">
-            {(['all', 'mine'] as const).map((s) => (
-              <button key={s} className={callsScope === s ? 'active' : ''} onClick={() => setCallsScope(s)}>
-                {s === 'all' ? 'Все' : 'Мои'}
-              </button>
-            ))}
-          </div>
         </div>
-        {d && d.calls === null ? (
-          <p className="muted">Статистика звонков недоступна: нет доступа к делам CRM.</p>
-        ) : (
-          <div className={`tiles call-tiles${d ? '' : ' loading'}`}>
-            <div className="tile call-today">
-              <span className="tile-value">{n(d?.callsToday)}</span>
-              <span className="tile-label">Все звонки сегодня</span>
-              <button className="tile-action" disabled={!d} onClick={() => setLogOpen(true)}>
-                Показать звонки
-              </button>
-            </div>
-            {CALL_KINDS.map((k) => (
-              <button
-                key={k}
-                className={`tile${k === 'lost' && d?.calls?.lost ? ' accent' : ''}`}
-                disabled={!d}
-                onClick={() => setCallsOpen(k)}
-              >
-                <span className="tile-value">{n(d?.calls?.[k])}</span>
-                <span className="tile-label">{CALL_KIND_LABELS[k]}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        <p className="muted dash-note">
-          Считаются клиенты, а не звонки: несколько звонков от клиента и ему — один клиент. Повторный — есть
-          состоявшаяся сделка в воронке {funnels.find((f) => f.id === d?.callsFunnel)?.name ?? 'группы'} до его первого
-          звонка в периоде (не проиграна и бронь уже прошла; без брони — выигранная). Упущенный — после пропущенного не перезвонили и он сам не дозвонился («не дозвонились» на
-          исходящих станет видно после выдачи приложению права «Телефония»).
-        </p>
-      </section>
-      {logOpen && <CallLogModal scope={callsScope} timezone={tz} onClose={closeLog} />}
-      {callsOpen && (
-        <CallsModal
-          kind={callsOpen}
-          from={range.from}
-          to={range.to}
-          scope={callsScope}
-          funnel={d?.callsFunnel ?? null}
-          timezone={tz}
-          onClose={() => setCallsOpen(null)}
-        />
-      )}
+        <div className="dash-tile">
+          <span className="dash-tile-label">Все звонки {word}</span>
+          <span className="dash-tile-value">{n(d?.callsTotal)}</span>
+          <button className="dash-tile-action" onClick={() => setView('calls')}>
+            Показать звонки
+          </button>
+        </div>
+        <div className="dash-tile">
+          <span className="dash-tile-label">Новых сделок {word}</span>
+          <span className="dash-tile-value">{n(d?.newDeals?.total)}</span>
+          <button className="dash-tile-action" disabled={!d?.newDeals?.total} onClick={() => setDealsOpen('all')}>
+            Показать сделки
+          </button>
+        </div>
+        <div className="dash-tile">
+          <span className="dash-tile-label">Повторные клиенты</span>
+          <span className="dash-tile-value">
+            {n(d?.newDeals?.repeat)}
+            {!!d?.newDeals?.total && <small> из {d.newDeals.total}</small>}
+          </span>
+          <button className="dash-tile-action" disabled={!d?.newDeals?.repeat} onClick={() => setDealsOpen('repeat')}>
+            Показать
+          </button>
+        </div>
+      </div>
+      {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
 
       <div className="dash-lists">
-        <BookingList
-          title="Сделки с бронью"
-          empty="За период вы не создавали броней со сделками."
-          rows={d?.bookings.deals}
-          tz={tz}
-          variant="created"
-        />
-        <BookingList
-          title="Отменённые брони"
-          empty="Отменённых броней за период нет."
-          rows={d?.bookings.cancelledList}
-          tz={tz}
-          variant="cancelled"
-        />
+        <BookingList title="Сделки с бронью" empty="За период вы не создавали броней со сделками." rows={d?.bookings.deals} tz={tz} variant="created" />
+        <BookingList title="Отменённые брони" empty="Отменённых броней за период нет." rows={d?.bookings.cancelledList} tz={tz} variant="cancelled" />
       </div>
-      <p className="muted dash-note">Учитываются брони, созданные через приложение.</p>
+      <p className="muted dash-note">
+        Новые сделки — созданные {word} в воронках ваших групп; повторный клиент — у контакта уже была состоявшаяся сделка той же
+        воронки. Брони — созданные через приложение.
+      </p>
+      {dealsOpen && d?.newDeals && (
+        <NewDealsModal
+          title={dealsOpen === 'repeat' ? 'Повторные клиенты' : `Новые сделки ${word}`}
+          items={dealsOpen === 'repeat' ? d.newDeals.items.filter((i) => i.repeat) : d.newDeals.items}
+          truncated={d.newDeals.truncated}
+          tz={tz}
+          onClose={() => setDealsOpen(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Окно со списком новых сделок (или только повторных клиентов). */
+function NewDealsModal({
+  title,
+  items,
+  truncated,
+  tz,
+  onClose,
+}: {
+  title: string;
+  items: DashboardNewDeal[];
+  truncated: boolean;
+  tz: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet calls-modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>
+            {title} <span className="muted">· {items.length}</span>
+          </h3>
+          <button aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        {truncated && <p className="notice">Сделок очень много — показаны последние. Сузьте период.</p>}
+        <ul className="call-rows">
+          {items.map((i) => (
+            <li key={i.id}>
+              <button className="link call-client" onClick={() => openCrm('deal', i.id)}>
+                {i.title}
+              </button>
+              {i.contact ? (
+                <button className="link" onClick={() => openCrm('contact', i.contact!.id)}>
+                  {i.contact.name ?? `Контакт #${i.contact.id}`}
+                </button>
+              ) : (
+                <span className="muted">без контакта</span>
+              )}
+              <span className={`pill${i.repeat ? '' : ' muted-pill'}`}>{i.repeat ? 'повторный' : 'новый'}</span>
+              <span className="muted">
+                создана {fmtDateTime(i.createdAt, tz)}
+                {i.opportunity ? ` · ${fmtMoney(i.opportunity, i.currency)}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -376,9 +448,7 @@ function BookingList({
             <div className="booking-row-tags">
               {variant === 'cancelled' && r.cancelReason ? (
                 <>
-                  <span className={`pill${r.cancelReason === 'payment_timeout' ? ' waiting' : ' muted-pill'}`}>
-                    {CANCEL_REASON[r.cancelReason]}
-                  </span>
+                  <span className={`pill${r.cancelReason === 'payment_timeout' ? ' waiting' : ' muted-pill'}`}>{CANCEL_REASON[r.cancelReason]}</span>
                   {r.cancelledAt && <span className="muted">отменена {fmtDateTime(r.cancelledAt, tz)}</span>}
                 </>
               ) : (

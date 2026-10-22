@@ -12,6 +12,7 @@ import {
   zonedDayRange,
   type DashboardBookingRow,
   type DashboardDto,
+  type DashboardNewDeal,
 } from '@btx24/shared';
 import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -34,6 +35,8 @@ const MAX_SESSIONS = 2000;
 const DAY_MS = 86_400_000;
 /** Звонков с начала периода по сейчас — больше не разбираем (за 92 дня у комплекса — сотни-тысячи). */
 const MAX_CALLS = 5000;
+/** Новых сделок за период в ответе (плитка считает все, список — первые). */
+const MAX_NEW_DEALS = 500;
 const OWNER_LABELS: Record<number, string> = { 1: 'Лид', 2: 'Сделка', 3: 'Контакт', 4: 'Компания' };
 
 type DealInfo = NonNullable<DashboardBookingRow['deal']>;
@@ -57,16 +60,17 @@ export class DashboardService {
     const { from, to, start, end } = parsePeriod(user.portal.timezone, query);
     const callsScope = parseScope(query.callsScope);
     const callsFunnel = pickFunnel(query.callsFunnel, funnelIds);
-    const [bookings, calls, callsToday, callFunnels, chats] = await Promise.all([
+    const [bookings, calls, callsTotal, newDeals, callFunnels, chats] = await Promise.all([
       this.bookings(user, start, end),
       this.callCounts(user, start, end, callsScope, callsFunnel),
-      this.callsToday(user, callsScope),
+      this.callsTotal(user, start, end, callsScope),
+      this.newDeals(user, start, end, callsScope, funnelIds),
       this.funnelNames(user, funnelIds),
       openlines
         ? Promise.all([this.chats.list(user, { scope: 'mine' }), this.unreadMessages(user), this.contacts(user, start, end)])
         : null,
     ]);
-    const callInfo = { calls, callsToday, callsScope, callsFunnel, callFunnels };
+    const callInfo = { calls, callsTotal, newDeals, callsScope, callsFunnel, callFunnels };
     if (!chats) return { from, to, chats: null, contacts: null, ...callInfo, bookings };
     const [mine, unread, contacts] = chats;
     return {
@@ -168,10 +172,9 @@ export class DashboardService {
     };
   }
 
-  /** Все звонки за сегодня (входящие и исходящие); нет доступа к делам CRM — null. */
-  private async callsToday(user: B24UserContext, scope: CallScope): Promise<number | null> {
+  /** Все звонки за период (входящие и исходящие); нет доступа к делам CRM — null. */
+  private async callsTotal(user: B24UserContext, start: Date, end: Date, scope: CallScope): Promise<number | null> {
     try {
-      const { start, end } = zonedDayRange(todayIn(user.portal.timezone), user.portal.timezone);
       const { rows } = await this.fetchCalls(user, start, end);
       return rows.filter((c) => scope !== 'mine' || Number(c.RESPONSIBLE_ID) === user.userId).length;
     } catch (err) {
@@ -209,6 +212,73 @@ export class DashboardService {
         CallKind,
         number
       >;
+    } catch (err) {
+      if (err instanceof Bitrix24Error) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * Новые сделки — созданные за период в воронках групп пользователя (мои — где я ответственный).
+   * Повторный клиент — у контакта есть состоявшаяся сделка той же воронки, созданная раньше этой
+   * (то же правило «состоялась», что у звонков: не проиграна и бронь прошла / выиграна).
+   */
+  private async newDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['newDeals']> {
+    type Row = Record<string, string | null>;
+    try {
+      const rows = await user.client.listAll<Row>(
+        'crm.deal.list',
+        {
+          filter: {
+            '>=DATE_CREATE': start.toISOString(),
+            '<DATE_CREATE': end.toISOString(),
+            ...(funnelIds.length ? { '@CATEGORY_ID': funnelIds } : {}),
+            ...(scope === 'mine' ? { ASSIGNED_BY_ID: user.userId } : {}),
+          },
+          order: { DATE_CREATE: 'DESC' },
+          select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID'],
+        },
+        { max: MAX_NEW_DEALS },
+      );
+      const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
+      const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
+      const earlier: Row[] = [];
+      for (let i = 0; i < contactIds.length; i += CONTACT_CHUNK)
+        earlier.push(
+          ...(await user.client.listAll<Row>(
+            'crm.deal.list',
+            {
+              filter: { '@CONTACT_ID': contactIds.slice(i, i + CONTACT_CHUNK), '!STAGE_SEMANTIC_ID': 'F', '<DATE_CREATE': end.toISOString() },
+              select: ['ID', 'CONTACT_ID', 'CATEGORY_ID', 'DATE_CREATE', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
+            },
+            { max: 5000 },
+          )),
+        );
+      const names = await this.contactNames(user, contactIds);
+      const items: DashboardNewDeal[] = rows.map((d) => {
+        const contactId = Number(d.CONTACT_ID) || 0;
+        const created = Date.parse(String(d.DATE_CREATE));
+        const repeat =
+          contactId > 0 &&
+          earlier.some(
+            (e) =>
+              e.ID !== d.ID &&
+              Number(e.CONTACT_ID) === contactId &&
+              e.CATEGORY_ID === d.CATEGORY_ID &&
+              Date.parse(String(e.DATE_CREATE)) < created &&
+              dealHappened(e, endField ? e[endField] : null, created),
+          );
+        return {
+          id: Number(d.ID),
+          title: d.TITLE ?? `Сделка #${d.ID}`,
+          createdAt: Number.isFinite(created) ? new Date(created).toISOString() : String(d.DATE_CREATE ?? ''),
+          opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
+          currency: d.CURRENCY_ID ?? null,
+          contact: contactId ? { id: contactId, name: names.get(contactId) ?? null } : null,
+          repeat,
+        };
+      });
+      return { total: items.length, repeat: items.filter((i) => i.repeat).length, items, truncated: rows.length >= MAX_NEW_DEALS };
     } catch (err) {
       if (err instanceof Bitrix24Error) return null;
       throw err;
