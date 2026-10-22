@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { PAYMENT_KINDS, type PaymentKind, type PaymentPreviewDto, type PaymentRequestDto } from '@btx24/shared';
+import { PAYMENT_KINDS, type DealInvoicesDto, type PaymentKind, type PaymentPreviewDto, type PaymentRequestDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -36,12 +36,23 @@ export class PaymentsController {
     return this.payments.create(user, body);
   }
 
-  /** Счета сделки — видят те, кому доступны данные броней. */
+  /** Заявки на оплату сделки — видят те, кому доступны данные броней. */
   @Get()
   async list(@B24User() user: B24UserContext, @Query('dealId') dealId?: string): Promise<PaymentRequestDto[]> {
+    await this.requireDetails(user);
+    return this.payments.list(user, int(dealId, 'dealId'));
+  }
+
+  /** Все счета сделки со стадиями (и заявками приложения) — «в работе» и «все счета». */
+  @Get('invoices')
+  async invoices(@B24User() user: B24UserContext, @Query('dealId') dealId?: string): Promise<DealInvoicesDto> {
+    await this.requireDetails(user);
+    return this.payments.invoices(user, int(dealId, 'dealId'));
+  }
+
+  private async requireDetails(user: B24UserContext): Promise<void> {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !this.access.pick(a, undefined, 'booking.details'))
       throw new ForbiddenException({ code: 'NO_BOOKING_ACCESS', message: 'Недостаточно прав' });
-    return this.payments.list(user, int(dealId, 'dealId'));
   }
 }

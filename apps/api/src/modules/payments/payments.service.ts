@@ -8,6 +8,7 @@ import {
   renderTemplate,
   type GroupOptionsDto,
   type PaymentKind,
+  type DealInvoicesDto,
   type PaymentPreviewDto,
   type PaymentRequestDto,
 } from '@btx24/shared';
@@ -159,6 +160,61 @@ export class PaymentsService {
       }
     }
     return toDto(req);
+  }
+
+  /**
+   * Все смарт-счета сделки из Битрикс24 (правами сотрудника) со стадией и, если счёт выставило
+   * приложение, — заявкой (ссылка, срок оплаты). Заявки без счёта (сбой создания) — в конце.
+   */
+  async invoices(user: B24UserContext, dealId: number): Promise<DealInvoicesDto> {
+    const items = await user.client.listAll<{ id: number; title?: string; opportunity?: number; currencyId?: string; stageId?: string; categoryId?: number; createdTime?: string }>(
+      'crm.item.list',
+      { entityTypeId: 31, filter: { parentId2: dealId }, select: ['id', 'title', 'opportunity', 'currencyId', 'stageId', 'categoryId', 'createdTime'], order: { id: 'desc' } },
+      { max: 200, pick: (r) => ((r as { items?: never[] })?.items ?? []) },
+    );
+    const stages = await this.invoiceStages(user, [...new Set(items.map((i) => Number(i.categoryId ?? 0)))]);
+    const reqs = await this.prisma.paymentRequest.findMany({ where: { portalId: user.portal.id, dealId }, orderBy: { createdAt: 'desc' } });
+    const byInvoice = new Map(reqs.filter((r) => r.invoiceId).map((r) => [r.invoiceId!, r]));
+    const invoices = items.map((i) => {
+      const st = stages.get(String(i.stageId ?? ''));
+      const sem = st?.semantics ?? (String(i.stageId).endsWith(':P') ? 'S' : String(i.stageId).endsWith(':D') ? 'F' : '');
+      const req = byInvoice.get(Number(i.id));
+      return {
+        invoiceId: Number(i.id),
+        title: i.title ?? `Счёт #${i.id}`,
+        amount: Number(i.opportunity ?? 0),
+        currency: i.currencyId ?? 'RUB',
+        stageId: String(i.stageId ?? ''),
+        stageName: st?.name ?? String(i.stageId ?? ''),
+        state: sem === 'S' ? ('paid' as const) : sem === 'F' ? ('failed' as const) : ('open' as const),
+        createdAt: i.createdTime ? new Date(i.createdTime).toISOString() : '',
+        request: req ? toDto(req) : null,
+      };
+    });
+    // Заявки, у которых счёт не создался, — видны в «Все счета» как ошибка.
+    for (const r of reqs.filter((x) => !x.invoiceId))
+      invoices.push({ invoiceId: 0, title: 'Счёт не создан', amount: Number(r.amount), currency: 'RUB', stageId: '', stageName: '', state: 'failed', createdAt: r.createdAt.toISOString(), request: toDto(r) });
+    return { dealId, invoices };
+  }
+
+  private readonly stageCache = new Map<string, { map: Map<string, { name: string; semantics: string }>; expiresAt: number }>();
+
+  /** Стадии смарт-счетов по воронкам (кэш 10 минут на портал). */
+  private async invoiceStages(user: B24UserContext, categories: number[]): Promise<Map<string, { name: string; semantics: string }>> {
+    const key = `${user.portal.id}:${categories.sort().join(',')}`;
+    const hit = this.stageCache.get(key);
+    if (hit && hit.expiresAt > Date.now()) return hit.map;
+    const map = new Map<string, { name: string; semantics: string }>();
+    for (const c of categories) {
+      try {
+        const r = await user.client.call<{ STATUS_ID: string; NAME: string; SEMANTICS?: string | null }[]>('crm.status.list', { filter: { ENTITY_ID: `SMART_INVOICE_STAGE_${c}` } });
+        for (const s of Array.isArray(r.result) ? r.result : []) map.set(s.STATUS_ID, { name: s.NAME, semantics: s.SEMANTICS ?? '' });
+      } catch {
+        /* без названий стадий — покажем код */
+      }
+    }
+    this.stageCache.set(key, { map, expiresAt: Date.now() + 10 * 60_000 });
+    return map;
   }
 
   async list(user: B24UserContext, dealId: number): Promise<PaymentRequestDto[]> {

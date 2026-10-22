@@ -3213,3 +3213,33 @@ main.loading {
     color: var(--muted);
   }
 }
+
+/* Счета: таймер до срока оплаты, «в работе» в шапке чата. */
+.countdown {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #a16207;
+}
+.countdown.soon,
+.countdown.over {
+  color: var(--danger);
+}
+.cv-pay.has-work {
+  font-weight: 700;
+}
+.payment-new {
+  margin: 6px 0 0;
+}
+.pill.inv-open {
+  color: #a16207;
+  background: rgba(202, 138, 4, 0.12);
+}
+.pill.inv-paid {
+  color: var(--ok);
+  background: rgba(21, 128, 61, 0.1);
+}
+.pill.inv-failed {
+  color: var(--muted);
+  background: rgba(17, 24, 39, 0.05);
+}

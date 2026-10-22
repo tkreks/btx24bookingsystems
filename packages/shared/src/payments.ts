@@ -138,3 +138,30 @@ export function suggestInvoiceConfig(meta: InvoiceMetaDto): InvoiceConfig | null
     fields: {},
   };
 }
+
+/** Счёт сделки (смарт-счёт Битрикс24) — с заявкой приложения, если счёт выставило оно. */
+export interface DealInvoiceDto {
+  invoiceId: number;
+  title: string;
+  amount: number;
+  currency: string;
+  stageId: string;
+  stageName: string;
+  /** open — ждёт оплаты, paid — оплачен, failed — не оплачен / отменён. */
+  state: 'open' | 'paid' | 'failed';
+  createdAt: string;
+  /** Выставлен приложением: ссылка, срок оплаты, статус. */
+  request: PaymentRequestDto | null;
+}
+
+/** `GET /api/payments/invoices?dealId` — счета сделки, новые сверху. */
+export interface DealInvoicesDto {
+  dealId: number;
+  invoices: DealInvoiceDto[];
+}
+
+/** Счёт «в работе» — ждёт оплаты: заявка приложения ещё идёт или счёт в Битрикс24 не закрыт. */
+export function invoiceInWork(i: DealInvoiceDto): boolean {
+  if (i.request) return i.request.status === 'link_pending' || i.request.status === 'sent';
+  return i.state === 'open';
+}

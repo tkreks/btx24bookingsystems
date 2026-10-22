@@ -10,6 +10,7 @@ import { fileSize } from './format.js';
 import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
+import { InvoicesBadge } from '../bookings/InvoicesBadge.js';
 
 /** Новые сообщения открытого чата подтягиваем раз в 15 секунд. */
 const POLL_MS = 15_000;
@@ -23,6 +24,7 @@ export function ChatView({
   onBack,
   onChanged,
   onPayment,
+  paymentRevision = 0,
   bookings,
 }: {
   chatId: number;
@@ -34,6 +36,8 @@ export function ChatView({
   onChanged: () => void;
   /** Счёт и ссылка на оплату по сделке чата (есть право `payment.send`). */
   onPayment?: (dealId: number) => void;
+  /** Сменился — значок счетов перечитывается (окно счетов закрыли). */
+  paymentRevision?: number;
   /** Брони клиента и «Создать бронирование» (рендерит страница чатов — у неё группы). */
   bookings?: ReactNode;
 }) {
@@ -158,11 +162,7 @@ export function ChatView({
                 <button className="link cv-deal" onClick={() => openCrm('deal', crm.dealId!)}>
                   Сделка #{crm.dealId}
                 </button>
-                {onPayment && (
-                  <button className="link cv-pay" onClick={() => onPayment(crm.dealId!)} title="Выставить счёт и отправить клиенту ссылку на оплату">
-                    Оплата
-                  </button>
-                )}
+                {onPayment && <InvoicesBadge dealId={crm.dealId} revision={paymentRevision} onOpen={() => onPayment(crm.dealId!)} />}
               </>
             )}
           </>

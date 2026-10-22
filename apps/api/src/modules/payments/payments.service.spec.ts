@@ -29,13 +29,24 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
     if (method === 'crm.item.add') return { result: { item: { id: 6001 } } };
     if (method === 'crm.item.get') return { result: { item: { id: 6001, ufCrmLink: o.link ?? '' } } };
     if (method === 'imopenlines.crm.chat.get') return { result: [{ CHAT_ID: '3301' }] };
+    if (method === 'crm.status.list')
+      return { result: [{ STATUS_ID: 'DT31_2:N', NAME: 'Внесение предоплаты', SEMANTICS: null }, { STATUS_ID: 'DT31_2:P', NAME: 'Оплачен', SEMANTICS: 'S' }, { STATUS_ID: 'DT31_2:D', NAME: 'Не оплачен', SEMANTICS: 'F' }] };
     return { result: {} };
   });
+  const listAll = vi.fn(async () => [
+    { id: 6003, title: 'Счёт БП', opportunity: 25000, currencyId: 'RUB', stageId: 'DT31_2:N', categoryId: 2, createdTime: '2026-10-22T10:00:00+03:00' },
+    { id: 6002, title: 'Оплаченный', opportunity: 10000, currencyId: 'RUB', stageId: 'DT31_2:P', categoryId: 2, createdTime: '2026-10-21T10:00:00+03:00' },
+    { id: 6001, title: 'Приложения', opportunity: 45000, currencyId: 'RUB', stageId: 'DT31_2:N', categoryId: 2, createdTime: '2026-10-20T10:00:00+03:00' },
+  ]);
   let row: PaymentRequest | null = null;
   const prisma = {
     paymentRequest: {
       findUnique: vi.fn(async () => (o.prev ? ({ id: 'old', amount: 1, warnings: [], createdAt: new Date(), status: 'sent', ...o.prev } as PaymentRequest) : null)),
       findFirst: vi.fn(async () => (o.active ? { id: 'a' } : null)),
+      findMany: vi.fn(async () => [
+        { id: 'r1', dealId: 678, kind: 'prepayment', amount: 45000, invoiceId: 6001, status: 'sent', deadlineAt: new Date('2026-10-22T12:00:00Z'), messageSentAt: new Date(), createdAt: new Date(), warnings: [] },
+        { id: 'r0', dealId: 678, kind: 'prepayment', amount: 45000, invoiceId: null, status: 'failed', error: 'x', createdAt: new Date(), warnings: [] },
+      ]),
       create: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { id: 'q1', status: 'link_pending', createdAt: new Date(), invoiceId: null, link: null, deadlineAt: null, messageSentAt: null, error: null, ...data } as PaymentRequest)),
       update: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { ...row!, ...data } as PaymentRequest)),
     },
@@ -49,7 +60,7 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
   const flow = new PaymentFlow(prisma, { find: vi.fn() } as unknown as BookingJournalService, fieldMap);
   const svc = new PaymentsService(prisma, access, fieldMap, flow);
   svc.sleep = async () => {};
-  const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 242, userName: 'Тест', client: { call } } as unknown as B24UserContext;
+  const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 242, userName: 'Тест', client: { call, listAll } } as unknown as B24UserContext;
   return { svc, user, calls };
 }
 
@@ -85,5 +96,19 @@ describe('PaymentsService', () => {
     const r = setup({ prev: { invoiceId: 6000 } });
     expect(await r.svc.create(r.user, body())).toMatchObject({ id: 'old', invoiceId: 6000 });
     expect(r.calls).toEqual([]);
+  });
+
+  it('lists all deal invoices with stage names; in work — open ones and app requests awaiting payment', async () => {
+    const { invoiceInWork } = await import('@btx24/shared');
+    const t = setup();
+    const r = await t.svc.invoices(t.user, 678);
+    expect(r.invoices.map((i) => [i.invoiceId, i.stageName, i.state, i.request?.status ?? null])).toEqual([
+      [6003, 'Внесение предоплаты', 'open', null],
+      [6002, 'Оплачен', 'paid', null],
+      [6001, 'Внесение предоплаты', 'open', 'sent'],
+      [0, '', 'failed', 'failed'],
+    ]);
+    expect(r.invoices.filter(invoiceInWork).map((i) => i.invoiceId)).toEqual([6003, 6001]);
+    expect(r.invoices[2].request?.deadline).toBe('2026-10-22T12:00:00.000Z');
   });
 });

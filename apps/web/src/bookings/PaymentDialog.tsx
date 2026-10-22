@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  invoiceInWork,
   PAYMENT_KIND_LABELS,
   PAYMENT_KINDS,
   PAYMENT_STATUS_LABELS,
+  type DealInvoiceDto,
+  type DealInvoicesDto,
   type PaymentKind,
   type PaymentPreviewDto,
   type PaymentRequestDto,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
+import { Countdown } from './Countdown.js';
 
 const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   fixed: 'фиксированная сумма группы',
@@ -16,6 +20,7 @@ const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   none: '',
 };
 const rub = (v: number) => `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v)} ₽`;
+const STATE_LABELS: Record<DealInvoiceDto['state'], string> = { open: 'ждёт оплаты', paid: 'оплачен', failed: 'не оплачен' };
 
 /**
  * Счёт и ссылка на оплату по сделке (ADR 0009): сумма и текст клиенту — до отправки; после —
@@ -35,14 +40,18 @@ export function PaymentDialog({
   const [kind, setKind] = useState<PaymentKind>('prepayment');
   const [preview, setPreview] = useState<PaymentPreviewDto | null>(null);
   const [amount, setAmount] = useState('');
-  const [history, setHistory] = useState<PaymentRequestDto[]>([]);
+  const [invoices, setInvoices] = useState<DealInvoiceDto[] | null>(null);
+  const [tab, setTab] = useState<'work' | 'all'>('work');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
   // Новый ключ на каждый вид платежа: повторное нажатие не выставит второй счёт.
   const keys = useMemo(() => ({ prepayment: crypto.randomUUID(), surcharge: crypto.randomUUID() }), []);
 
-  const loadHistory = useCallback(() => apiGet<PaymentRequestDto[]>(`/payments?dealId=${dealId}`).then(setHistory, () => undefined), [dealId]);
+  const loadHistory = useCallback(
+    () => apiGet<DealInvoicesDto>(`/payments/invoices?dealId=${dealId}`).then((d) => setInvoices(d.invoices), () => undefined),
+    [dealId],
+  );
   const chooseKind = (k: PaymentKind) => {
     setKind(k);
     setPreview(null);
@@ -58,8 +67,9 @@ export function PaymentDialog({
     );
   }, [dealId, kind, bookingId]);
   useEffect(() => void loadHistory(), [loadHistory]);
+  const inWork = (invoices ?? []).filter(invoiceInWork);
   // Пока ссылка формируется или ждём оплату — обновляем статус.
-  const waiting = history.some((h) => h.status === 'link_pending' || h.status === 'sent');
+  const waiting = inWork.some((i) => i.request);
   useEffect(() => {
     if (!waiting) return;
     const t = setInterval(() => void loadHistory(), 5000);
@@ -80,6 +90,7 @@ export function PaymentDialog({
         bookingId: bookingId ?? null,
       });
       await loadHistory();
+      setTab('work');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось выставить счёт');
     } finally {
@@ -98,13 +109,30 @@ export function PaymentDialog({
 
   return (
     <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
-      <div className="sheet payment-dialog" role="dialog" aria-modal="true" aria-label="Счёт и ссылка на оплату" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet payment-dialog" role="dialog" aria-modal="true" aria-label="Счета сделки" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h3>Счёт и ссылка на оплату · сделка #{dealId}</h3>
+          <h3>Счета сделки #{dealId}</h3>
           <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
         </header>
+        <section className="payment-history">
+          <div className="segmented" role="group" aria-label="Счета">
+            <button type="button" aria-pressed={tab === 'work'} className={tab === 'work' ? 'active' : ''} onClick={() => setTab('work')}>
+              В работе {inWork.length}
+            </button>
+            <button type="button" aria-pressed={tab === 'all'} className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>
+              Все счета {invoices?.length ?? ''}
+            </button>
+          </div>
+          {!invoices && <p className="muted">Загрузка счетов…</p>}
+          {invoices && tab === 'work' && !inWork.length && <p className="muted">Счетов, ожидающих оплаты, нет.</p>}
+          {invoices && tab === 'all' && !invoices.length && <p className="muted">У сделки нет счетов.</p>}
+          {(tab === 'work' ? inWork : (invoices ?? [])).map((i) => (
+            <InvoiceRow key={`${i.invoiceId}:${i.request?.id ?? ''}`} i={i} work={tab === 'work'} fmt={fmt} copied={copied} onCopy={copy} />
+          ))}
+        </section>
+        <h4 className="payment-new">Выставить счёт</h4>
         <div className="segmented" role="group" aria-label="Что выставить">
           {PAYMENT_KINDS.map((k) => (
             <button key={k} type="button" aria-pressed={kind === k} className={kind === k ? 'active' : ''} onClick={() => chooseKind(k)}>
@@ -143,37 +171,65 @@ export function PaymentDialog({
             {busy ? 'Выставляем счёт…' : 'Выставить счёт и отправить ссылку'}
           </button>
         </div>
-        {history.length > 0 && (
-          <section className="payment-history">
-            <h4>Счета сделки</h4>
-            {history.map((h) => (
-              <div key={h.id} className={`payment-row ${h.status}`}>
-                <div>
-                  <b>{PAYMENT_KIND_LABELS[h.kind]} {rub(h.amount)}</b>
-                  {h.invoiceId && <span className="muted"> · счёт #{h.invoiceId}</span>} · <span className={`pill ${h.status}`}>{PAYMENT_STATUS_LABELS[h.status]}</span>
-                </div>
-                <div className="muted">
-                  {fmt(h.createdAt)}
-                  {h.createdBy ? ` · ${h.createdBy}` : ''}
-                  {h.deadline && h.status === 'sent' ? ` · оплатить до ${fmt(h.deadline)}` : ''}
-                  {h.status === 'sent' && !h.messageSent ? ' · клиенту не отправлено' : ''}
-                </div>
-                {h.link && (h.status === 'sent' || h.status === 'link_pending') && (
-                  <button type="button" className="link" onClick={() => void copy(h)}>
-                    {copied === h.id ? 'Ссылка скопирована' : 'Скопировать ссылку'}
-                  </button>
-                )}
-                {h.error && <p className="notice error">{h.error}</p>}
-                {h.warnings.map((w) => (
-                  <p key={w} className="notice">
-                    {w}
-                  </p>
-                ))}
-              </div>
-            ))}
-          </section>
-        )}
       </div>
     </div>
   );
 }
+
+function InvoiceRow({
+  i,
+  work,
+  fmt,
+  copied,
+  onCopy,
+}: {
+  i: DealInvoiceDto;
+  work: boolean;
+  fmt: (iso: string) => string;
+  copied: string;
+  onCopy: (h: PaymentRequestDto) => void;
+}) {
+  const h = i.request;
+  return (
+    <div className={`payment-row ${h?.status ?? i.state}`}>
+      <div>
+        <b>
+          {h ? `${PAYMENT_KIND_LABELS[h.kind]} ` : ''}
+          {rub(i.amount)}
+        </b>
+        {i.invoiceId > 0 && <span className="muted"> · счёт #{i.invoiceId}</span>} ·{' '}
+        {h && (work || h.status !== 'sent') ? (
+          <span className={`pill ${h.status}`}>{PAYMENT_STATUS_LABELS[h.status]}</span>
+        ) : (
+          <span className={`pill inv-${i.state}`}>{i.stageName || STATE_LABELS[i.state]}</span>
+        )}
+        {work && h?.deadline && h.status === 'sent' && (
+          <>
+            {' '}
+            <Countdown deadline={h.deadline} />
+          </>
+        )}
+      </div>
+      <div className="muted">
+        {i.createdAt && fmt(i.createdAt)}
+        {h?.createdBy ? ` · ${h.createdBy}` : ''}
+        {!h && ` · ${i.title}`}
+        {h?.deadline && h.status === 'sent' ? ` · оплатить до ${fmt(h.deadline)}` : ''}
+        {work && h?.status === 'sent' && !h.deadline ? ' · срок не идёт: клиенту не отправлено' : ''}
+        {work && !h ? ' · выставлен не приложением — срок не отслеживается' : ''}
+      </div>
+      {h?.link && (h.status === 'sent' || h.status === 'link_pending') && (
+        <button type="button" className="link" onClick={() => onCopy(h)}>
+          {copied === h.id ? 'Ссылка скопирована' : 'Скопировать ссылку'}
+        </button>
+      )}
+      {h?.error && <p className="notice error">{h.error}</p>}
+      {work && h?.warnings.map((w) => (
+        <p key={w} className="notice">
+          {w}
+        </p>
+      ))}
+    </div>
+  );
+}
+

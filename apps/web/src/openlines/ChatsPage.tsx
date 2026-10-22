@@ -91,6 +91,7 @@ export function ChatsPage({
   const canCreate = groups.some((g) => g.permissions.includes('booking.create'));
   const canPay = groups.some((g) => g.permissions.includes('payment.send'));
   const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null } | null>(null);
+  const [paymentRev, setPaymentRev] = useState(0);
   // Полный номер телефона — поиск по всему порталу (CRM → чаты клиента), а не только в загруженных.
   const [phoneHits, setPhoneHits] = useState<{ q: string; items: ChatSummary[] | null; error: string } | null>(null);
   const fullPhone = isFullPhone(query);
@@ -508,6 +509,7 @@ export function ChatsPage({
           onBack={() => setOpenId(null)}
           onChanged={() => void refresh()}
           onPayment={canPay ? (dealId) => setPayment({ dealId, bookingId: null }) : undefined}
+          paymentRevision={paymentRev}
           bookings={
             <>
               <ClientBookings
@@ -549,7 +551,17 @@ export function ChatsPage({
           }}
         />
       )}
-      {payment && <PaymentDialog dealId={payment.dealId} bookingId={payment.bookingId} timezone={timezone} onClose={() => setPayment(null)} />}
+      {payment && (
+        <PaymentDialog
+          dealId={payment.dealId}
+          bookingId={payment.bookingId}
+          timezone={timezone}
+          onClose={() => {
+            setPayment(null);
+            setPaymentRev((n) => n + 1);
+          }}
+        />
+      )}
     </div>
   );
 }
