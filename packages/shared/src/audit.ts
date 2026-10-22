@@ -22,6 +22,14 @@ export interface ActionLogDto {
 }
 
 /** `POST /api/activity/enter` — сотрудник открыл приложение (откуда). */
+/** `POST /api/activity/error` — интерфейс упал: где, текст и трасса (для журнала). */
+export interface ClientErrorDto {
+  where: string;
+  message: string;
+  stack: string;
+  build: string;
+}
+
 export interface AppEnterDto {
   placement: string;
   dealId: number | null;

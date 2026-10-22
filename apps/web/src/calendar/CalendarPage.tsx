@@ -15,6 +15,7 @@ import { fmtDateTime, fmtDayTitle, fmtTime, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
 import { BookingForm } from '../bookings/BookingForm.js';
+import { ErrorBoundary } from '../ErrorBoundary.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { dayKey } from '../openlines/chat-list.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
@@ -440,26 +441,28 @@ export function CalendarPage({
         />
       )}
       {bookingForm && (
-        <BookingForm
-          groups={groups ?? []}
-          timezone={tz}
-          context={{
-            ...bookingForm,
-            groupId: activeGroup?.id ?? null,
-            dealId: placement.dealId,
-            contactId: dealBookingsInfo?.contactId ?? null,
-            openDeals: dealBookingsInfo?.openDeals ?? [],
-          }}
-          onClose={() => setBookingForm(null)}
-          onDone={(r, mode) => {
-            setBookingForm(null);
-            if (mode === 'prepayment' && r.dealId && groups?.some((g) => g.permissions.includes('payment.send'))) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
-            setCreatedNote(
-              `Бронь #${r.bookingId} создана${r.dealId ? ` в сделке #${r.dealId}` : ''}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
-            );
-            setSettingsRevision((n) => n + 1);
-          }}
-        />
+        <ErrorBoundary where="booking-form" onClose={() => setBookingForm(null)}>
+          <BookingForm
+            groups={groups ?? []}
+            timezone={tz}
+            context={{
+              ...bookingForm,
+              groupId: activeGroup?.id ?? null,
+              dealId: placement.dealId,
+              contactId: dealBookingsInfo?.contactId ?? null,
+              openDeals: dealBookingsInfo?.openDeals ?? [],
+            }}
+            onClose={() => setBookingForm(null)}
+            onDone={(r, mode) => {
+              setBookingForm(null);
+              if (mode === 'prepayment' && r.dealId && groups?.some((g) => g.permissions.includes('payment.send'))) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
+              setCreatedNote(
+                `Бронь #${r.bookingId} создана${r.dealId ? ` в сделке #${r.dealId}` : ''}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
+              );
+              setSettingsRevision((n) => n + 1);
+            }}
+          />
+        </ErrorBoundary>
       )}
       {payment && (
         <PaymentDialog

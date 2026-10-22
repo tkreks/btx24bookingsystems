@@ -11,6 +11,7 @@ import {
   type MyGroupDto,
 } from '@btx24/shared';
 import { BookingForm } from '../bookings/BookingForm.js';
+import { ErrorBoundary } from '../ErrorBoundary.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { ClientBookings } from '../bookings/ClientBookings.js';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api.js';
@@ -552,24 +553,26 @@ export function ChatsPage({
         <main className="chat-view empty-chat">Выберите чат слева</main>
       )}
       {form && (
-        <BookingForm
-          groups={groups}
-          timezone={timezone}
-          context={{
-            date: todayIn(timezone),
-            contactId: form.data?.contactId ?? null,
-            dealId: form.dealId ?? null,
-            clientName: items.find((c) => c.chatId === form.chatId)?.title ?? all.find((c) => c.chatId === form.chatId)?.title ?? null,
-            openDeals: form.data?.openDeals ?? [],
-          }}
-          onClose={() => setForm(null)}
-          onDone={(r, mode) => {
-            setForm(null);
-            setCreated(r);
-            setBookingsRev((n) => n + 1);
-            if (mode === 'prepayment' && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
-          }}
-        />
+        <ErrorBoundary where="booking-form" onClose={() => setForm(null)}>
+          <BookingForm
+            groups={groups}
+            timezone={timezone}
+            context={{
+              date: todayIn(timezone),
+              contactId: form.data?.contactId ?? null,
+              dealId: form.dealId ?? null,
+              clientName: items.find((c) => c.chatId === form.chatId)?.title ?? all.find((c) => c.chatId === form.chatId)?.title ?? null,
+              openDeals: form.data?.openDeals ?? [],
+            }}
+            onClose={() => setForm(null)}
+            onDone={(r, mode) => {
+              setForm(null);
+              setCreated(r);
+              setBookingsRev((n) => n + 1);
+              if (mode === 'prepayment' && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
+            }}
+          />
+        </ErrorBoundary>
       )}
       {payment && (
         <PaymentDialog

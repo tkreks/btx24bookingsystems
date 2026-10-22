@@ -14,6 +14,7 @@ const PLACEMENTS: Record<string, string> = {
   LEFT_MENU: 'из левого меню',
   DEFAULT: 'из списка приложений',
 };
+const errorSchema = z.object({ where: z.string().max(64), message: z.string().max(500), stack: z.string().max(4000), build: z.string().max(64) }).strict();
 const enterSchema = z.object({ placement: z.string().max(64), dealId: z.number().int().positive().nullable() }).strict();
 
 /** Журнал действий: вход в приложение (пишет каждый) и просмотр (администраторы приложения). */
@@ -40,6 +41,16 @@ export class ActionLogController {
       details: { placement: p.data.placement, isPortalAdmin: user.isAdmin },
       via: p.data.placement,
     });
+    return { ok: true };
+  }
+
+  /** Интерфейс упал (перехватчик ошибок) — в журнал с трассой, чтобы найти причину. */
+  @Post('activity/error')
+  @OpenWithoutAppAccess()
+  async error(@B24User() user: B24UserContext, @Body() body: unknown): Promise<{ ok: true }> {
+    const p = errorSchema.safeParse(body);
+    if (!p.success) throw new BadRequestException({ code: 'INVALID_ERROR_REPORT', message: 'Ожидается { where, message, stack, build }' });
+    await this.log.user(user, { action: 'app.error', summary: `Ошибка интерфейса (${p.data.where}): ${p.data.message}`, details: { stack: p.data.stack, build: p.data.build }, via: 'web' });
     return { ok: true };
   }
 

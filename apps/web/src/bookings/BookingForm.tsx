@@ -18,12 +18,12 @@ import {
   type RecentDealsDto,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
-import { DayGrid } from '../calendar/DayGrid.js';
-import { fmtDayTitle, fmtMoney, fmtTime, shiftDate } from '../format.js';
+import { fmtMoney, fmtTime, shiftDate } from '../format.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
 import { ClientPicker } from './ClientPicker.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
 import { ProductsEditor, productsTotal, type ProductRow } from './ProductsEditor.js';
+import { SlotPicker } from './SlotPicker.js';
 
 export interface BookingFormContext {
   date: string;
@@ -154,15 +154,17 @@ export function BookingForm({
     };
   }, [needRecent, recent.deals]);
 
-  // День группы: календарь шага «Дата и ресурс» и занятость ресурсов в деталях.
-  const dayKey = `${groupId}:${period.startDate}`;
+  // Дни брони группы (с первого по последний, до 14): занятость ресурсов на всё время брони —
+  // шаг «Дата и ресурс» и селектор ресурса в деталях.
+  const bookingDates = datesBetween(period.startDate, period.endDate);
+  const dayKey = `${groupId}|${bookingDates.join(',')}`;
   const [day, setDay] = useState<{ key: string; data: CalendarDay | null } | null>(null);
   useEffect(() => {
     if (!groupId) return;
     let active = true;
-    const [gid, date] = dayKey.split(':');
-    apiGet<CalendarDay>(`/calendar?date=${date}&groupId=${encodeURIComponent(gid)}`).then(
-      (d) => active && setDay({ key: dayKey, data: d }),
+    const [gid, dates] = dayKey.split('|');
+    Promise.all(dates.split(',').map((date) => apiGet<CalendarDay>(`/calendar?date=${date}&groupId=${encodeURIComponent(gid)}`))).then(
+      (list) => active && setDay({ key: dayKey, data: mergeDays(list) }),
       () => active && setDay({ key: dayKey, data: null }),
     );
     return () => {
@@ -380,21 +382,6 @@ export function BookingForm({
     setDeal({ mode: 'none' });
   };
 
-  // Слот выбран в календаре группы: ресурс и время, конец — по режиму группы.
-  const pickSlot = (resourceId: number, startIso: string) => {
-    if (!group) return;
-    const d = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(new Date(startIso));
-    setResourceIds([resourceId]);
-    setPeriod(defaultPeriod(group, d, fmtTime(startIso, timezone)));
-    setError('');
-  };
-  /** Длительность в часах — конец от начала (быстрые кнопки карточки слота). */
-  const setHours = (h: number) => {
-    const start = zonedTimeToUtc(period.startDate, period.startTime, timezone).getTime();
-    const end = new Date(start + h * 3_600_000);
-    setPeriod({ ...period, endDate: new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(end), endTime: fmtTime(end.toISOString(), timezone) });
-  };
-
   // Занятость ресурса на выбранное время — для селектора ресурса.
   const startMs = Date.parse(zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).toISOString());
   const endMs = Date.parse(zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).toISOString());
@@ -404,15 +391,6 @@ export function BookingForm({
   };
 
   // Слот: пересекается с бронью — занято (Битрикс24 не даст), с тех. окном — можно, с предупреждением.
-  const slotState: 'free' | 'tech' | 'busy' | null = resourceIds.length
-    ? resourceIds.some((rid) => busyUntil(rid))
-      ? 'busy'
-      : (dayData?.techWindows ?? []).some((t) => resourceIds.includes(t.resourceId) && Date.parse(t.start) < endMs && Date.parse(t.end) > startMs)
-        ? 'tech'
-        : 'free'
-    : null;
-  const durationMs = endMs - startMs;
-  const days = Array.from({ length: 7 }, (_, i) => shiftDate(period.startDate, i - 2));
 
   // Сводка внизу: клиент · сделка · ресурс · дата/время · длительность · сумма.
   const utc = periodToUtc(period, timezone);
@@ -548,89 +526,9 @@ export function BookingForm({
     </section>
   );
 
-  const slotStep = (
-    <section className="bk-section wz-slot">
-      <div className="wz-daynav">
-        <button type="button" aria-label="Раньше" onClick={() => setPeriod({ ...period, startDate: shiftDate(period.startDate, -1), endDate: shiftDate(period.endDate, -1) })}>
-          ‹
-        </button>
-        <div className="wz-days" role="group" aria-label="Дни">
-          {days.map((d) => {
-            const wd = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short' }).format(new Date(`${d}T12:00:00Z`));
-            const weekend = [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay());
-            return (
-              <button
-                key={d}
-                type="button"
-                aria-pressed={d === period.startDate}
-                className={`wz-day${d === period.startDate ? ' active' : ''}${weekend ? ' weekend' : ''}`}
-                onClick={() => group && setPeriod(defaultPeriod(group, d, period.startTime))}
-              >
-                <small>{wd}</small>
-                <b>{Number(d.slice(8, 10))}</b>
-              </button>
-            );
-          })}
-        </div>
-        <button type="button" aria-label="Позже" onClick={() => setPeriod({ ...period, startDate: shiftDate(period.startDate, 1), endDate: shiftDate(period.endDate, 1) })}>
-          ›
-        </button>
-        <input
-          type="date"
-          aria-label="Дата брони"
-          value={period.startDate}
-          onChange={(e) => {
-            if (!e.target.value || !group) return;
-            setPeriod(defaultPeriod(group, e.target.value, period.startTime));
-          }}
-        />
-      </div>
-      <p className="cp-hint">{fmtDayTitle(period.startDate, timezone)} · кликните по свободному месту в колонке ресурса</p>
-      <div className="wz-slot-layout">
-        <div className="wz-slot-grid">
-          {!dayData && <p className="cp-hint">Загрузка календаря…</p>}
-          {dayData && <DayGrid day={dayData} highlightDealId={existingDealId} onSelect={() => undefined} onCreate={pickSlot} />}
-        </div>
-        <aside className={`wz-slot-card${resourceIds.length ? ' active' : ''}`} aria-label="Выбранное время">
-          {resourceIds.length ? (
-            <>
-              <b className="wz-slot-res">{resourceIds.map((id) => names.get(id) ?? `#${id}`).join(', ')}</b>
-              <div className="wz-slot-when">
-                {Number(period.startDate.slice(8, 10))}.{period.startDate.slice(5, 7)}, {period.startTime}–{period.endTime}
-                {durationMs > 0 && <span className="muted"> ({durationText(durationMs)})</span>}
-              </div>
-              <div className="df-row pair">
-                <label className="df-field">
-                  <span className="df-label">Начало</span>
-                  <input type="time" aria-label="Время начала" value={period.startTime} onChange={(e) => setPeriod({ ...period, startTime: e.target.value })} />
-                </label>
-                <label className="df-field">
-                  <span className="df-label">Конец</span>
-                  <input type="time" aria-label="Время конца" value={period.endTime} onChange={(e) => setPeriod({ ...period, endTime: e.target.value })} />
-                </label>
-              </div>
-              {group?.bookingMode !== 'interval' && (
-                <div className="wz-durations" role="group" aria-label="Длительность">
-                  {[2, 3, 4, 6].map((h) => (
-                    <button key={h} type="button" aria-pressed={durationMs === h * 3_600_000} className={durationMs === h * 3_600_000 ? 'active' : ''} onClick={() => setHours(h)}>
-                      {h} ч
-                    </button>
-                  ))}
-                </div>
-              )}
-              {slotState && (
-                <p className={`wz-slot-state ${slotState}`}>
-                  {slotState === 'free' ? '✓ Свободно' : slotState === 'tech' ? '⚠ Тех. окно — можно продолжить' : '✕ Занято другой бронью — выберите другое время'}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="cp-hint">Выберите время в календаре — здесь появится бронь.</p>
-          )}
-        </aside>
-      </div>
-    </section>
-  );
+  const slotStep = group ? (
+    <SlotPicker group={group} timezone={timezone} period={period} onPeriod={setPeriod} days={dayData} resourceIds={resourceIds} onResources={setResourceIds} />
+  ) : null;
 
   const detailsStep = (
     <>
@@ -905,4 +803,18 @@ function FieldsDecision({ fields, onDone }: { fields: DealFormField[]; onDone: (
       </div>
     </div>
   );
+}
+
+/** Даты с первой по последнюю включительно (не больше 14). */
+function datesBetween(from: string, to: string): string[] {
+  const out = [from];
+  while (out.length < 14 && out[out.length - 1] < to) out.push(shiftDate(out[out.length - 1], 1));
+  return out;
+}
+
+/** Несколько дней календаря группы — один набор: ресурсы первого дня, брони и тех. окна без повторов. */
+function mergeDays(list: CalendarDay[]): CalendarDay {
+  const bookings = new Map(list.flatMap((d) => d.bookings).map((b) => [b.id, b]));
+  const tech = new Map(list.flatMap((d) => d.techWindows).map((t) => [`${t.resourceId}:${t.start}`, t]));
+  return { ...list[0], bookings: [...bookings.values()], techWindows: [...tech.values()] };
 }

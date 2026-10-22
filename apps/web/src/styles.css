@@ -5052,3 +5052,176 @@ input[role='switch']:checked::after {
   border-radius: 8px;
   font: inherit;
 }
+
+/* Мастер брони, шаг «Дата и ресурс»: время сверху, ресурсы списком со шкалой занятости. */
+.wz-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: end;
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f9fafb;
+}
+.wz-when-field {
+  display: grid;
+  gap: 4px;
+}
+.wz-start {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.wz-start button {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.wz-res-bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.wz-only-free {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+}
+.wz-res-ticks,
+.wz-res-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 300px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.wz-res-ticks {
+  padding: 0 9px;
+}
+.wz-res-ticks > div {
+  position: relative;
+  height: 16px;
+}
+.wz-res-ticks > div span {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.wz-res-ticks > div span:first-child {
+  transform: none;
+}
+.wz-res-ticks > div span:last-child:not(:first-child) {
+  transform: translateX(-100%);
+}
+.wz-res-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wz-res-row {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.wz-res-row.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+  background: rgba(0, 122, 255, 0.04);
+}
+.wz-res-row.busy:not(.selected) {
+  opacity: 0.62;
+}
+.wz-res-pick {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: center;
+  min-height: 40px;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.wz-res-pick b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wz-res-pick .wz-res-state {
+  grid-column: 2;
+  justify-self: start;
+}
+.wz-res-check {
+  display: grid;
+  grid-row: span 2;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--f-border, #d0d5dd);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+.wz-res-row.selected .wz-res-check {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+.wz-res-state.tech {
+  background: #fffaeb;
+  color: #b54708;
+}
+.wz-res-scale {
+  position: relative;
+  height: 26px;
+  border-radius: 8px;
+  background: #ecfdf3;
+  cursor: pointer;
+  overflow: hidden;
+}
+.wz-res-scale .piece {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.wz-res-scale .piece.booked {
+  background: #93c5fd;
+}
+.wz-res-scale .piece.tech {
+  background: #fcd34d;
+}
+.wz-res-scale .pick {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 3px;
+  border: 2px solid var(--primary);
+  border-radius: 6px;
+  background: rgba(0, 122, 255, 0.18);
+  pointer-events: none;
+}
+.wz-res-row.busy .wz-res-scale .pick {
+  border-color: #d92d20;
+  background: rgba(217, 45, 32, 0.15);
+}
+@media (max-width: 640px) {
+  .wz-res-ticks,
+  .wz-res-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .wz-res-ticks > span {
+    display: none;
+  }
+}
