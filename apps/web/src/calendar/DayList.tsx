@@ -12,11 +12,14 @@ export function DayList({
   groupName,
   highlightDealId,
   onSelect,
+  onCreate,
 }: {
   day: CalendarDay;
   groupName: string;
   highlightDealId: number | null;
   onSelect: (b: CalendarBooking) => void;
+  /** Новая бронь ресурса: start — начало (тех. окно) или null (время по умолчанию группы). */
+  onCreate?: (resourceId: number, start: string | null) => void;
 }) {
   const names = new Map(day.resources.map((r) => [r.id, r.name]));
   if (!day.resources.length)
@@ -34,21 +37,38 @@ export function DayList({
           Броней: {day.bookings.length} · Техокон: {day.techWindows.length}
         </span>
       </DayHeader>
+      {onCreate && (
+        <div className="list-quick-add">
+          {day.resources.map((r) => (
+            <button key={r.id} onClick={() => onCreate(r.id, null)}>
+              + {r.name}
+            </button>
+          ))}
+        </div>
+      )}
       {!entries.length && <div className="empty">На выбранную дату бронирований и технологических окон нет.</div>}
       <ul className={`list${highlightDealId && day.bookings.some((b) => b.dealId === highlightDealId) ? ' has-highlight' : ''}`}>
         {entries.map((e) =>
           e.kind === 'tech' ? (
-            <li key={`t${e.item.bookingId}:${e.item.resourceId}`} className="list-item tech">
-              <div className="list-top">
-                <strong>Тех. окно</strong>
-                <span className="pill tech">{names.get(e.item.resourceId) ?? `#${e.item.resourceId}`}</span>
-              </div>
-              <span className="list-time">
-                {fmtDateTime(e.item.start, day.timezone)} — {fmtDateTime(e.item.end, day.timezone)}
-              </span>
-              {source.get(e.item.bookingId)?.dealId && (
-                <span className="list-meta">После брони: {bookingTitle(source.get(e.item.bookingId)!)}</span>
-              )}
+            <li key={`t${e.item.bookingId}:${e.item.resourceId}`}>
+              {/* Тех. окно бронь не запрещает: клик — новая бронь с его начала (с предупреждением). */}
+              <button
+                className="list-item tech"
+                disabled={!onCreate}
+                title={onCreate ? 'Забронировать с начала тех. окна' : undefined}
+                onClick={() => onCreate?.(e.item.resourceId, e.item.start)}
+              >
+                <span className="list-top">
+                  <strong>Тех. окно</strong>
+                  <span className="pill tech">{names.get(e.item.resourceId) ?? `#${e.item.resourceId}`}</span>
+                </span>
+                <span className="list-time">
+                  {fmtDateTime(e.item.start, day.timezone)} — {fmtDateTime(e.item.end, day.timezone)}
+                </span>
+                {source.get(e.item.bookingId)?.dealId && (
+                  <span className="list-meta">После брони: {bookingTitle(source.get(e.item.bookingId)!)}</span>
+                )}
+              </button>
             </li>
           ) : (
             <li key={e.item.id}>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CalendarBooking } from '@btx24/shared';
-import { availabilityPieces, layoutResourceDay } from './layout.js';
+import { availabilityPieces, layoutResourceDay, slotAt } from './layout.js';
 
 const day0 = Date.parse('2026-10-20T21:00:00Z'); // 00:00 МСК
 const day1 = day0 + 86_400_000;
@@ -81,5 +81,20 @@ describe('availabilityPieces', () => {
     expect(availabilityPieces([], [], 1, day0, day1)).toEqual([
       { kind: 'free', from: 0, to: 1, bookingId: null, start: null, end: null },
     ]);
+  });
+});
+
+describe('slotAt', () => {
+  it('округляет клик вниз до получаса', () => {
+    expect(slotAt(14 * 60 + 29, 1440)).toBe(14 * 60);
+    expect(slotAt(14 * 60 + 30, 1440)).toBe(14 * 60 + 30);
+  });
+  it('держит начало внутри суток', () => {
+    expect(slotAt(-5, 1440)).toBe(0);
+    expect(slotAt(1439, 1440)).toBe(1410);
+  });
+  it('не раньше начала свободного куска', () => {
+    expect(slotAt(13 * 60 + 20, 1440, 13 * 60 + 15)).toBe(13 * 60 + 15);
+    expect(slotAt(16 * 60 + 10, 1440, 13 * 60 + 15)).toBe(16 * 60);
   });
 });

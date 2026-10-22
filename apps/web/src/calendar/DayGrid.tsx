@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { zonedDayRange, type CalendarBooking, type CalendarDay } from '@btx24/shared';
 import { fmtDateTime, fmtTime } from '../format.js';
-import { layoutResourceDay } from './layout.js';
+import { layoutResourceDay, slotAt } from './layout.js';
 
 const PX_PER_MIN = 0.9; // 54 px на час, как в прототипе
 
@@ -10,10 +10,13 @@ export function DayGrid({
   day,
   highlightDealId,
   onSelect,
+  onCreate,
 }: {
   day: CalendarDay;
   highlightDealId: number | null;
   onSelect: (b: CalendarBooking) => void;
+  /** Клик по пустому месту колонки — новая бронь ресурса с этого получаса (нет права — не передаётся). */
+  onCreate?: (resourceId: number, start: string) => void;
 }) {
   const { start, end } = zonedDayRange(day.date, day.timezone);
   const dayStart = start.getTime();
@@ -21,9 +24,14 @@ export function DayGrid({
   const minutes = (dayEnd - dayStart) / 60_000;
   const hours = Array.from({ length: Math.round(minutes / 60) }, (_, i) => i);
   const mine = useRef<HTMLButtonElement | null>(null);
+  // Получас под курсором — подсказка «+ 14:30», куда встанет новая бронь.
+  const [hover, setHover] = useState<{ resourceId: number; minute: number } | null>(null);
   const hasMine = !!highlightDealId && day.bookings.some((b) => b.dealId === highlightDealId);
   // Бронь сделки — в поле зрения (сетка суток длинная).
   useEffect(() => mine.current?.scrollIntoView({ block: 'center', inline: 'center' }), [day, highlightDealId]);
+  const minuteAt = (e: MouseEvent<HTMLDivElement>) =>
+    slotAt((e.clientY - e.currentTarget.getBoundingClientRect().top) / PX_PER_MIN, minutes);
+  const slotIso = (minute: number) => new Date(dayStart + minute * 60_000).toISOString();
   if (!day.resources.length)
     return <div className="empty">В выбранной группе нет ресурсов. Откройте ⚙ и добавьте ресурсы в группу.</div>;
 
@@ -47,9 +55,17 @@ export function DayGrid({
         {day.resources.map((r) => (
           <div
             key={r.id}
-            className="grid-col"
+            className={`grid-col${onCreate ? ' creatable' : ''}`}
             style={{ height: minutes * PX_PER_MIN, backgroundSize: `100% ${30 * PX_PER_MIN}px` }}
+            onClick={onCreate && ((e) => onCreate(r.id, slotIso(minuteAt(e))))}
+            onMouseMove={onCreate && ((e) => setHover({ resourceId: r.id, minute: minuteAt(e) }))}
+            onMouseLeave={onCreate && (() => setHover(null))}
           >
+            {hover?.resourceId === r.id && (
+              <div className="slot-ghost" style={{ top: hover.minute * PX_PER_MIN, height: 30 * PX_PER_MIN }} aria-hidden="true">
+                + {fmtTime(slotIso(hover.minute), day.timezone)}
+              </div>
+            )}
             {day.techWindows
               .filter((t) => t.resourceId === r.id)
               .map((t) => {
@@ -81,7 +97,12 @@ export function DayGrid({
                   left: `calc(${(p.lane / p.lanes) * 100}% + 4px)`,
                   width: `calc(${100 / p.lanes}% - 8px)`,
                 }}
-                onClick={() => onSelect(p.booking)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect(p.booking);
+                }}
+                onMouseMove={(e) => e.stopPropagation()}
+                onMouseEnter={() => setHover(null)}
               >
                 <strong>{bookingTitle(p.booking)}</strong>
                 <small>

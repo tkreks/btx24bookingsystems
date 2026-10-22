@@ -1,7 +1,7 @@
 import { zonedDayRange, type CalendarBooking, type CalendarDay } from '@btx24/shared';
 import { fmtDateTime, fmtTime } from '../format.js';
 import { DayHeader } from './DayHeader.js';
-import { availabilityPieces } from './layout.js';
+import { availabilityPieces, slotAt } from './layout.js';
 
 /** Вид «Доступность»: карточка на ресурс со шкалой суток (свободно / бронь / тех. окно). */
 export function DayAvailability({
@@ -9,13 +9,17 @@ export function DayAvailability({
   groupName,
   highlightDealId = null,
   onSelect,
+  onCreate,
 }: {
   day: CalendarDay;
   groupName: string;
   highlightDealId?: number | null;
   onSelect: (b: CalendarBooking) => void;
+  /** Клик по свободному куску или тех. окну — новая бронь ресурса с этого места шкалы. */
+  onCreate?: (resourceId: number, start: string) => void;
 }) {
   const { start, end } = zonedDayRange(day.date, day.timezone);
+  const dayMinutes = (end.getTime() - start.getTime()) / 60_000;
   const byId = new Map(day.bookings.map((b) => [b.id, b]));
   if (!day.resources.length)
     return <div className="empty">В выбранной группе нет ресурсов. Откройте ⚙ и добавьте ресурсы в группу.</div>;
@@ -77,25 +81,39 @@ export function DayAvailability({
                         )}
                       </button>
                     );
+                  const techTitle =
+                    p.kind === 'tech' && p.start && p.end
+                      ? `Тех. окно ${fmtTime(p.start, day.timezone)}–${fmtTime(p.end, day.timezone)}`
+                      : undefined;
+                  const techLabel = p.kind === 'tech' && roomy && p.start && p.end && (
+                    <span>
+                      Тех.
+                      <small>
+                        {fmtTime(p.start, day.timezone)}–{fmtTime(p.end, day.timezone)}
+                      </small>
+                    </span>
+                  );
+                  if (onCreate && p.kind !== 'booked')
+                    return (
+                      <button
+                        key={i}
+                        className={`piece ${p.kind} addable`}
+                        style={style}
+                        title={techTitle ? `${techTitle} · нажмите, чтобы забронировать` : 'Нажмите, чтобы забронировать'}
+                        aria-label={`Забронировать ${r.name}`}
+                        onClick={(e) => {
+                          // Место клика на шкале → получас, но не раньше начала куска.
+                          const bar = e.currentTarget.parentElement!.getBoundingClientRect();
+                          const minute = slotAt(((e.clientX - bar.left) / bar.width) * dayMinutes, dayMinutes, p.from * dayMinutes);
+                          onCreate(r.id, new Date(start.getTime() + minute * 60_000).toISOString());
+                        }}
+                      >
+                        {techLabel}
+                      </button>
+                    );
                   return (
-                    <div
-                      key={i}
-                      className={`piece ${p.kind}`}
-                      style={style}
-                      title={
-                        p.kind === 'tech' && p.start && p.end
-                          ? `Тех. окно ${fmtTime(p.start, day.timezone)}–${fmtTime(p.end, day.timezone)}`
-                          : undefined
-                      }
-                    >
-                      {p.kind === 'tech' && roomy && p.start && p.end && (
-                        <span>
-                          Тех.
-                          <small>
-                            {fmtTime(p.start, day.timezone)}–{fmtTime(p.end, day.timezone)}
-                          </small>
-                        </span>
-                      )}
+                    <div key={i} className={`piece ${p.kind}`} style={style} title={techTitle}>
+                      {techLabel}
                     </div>
                   );
                 })}

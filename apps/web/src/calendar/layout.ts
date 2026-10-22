@@ -129,3 +129,15 @@ export function availabilityPieces(
   }
   return pieces;
 }
+
+/** Шаг выбора начала брони кликом по шкале дня. */
+export const SLOT_MINUTES = 30;
+
+/**
+ * Начало новой брони по клику на шкале дня (минуты от начала дня): вниз до получаса, внутри
+ * суток и не раньше `notBefore` (начало свободного куска, например конец тех. окна).
+ */
+export function slotAt(minute: number, dayMinutes: number, notBefore = 0): number {
+  const snapped = Math.floor(Math.max(0, minute) / SLOT_MINUTES) * SLOT_MINUTES;
+  return Math.max(Math.ceil(notBefore), Math.min(snapped, dayMinutes - SLOT_MINUTES));
+}
