@@ -34,16 +34,15 @@ type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new'; title: s
 export function BookingForm({
   groups,
   timezone,
-  readOnly,
   context,
   onDone,
   onClose,
 }: {
   groups: MyGroupDto[];
   timezone: string;
-  readOnly: boolean;
   context: BookingFormContext;
-  onDone: (r: CreateBookingResultDto) => void;
+  /** paymentMode — чтобы после брони с предоплатой сразу предложить счёт. */
+  onDone: (r: CreateBookingResultDto, paymentMode: PaymentMode | null) => void;
   onClose: () => void;
 }) {
   const allowed = groups.filter((g) => g.permissions.includes('booking.create'));
@@ -71,11 +70,6 @@ export function BookingForm({
   const [guests, setGuests] = useState('');
   const [comment, setComment] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('prepayment');
-  // Другая группа — другие права: недоступный выбор сбрасывается.
-  useEffect(() => {
-    if (deal.mode === 'new' && !canNewDeal) setDeal({ mode: 'service' });
-    if (!modes.includes(paymentMode)) setPaymentMode('prepayment');
-  }, [canNewDeal, deal.mode, modes, paymentMode]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // Один ключ на открытие формы: повторная отправка (обрыв связи) не создаст вторую бронь.
@@ -100,6 +94,9 @@ export function BookingForm({
     const g = allowed.find((x) => x.id === id);
     if (g) setPeriod(defaultPeriod(g, period.startDate, period.startTime));
     setResourceIds((prev) => prev.filter((r) => g?.resourceIds.includes(r)));
+    // Другая группа — другие права: недоступный выбор сбрасывается.
+    if (deal.mode === 'new' && !g?.permissions.includes('deal.create')) setDeal({ mode: 'service' });
+    if (!PAYMENT_MODES.filter((m) => canUsePaymentMode(g?.permissions ?? [], m)).includes(paymentMode)) setPaymentMode('prepayment');
   };
 
   const submit = async () => {
@@ -124,7 +121,7 @@ export function BookingForm({
         comment: comment.trim() || undefined,
         paymentMode,
       });
-      onDone(r);
+      onDone(r, deal.mode === 'service' ? null : paymentMode);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось создать бронь');
     } finally {
@@ -151,11 +148,6 @@ export function BookingForm({
             ×
           </button>
         </header>
-        {readOnly && (
-          <p className="notice">
-            Режим просмотра: в Битрикс24 сейчас можно создать бронь только в песочнице — сделка 678, даты в 2020 году.
-          </p>
-        )}
         {!allowed.length ? (
           <p className="notice error">Нет права создавать брони ни в одной группе.</p>
         ) : (

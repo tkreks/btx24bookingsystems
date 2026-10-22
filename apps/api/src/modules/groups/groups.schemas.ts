@@ -24,6 +24,17 @@ const bookingTypeRule = z
 
 const payStep = z.object({ stageId: z.string().max(100), moveStage: z.boolean(), templateId: z.string().max(50) }).strict();
 
+/** Смарт-счёт направления (ADR 0009): воронка, стадии предоплаты/доплаты, поле ссылки, постоянные поля. */
+const invoiceConfig = z
+  .object({
+    categoryId: z.number().int().nonnegative(),
+    prepaymentStageId: z.string().min(1).max(100),
+    surchargeStageId: z.string().min(1).max(100),
+    linkField: z.string().regex(/^ufCrm\w{1,80}$/, 'поле счёта ufCrm…'),
+    fields: z.record(z.string().regex(/^ufCrm\w{1,80}$/), z.union([z.string().max(255), z.number()])).refine((f) => Object.keys(f).length <= 20, 'не больше 20 полей'),
+  })
+  .strict();
+
 /** `WorkGroup.options` — настройки направления, перенесённые из прототипа. */
 export const groupOptionsSchema = z
   .object({
@@ -58,6 +69,9 @@ export const groupOptionsSchema = z
         prepaymentAmount: z.number().min(0).max(10_000_000).optional(),
         clientMessage: z.string().max(4000).optional(),
         failMessage: z.string().max(4000).optional(),
+        surchargeMessage: z.string().max(4000).optional(),
+        prepaymentPercent: z.number().min(1).max(100).optional(),
+        invoice: invoiceConfig.optional(),
       })
       .strict(),
   })
@@ -87,6 +101,7 @@ export const appSettingsSchema = z
     dialogTextsEnabled: z.boolean(),
     removeWazzupEmail: z.boolean(),
     createInBitrix: z.boolean().optional(),
+    updateDealFields: z.boolean().optional(),
     createGrantedAt: z.string().nullable().optional(), // только для показа, при сохранении игнорируется
     admins: z.array(member).max(200),
   })

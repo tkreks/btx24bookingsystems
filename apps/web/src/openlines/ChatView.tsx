@@ -22,6 +22,7 @@ export function ChatView({
   onTemplates,
   onBack,
   onChanged,
+  onPayment,
   bookings,
 }: {
   chatId: number;
@@ -31,6 +32,8 @@ export function ChatView({
   onBack: () => void;
   /** Что-то отправили/присоединились — список чатов стоит обновить. */
   onChanged: () => void;
+  /** Счёт и ссылка на оплату по сделке чата (есть право `payment.send`). */
+  onPayment?: (dealId: number) => void;
   /** Брони клиента и «Создать бронирование» (рендерит страница чатов — у неё группы). */
   bookings?: ReactNode;
 }) {
@@ -155,6 +158,11 @@ export function ChatView({
                 <button className="link cv-deal" onClick={() => openCrm('deal', crm.dealId!)}>
                   Сделка #{crm.dealId}
                 </button>
+                {onPayment && (
+                  <button className="link cv-pay" onClick={() => onPayment(crm.dealId!)} title="Выставить счёт и отправить клиенту ссылку на оплату">
+                    Оплата
+                  </button>
+                )}
               </>
             )}
           </>

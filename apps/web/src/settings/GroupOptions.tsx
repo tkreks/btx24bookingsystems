@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
-import type { CatalogDto, DealFieldInfo, DealStageItem, GroupOptionsDto, NamedBitrixItem } from '@btx24/shared';
+import { DEFAULT_SURCHARGE_MESSAGE, type CatalogDto, type DealFieldInfo, type DealStageItem, type GroupOptionsDto, type NamedBitrixItem } from '@btx24/shared';
 import { DEFAULT_CLIENT_MESSAGE, DEFAULT_FAIL_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
 import { CatalogSections, sectionSummary } from './CatalogSections.js';
+import { InvoiceSettings } from './InvoiceSettings.js';
 
 type Ref<T> = { data: T | null; error: string };
 
@@ -67,7 +68,7 @@ function StageSelect({
   );
 }
 
-/** Оплаты без бизнес-процессов: стадии и таймаут. Шаблоны сообщений появятся вместе с оплатами. */
+/** Оплаты без бизнес-процессов (ADR 0009): счёт, ссылка, сообщения клиенту, стадии и срок оплаты. */
 export function PaymentsSection({
   payments,
   stages,
@@ -103,6 +104,8 @@ export function PaymentsSection({
         {step('prepayment', 'Предоплата')}
         {step('surcharge', 'Доплата')}
       </div>
+      <h4>Счёт на оплату</h4>
+      <InvoiceSettings value={payments.invoice} onChange={(invoice) => onChange({ ...payments, invoice })} />
       <h4>Предоплата и сообщение клиенту</h4>
       <div className="settings-grid">
         <label>
@@ -115,7 +118,18 @@ export function PaymentsSection({
             value={payments.prepaymentAmount ?? 0}
             onChange={(e) => onChange({ ...payments, prepaymentAmount: Math.max(0, Number(e.target.value)) })}
           />
-          <span className="muted">0 — сумма из поля сделки «ручная сумма предоплаты»</span>
+          <span className="muted">Если в сделке заполнена «ручная сумма предоплаты» — берётся она. 0 — процент от суммы сделки</span>
+        </label>
+        <label>
+          Процент от суммы сделки
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={payments.prepaymentPercent ?? 100}
+            onChange={(e) => onChange({ ...payments, prepaymentPercent: Math.min(100, Math.max(1, Number(e.target.value))) })}
+          />
+          <span className="muted">Бани в прототипе — 50%, домики — 100%</span>
         </label>
       </div>
       <label className="settings-block">
@@ -130,6 +144,16 @@ export function PaymentsSection({
           Переменные: {'{link}'} — ссылка на оплату, {'{prepayment}'} — сумма предоплаты, {'{client_name}'}, {'{house}'}, {'{date_start}'}, {'{minutes}'} — минут на оплату,{' '}
           {'{deadline}'} — оплатить до. Подтверждение после оплаты — в блоке «Типы брони и сообщения клиенту».
         </span>
+      </label>
+      <label className="settings-block">
+        Сообщение клиенту со ссылкой на доплату
+        <textarea
+          rows={3}
+          maxLength={4000}
+          value={payments.surchargeMessage ?? DEFAULT_SURCHARGE_MESSAGE}
+          onChange={(e) => onChange({ ...payments, surchargeMessage: e.target.value })}
+        />
+        <span className="muted">{'{prepayment}'} — сумма доплаты (из «ручной суммы доплаты» сделки или указанная сотрудником).</span>
       </label>
       <label className="settings-block">
         Сообщение клиенту, если бронь снята из-за неоплаты (пусто — не отправлять)
@@ -167,8 +191,8 @@ export function PaymentsSection({
         />
       </div>
       <p className="muted">
-        Без бизнес-процессов: ссылку, сообщение клиенту, смену стадии при оплате и снятие брони при неоплате выполняет
-        приложение. Правила свои у каждой группы (воронки): например, у «БК Алатырь» — 25 000 ₽ и 90 минут.
+        Без бизнес-процессов: счёт, сообщение клиенту со ссылкой, смену стадии при оплате, снятие брони и аннулирование
+        ссылки при неоплате выполняет приложение. Срок оплаты считается с момента, когда клиент получил ссылку.
       </p>
     </Section>
   );

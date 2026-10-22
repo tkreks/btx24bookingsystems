@@ -10,6 +10,9 @@ import { OpenlineIndexService } from '../modules/openlines/openline-index.servic
 import { BookingSyncJob } from './booking-sync.job.js';
 import { HeartbeatService } from './heartbeat.service.js';
 import { OpenlineIndexJob } from './openline-index.job.js';
+import { PaymentJob } from './payment.job.js';
+import { PaymentFlow } from '../modules/payments/payment-flow.js';
+import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
 
 // Фоновые задачи (обновление кэша календаря, контроль оплат по таймауту, рассылки) живут здесь,
 // а не в api: api отвечает на запросы, worker выполняет работу по расписанию.
@@ -23,6 +26,9 @@ import { OpenlineIndexJob } from './openline-index.job.js';
     BookingAlertsService,
     BookingSyncService,
     BookingSyncJob,
+    DealFieldMapService,
+    PaymentFlow,
+    PaymentJob,
   ],
 })
 export class WorkerModule {}

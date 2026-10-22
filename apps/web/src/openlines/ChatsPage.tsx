@@ -11,6 +11,7 @@ import {
   type MyGroupDto,
 } from '@btx24/shared';
 import { BookingForm } from '../bookings/BookingForm.js';
+import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { ClientBookings } from '../bookings/ClientBookings.js';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api.js';
 import { ChatView } from './ChatView.js';
@@ -48,7 +49,6 @@ export function ChatsPage({
   initialWaiting = false,
   onClose,
   groups = [],
-  readOnly = false,
   onOpenDay,
 }: {
   timezone: string;
@@ -58,7 +58,6 @@ export function ChatsPage({
   onClose: () => void;
   /** Группы пользователя — для формы брони. */
   groups?: MyGroupDto[];
-  readOnly?: boolean;
   /** Открыть день в календаре. */
   onOpenDay?: (date: string) => void;
 }) {
@@ -90,6 +89,8 @@ export function ChatsPage({
   const [created, setCreated] = useState<CreateBookingResultDto | null>(null);
   const [bookingsRev, setBookingsRev] = useState(0);
   const canCreate = groups.some((g) => g.permissions.includes('booking.create'));
+  const canPay = groups.some((g) => g.permissions.includes('payment.send'));
+  const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null } | null>(null);
   // Полный номер телефона — поиск по всему порталу (CRM → чаты клиента), а не только в загруженных.
   const [phoneHits, setPhoneHits] = useState<{ q: string; items: ChatSummary[] | null; error: string } | null>(null);
   const fullPhone = isFullPhone(query);
@@ -506,6 +507,7 @@ export function ChatsPage({
           onTemplates={setTemplates}
           onBack={() => setOpenId(null)}
           onChanged={() => void refresh()}
+          onPayment={canPay ? (dealId) => setPayment({ dealId, bookingId: null }) : undefined}
           bookings={
             <>
               <ClientBookings
@@ -532,7 +534,6 @@ export function ChatsPage({
         <BookingForm
           groups={groups}
           timezone={timezone}
-          readOnly={readOnly}
           context={{
             date: todayIn(timezone),
             contactId: form.data?.contactId ?? null,
@@ -540,13 +541,15 @@ export function ChatsPage({
             openDeals: form.data?.openDeals ?? [],
           }}
           onClose={() => setForm(null)}
-          onDone={(r) => {
+          onDone={(r, mode) => {
             setForm(null);
             setCreated(r);
             setBookingsRev((n) => n + 1);
+            if (mode === 'prepayment' && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
           }}
         />
       )}
+      {payment && <PaymentDialog dealId={payment.dealId} bookingId={payment.bookingId} timezone={timezone} onClose={() => setPayment(null)} />}
     </div>
   );
 }

@@ -98,14 +98,23 @@ export class PortalService {
     if (!this.config.readOnly) return undefined;
     // Без песочницы политика всё равно нужна: разрешение «создавать новые» хранится у портала.
     const sandbox = this.config.sandbox ?? { dealIds: [], bookingsFrom: null, bookingsTo: null };
-    return new SandboxWritePolicy(this.prisma, portal, sandbox, (dealIds) => this.relationsOfDeals(portal, dealIds));
+    return new SandboxWritePolicy(
+      this.prisma,
+      portal,
+      sandbox,
+      (dealIds) => this.relationsOfDeals(portal, dealIds),
+      (chatId) => this.dealOfChat(portal, chatId),
+    );
   }
 
-  /** Контакты, счета, оплаты и чаты открытых линий сделок — только чтением, токеном приложения. */
-  private async relationsOfDeals(portal: Portal, dealIds: number[]): Promise<SandboxRelations> {
-    const hit = this.sandboxRelations.get(portal.id);
-    if (hit && hit.expiresAt > Date.now()) return hit.value;
-    const reader = new Bitrix24RestClient({
+  /** Сделка, к которой сейчас привязан чат открытой линии (`entity_data_2`: …|DEAL|<id>), — чтением. */
+  private async dealOfChat(portal: Portal, chatId: number): Promise<number | null> {
+    const res = await this.reader(portal).call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
+    return dealOfBindings(res.result?.entity_data_2);
+  }
+
+  private reader(portal: Portal): Bitrix24RestClient {
+    return new Bitrix24RestClient({
       clientEndpoint: portal.clientEndpoint,
       access: { getAccessToken: () => this.currentAccessToken(portal.id), refresh: (t) => this.refreshTokens(portal.id, t) },
       limiter: this.limiter,
@@ -113,6 +122,13 @@ export class PortalService {
       fetch: this.fetchImpl,
       readOnly: true,
     });
+  }
+
+  /** Контакты, счета, оплаты и чаты открытых линий сделок — только чтением, токеном приложения. */
+  private async relationsOfDeals(portal: Portal, dealIds: number[]): Promise<SandboxRelations> {
+    const hit = this.sandboxRelations.get(portal.id);
+    if (hit && hit.expiresAt > Date.now()) return hit.value;
+    const reader = this.reader(portal);
     const contacts = new Set<number>();
     const invoices = new Set<number>();
     const payments = new Set<number>();
@@ -198,3 +214,10 @@ export class PortalService {
     return p;
   }
 }
+
+/** «LEAD|0|COMPANY|0|CONTACT|140|DEAL|678» → 678; нет сделки — null. */
+export function dealOfBindings(bindings: unknown): number | null {
+  const m = /(?:^|\|)DEAL\|(\d+)/.exec(String(bindings ?? ''));
+  return m && Number(m[1]) > 0 ? Number(m[1]) : null;
+}
+

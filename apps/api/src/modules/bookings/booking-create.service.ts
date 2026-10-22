@@ -187,7 +187,7 @@ export class BookingCreateService {
         if (Object.keys(fields).length) {
           if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update'))
             await log('deal.update', true, { fields: Object.keys(fields) });
-          else warnings.push(`Поля сделки #${dealId} не заполнены: изменять существующие сделки приложению пока не разрешено`);
+          else warnings.push(`Поля сделки #${dealId} не заполнены: изменять существующие сделки не разрешено (⚙ → «Приложение» → «Запись в Битрикс24»)`);
         } else warnings.push('Системные поля сделки не настроены (⚙ → «Приложение»)');
       }
 

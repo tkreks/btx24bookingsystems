@@ -113,6 +113,10 @@ export const DEAL_FIELD_ROLES = {
   managerComment: 'Комментарий менеджера',
   prepayment: 'Ручная сумма предоплаты',
   surcharge: 'Ручная сумма доплаты',
+  prepaymentInvoiceId: 'ID Счёта на предоплату',
+  prepaymentLink: 'Ссылка на предоплату',
+  surchargeInvoiceId: 'ID Счёта на доплату',
+  surchargeLink: 'Ссылка на доплату',
 } as const;
 export type DealFieldRole = keyof typeof DEAL_FIELD_ROLES;
 export type DealFieldMapDto = Partial<Record<DealFieldRole, string>>;

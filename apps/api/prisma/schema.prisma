@@ -44,6 +44,7 @@ model Portal {
   externalUsers        ExternalUser[]
   sandboxBookings      SandboxBooking[]
   appCreatedEntities   AppCreatedEntity[]
+  paymentRequests      PaymentRequest[]
   messageTemplates     MessageTemplate[]
   storedFiles          StoredFile[]
   openlineChats        OpenlineChat[]
@@ -189,6 +190,8 @@ model PortalSettings {
   createInBitrix        Boolean  @default(false)
   createGrantedByUserId Int?
   createGrantedAt       DateTime? @db.DateTime(3)
+  /// Разрешение владельца менять поля существующих сделок (2026-10-22); удалять — нельзя.
+  updateDealFields      Boolean  @default(false)
   updatedByUserId       Int?
   updatedAt             DateTime @updatedAt @db.DateTime(3)
 }
@@ -558,3 +561,52 @@ model ChatFolderItem {
   @@unique([portalId, ownerUserId, chatId])
   @@index([folderId])
 }
+
+enum PaymentKind {
+  prepayment
+  surcharge
+}
+
+enum PaymentRequestStatus {
+  link_pending
+  sent
+  paid
+  expired
+  failed
+  cancelled
+}
+
+/// Счёт и ссылка на оплату (ADR 0009): смарт-счёт создаёт приложение, ссылку ставит портал,
+/// worker доводит до сообщения клиенту и следит за оплатой до срока.
+model PaymentRequest {
+  id              String               @id @default(cuid())
+  portalId        String
+  portal          Portal               @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  idempotencyKey  String               @db.VarChar(64)
+  dealId          Int
+  bookingId       Int?
+  groupId         String?              @db.VarChar(191)
+  kind            PaymentKind
+  amount          Decimal              @db.Decimal(12, 2)
+  invoiceId       Int?
+  /// Ссылка на оплату от портала; в логи и ошибки не пишется.
+  link            String?              @db.VarChar(1000)
+  status          PaymentRequestStatus @default(link_pending)
+  /// Срок оплаты (предоплата); null — без срока.
+  deadlineAt      DateTime?            @db.DateTime(3)
+  messageSentAt   DateTime?            @db.DateTime(3)
+  paidAt          DateTime?            @db.DateTime(3)
+  closedAt        DateTime?            @db.DateTime(3)
+  createdByUserId Int
+  createdByName   String?              @db.VarChar(255)
+  error           String?              @db.VarChar(1000)
+  warnings        Json?
+  attempts        Int                  @default(0)
+  createdAt       DateTime             @default(now()) @db.DateTime(3)
+  updatedAt       DateTime             @updatedAt @db.DateTime(3)
+
+  @@unique([portalId, idempotencyKey])
+  @@index([portalId, dealId])
+  @@index([status, deadlineAt])
+}
+

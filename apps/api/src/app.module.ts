@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
 import { AccessModule } from './modules/access/access.module.js';
 import { Bitrix24Module } from './modules/bitrix24/bitrix24.module.js';
 import { BookingsModule } from './modules/bookings/bookings.module.js';
+import { PaymentsModule } from './modules/payments/payments.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { GroupsModule } from './modules/groups/groups.module.js';
 import { HealthModule } from './modules/health/health.module.js';
@@ -19,6 +20,7 @@ import { WorkdayModule } from './modules/workday/workday.module.js';
     AccessModule,
     Bitrix24Module,
     BookingsModule,
+    PaymentsModule,
     CalendarModule,
     GroupsModule,
     HealthModule,

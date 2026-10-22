@@ -1,0 +1,323 @@
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  DEFAULT_CLIENT_MESSAGE,
+  DEFAULT_FAIL_MESSAGE,
+  DEFAULT_SURCHARGE_MESSAGE,
+  renderTemplate,
+  type DealFieldMapDto,
+  type GroupOptionsDto,
+  type PaymentKind,
+} from '@btx24/shared';
+import type { PaymentRequest, Portal, Prisma } from '../../generated/prisma/client.js';
+import { PrismaService } from '../../prisma/prisma.service.js';
+import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
+import { Bitrix24Error } from '../bitrix24/rest/errors.js';
+import { dealOfBindings } from '../bitrix24/portals/portal.service.js';
+import { BookingJournalService, SYSTEM } from '../bookings/booking-journal.service.js';
+import { dateRu, timeRu } from '../bookings/booking-create.service.js';
+import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
+
+/** Сколько ждать ссылку от портала, прежде чем признать счёт неудачным. */
+export const LINK_WAIT_MS = 15 * 60_000;
+/** Доплату без срока перестаём отслеживать через 60 дней. */
+export const WATCH_LIMIT_MS = 60 * 86_400_000;
+
+type Deal = Record<string, unknown> & { ID: string; TITLE?: string; CATEGORY_ID?: string; CONTACT_ID?: string; ASSIGNED_BY_ID?: string; OPPORTUNITY?: string };
+type Invoice = { id: number; stageId?: string; categoryId?: number } & Record<string, unknown>;
+
+export const msg = (e: unknown) => (e instanceof Bitrix24Error ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e)).slice(0, 500);
+const money = (v: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v);
+/** Стадия счёта «оплачен»: семантика успеха у смарт-счёта — суффикс `:P`. */
+export const invoicePaid = (stageId: unknown) => String(stageId ?? '').endsWith(':P');
+const invoiceFailed = (stageId: unknown) => String(stageId ?? '').endsWith(':D');
+
+export interface FlowContext {
+  portal: Portal;
+  client: Bitrix24RestClient;
+  /** Кто действует: сотрудник (из интерфейса) или система (worker). */
+  actor: { kind: 'user'; userId: number; name: string } | { kind: 'system'; name: string };
+}
+
+/**
+ * Шаги счёта и ссылки на оплату после создания счёта (ADR 0009). Используются и запросом
+ * сотрудника (сразу, если портал быстро выдал ссылку), и worker'ом (доводит до конца, следит за
+ * оплатой и сроком). Каждый шаг безопасен к повтору: состояние — в `PaymentRequest`.
+ * Ссылку на оплату не пишем в логи и ошибки.
+ */
+@Injectable()
+export class PaymentFlow {
+  private readonly logger = new Logger(PaymentFlow.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly journal: BookingJournalService,
+    private readonly fieldMap: DealFieldMapService,
+  ) {}
+
+  async options(req: Pick<PaymentRequest, 'groupId'>): Promise<GroupOptionsDto | null> {
+    if (!req.groupId) return null;
+    const g = await this.prisma.workGroup.findUnique({ where: { id: req.groupId } });
+    return (g?.options ?? null) as GroupOptionsDto | null;
+  }
+
+  /** Один шаг автомата: ссылка → сообщение; ожидание → оплачено / срок вышел. */
+  async advance(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    if (req.status === 'link_pending') return this.awaitLink(ctx, req);
+    if (req.status === 'sent') return this.watch(ctx, req);
+    return req;
+  }
+
+  /** Есть ли ссылка у счёта; есть — записать в сделку и отправить клиенту. */
+  async awaitLink(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    const opts = await this.options(req);
+    const inv = opts?.payments.invoice;
+    if (!req.invoiceId || !inv) return this.fail(req, 'Нет счёта или настроек счёта группы');
+    const invoice = await this.invoice(ctx, req.invoiceId);
+    const link = typeof invoice?.[inv.linkField] === 'string' ? String(invoice[inv.linkField]).trim() : '';
+    if (!link) {
+      if (Date.now() - req.createdAt.getTime() > LINK_WAIT_MS)
+        return this.fail(req, 'Портал не поставил ссылку на оплату в счёт за 15 минут — проверьте платёжную систему и роботов счёта');
+      return req;
+    }
+    return this.deliver(ctx, { ...req, link }, opts!);
+  }
+
+  /** Ссылка в сделку, сообщение клиенту, комментарий в сделке; срок — с момента отправки. */
+  private async deliver(ctx: FlowContext, req: PaymentRequest & { link: string }, opts: GroupOptionsDto): Promise<PaymentRequest> {
+    const warnings = this.warningsOf(req);
+    const map = await this.fieldMap.get(ctx.portal.id);
+    const linkField = req.kind === 'prepayment' ? map.prepaymentLink : map.surchargeLink;
+    if (linkField) await this.dealUpdate(ctx, req.dealId, { [linkField]: req.link }, warnings, 'ссылка на оплату');
+
+    const deal = await this.deal(ctx, req.dealId);
+    const minutes = req.kind === 'prepayment' ? opts.payments.timeoutMinutes : null;
+    const deadline = minutes ? new Date(Date.now() + minutes * 60_000) : null;
+    const text = renderTemplate(this.template(req.kind, opts), {
+      ...(await this.vars(ctx, deal, map)),
+      prepayment: money(Number(req.amount)),
+      link: req.link,
+      minutes: minutes ?? '',
+      deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
+    });
+    const sent = await this.sendToClient(ctx, req, deal, text, warnings);
+    await this.comment(ctx, req.dealId, `Ссылка на оплату (${req.kind === 'prepayment' ? 'предоплата' : 'доплата'} ${money(Number(req.amount))} ₽, счёт #${req.invoiceId}) ${sent ? 'отправлена клиенту' : 'НЕ отправлена — отправьте вручную'}:\n${text}`, warnings);
+    // Срок — только если клиент получил ссылку: иначе бронь снялась бы без его вины.
+    return this.prisma.paymentRequest.update({
+      where: { id: req.id },
+      data: {
+        link: req.link,
+        status: 'sent',
+        messageSentAt: sent ? new Date() : null,
+        deadlineAt: sent ? deadline : null,
+        warnings: warnings as Prisma.InputJsonValue,
+        error: null,
+      },
+    });
+  }
+
+  /** Ожидание оплаты: оплачено → стадия успеха; срок вышел → снять бронь, аннулировать ссылку. */
+  async watch(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    if (!req.invoiceId) return req;
+    const invoice = await this.invoice(ctx, req.invoiceId);
+    if (invoice && invoicePaid(invoice.stageId)) return this.paid(ctx, req);
+    if (invoice && invoiceFailed(invoice.stageId) && !req.deadlineAt)
+      return this.close(req, 'cancelled', 'Счёт переведён в «Не оплачен» в Битрикс24');
+    if (req.deadlineAt && req.deadlineAt.getTime() <= Date.now()) return this.expire(ctx, req, invoice);
+    if (!req.deadlineAt && Date.now() - req.createdAt.getTime() > WATCH_LIMIT_MS) return this.close(req, 'cancelled', 'Оплата не поступила за 60 дней — больше не отслеживаем');
+    return req;
+  }
+
+  private async paid(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    const opts = await this.options(req);
+    const warnings = this.warningsOf(req);
+    if (req.kind === 'prepayment' && opts?.payments.successStageId)
+      await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.successStageId }, warnings, 'стадия «оплачено»');
+    if (req.bookingId) {
+      const rec = await this.journal.find(ctx.portal.id, req.bookingId);
+      if (rec) await this.journal.note(rec.id, 'paid', { kind: 'system', name: 'Система: оплата получена' }, { kind: req.kind, amount: Number(req.amount), invoiceId: req.invoiceId }, 'worker');
+    }
+    return this.prisma.paymentRequest.update({
+      where: { id: req.id },
+      data: { status: 'paid', paidAt: new Date(), closedAt: new Date(), warnings: warnings as Prisma.InputJsonValue },
+    });
+  }
+
+  /** Срок вышел: ещё раз проверить оплату, затем счёт «не оплачен», оплаты счёта удалить, бронь снять. */
+  private async expire(ctx: FlowContext, req: PaymentRequest, invoice: Invoice | null): Promise<PaymentRequest> {
+    const opts = await this.options(req);
+    const warnings = this.warningsOf(req);
+    const cat = invoice?.categoryId ?? opts?.payments.invoice?.categoryId;
+    if (req.invoiceId && cat !== undefined)
+      await this.safe(warnings, 'счёт → «Не оплачен»', () => ctx.client.call('crm.item.update', { entityTypeId: 31, id: req.invoiceId, fields: { stageId: `DT31_${cat}:D` } }));
+    if (req.invoiceId) await this.annulPayments(ctx, req.invoiceId, warnings);
+
+    if (req.bookingId) {
+      const rec = await this.journal.find(ctx.portal.id, req.bookingId);
+      if (rec?.status === 'active') {
+        const removed = await this.safe(warnings, `снять бронь #${req.bookingId}`, () => ctx.client.call('booking.v1.booking.delete', { id: req.bookingId }));
+        if (removed) await this.journal.recordCancelled(ctx.portal.id, req.bookingId, { reason: 'payment_timeout', actor: SYSTEM.paymentTimeout, via: 'worker' });
+      }
+    }
+    if (opts?.payments.failStageId) await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.failStageId }, warnings, 'стадия «не оплачено»');
+    const failText = opts?.payments.failMessage ?? DEFAULT_FAIL_MESSAGE;
+    if (failText.trim()) {
+      const deal = await this.deal(ctx, req.dealId);
+      const map = await this.fieldMap.get(ctx.portal.id);
+      const text = renderTemplate(failText, { ...(await this.vars(ctx, deal, map)), minutes: opts?.payments.timeoutMinutes ?? '' });
+      await this.sendToClient(ctx, req, deal, text, warnings);
+    }
+    await this.comment(ctx, req.dealId, `Предоплата по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}.`, warnings);
+    return this.prisma.paymentRequest.update({
+      where: { id: req.id },
+      data: { status: 'expired', closedAt: new Date(), warnings: warnings as Prisma.InputJsonValue },
+    });
+  }
+
+  /** Аннулировать ссылку = удалить неоплаченные оплаты своего счёта (их создал портал под наш счёт). */
+  private async annulPayments(ctx: FlowContext, invoiceId: number, warnings: string[]): Promise<void> {
+    let pays: { id?: number; paid?: string }[] = [];
+    try {
+      const r = await ctx.client.call<{ id?: number; paid?: string }[]>('crm.item.payment.list', { entityTypeId: 31, entityId: invoiceId });
+      pays = Array.isArray(r.result) ? r.result : [];
+    } catch (e) {
+      warnings.push(`Оплаты счёта #${invoiceId} не прочитаны: ${msg(e)}`);
+      return;
+    }
+    const own = await this.prisma.appCreatedEntity.findUnique({
+      where: { portalId_entityType_entityId: { portalId: ctx.portal.id, entityType: 'invoice', entityId: invoiceId } },
+    });
+    if (!own) {
+      warnings.push(`Счёт #${invoiceId} создан не приложением — ссылку не аннулируем`);
+      return;
+    }
+    for (const p of pays) {
+      const id = Number(p.id);
+      if (!(id > 0) || p.paid === 'Y') continue;
+      await this.prisma.appCreatedEntity.upsert({
+        where: { portalId_entityType_entityId: { portalId: ctx.portal.id, entityType: 'payment', entityId: id } },
+        create: { portalId: ctx.portal.id, entityType: 'payment', entityId: id },
+        update: {},
+      });
+      await this.safe(warnings, `аннулировать оплату ${id}`, () => ctx.client.call('crm.item.payment.delete', { id }));
+    }
+  }
+
+  /**
+   * Сообщение клиенту в чат открытой линии сделки от сотрудника, выставившего счёт, иначе — от
+   * ответственного за сделку. Не вышло — предупреждение (ссылку можно отправить вручную).
+   */
+  private async sendToClient(ctx: FlowContext, req: PaymentRequest, deal: Deal | null, text: string, warnings: string[]): Promise<boolean> {
+    let chats: number[] = [];
+    try {
+      const r = await ctx.client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, ACTIVE_ONLY: 'N' });
+      chats = [...new Set((Array.isArray(r.result) ? r.result : []).map((c) => Number(c.CHAT_ID) || 0).filter((x) => x > 0))].sort((a, b) => b - a);
+    } catch (e) {
+      warnings.push(`Чат сделки не найден: ${msg(e)}`);
+      return false;
+    }
+    if (!chats.length) {
+      warnings.push('У сделки нет чата открытой линии — ссылку нужно отправить клиенту вручную');
+      return false;
+    }
+    const senders = [...new Set([req.createdByUserId, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
+    let last = '';
+    // Чат клиента со временем переходит к его новой сделке: такой (CHAT_NOT_IN_CRM) пропускаем,
+    // берём самый новый чат, который сейчас привязан к этой сделке.
+    for (const chatId of chats) {
+      for (const userId of senders) {
+        try {
+          await ctx.client.call('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
+          return true;
+        } catch (e) {
+          last = msg(e);
+          if (e instanceof Bitrix24Error && e.code === 'CHAT_NOT_IN_CRM') break;
+        }
+      }
+    }
+    // Сессия чата закрыта — `imopenlines.crm.message.add` отвечает CHAT_NOT_IN_CRM. Пишем как
+    // оператор (`im.message.add`) в чат, который сейчас привязан к этой сделке.
+    for (const chatId of chats) {
+      try {
+        const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
+        if (dealOfBindings(d.result?.entity_data_2) !== req.dealId) continue;
+        await ctx.client.call('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
+        return true;
+      } catch (e) {
+        last = msg(e);
+      }
+    }
+    warnings.push(`Сообщение клиенту не отправлено (${last}) — отправьте ссылку вручную`);
+    return false;
+  }
+
+  private template(kind: PaymentKind, opts: GroupOptionsDto): string {
+    return kind === 'prepayment' ? opts.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
+  }
+
+  /** Переменные шаблона из сделки: имя клиента, даты визита, сумма сделки. */
+  async vars(ctx: FlowContext, deal: Deal | null, map: DealFieldMapDto): Promise<Record<string, string | number>> {
+    const v: Record<string, string | number> = {};
+    if (!deal) return v;
+    const pick = (code?: string) => (code && deal[code] !== undefined && deal[code] !== null ? String(deal[code]) : '');
+    v.date_start = pick(map.visitDateStart);
+    v.time_start = pick(map.visitTimeStart);
+    v.date_end = pick(map.visitDateEnd);
+    v.time_end = pick(map.visitTimeEnd);
+    v.guests = pick(map.guests);
+    if (Number(deal.OPPORTUNITY) > 0) v.amount = money(Number(deal.OPPORTUNITY));
+    const contactId = Number(deal.CONTACT_ID);
+    if (contactId > 0) {
+      try {
+        const c = (await ctx.client.call<{ NAME?: string }>('crm.contact.get', { id: contactId })).result;
+        if (c?.NAME) v.client_name = c.NAME;
+      } catch {
+        /* без имени — шаблон оставит {client_name}, текст всё равно уйдёт */
+      }
+    }
+    return v;
+  }
+
+  async deal(ctx: Pick<FlowContext, 'client'>, dealId: number): Promise<Deal | null> {
+    try {
+      return (await ctx.client.call<Deal>('crm.deal.get', { id: dealId })).result ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async invoice(ctx: Pick<FlowContext, 'client'>, id: number): Promise<Invoice | null> {
+    const r = await ctx.client.call<{ item?: Invoice }>('crm.item.get', { entityTypeId: 31, id });
+    return r.result?.item ?? null;
+  }
+
+  async dealUpdate(ctx: FlowContext, dealId: number, fields: Record<string, unknown>, warnings: string[], what: string): Promise<boolean> {
+    return this.safe(warnings, `сделка #${dealId}: ${what}`, () => ctx.client.call('crm.deal.update', { id: dealId, fields }));
+  }
+
+  private async comment(ctx: FlowContext, dealId: number, text: string, warnings: string[]): Promise<void> {
+    await this.safe(warnings, 'комментарий в сделке', () => ctx.client.call('crm.timeline.comment.add', { fields: { ENTITY_ID: dealId, ENTITY_TYPE: 'deal', COMMENT: text } }));
+  }
+
+  private async safe(warnings: string[], what: string, fn: () => Promise<unknown>): Promise<boolean> {
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      warnings.push(`Не удалось: ${what} (${msg(e)})`);
+      this.logger.warn(`${what}: ${msg(e)}`);
+      return false;
+    }
+  }
+
+  private warningsOf(req: PaymentRequest): string[] {
+    return Array.isArray(req.warnings) ? (req.warnings as string[]).slice() : [];
+  }
+
+  private fail(req: PaymentRequest, error: string): Promise<PaymentRequest> {
+    return this.prisma.paymentRequest.update({ where: { id: req.id }, data: { status: 'failed', error, closedAt: new Date() } });
+  }
+
+  private close(req: PaymentRequest, status: 'cancelled', error: string): Promise<PaymentRequest> {
+    return this.prisma.paymentRequest.update({ where: { id: req.id }, data: { status, error, closedAt: new Date() } });
+  }
+}

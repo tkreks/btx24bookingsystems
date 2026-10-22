@@ -3005,3 +3005,85 @@ main.loading {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Блокировка интерфейса: сессия истекла или вышло обновление (SessionOverlay). */
+.session-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+}
+.session-overlay .card {
+  max-width: 420px;
+  width: 100%;
+}
+.session-overlay h2 {
+  margin-top: 0;
+}
+
+/* Счёт и ссылка на оплату (PaymentDialog). */
+.payment-dialog {
+  display: grid;
+  gap: 10px;
+}
+.payment-dialog h3 {
+  margin: 0;
+}
+.payment-dialog > label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.payment-dialog input[type='number'],
+.payment-dialog textarea {
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.payment-history {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.payment-history h4 {
+  margin: 0;
+}
+.payment-row {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+}
+.payment-row .notice {
+  margin: 4px 0 0;
+}
+.pill.paid {
+  color: var(--ok);
+  background: rgba(21, 128, 61, 0.1);
+}
+.pill.sent,
+.pill.link_pending {
+  color: #a16207;
+  background: rgba(202, 138, 4, 0.12);
+}
+.pill.expired,
+.pill.failed {
+  color: var(--danger);
+  background: rgba(185, 28, 28, 0.08);
+}
+.pill.cancelled {
+  color: var(--muted);
+  background: rgba(17, 24, 39, 0.05);
+}
+.cv-pay {
+  margin-left: 8px;
+}

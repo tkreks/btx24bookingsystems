@@ -47,22 +47,58 @@ export function initB24(timeoutMs = 4000): Promise<boolean> {
   return ready;
 }
 
-export function currentAuth(): { token: string; memberId: string } | null {
-  const a = window.BX24?.getAuth();
-  return a && a.access_token ? { token: a.access_token, memberId: a.member_id } : null;
+export interface B24Auth {
+  token: string;
+  memberId: string;
 }
 
-/** Новый токен у портала (по истечении часа). */
-export function refreshAuth(): Promise<{ token: string; memberId: string }> {
-  return new Promise((resolve, reject) => {
+/** Обновлять токен заранее: за 5 минут до конца часа, а не после отказа. */
+const REFRESH_AHEAD_MS = 5 * 60_000;
+/** SDK может не вызвать callback refreshAuth (портал недоступен) — не ждём вечно. */
+const REFRESH_TIMEOUT_MS = 15_000;
+
+let cached: (B24Auth & { expiresAt: number }) | null = null;
+let refreshing: Promise<B24Auth> | null = null;
+
+function remember(a: Bx24Auth): B24Auth {
+  // expires_in — сколько секунд осталось; без него считаем как у Битрикс24 — час.
+  const ttl = Number(a.expires_in) > 0 ? Number(a.expires_in) * 1000 : 3600_000;
+  cached = { token: a.access_token, memberId: a.member_id, expiresAt: Date.now() + ttl };
+  return { token: cached.token, memberId: cached.memberId };
+}
+
+/**
+ * Токен для запроса к API. После долгого бездействия `BX24.getAuth()` возвращает false
+ * (токен истёк) — тогда, а также незадолго до истечения, берём новый у портала.
+ */
+export async function getAuth(): Promise<B24Auth | null> {
+  if (cached && cached.expiresAt - Date.now() > REFRESH_AHEAD_MS) return { token: cached.token, memberId: cached.memberId };
+  if (!cached) {
+    const a = window.BX24?.getAuth();
+    if (a && a.access_token) {
+      const fresh = remember(a);
+      if (cached!.expiresAt - Date.now() > REFRESH_AHEAD_MS) return fresh;
+    }
+  }
+  if (!window.BX24) return null;
+  return refreshAuth();
+}
+
+/** Новый токен у портала. Параллельные запросы ждут одно обновление. */
+export function refreshAuth(): Promise<B24Auth> {
+  refreshing ??= new Promise<B24Auth>((resolve, reject) => {
     const sdk = window.BX24;
     if (!sdk) return reject(new Error('BX24 SDK недоступен'));
-    sdk.refreshAuth((a) =>
-      a?.access_token
-        ? resolve({ token: a.access_token, memberId: a.member_id })
-        : reject(new Error('Не удалось обновить авторизацию')),
-    );
+    const timer = setTimeout(() => reject(new Error('Портал не ответил на обновление авторизации')), REFRESH_TIMEOUT_MS);
+    sdk.refreshAuth((a) => {
+      clearTimeout(timer);
+      if (a?.access_token) resolve(remember(a));
+      else reject(new Error('Не удалось обновить авторизацию'));
+    });
+  }).finally(() => {
+    refreshing = null;
   });
+  return refreshing;
 }
 
 export function placementContext(): PlacementContext {

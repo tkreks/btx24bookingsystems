@@ -108,13 +108,17 @@ export function AppSettingsForm({
           <legend>Запись в Битрикс24</legend>
           <label className="check">
             <input type="checkbox" checked={draft.createInBitrix} onChange={(e) => update({ createInBitrix: e.target.checked })} />
-            Создавать новые брони и сделки
+            Создавать новые брони, сделки и счета на оплату
           </label>
           <p className="muted">
-            Брони на любые даты и новые сделки из формы брони. Существующие брони и сделки приложение не меняет: поля и товары записываются
-            только в созданные им сделки.
+            Брони на любые даты, новые сделки из формы брони и смарт-счета на предоплату и доплату. Чужие брони приложение не меняет.
             {draft.createInBitrix && draft.createGrantedAt && ` Включено ${new Date(draft.createGrantedAt).toLocaleString('ru-RU')}.`}
           </p>
+          <label className="check">
+            <input type="checkbox" checked={draft.updateDealFields} onChange={(e) => update({ updateDealFields: e.target.checked })} />
+            Менять поля существующих сделок
+          </label>
+          <p className="muted">Системные поля брони, счёт и ссылка на оплату, стадия оплаты. Удалять сделки и менять их товары приложение не может.</p>
         </fieldset>
         <button className="primary" type="submit">
           {busy ? 'Сохранение…' : 'Сохранить настройки'}

@@ -3,6 +3,8 @@ import type { SessionInfo } from '@btx24/shared';
 import { apiGet, ApiRequestError } from './api.js';
 import { initB24, placementContext, type PlacementContext } from './b24.js';
 import { CalendarPage } from './calendar/CalendarPage.js';
+import { SessionOverlay } from './SessionOverlay.js';
+import { startSessionWatch } from './session-guard.js';
 
 type Boot =
   | { state: 'loading' }
@@ -19,6 +21,7 @@ export function App() {
       try {
         const session = await apiGet<SessionInfo>('/session');
         setBoot({ state: 'ready', session, placement: placementContext() });
+        startSessionWatch();
       } catch (e) {
         setBoot({ state: 'error', message: e instanceof ApiRequestError ? e.message : 'Не удалось подключиться к серверу приложения' });
       }
@@ -28,5 +31,10 @@ export function App() {
   if (boot.state === 'loading') return <div className="screen-center muted">Загрузка…</div>;
   if (boot.state === 'outside') return <div className="screen-center"><div className="card"><h1>Система бронирования</h1><p className="muted">Откройте приложение из Битрикс24.</p></div></div>;
   if (boot.state === 'error') return <div className="screen-center"><div className="card error">{boot.message}</div></div>;
-  return <CalendarPage session={boot.session} placement={boot.placement} />;
+  return (
+    <>
+      <CalendarPage session={boot.session} placement={boot.placement} />
+      <SessionOverlay />
+    </>
+  );
 }

@@ -72,6 +72,7 @@ export class GroupsService {
       removeWazzupEmail: s?.removeWazzupEmail ?? false,
       createInBitrix: s?.createInBitrix ?? false,
       createGrantedAt: s?.createGrantedAt?.toISOString() ?? null,
+      updateDealFields: s?.updateDealFields ?? false,
       admins: admins.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
     };
   }
@@ -86,7 +87,14 @@ export class GroupsService {
         : s.createInBitrix
           ? { createInBitrix: true, createGrantedByUserId: userId, createGrantedAt: new Date() }
           : { createInBitrix: false };
-    const flags = { dialogMetadataEnabled: s.dialogMetadataEnabled, dialogTextsEnabled: s.dialogTextsEnabled, removeWazzupEmail: s.removeWazzupEmail, ...grant, updatedByUserId: userId };
+    const flags = {
+      dialogMetadataEnabled: s.dialogMetadataEnabled,
+      dialogTextsEnabled: s.dialogTextsEnabled,
+      removeWazzupEmail: s.removeWazzupEmail,
+      ...grant,
+      ...(s.updateDealFields === undefined ? {} : { updateDealFields: s.updateDealFields }),
+      updatedByUserId: userId,
+    };
     const admins = [...new Map(s.admins.map((a) => [`${a.kind}:${a.bitrixId}`, a])).values()];
     await this.prisma.$transaction([
       this.prisma.portalSettings.upsert({ where: { portalId }, create: { portalId, ...flags }, update: flags }),

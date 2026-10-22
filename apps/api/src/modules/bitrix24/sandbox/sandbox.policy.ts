@@ -12,6 +12,11 @@ export interface SandboxConfig {
 }
 
 type P = Record<string, unknown>;
+/**
+ * Что приложение создало само (AppCreatedEntity): бронь, сделка, смарт-счёт, оплата счёта
+ * (регистрирует worker, прочитав оплаты своего счёта), сделка со счётом приложения.
+ */
+export type CreatedKind = 'booking' | 'deal' | 'invoice' | 'payment' | 'payment_deal';
 
 /** Связанные с тестовыми сделками объекты (читаются из Битрикс24): только с ними можно работать. */
 export interface SandboxRelations {
@@ -24,6 +29,8 @@ export interface SandboxRelations {
   chatIds: number[];
 }
 export type SandboxRelationsResolver = (dealIds: number[]) => Promise<SandboxRelations>;
+/** Сделка, к которой сейчас привязан чат открытой линии (`imopenlines.dialog.get`); null — ни к какой. */
+export type ChatDealResolver = (chatId: number) => Promise<number | null>;
 const lc = (v: unknown) => String(v ?? '').toLowerCase();
 /** `chat123` → 123; личный диалог (ID пользователя) — не чат, null. */
 const chatOf = (dialogId: unknown) => /^chat(\d+)$/.exec(String(dialogId ?? ''))?.[1] ?? null;
@@ -34,8 +41,12 @@ const chatOf = (dialogId: unknown) => /^chat(\d+)$/.exec(String(dialogId ?? ''))
  * (журнал SandboxBooking), поэтому реальные брони недоступны даже при ошибке в коде выше.
  *
  * Разрешение «создавать новые» (решение владельца 2026-10-22, `PortalSettings.createInBitrix`):
- * новые брони на любые даты и новые сделки. Дальше менять можно только созданное приложением
- * (журнал AppCreatedEntity); существующие сделки и брони по-прежнему только читаются.
+ * новые брони на любые даты, новые сделки и смарт-счета сделок (ADR 0009). Дальше менять можно
+ * только созданное приложением (журнал AppCreatedEntity); сообщение клиенту и комментарий —
+ * только по сделке, где приложение выставило счёт. Существующие брони только читаются.
+ *
+ * «Менять поля сделок» (`PortalSettings.updateDealFields`, решение владельца 2026-10-22):
+ * `crm.deal.update` любой сделки; удаление и товары существующих сделок — нет.
  */
 export class SandboxWritePolicy implements WritePolicy {
   private readonly from: number | null;
@@ -46,6 +57,7 @@ export class SandboxWritePolicy implements WritePolicy {
     private readonly portal: Portal,
     private readonly cfg: SandboxConfig,
     private readonly relationsOf: SandboxRelationsResolver = async () => ({ contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] }),
+    private readonly chatDeal: ChatDealResolver = async () => null,
   ) {
     this.from = cfg.bookingsFrom ? zonedTimeToUtc(cfg.bookingsFrom, '00:00', portal.timezone).getTime() / 1000 : null;
     this.to = cfg.bookingsTo ? zonedTimeToUtc(cfg.bookingsTo, '00:00', portal.timezone).getTime() / 1000 : null;
@@ -57,28 +69,36 @@ export class SandboxWritePolicy implements WritePolicy {
       case 'crm.deal.add':
         return this.createAllowed();
       case 'crm.deal.update':
+        return this.deal(params.id) || (await this.created('deal', params.id)) || this.dealFieldsAllowed(params.id);
       case 'crm.deal.productrows.set':
         return this.deal(params.id) || this.created('deal', params.id);
+      case 'crm.item.add':
+        // Смарт-счёт сделки (ссылку на оплату к нему ставит портал).
+        return Number(params.entityTypeId) === 31 && /^\d+$/.test(String(fields.parentId2 ?? '')) && this.createAllowed();
       case 'crm.item.update':
         if (Number(params.entityTypeId) === 3) return this.related('contactIds', params.id);
-        if (Number(params.entityTypeId) === 31) return this.related('invoiceIds', params.id);
-        return Number(params.entityTypeId) === 2 && (this.deal(params.id) || this.created('deal', params.id));
+        if (Number(params.entityTypeId) === 31) return (await this.related('invoiceIds', params.id)) || this.created('invoice', params.id);
+        return Number(params.entityTypeId) === 2 && (this.deal(params.id) || (await this.created('deal', params.id)) || this.dealFieldsAllowed(params.id));
       // Правка контакта сделки песочницы (решение владельца): например, очистка e-mail «wazzup».
       case 'crm.contact.update':
         return this.related('contactIds', params.id);
       // Аннулирование ссылки на оплату = удаление неоплаченной оплаты счёта тестовой сделки.
       case 'crm.item.payment.delete':
       case 'crm.item.payment.update':
-        return this.related('paymentIds', params.id);
+        return (await this.related('paymentIds', params.id)) || this.created('payment', params.id);
       case 'crm.timeline.comment.add':
-        return lc(fields.ENTITY_TYPE) === 'deal' && (this.deal(fields.ENTITY_ID) || this.created('deal', fields.ENTITY_ID));
+        return (
+          lc(fields.ENTITY_TYPE) === 'deal' &&
+          (this.deal(fields.ENTITY_ID) || (await this.created('deal', fields.ENTITY_ID)) || this.created('payment_deal', fields.ENTITY_ID))
+        );
       case 'bizproc.workflow.start': {
         const doc = Array.isArray(params.DOCUMENT_ID) ? params.DOCUMENT_ID : [];
         const m = /^DEAL_(\d+)$/.exec(String(doc[2] ?? ''));
         return lc(doc[1]) === 'ccrmdocumentdeal' && !!m && this.deal(m[1]);
       }
+      // Сообщение клиенту в чат сделки: песочница или сделка, где приложение выставило счёт.
       case 'imopenlines.crm.message.add':
-        return lc(params.CRM_ENTITY_TYPE) === 'deal' && this.deal(params.CRM_ENTITY);
+        return lc(params.CRM_ENTITY_TYPE) === 'deal' && (this.deal(params.CRM_ENTITY) || this.created('payment_deal', params.CRM_ENTITY));
       // Чат открытой линии сделки песочницы (решение владельца): войти, писать, отправлять файлы.
       case 'imopenlines.session.join':
         return this.related('chatIds', params.CHAT_ID);
@@ -87,7 +107,9 @@ export class SandboxWritePolicy implements WritePolicy {
       case 'im.chat.add':
         return !(await this.alertChatId());
       case 'im.message.add':
-        return (await this.isAlertChat(chatOf(params.DIALOG_ID))) || this.related('chatIds', chatOf(params.DIALOG_ID));
+        return (
+          (await this.isAlertChat(chatOf(params.DIALOG_ID))) || (await this.related('chatIds', chatOf(params.DIALOG_ID))) || this.paymentChat(chatOf(params.DIALOG_ID))
+        );
       case 'im.message.update':
         return this.isAlertMessage(params.MESSAGE_ID);
       // Свой рабочий день (запрос владельца 2026-10-21): только без USER_ID — токеном самого
@@ -131,9 +153,13 @@ export class SandboxWritePolicy implements WritePolicy {
       if (!(Number.isInteger(id) && id > 0)) return;
       // Бронь в датах песочницы — в её журнал (уборка удалит), иначе — созданная по разрешению.
       if (this.inRange(((params.fields ?? {}) as P).datePeriod)) await this.prisma.sandboxBooking.create({ data: { portalId: this.portal.id, bookingId: id } });
-      else await this.prisma.appCreatedEntity.create({ data: { portalId: this.portal.id, entityType: 'booking', entityId: id } });
+      else await this.remember('booking', id);
     } else if (m === 'crm.deal.add') {
-      if (Number.isInteger(id) && id > 0) await this.prisma.appCreatedEntity.create({ data: { portalId: this.portal.id, entityType: 'deal', entityId: id } });
+      if (Number.isInteger(id) && id > 0) await this.remember('deal', id);
+    } else if (m === 'crm.item.add' && Number(params.entityTypeId) === 31) {
+      const invoiceId = Number(((result ?? {}) as { item?: { id?: unknown } }).item?.id);
+      if (Number.isInteger(invoiceId) && invoiceId > 0) await this.remember('invoice', invoiceId);
+      await this.remember('payment_deal', Number(((params.fields ?? {}) as P).parentId2));
     } else if (m === 'booking.v1.booking.delete') {
       await this.prisma.sandboxBooking.updateMany({ where: { portalId: this.portal.id, bookingId: Number(params.id) }, data: { deletedAt: new Date() } });
     }
@@ -160,8 +186,31 @@ export class SandboxWritePolicy implements WritePolicy {
     return s?.createInBitrix === true;
   }
 
+  /** Чат сейчас привязан к сделке, где приложение выставило счёт (сообщение со ссылкой на оплату). */
+  private async paymentChat(chatId: string | null): Promise<boolean> {
+    if (chatId === null) return false;
+    const dealId = await this.chatDeal(Number(chatId));
+    return dealId !== null && this.created('payment_deal', dealId);
+  }
+
+  private async dealFieldsAllowed(id: unknown): Promise<boolean> {
+    if (!/^\d+$/.test(String(id ?? ''))) return false;
+    const s = await this.prisma.portalSettings.findUnique({ where: { portalId: this.portal.id } });
+    return s?.updateDealFields === true;
+  }
+
+  /** Журнал созданного: повтор (та же сделка — второй счёт) не ошибка. */
+  private async remember(entityType: CreatedKind, entityId: number): Promise<void> {
+    if (!Number.isInteger(entityId) || entityId <= 0) return;
+    await this.prisma.appCreatedEntity.upsert({
+      where: { portalId_entityType_entityId: { portalId: this.portal.id, entityType, entityId } },
+      create: { portalId: this.portal.id, entityType, entityId },
+      update: {},
+    });
+  }
+
   /** Создано приложением по разрешению «создавать новые» — и разрешение всё ещё действует. */
-  private async created(entityType: 'booking' | 'deal', id: unknown): Promise<boolean> {
+  private async created(entityType: CreatedKind, id: unknown): Promise<boolean> {
     if (!/^\d+$/.test(String(id ?? '')) || !(await this.createAllowed())) return false;
     const row = await this.prisma.appCreatedEntity.findUnique({
       where: { portalId_entityType_entityId: { portalId: this.portal.id, entityType, entityId: Number(id) } },

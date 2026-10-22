@@ -129,6 +129,12 @@ export interface GroupOptionsDto {
     clientMessage?: string;
     /** Сообщение клиенту, когда бронь снята из-за неоплаты в срок; пусто — не отправлять. */
     failMessage?: string;
+    /** Сообщение клиенту со ссылкой на доплату ({prepayment} — сумма доплаты). */
+    surchargeMessage?: string;
+    /** Предоплата в процентах от суммы сделки, если нет фиксированной и ручной (по умолчанию 100). */
+    prepaymentPercent?: number;
+    /** Смарт-счёт направления; не задан — выставить счёт из приложения нельзя. */
+    invoice?: import('./payments.js').InvoiceConfig;
   };
 }
 
@@ -188,5 +194,7 @@ export interface AppSettingsDto {
   createInBitrix: boolean;
   /** Когда разрешение включили (только для показа). */
   createGrantedAt?: string | null;
+  /** Менять поля существующих сделок (системные поля брони, ссылки и стадии оплаты); удалять — нет. */
+  updateDealFields: boolean;
   admins: { kind: MemberKind; bitrixId: number }[];
 }

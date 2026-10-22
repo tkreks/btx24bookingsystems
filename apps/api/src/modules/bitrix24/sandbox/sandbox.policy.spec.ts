@@ -10,17 +10,17 @@ const cfg = { dealIds: [678], bookingsFrom: '2020-01-01', bookingsTo: '2021-01-0
 const in2020 = { from: { timestamp: 1590994800, timezone: 'Europe/Moscow' }, to: { timestamp: 1591002000, timezone: 'Europe/Moscow' } };
 const in2026 = { from: { timestamp: 1780300800 }, to: { timestamp: 1780308000 } };
 
-function setup(owned: number[] = [], alertChatId: number | null = null, grant = { createInBitrix: false }) {
+function setup(owned: number[] = [], alertChatId: number | null = null, grant: { createInBitrix: boolean; updateDealFields?: boolean } = { createInBitrix: false }) {
   const rows = new Map(owned.map((id) => [id, { bookingId: id, deletedAt: null as Date | null }]));
   const created = new Set<string>();
   const prisma = {
-    portalSettings: { findUnique: vi.fn(async () => ({ alertChatId, createInBitrix: grant.createInBitrix })) },
+    portalSettings: { findUnique: vi.fn(async () => ({ alertChatId, createInBitrix: grant.createInBitrix, updateDealFields: grant.updateDealFields ?? false })) },
     appCreatedEntity: {
       findUnique: vi.fn(async ({ where }: { where: { portalId_entityType_entityId: { entityType: string; entityId: number } } }) => {
         const k = where.portalId_entityType_entityId;
         return created.has(`${k.entityType}:${k.entityId}`) ? { id: 'c' } : null;
       }),
-      create: vi.fn(async ({ data }: { data: { entityType: string; entityId: number } }) => created.add(`${data.entityType}:${data.entityId}`)),
+      upsert: vi.fn(async ({ create }: { create: { entityType: string; entityId: number } }) => created.add(`${create.entityType}:${create.entityId}`)),
     },
     bookingAlert: {
       findFirst: vi.fn(async ({ where }: { where: { messageId: number } }) => (where.messageId === 9001 ? { id: 'a1' } : null)),
@@ -35,7 +35,15 @@ function setup(owned: number[] = [], alertChatId: number | null = null, grant = 
     },
   } as unknown as PrismaService;
   const relations = { contactIds: [140], invoiceIds: [5152], paymentIds: [8672, 8674], chatIds: [3301] };
-  return { policy: new SandboxWritePolicy(prisma, portal, cfg, async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] })), rows, created, grant };
+  const chatDeals: Record<number, number> = { 5001: 39694, 5002: 39695 };
+  const policy = new SandboxWritePolicy(
+    prisma,
+    portal,
+    cfg,
+    async (deals) => (deals.includes(678) ? relations : { contactIds: [], invoiceIds: [], paymentIds: [], chatIds: [] }),
+    async (chatId) => chatDeals[chatId] ?? null,
+  );
+  return { policy, rows, created, grant };
 }
 
 describe('SandboxWritePolicy', () => {
@@ -160,6 +168,40 @@ describe('SandboxWritePolicy: разрешение «создавать новы
     await policy.recorded('booking.v1.booking.add', { fields: { datePeriod: in2026 } }, 902);
     grant.createInBitrix = false;
     await expect(policy.allows('booking.v1.booking.delete', { id: 902 })).resolves.toBe(false);
+  });
+});
+
+describe('SandboxWritePolicy: счета и поля сделок', () => {
+  it('creates an invoice of any deal, then messages only that deal and touches only its invoice and payments', async () => {
+    const { policy, created } = setup([], null, { createInBitrix: true });
+    await expect(policy.allows('crm.item.add', { entityTypeId: 31, fields: { parentId2: 39694, opportunity: 25000 } })).resolves.toBe(true);
+    await expect(policy.allows('crm.item.add', { entityTypeId: 31, fields: { opportunity: 1 } })).resolves.toBe(false); // без сделки
+    await expect(policy.allows('crm.item.add', { entityTypeId: 2, fields: { parentId2: 1 } })).resolves.toBe(false);
+    await expect(policy.allows('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: 39694, MESSAGE: 'x' })).resolves.toBe(false);
+    await policy.recorded('crm.item.add', { entityTypeId: 31, fields: { parentId2: 39694 } }, { item: { id: 6001 } });
+    expect([...created]).toEqual(['invoice:6001', 'payment_deal:39694']);
+    await expect(policy.allows('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: 39694, MESSAGE: 'x' })).resolves.toBe(true);
+    await expect(policy.allows('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: 39695, MESSAGE: 'x' })).resolves.toBe(false);
+    await expect(policy.allows('crm.timeline.comment.add', { fields: { ENTITY_TYPE: 'deal', ENTITY_ID: 39694, COMMENT: 'x' } })).resolves.toBe(true);
+    // Сообщение оператора — только в чат, который сейчас привязан к сделке со счётом приложения.
+    await expect(policy.allows('im.message.add', { DIALOG_ID: 'chat5001', MESSAGE: 'x' })).resolves.toBe(true);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: 'chat5002', MESSAGE: 'x' })).resolves.toBe(false);
+    await expect(policy.allows('im.message.add', { DIALOG_ID: '242', MESSAGE: 'x' })).resolves.toBe(false);
+    await expect(policy.allows('crm.item.update', { entityTypeId: 31, id: 6001, fields: { stageId: 'DT31_2:D' } })).resolves.toBe(true);
+    await expect(policy.allows('crm.item.update', { entityTypeId: 31, id: 6002, fields: {} })).resolves.toBe(false);
+    await expect(policy.allows('crm.item.payment.delete', { id: 9001 })).resolves.toBe(false);
+    created.add('payment:9001');
+    await expect(policy.allows('crm.item.payment.delete', { id: 9001 })).resolves.toBe(true);
+  });
+
+  it('updates fields of existing deals only with the owner grant; never deletes or replaces their products', async () => {
+    const off = setup([], null, { createInBitrix: true });
+    await expect(off.policy.allows('crm.deal.update', { id: 39694, fields: { UF_X: 1 } })).resolves.toBe(false);
+    const on = setup([], null, { createInBitrix: true, updateDealFields: true });
+    await expect(on.policy.allows('crm.deal.update', { id: 39694, fields: { UF_X: 1, STAGE_ID: 'UC_DIZN23' } })).resolves.toBe(true);
+    await expect(on.policy.allows('crm.item.update', { entityTypeId: 2, id: 39694, fields: {} })).resolves.toBe(true);
+    await expect(on.policy.allows('crm.deal.productrows.set', { id: 39694, rows: [] })).resolves.toBe(false);
+    await expect(on.policy.allows('crm.deal.delete', { id: 39694 })).resolves.toBe(false);
   });
 });
 

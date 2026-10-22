@@ -15,6 +15,7 @@ import { fmtDayTitle, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
 import { BookingForm } from '../bookings/BookingForm.js';
+import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { dayKey } from '../openlines/chat-list.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
@@ -68,6 +69,7 @@ export function CalendarPage({
   const [selected, setSelected] = useState<CalendarBooking | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
   const [bookingForm, setBookingForm] = useState(false);
+  const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null } | null>(null);
   const [createdNote, setCreatedNote] = useState('');
   const [dealBookingsInfo, setDealBookings] = useState<ClientBookingsDto | null>(null);
   const [settingsRevision, setSettingsRevision] = useState(0);
@@ -244,7 +246,6 @@ export function CalendarPage({
         initialWaiting={screen.waiting}
         onClose={() => setScreen({ name: 'dashboard' })}
         groups={groups ?? []}
-        readOnly={session.readOnly}
         onOpenDay={(d) => {
           setDate(d);
           setScreen({ name: 'calendar' });
@@ -362,7 +363,6 @@ export function CalendarPage({
         <BookingForm
           groups={groups ?? []}
           timezone={tz}
-          readOnly={session.readOnly}
           context={{
             date,
             groupId: activeGroup?.id ?? null,
@@ -371,8 +371,9 @@ export function CalendarPage({
             openDeals: dealBookingsInfo?.openDeals.filter((d) => d.id !== placement.dealId) ?? [],
           }}
           onClose={() => setBookingForm(false)}
-          onDone={(r) => {
+          onDone={(r, mode) => {
             setBookingForm(false);
+            if (mode === 'prepayment' && r.dealId && groups?.some((g) => g.permissions.includes('payment.send'))) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
             setCreatedNote(
               `Бронь #${r.bookingId} создана${r.dealId ? ` в сделке #${r.dealId}` : ''}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
             );
@@ -380,6 +381,7 @@ export function CalendarPage({
           }}
         />
       )}
+      {payment && <PaymentDialog dealId={payment.dealId} bookingId={payment.bookingId} timezone={tz} onClose={() => setPayment(null)} />}
     </div>
   );
 }
