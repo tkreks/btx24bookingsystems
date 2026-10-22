@@ -5,7 +5,7 @@ import {
   PAYMENT_KINDS,
   moneyValue,
   paymentAmount,
-  renderTemplate,
+  renderMessage,
   type GroupOptionsDto,
   type PaymentKind,
   type DealInvoicesDto,
@@ -71,10 +71,10 @@ export class PaymentsService {
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
     const template = kind === 'prepayment' ? opts?.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts?.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
-    const message = renderTemplate(template, {
-      ...(await this.flow.vars(ctx, deal, map)),
-      prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount) : '',
-      minutes: minutes ?? '',
+    const mc = await this.flow.messages(ctx, dealId);
+    const message = renderMessage(template, {
+      ...mc,
+      vars: { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' },
     });
     return { dealId, kind, groupId: g?.group.id ?? null, groupName: g?.group.name ?? null, amount: a.amount, source: a.source, timeoutMinutes: minutes, message, problems };
   }

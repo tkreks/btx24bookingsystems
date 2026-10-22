@@ -9,6 +9,7 @@ import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { BookingSyncService } from './booking-sync.service.js';
+import { MessageContextService } from './message-context.service.js';
 
 @Module({
   imports: [AccessModule, Bitrix24Module],
@@ -20,7 +21,8 @@ import { BookingSyncService } from './booking-sync.service.js';
     BookingCreateService,
     ClientBookingsService,
     DealFieldMapService,
+    MessageContextService,
   ],
-  exports: [BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService],
+  exports: [BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService, MessageContextService],
 })
 export class BookingsModule {}

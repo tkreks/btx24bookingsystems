@@ -3,24 +3,26 @@ import type { FilesService } from './files.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 
-function setup(existing: { id: string; name: string; steps: unknown; ownerUserId?: number }[] = []) {
+type Where = { id?: string; ownerUserId?: number; OR?: ({ ownerUserId: number } | { shared: boolean })[] };
+function setup(existing: { id: string; name: string; steps: unknown; ownerUserId?: number; shared?: boolean }[] = []) {
   const rows = existing.map((r) => ({
     portalId: 'p1',
     ownerUserId: 7,
+    shared: false,
     updatedAt: new Date('2026-10-21T00:00:00Z'),
     ...r,
   }));
+  const match = (r: (typeof rows)[number], w: Where) =>
+    (!w.id || r.id === w.id) &&
+    (w.OR ? w.OR.some((c) => ('ownerUserId' in c ? r.ownerUserId === c.ownerUserId : r.shared === c.shared)) : w.ownerUserId === undefined || r.ownerUserId === w.ownerUserId);
   const prisma = {
     messageTemplate: {
-      findMany: vi.fn(async ({ where }: { where: { ownerUserId: number } }) =>
-        rows.filter((r) => r.ownerUserId === where.ownerUserId),
-      ),
-      findFirst: vi.fn(
-        async ({ where }: { where: { id: string; ownerUserId: number } }) =>
-          rows.find((r) => r.id === where.id && r.ownerUserId === where.ownerUserId) ?? null,
-      ),
+      findMany: vi.fn(async ({ where }: { where: Where }) => rows.filter((r) => match(r, where))),
+      findFirst: vi.fn(async ({ where }: { where: Where }) => rows.find((r) => match(r, where)) ?? null),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: object }) => Object.assign(rows.find((r) => r.id === where.id)!, data)),
+      delete: vi.fn(async () => ({})),
       count: vi.fn(async () => rows.length),
-      create: vi.fn(async ({ data }: { data: { name: string; steps: unknown } }) => {
+      create: vi.fn(async ({ data }: { data: { name: string; steps: unknown; shared: boolean } }) => {
         const row = { id: 'new', portalId: 'p1', ownerUserId: 7, updatedAt: new Date(), ...data };
         rows.push(row);
         return row;
@@ -78,9 +80,21 @@ describe('TemplatesService', () => {
     ]);
     await expect(svc.remove(user, 't2')).rejects.toMatchObject({ status: 404 });
     await svc.remove(user, 't1');
-    expect(prisma.messageTemplate.deleteMany).toHaveBeenCalledWith({
-      where: { id: 't1', portalId: 'p1', ownerUserId: 7 },
-    });
+    expect(prisma.messageTemplate.delete).toHaveBeenCalledWith({ where: { id: 't1' } });
     expect(files.dropUnused).toHaveBeenCalledWith(user, ['f9']);
+  });
+
+  it('everyone sees shared templates; only admins create or change them', async () => {
+    const t = setup([
+      { id: 's1', name: 'Приветствие', steps: [{ text: 'Здравствуйте', fileIds: [] }], ownerUserId: 1, shared: true },
+      { id: 't2', name: 'Чужой личный', steps: [], ownerUserId: 8 },
+    ]);
+    const list = await t.svc.list(t.user);
+    expect(list.map((x) => [x.id, x.shared, x.mine, x.canEdit])).toEqual([['s1', true, false, false]]);
+    expect((await t.svc.list(t.user, true))[0].canEdit).toBe(true);
+    await expect(t.svc.update(t.user, 's1', { name: 'x', steps: [{ text: 'y', fileIds: [] }] })).rejects.toMatchObject({ status: 403 });
+    await expect(t.svc.create(t.user, { name: 'Общий', shared: true, steps: [{ text: 'y', fileIds: [] }] })).rejects.toMatchObject({ status: 403 });
+    expect(await t.svc.update(t.user, 's1', { name: 'Приветствие 2', steps: [{ text: 'y', fileIds: [] }] }, true)).toMatchObject({ name: 'Приветствие 2', shared: true });
+    expect(await t.svc.create(t.user, { name: 'Общий', shared: true, steps: [{ text: 'y', fileIds: [] }] }, true)).toMatchObject({ shared: true, mine: true });
   });
 });

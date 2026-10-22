@@ -165,6 +165,11 @@ export function PaymentsSection({
         />
       </label>
       <h4>Действия после оплаты</h4>
+      <label className="check">
+        <input type="checkbox" checked={!!payments.sendConfirmation} onChange={(e) => onChange({ ...payments, sendConfirmation: e.target.checked })} />
+        Отправлять клиенту подтверждение после предоплаты (цепочка типа брони из «Типы брони и сообщения клиенту»)
+      </label>
+      <p className="muted">Перед включением отключите на портале БП, которые шлют подтверждение (270, 358), — иначе клиент получит его дважды.</p>
       <div className="settings-grid">
         <label>
           Ожидание оплаты, минут

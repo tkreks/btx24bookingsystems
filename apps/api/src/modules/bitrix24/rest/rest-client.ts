@@ -152,6 +152,33 @@ export class Bitrix24RestClient {
     return items.slice(0, max);
   }
 
+  /**
+   * Скачать файл по одноразовой ссылке портала (`downloadUrl` из REST, токен уже в ссылке). Только
+   * хост самого портала — ссылку не подменить на чужой адрес; больше `maxBytes` — ошибка.
+   */
+  async download(url: string, maxBytes = 50 * 1024 * 1024): Promise<{ data: Buffer; contentType: string | null }> {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      throw new Bitrix24Error('INVALID_DOWNLOAD_URL', 'Download URL is malformed');
+    }
+    const portal = new URL(this.opts.clientEndpoint);
+    if (target.host !== portal.host || target.protocol !== portal.protocol)
+      throw new Bitrix24Error('INVALID_DOWNLOAD_URL', 'Download URL is not on the portal host');
+    let res: Response;
+    try {
+      res = await this.fetchImpl(target, { signal: AbortSignal.timeout(60_000) });
+    } catch (err) {
+      throw new Bitrix24Error('NETWORK_ERROR', `Download failed: ${(err as Error).message}`);
+    }
+    if (!res.ok) throw new Bitrix24Error('DOWNLOAD_FAILED', `Download failed: HTTP ${res.status}`, res.status);
+    if (Number(res.headers.get('content-length') ?? 0) > maxBytes) throw new Bitrix24Error('FILE_TOO_LARGE', 'File is too large');
+    const data = Buffer.from(await res.arrayBuffer());
+    if (data.length > maxBytes) throw new Bitrix24Error('FILE_TOO_LARGE', 'File is too large');
+    return { data, contentType: res.headers.get('content-type') };
+  }
+
   /** true — вызов разрешён только благодаря песочнице (после успеха его надо записать в журнал). */
   private async assertAllowed(method: string, params: Record<string, unknown>): Promise<boolean> {
     if (method === 'batch' || !this.opts.readOnly || isReadMethod(method)) return false; // команды пакета проверяет batch()

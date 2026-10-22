@@ -536,6 +536,7 @@ export function ChatsPage({
         <BookingForm
           groups={groups}
           timezone={timezone}
+          wizard
           context={{
             date: todayIn(timezone),
             contactId: form.data?.contactId ?? null,

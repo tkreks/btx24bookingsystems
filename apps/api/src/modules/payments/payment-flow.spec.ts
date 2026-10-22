@@ -5,6 +5,7 @@ import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import type { BookingJournalService } from '../bookings/booking-journal.service.js';
 import type { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { PaymentFlow } from './payment-flow.js';
+import { MessageContextService } from '../bookings/message-context.service.js';
 
 const portal = { id: 'p1', timezone: 'Europe/Moscow' } as Portal;
 const options = {
@@ -30,6 +31,10 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
     if (method === 'crm.item.get') return { result: { item: { id: 6001, categoryId: 2, stageId: o.stage ?? 'DT31_2:N', ufCrmLink: o.link ?? '' } } };
     if (method === 'crm.deal.get') return { result: { ID: '678', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_VD: '01.06.2020' } };
     if (method === 'crm.contact.get') return { result: { NAME: 'Анна' } };
+    if (method === 'crm.deal.fields') return { result: { UF_VD: { type: 'string', title: 'Дата начала визита' }, OPPORTUNITY: { type: 'double', title: 'Сумма' } } };
+    if (method === 'crm.contact.fields') return { result: { NAME: { type: 'string', title: 'Имя' } } };
+    if (method === 'crm.deal.productrows.get') return { result: [{ PRODUCT_NAME: 'Программа «Алатырь»' }] };
+    if (method === 'disk.file.get') return { result: { NAME: 'Правила.pdf', DOWNLOAD_URL: 'https://portal/x' } };
     if (method === 'imopenlines.crm.chat.get') return { result: (o.chats ?? ['3301']).map((CHAT_ID) => ({ CHAT_ID })) };
     if (method === 'imopenlines.crm.message.add' && o.sendFails) throw new Bitrix24Error('ACCESS_DENIED', 'no');
     if (method === 'imopenlines.crm.message.add' && (params.CHAT_ID === 14034 || o.closedSession)) throw new Bitrix24Error('CHAT_NOT_IN_CRM', 'other deal');
@@ -37,10 +42,11 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
     if (method === 'crm.item.payment.list') return { result: o.payments ?? [] };
     return { result: true };
   });
-  const client = { call } as unknown as Bitrix24RestClient;
+  const client = { call, download: vi.fn(async () => ({ data: Buffer.from('pdf'), contentType: null })) } as unknown as Bitrix24RestClient;
   let row: PaymentRequest;
   const prisma = {
-    workGroup: { findUnique: vi.fn(async () => ({ options })) },
+    workGroup: { findUnique: vi.fn(async () => ({ options })), findMany: vi.fn(async () => [{ options }]) },
+    bookingRecord: { findUnique: vi.fn(async () => null) },
     paymentRequest: { update: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { ...row, ...data } as PaymentRequest)) },
     appCreatedEntity: {
       findUnique: vi.fn(async () => (o.ownInvoice === false ? null : { id: 'x' })),
@@ -53,7 +59,8 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
     recordCancelled: vi.fn(async () => ({})),
   };
   const fieldMap = { get: vi.fn(async () => map) } as unknown as DealFieldMapService;
-  const flow = new PaymentFlow(prisma, journal as unknown as BookingJournalService, fieldMap);
+  const flow = new PaymentFlow(prisma, journal as unknown as BookingJournalService, fieldMap, new MessageContextService(prisma, fieldMap));
+  flow.sleep = async () => {};
   const req = (over: Partial<PaymentRequest> = {}): PaymentRequest =>
     (row = {
       id: 'q1', portalId: 'p1', idempotencyKey: 'k', dealId: 678, bookingId: o.booking ? 5918 : null, groupId: 'g1', kind: 'prepayment',
@@ -140,6 +147,24 @@ describe('PaymentFlow', () => {
     expect(t.calls.map((c) => c[0])).not.toContain('booking.v1.booking.delete');
     expect(t.calls.map((c) => c[0])).not.toContain('imopenlines.crm.message.add');
     expect(t.journal.note).toHaveBeenCalledWith('r1', 'payment_cancelled', expect.anything(), { invoiceId: 6001 }, 'worker');
+  });
+
+  it('paid → confirmation of the booking type with variables, then its Disk file in the deal chat', async () => {
+    const o = options as unknown as { bookingTypes?: unknown; payments: { sendConfirmation?: boolean } };
+    o.bookingTypes = [{ id: 'p', title: 'Программы', keywords: ['Алатырь'], dealTypeValue: '86', program: '@keyword', confirmation: [{ text: '{{Контакт: Имя}}, ждём вас! Программа: {=Variable:programm > printable}, сумма {{Сумма}}', files: [{ id: 92152, name: 'Правила.pdf' }] }] }];
+    o.payments.sendConfirmation = true;
+    try {
+      const t = setup({ stage: 'DT31_2:P', chats: ['4396'] });
+      const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60_000) }));
+      expect(r.status).toBe('paid');
+      expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Анна, ждём вас! Программа: Алатырь, сумма 90 000');
+      expect(t.calls.find((c) => c[0] === 'im.v2.File.upload')![1]).toEqual({ dialogId: 'chat4396', fields: { name: 'Правила.pdf', content: Buffer.from('pdf').toString('base64') } });
+      const names = t.calls.map((c) => c[0]);
+      expect(names.indexOf('imopenlines.crm.message.add')).toBeLessThan(names.indexOf('im.v2.File.upload'));
+    } finally {
+      delete o.bookingTypes;
+      o.payments.sendConfirmation = false;
+    }
   });
 
   it('still waiting before the deadline — nothing changes', async () => {

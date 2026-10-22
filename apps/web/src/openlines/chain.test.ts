@@ -6,6 +6,9 @@ const template = {
   id: 't',
   name: 'Прайс',
   updatedAt: '',
+  shared: false,
+  mine: true,
+  canEdit: true,
   steps: [
     { text: 'Добрый день', fileIds: [], files: [] },
     { text: '', fileIds: ['f1'], files: [file] },

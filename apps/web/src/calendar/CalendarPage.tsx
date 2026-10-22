@@ -18,6 +18,7 @@ import { BookingForm } from '../bookings/BookingForm.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { dayKey } from '../openlines/chat-list.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
+import { TemplatesPage } from '../openlines/TemplatesPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { BookingDetails } from './BookingDetails.js';
@@ -81,6 +82,7 @@ export function CalendarPage({
     | { name: 'dashboard' }
     | { name: 'chats'; chatId?: number; waiting?: boolean }
     | { name: 'alerts'; alertId?: string | null }
+    | { name: 'templates' }
   >(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
     if (alertId) return { name: 'alerts', alertId };
@@ -222,6 +224,25 @@ export function CalendarPage({
       />
     );
 
+  if (screen.name === 'templates')
+    return (
+      <>
+        <TemplatesPage
+          admin={session.canManageApp}
+          onBack={() => setScreen({ name: 'dashboard' })}
+          onSettings={session.canManageApp ? () => setAdminOpen(true) : undefined}
+        />
+        {adminOpen && session.canManageApp && (
+          <SettingsPanel
+            timezone={tz}
+            temporary={session.settingsAccessUntil}
+            onClose={() => setAdminOpen(false)}
+            onChanged={() => setSettingsRevision((n) => n + 1)}
+          />
+        )}
+      </>
+    );
+
   // Настройки открываются только с дашборда (решение владельца): админам и по временному паролю.
   if (screen.name === 'dashboard')
     return (
@@ -234,6 +255,7 @@ export function CalendarPage({
           bookingAlerts={bookingsView}
           onAlerts={() => setScreen({ name: 'alerts' })}
           onSettings={() => setAdminOpen(true)}
+          onTemplates={openlinesSend ? () => setScreen({ name: 'templates' }) : undefined}
           onSession={(s) => {
             setSession(s);
             setSettingsRevision((n) => n + 1);

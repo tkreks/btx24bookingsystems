@@ -1,3 +1,4 @@
+import { Bitrix24Module } from '../bitrix24/bitrix24.module.js';
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module.js';
 import { BookingsModule } from '../bookings/bookings.module.js';
@@ -10,7 +11,7 @@ import { OpenlinesController } from './openlines.controller.js';
 import { TemplatesService } from './templates.service.js';
 
 @Module({
-  imports: [AccessModule, BookingsModule],
+  imports: [AccessModule, BookingsModule, Bitrix24Module],
   controllers: [OpenlinesController],
   providers: [ChatFoldersService, ChatsService, DashboardService, FilesService, OpenlineIndexService, TemplatesService],
 })

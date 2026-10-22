@@ -10,3 +10,4 @@ export * from './openlines.js';
 export * from './bookings.js';
 export * from './client-messages.js';
 export * from './payments.js';
+export * from './template-engine.js';

@@ -3,8 +3,9 @@ import {
   DEFAULT_CLIENT_MESSAGE,
   DEFAULT_FAIL_MESSAGE,
   DEFAULT_SURCHARGE_MESSAGE,
-  renderTemplate,
-  type DealFieldMapDto,
+  renderMessage,
+  type ClientMessageStep,
+  type MessageContext,
   type GroupOptionsDto,
   type PaymentKind,
 } from '@btx24/shared';
@@ -16,6 +17,7 @@ import { dealOfBindings } from '../bitrix24/portals/portal.service.js';
 import { BookingJournalService, SYSTEM } from '../bookings/booking-journal.service.js';
 import { dateRu, timeRu } from '../bookings/booking-create.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
+import { MessageContextService } from '../bookings/message-context.service.js';
 
 /** Сколько ждать ссылку от портала, прежде чем признать счёт неудачным. */
 export const LINK_WAIT_MS = 15 * 60_000;
@@ -26,7 +28,7 @@ type Deal = Record<string, unknown> & { ID: string; TITLE?: string; CATEGORY_ID?
 type Invoice = { id: number; stageId?: string; categoryId?: number } & Record<string, unknown>;
 
 export const msg = (e: unknown) => (e instanceof Bitrix24Error ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e)).slice(0, 500);
-const money = (v: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v);
+const money = (v: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v).replace(/[\u00a0\u202f]/g, ' ');
 /** Стадия счёта «оплачен»: семантика успеха у смарт-счёта — суффикс `:P`. */
 export const invoicePaid = (stageId: unknown) => String(stageId ?? '').endsWith(':P');
 const invoiceFailed = (stageId: unknown) => String(stageId ?? '').endsWith(':D');
@@ -52,7 +54,23 @@ export class PaymentFlow {
     private readonly prisma: PrismaService,
     private readonly journal: BookingJournalService,
     private readonly fieldMap: DealFieldMapService,
+    private readonly messageContext: MessageContextService,
   ) {}
+
+  /** Пауза между сообщениями цепочки: каналы доставляют асинхронно (порядок). В тестах — 0. */
+  sendGapMs = 1500;
+  sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  /** Данные сделки для шаблонов; не прочитались — пустые (текст уйдёт с переменными как есть). */
+  async messages(ctx: Pick<FlowContext, 'portal' | 'client'>, dealId: number): Promise<MessageContext & { deal: Deal | null }> {
+    try {
+      const mc = await this.messageContext.forDeal(ctx.portal, ctx.client, dealId);
+      return { ...mc, deal: mc.deal as Deal | null };
+    } catch (e) {
+      this.logger.warn(`deal ${dealId}: message context failed: ${msg(e)}`);
+      return { vars: {}, dealByTitle: {}, dealByCode: {}, contact: {}, variables: {}, deal: null };
+    }
+  }
 
   async options(req: Pick<PaymentRequest, 'groupId'>): Promise<GroupOptionsDto | null> {
     if (!req.groupId) return null;
@@ -89,15 +107,19 @@ export class PaymentFlow {
     const linkField = req.kind === 'prepayment' ? map.prepaymentLink : map.surchargeLink;
     if (linkField) await this.dealUpdate(ctx, req.dealId, { [linkField]: req.link }, warnings, 'ссылка на оплату');
 
-    const deal = await this.deal(ctx, req.dealId);
+    const mc = await this.messages(ctx, req.dealId);
+    const deal = mc.deal;
     const minutes = req.kind === 'prepayment' ? opts.payments.timeoutMinutes : null;
     const deadline = minutes ? new Date(Date.now() + minutes * 60_000) : null;
-    const text = renderTemplate(this.template(req.kind, opts), {
-      ...(await this.vars(ctx, deal, map)),
-      prepayment: money(Number(req.amount)),
-      link: req.link,
-      minutes: minutes ?? '',
-      deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
+    const text = renderMessage(this.template(req.kind, opts), {
+      ...mc,
+      vars: {
+        ...mc.vars,
+        prepayment: money(Number(req.amount)),
+        link: req.link,
+        minutes: minutes ?? '',
+        deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
+      },
     });
     const sent = await this.sendToClient(ctx, req, deal, text, warnings);
     await this.comment(ctx, req.dealId, `Ссылка на оплату (${req.kind === 'prepayment' ? 'предоплата' : 'доплата'} ${money(Number(req.amount))} ₽, счёт #${req.invoiceId}) ${sent ? 'отправлена клиенту' : 'НЕ отправлена — отправьте вручную'}:\n${text}`, warnings);
@@ -135,6 +157,7 @@ export class PaymentFlow {
       const rec = await this.journal.find(ctx.portal.id, req.bookingId);
       if (rec) await this.journal.note(rec.id, 'paid', { kind: 'system', name: 'Система: оплата получена' }, { kind: req.kind, amount: Number(req.amount), invoiceId: req.invoiceId }, 'worker');
     }
+    if (req.kind === 'prepayment' && opts?.payments.sendConfirmation) await this.confirm(ctx, req, opts, warnings);
     return this.prisma.paymentRequest.update({
       where: { id: req.id },
       data: { status: 'paid', paidAt: new Date(), closedAt: new Date(), warnings: warnings as Prisma.InputJsonValue },
@@ -183,10 +206,9 @@ export class PaymentFlow {
     if (opts?.payments.failStageId) await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.failStageId }, warnings, 'стадия «не оплачено»');
     const failText = opts?.payments.failMessage ?? DEFAULT_FAIL_MESSAGE;
     if (failText.trim()) {
-      const deal = await this.deal(ctx, req.dealId);
-      const map = await this.fieldMap.get(ctx.portal.id);
-      const text = renderTemplate(failText, { ...(await this.vars(ctx, deal, map)), minutes: opts?.payments.timeoutMinutes ?? '' });
-      await this.sendToClient(ctx, req, deal, text, warnings);
+      const mc = await this.messages(ctx, req.dealId);
+      const text = renderMessage(failText, { ...mc, vars: { ...mc.vars, minutes: opts?.payments.timeoutMinutes ?? '' } });
+      await this.sendToClient(ctx, req, mc.deal, text, warnings);
     }
     await this.comment(ctx, req.dealId, `Предоплата по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}.`, warnings);
     return this.prisma.paymentRequest.update({
@@ -272,31 +294,77 @@ export class PaymentFlow {
     return false;
   }
 
-  private template(kind: PaymentKind, opts: GroupOptionsDto): string {
-    return kind === 'prepayment' ? opts.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
+  /**
+   * Подтверждение после оплаты (замена БП 270/358): тип брони по товарам сделки → его цепочка
+   * «текст + файлы Диска» с переменными. Тип не определён — клиенту ничего, комментарий в сделке.
+   */
+  private async confirm(ctx: FlowContext, req: PaymentRequest, opts: GroupOptionsDto, warnings: string[]): Promise<void> {
+    const mc = await this.messages(ctx, req.dealId);
+    const rule = (opts.bookingTypes ?? []).find((r) => r.title === mc.variables.dealtype);
+    if (!rule || !rule.confirmation.length) {
+      const why = rule ? `у типа «${rule.title}» нет сообщений` : 'тип брони не определён по товарам сделки';
+      warnings.push(`Подтверждение клиенту не отправлено: ${why}`);
+      await this.comment(ctx, req.dealId, `Оплата получена, но подтверждение клиенту не отправлено: ${why}.`, warnings);
+      return;
+    }
+    const steps = rule.confirmation.map((st) => ({ ...st, text: renderMessage(st.text, mc) }));
+    const sent = await this.sendChain(ctx, req, mc.deal, steps, warnings);
+    await this.comment(
+      ctx,
+      req.dealId,
+      `Подтверждение брони (${rule.title}) ${sent ? 'отправлено клиенту' : 'НЕ отправлено — отправьте вручную'}:\n${steps.map((x) => x.text).filter(Boolean).join('\n\n')}`,
+      warnings,
+    );
   }
 
-  /** Переменные шаблона из сделки: имя клиента, даты визита, сумма сделки. */
-  async vars(ctx: FlowContext, deal: Deal | null, map: DealFieldMapDto): Promise<Record<string, string | number>> {
-    const v: Record<string, string | number> = {};
-    if (!deal) return v;
-    const pick = (code?: string) => (code && deal[code] !== undefined && deal[code] !== null ? String(deal[code]) : '');
-    v.date_start = pick(map.visitDateStart);
-    v.time_start = pick(map.visitTimeStart);
-    v.date_end = pick(map.visitDateEnd);
-    v.time_end = pick(map.visitTimeEnd);
-    v.guests = pick(map.guests);
-    if (Number(deal.OPPORTUNITY) > 0) v.amount = money(Number(deal.OPPORTUNITY));
-    const contactId = Number(deal.CONTACT_ID);
-    if (contactId > 0) {
-      try {
-        const c = (await ctx.client.call<{ NAME?: string }>('crm.contact.get', { id: contactId })).result;
-        if (c?.NAME) v.client_name = c.NAME;
-      } catch {
-        /* без имени — шаблон оставит {client_name}, текст всё равно уйдёт */
+  /** Цепочка по порядку: у шага — текст, затем файлы Диска отдельными сообщениями; пауза между ними. */
+  private async sendChain(ctx: FlowContext, req: PaymentRequest, deal: Deal | null, steps: ClientMessageStep[], warnings: string[]): Promise<boolean> {
+    let first = true;
+    const gap = async () => {
+      if (!first && this.sendGapMs > 0) await this.sleep(this.sendGapMs);
+      first = false;
+    };
+    let chatId: number | null | undefined;
+    for (const st of steps) {
+      if (st.text.trim()) {
+        await gap();
+        if (!(await this.sendToClient(ctx, req, deal, st.text, warnings))) return false;
+      }
+      for (const f of st.files) {
+        chatId ??= await this.boundChat(ctx, req.dealId);
+        if (!chatId) {
+          warnings.push('Файлы подтверждения не отправлены: у сделки нет чата открытой линии');
+          return false;
+        }
+        await gap();
+        const ok = await this.safe(warnings, `файл «${f.name}»`, async () => {
+          const file = (await ctx.client.call<{ DOWNLOAD_URL?: string; NAME?: string }>('disk.file.get', { id: f.id })).result;
+          const { data } = await ctx.client.download(String(file?.DOWNLOAD_URL ?? ''));
+          await ctx.client.call('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name: file?.NAME ?? f.name, content: data.toString('base64') } });
+        });
+        if (!ok) return false;
       }
     }
-    return v;
+    return true;
+  }
+
+  /** Самый новый чат открытой линии, который сейчас привязан к сделке. */
+  private async boundChat(ctx: FlowContext, dealId: number): Promise<number | null> {
+    try {
+      const r = await ctx.client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: dealId, ACTIVE_ONLY: 'N' });
+      const chats = (Array.isArray(r.result) ? r.result : []).map((c) => Number(c.CHAT_ID) || 0).filter((x) => x > 0).sort((a, b) => b - a);
+      for (const chatId of chats) {
+        const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
+        if (dealOfBindings(d.result?.entity_data_2) === dealId) return chatId;
+      }
+    } catch (e) {
+      this.logger.warn(`deal ${dealId}: chat lookup failed: ${msg(e)}`);
+    }
+    return null;
+  }
+
+  private template(kind: PaymentKind, opts: GroupOptionsDto): string {
+    return kind === 'prepayment' ? opts.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
   }
 
   async deal(ctx: Pick<FlowContext, 'client'>, dealId: number): Promise<Deal | null> {

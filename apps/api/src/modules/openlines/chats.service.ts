@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
   ChatListDto,
@@ -22,6 +23,8 @@ import {
   type ImUser,
 } from './chat-parsing.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { dealOfBindings, PortalService } from '../bitrix24/portals/portal.service.js';
+import { MessageContextService } from '../bookings/message-context.service.js';
 import { FilesService } from './files.service.js';
 import { OpenlineIndexService } from './openline-index.service.js';
 import { stepsSchema } from './templates.service.js';
@@ -91,7 +94,74 @@ export class ChatsService {
     private readonly files: FilesService,
     private readonly index: OpenlineIndexService,
     private readonly prisma?: PrismaService,
+    private readonly portals?: PortalService,
+    private readonly messageContext?: MessageContextService,
   ) {}
+
+  /**
+   * Подставить переменные шаблона (`{{Поле сделки}}`, `{=Variable:…}`, `{client_name}`…) по сделке,
+   * к которой сейчас привязан чат, — правами сотрудника. Нет сделки — тексты как есть.
+   */
+  /** Проверка шаблона на данных сделки (страница «Шаблоны»). */
+  async preview(user: B24UserContext, body: unknown): Promise<{ texts: string[]; unresolved: string[] }> {
+    const b = (body ?? {}) as { texts?: unknown; dealId?: unknown };
+    const texts = b.texts;
+    if (!Array.isArray(texts) || texts.length > 50 || texts.some((t) => typeof t !== 'string' || t.length > 4000))
+      throw new BadRequestException({ code: 'INVALID_TEXTS', message: 'texts: до 50 строк до 4000 символов' });
+    const dealId = Number(b.dealId);
+    if (!Number.isInteger(dealId) || dealId <= 0) throw new BadRequestException({ code: 'INVALID_DEAL', message: 'Укажите номер сделки' });
+    if (!this.messageContext) return { texts: texts as string[], unresolved: [] };
+    const ctx = await this.messageContext.forDeal(user.portal, user.client, dealId);
+    if (!ctx.deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена или нет доступа` });
+    const out = (texts as string[]).map((t) => renderMessage(t, { ...ctx, vars: { ...ctx.vars, link: '{link}', prepayment: ctx.vars.prepayment ?? '' } }));
+    return { texts: out, unresolved: [...new Set(out.flatMap(unresolvedTokens))].filter((t) => !['{link}', '{deadline}', '{minutes}', '{prepayment}'].includes(t)) };
+  }
+
+  async variables(user: B24UserContext): Promise<TemplateVariablesDto> {
+    const t = this.messageContext ? await this.messageContext.titles(user.portal, user.client) : { deal: [], contact: [] };
+    return {
+      ...t,
+      app: [
+        ...Object.entries(TEMPLATE_VARIABLES).map(([k, label]) => ({ token: `{${k}}`, label })),
+        { token: '{=Variable:programm}', label: 'программа по товарам сделки (как в БП)' },
+        { token: '{=Variable:dealtype}', label: 'тип брони по товарам сделки' },
+        { token: '{=Document:CONTACT.NAME}', label: 'имя контакта (как в БП)' },
+        { token: '{=Document:UF_CRM_…}', label: 'поле сделки по коду (как в БП)' },
+      ],
+    };
+  }
+
+  async render(user: B24UserContext, chatId: number, body: unknown): Promise<{ texts: string[]; unresolved: string[]; dealId: number | null }> {
+    const texts = (body as { texts?: unknown } | null)?.texts;
+    if (!Array.isArray(texts) || texts.length > 50 || texts.some((t) => typeof t !== 'string' || t.length > 4000))
+      throw new BadRequestException({ code: 'INVALID_TEXTS', message: 'texts: до 50 строк до 4000 символов' });
+    if (!texts.some((t) => hasTokens(t as string)) || !this.messageContext) return { texts: texts as string[], unresolved: [], dealId: null };
+    const dialog = (await user.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId })).result;
+    const dealId = dealOfBindings(dialog?.entity_data_2);
+    const ctx = await this.messageContext.forDeal(user.portal, user.client, dealId);
+    const out = (texts as string[]).map((t) => renderMessage(t, ctx));
+    return { texts: out, unresolved: [...new Set(out.flatMap(unresolvedTokens))], dealId };
+  }
+
+  /**
+   * Файл сообщения чата (картинка, видео, документ) — через сервер приложения: прямые ссылки
+   * портала во фрейме не открываются (нет входа в Битрикс24 у стороннего домена). Доступ к диалогу —
+   * правами сотрудника; ссылку на файл берём его токеном, а если он не участник чата (видит диалог
+   * по правам CRM), — токеном приложения.
+   */
+  async file(user: B24UserContext, chatId: number, fileId: number): Promise<{ data: Buffer; contentType: string | null }> {
+    await user.client.call('imopenlines.dialog.get', { CHAT_ID: chatId });
+    const params = { dialogId: `chat${chatId}`, fileId };
+    try {
+      const r = await user.client.call<{ downloadUrl?: string }>('im.v2.File.download', params);
+      return await user.client.download(String(r.result?.downloadUrl ?? ''));
+    } catch (err) {
+      if (!(err instanceof Bitrix24Error) || !this.portals || err.code === 'FILE_TOO_LARGE') throw err;
+      const app = this.portals.clientFor(user.portal);
+      const r = await app.call<{ downloadUrl?: string }>('im.v2.File.download', params);
+      return app.download(String(r.result?.downloadUrl ?? ''));
+    }
+  }
 
   /** Мои папки: чат → папка. */
   async myFolders(user: B24UserContext): Promise<Map<number, string>> {

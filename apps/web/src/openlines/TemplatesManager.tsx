@@ -4,28 +4,36 @@ import { apiDelete, apiPost, apiPut } from '../api.js';
 import { isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { StepsEditor } from './StepsEditor.js';
 
-type Editing = { id: string | null; name: string; steps: ChainStep[] };
+type Editing = { id: string | null; name: string; steps: ChainStep[]; shared: boolean };
 
-/** Личные шаблоны менеджера: название + цепочка сообщений с вложениями. */
+/**
+ * Шаблоны сообщений: свои и общие (общие меняют администраторы приложения). Окно в чате или
+ * встроенный блок страницы «Шаблоны» (`embedded`).
+ */
 export function TemplatesManager({
   templates,
   onChanged,
   onClose,
   initial,
+  admin = false,
+  embedded = false,
 }: {
   templates: MessageTemplateDto[];
   onChanged: (templates: MessageTemplateDto[]) => void;
   onClose: () => void;
   /** Открыть сразу на создании шаблона из текущей цепочки. */
   initial?: ChainStep[];
+  /** Администратор приложения — может создавать и менять общие шаблоны. */
+  admin?: boolean;
+  embedded?: boolean;
 }) {
-  const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial } : null);
+  const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial, shared: false } : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
     if (!editing) return;
-    const body: SaveTemplateDto = { name: editing.name, steps: toSteps(editing.steps) };
+    const body: SaveTemplateDto = { name: editing.name, steps: toSteps(editing.steps), ...(admin ? { shared: editing.shared } : {}) };
     setBusy(true);
     setError('');
     try {
@@ -33,7 +41,7 @@ export function TemplatesManager({
         ? await apiPut<MessageTemplateDto>(`/openlines/templates/${editing.id}`, body)
         : await apiPost<MessageTemplateDto>('/openlines/templates', body);
       onChanged(
-        [...templates.filter((t) => t.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+        [...templates.filter((t) => t.id !== saved.id), saved].sort((a, b) => Number(b.shared) - Number(a.shared) || a.name.localeCompare(b.name, 'ru')),
       );
       setEditing(null);
     } catch (e) {
@@ -55,21 +63,16 @@ export function TemplatesManager({
     }
   };
 
-  return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div
-        className="sheet templates-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="templates-title"
-        onClick={(e) => e.stopPropagation()}
-      >
+  const body = (
+    <>
+        {!embedded && (
         <header>
-          <h2 id="templates-title">{editing ? (editing.id ? 'Шаблон' : 'Новый шаблон') : 'Мои шаблоны'}</h2>
+          <h2 id="templates-title">{editing ? (editing.id ? 'Шаблон' : 'Новый шаблон') : 'Шаблоны'}</h2>
           <button aria-label="Закрыть шаблоны" onClick={onClose}>
             ×
           </button>
         </header>
+        )}
         {error && (
           <div className="notice error" role="alert">
             {error}
@@ -93,7 +96,16 @@ export function TemplatesManager({
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               />
             </label>
-            <p className="muted">Сообщения уйдут по порядку. К каждому можно приложить файлы (до 10 МБ).</p>
+            {admin && (
+              <label className="check">
+                <input type="checkbox" checked={editing.shared} onChange={(e) => setEditing({ ...editing, shared: e.target.checked })} />
+                Общий шаблон — видят все сотрудники
+              </label>
+            )}
+            <p className="muted">
+              Сообщения уйдут по порядку, файлы — отдельными сообщениями после текста. Переменные ({'{{Дата начала визита}}'}, {'{{Контакт: Имя}}'},{' '}
+              {'{=Variable:programm}'} и др.) подставятся по сделке чата при вставке шаблона.
+            </p>
             <StepsEditor
               steps={editing.steps}
               disabled={busy}
@@ -115,7 +127,7 @@ export function TemplatesManager({
         ) : (
           <>
             <div className="form-actions">
-              <button className="primary" onClick={() => setEditing({ id: null, name: '', steps: [newStep()] })}>
+              <button className="primary" onClick={() => setEditing({ id: null, name: '', steps: [newStep()], shared: false })}>
                 Создать шаблон
               </button>
             </div>
@@ -126,28 +138,41 @@ export function TemplatesManager({
               {templates.map((t) => (
                 <li key={t.id}>
                   <div>
-                    <strong>{t.name}</strong>
+                    <strong>{t.name}</strong> {t.shared && <span className="pill">общий</span>}
                     <p className="muted">
                       Сообщений: {t.steps.length} · Вложений: {t.steps.reduce((n, s) => n + s.files.length, 0)}
                     </p>
                   </div>
-                  <span className="form-actions">
-                    <button
-                      onClick={() =>
-                        setEditing({ id: t.id, name: t.name, steps: t.steps.map((s) => newStep(s.text, s.files)) })
-                      }
-                    >
-                      Изменить
-                    </button>
-                    <button className="danger" disabled={busy} onClick={() => void remove(t)}>
-                      Удалить
-                    </button>
-                  </span>
+                  {t.canEdit ? (
+                    <span className="form-actions">
+                      <button onClick={() => setEditing({ id: t.id, name: t.name, steps: t.steps.map((s) => newStep(s.text, s.files)), shared: t.shared })}>
+                        Изменить
+                      </button>
+                      <button className="danger" disabled={busy} onClick={() => void remove(t)}>
+                        Удалить
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="muted">меняют администраторы</span>
+                  )}
                 </li>
               ))}
             </ul>
           </>
         )}
+    </>
+  );
+  if (embedded) return <div className="templates-embedded">{body}</div>;
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div
+        className="sheet templates-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="templates-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {body}
       </div>
     </div>
   );

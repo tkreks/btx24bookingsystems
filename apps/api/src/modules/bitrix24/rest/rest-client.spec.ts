@@ -115,3 +115,24 @@ describe('Bitrix24RestClient.listAll', () => {
     expect(calls.map((c) => c.body.start)).toEqual([0, 2]);
   });
 });
+
+describe('Bitrix24RestClient.download', () => {
+  const make = (body: string, headers: Record<string, string> = {}) => {
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200, headers }));
+    const client = new Bitrix24RestClient({
+      clientEndpoint: 'https://portal.example/rest/',
+      access: { getAccessToken: async () => 't', refresh: async () => 't' },
+      limiter: new RateLimiter(1000, 1000),
+      limiterKey: 'm1',
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    return { client, fetchMock };
+  };
+  it('downloads only from the portal host and within the size limit', async () => {
+    const ok = make('img', { 'content-type': 'image/jpeg' });
+    expect(await ok.client.download('https://portal.example/rest/download.json?token=x')).toMatchObject({ contentType: 'image/jpeg' });
+    await expect(ok.client.download('https://evil.example/x')).rejects.toMatchObject({ code: 'INVALID_DOWNLOAD_URL' });
+    await expect(ok.client.download('http://portal.example/x')).rejects.toMatchObject({ code: 'INVALID_DOWNLOAD_URL' });
+    await expect(make('0123456789').client.download('https://portal.example/x', 5)).rejects.toMatchObject({ code: 'FILE_TOO_LARGE' });
+  });
+});

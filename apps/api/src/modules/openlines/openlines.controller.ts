@@ -10,6 +10,8 @@ import {
   Post,
   Put,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -163,6 +165,27 @@ export class OpenlinesController {
     return this.chats.history(user, chatId, query, await this.can(user, 'openlines.send'));
   }
 
+  /** Файл сообщения (картинки и видео в чате приложения) — через сервер, с правами сотрудника. */
+  @Get('openlines/chats/:chatId/files/:fileId')
+  async file(
+    @B24User() user: B24UserContext,
+    @Param('chatId', ParseIntPipe) chatId: number,
+    @Param('fileId', ParseIntPipe) fileId: number,
+    @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void },
+  ): Promise<StreamableFile> {
+    await this.require(user, 'openlines.read');
+    const f = await this.chats.file(user, chatId, fileId);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return new StreamableFile(f.data, { type: f.contentType ?? 'application/octet-stream', length: f.data.length });
+  }
+
+  /** Переменные шаблона по сделке чата — до отправки, чтобы сотрудник видел готовый текст. */
+  @Post('openlines/chats/:chatId/render')
+  async render(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number, @Body() body: unknown) {
+    await this.require(user, 'openlines.send');
+    return this.chats.render(user, chatId, body);
+  }
+
   @Post('openlines/chats/:chatId/join')
   @HttpCode(204)
   async join(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {
@@ -187,16 +210,28 @@ export class OpenlinesController {
     return this.files.upload(user, file);
   }
 
+  @Get('openlines/templates/variables')
+  async templateVariables(@B24User() user: B24UserContext) {
+    await this.require(user, 'openlines.send');
+    return this.chats.variables(user);
+  }
+
+  @Post('openlines/templates/preview')
+  async templatePreview(@B24User() user: B24UserContext, @Body() body: unknown) {
+    await this.require(user, 'openlines.send');
+    return this.chats.preview(user, body);
+  }
+
   @Get('openlines/templates')
   async templateList(@B24User() user: B24UserContext): Promise<MessageTemplateDto[]> {
     await this.require(user, 'openlines.send');
-    return this.templates.list(user);
+    return this.templates.list(user, await this.isAdmin(user));
   }
 
   @Post('openlines/templates')
   async templateCreate(@B24User() user: B24UserContext, @Body() body: unknown): Promise<MessageTemplateDto> {
     await this.require(user, 'openlines.send');
-    return this.templates.create(user, body);
+    return this.templates.create(user, body, await this.isAdmin(user));
   }
 
   @Put('openlines/templates/:id')
@@ -206,14 +241,19 @@ export class OpenlinesController {
     @Body() body: unknown,
   ): Promise<MessageTemplateDto> {
     await this.require(user, 'openlines.send');
-    return this.templates.update(user, id, body);
+    return this.templates.update(user, id, body, await this.isAdmin(user));
   }
 
   @Delete('openlines/templates/:id')
   @HttpCode(204)
   async templateDelete(@B24User() user: B24UserContext, @Param('id') id: string): Promise<void> {
     await this.require(user, 'openlines.send');
-    await this.templates.remove(user, id);
+    await this.templates.remove(user, id, await this.isAdmin(user));
+  }
+
+  /** Администратор приложения — меняет общие шаблоны. */
+  private async isAdmin(user: B24UserContext): Promise<boolean> {
+    return (await this.access.resolve(user)).isAppAdmin;
   }
 
   private async can(user: B24UserContext, permission: 'openlines.read' | 'openlines.send'): Promise<boolean> {

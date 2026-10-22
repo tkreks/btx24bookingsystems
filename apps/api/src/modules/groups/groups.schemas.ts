@@ -72,6 +72,7 @@ export const groupOptionsSchema = z
         surchargeMessage: z.string().max(4000).optional(),
         prepaymentPercent: z.number().min(1).max(100).optional(),
         invoice: invoiceConfig.optional(),
+        sendConfirmation: z.boolean().optional(),
       })
       .strict(),
   })

@@ -119,7 +119,7 @@ export class SandboxWritePolicy implements WritePolicy {
       case 'timeman.close':
         return params.USER_ID === undefined;
       case 'im.v2.file.upload':
-        return this.related('chatIds', chatOf(params.dialogId));
+        return (await this.related('chatIds', chatOf(params.dialogId))) || this.paymentChat(chatOf(params.dialogId));
       case 'booking.v1.booking.add':
         return this.inRange(fields.datePeriod) || this.createAllowed();
       case 'booking.v1.booking.update':

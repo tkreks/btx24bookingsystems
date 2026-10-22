@@ -34,6 +34,7 @@ export function DashboardPage({
   bookingAlerts = false,
   onAlerts,
   onSettings,
+  onTemplates,
   onSession,
 }: {
   session: SessionInfo;
@@ -45,6 +46,8 @@ export function DashboardPage({
   onAlerts?: () => void;
   /** Открыть настройки (админам; остальным — после временного пароля). */
   onSettings?: () => void;
+  /** Шаблоны сообщений: свои, общие и автоматические. */
+  onTemplates?: () => void;
   onSession?: (s: SessionInfo) => void;
 }) {
   const tz = session.portal.timezone;
@@ -120,6 +123,11 @@ export function DashboardPage({
         </div>
         <div className="toolbar-controls">
         <WorkdayButton timezone={tz} />
+        {onTemplates && (
+          <button className="settings-button" onClick={onTemplates} title="Шаблоны сообщений: свои, общие и автоматические">
+            <span aria-hidden="true">✉</span> Шаблоны
+          </button>
+        )}
         {onSettings && (
           <button
             className="settings-button"

@@ -61,6 +61,23 @@ export async function apiDelete(path: string): Promise<void> {
   return request<void>('DELETE', path);
 }
 
+/** Файл с нашего API (картинки чата и т. п.): `<img src>` не умеет передать токен — берём Blob. */
+export async function apiBlob(path: string, retried = false): Promise<Blob> {
+  let auth: B24Auth | null;
+  try {
+    auth = retried ? await refreshAuth() : await getAuth();
+  } catch (e) {
+    reportSessionLost();
+    throw new ApiRequestError(401, 'SESSION_LOST', e instanceof Error ? e.message : 'Авторизация Битрикс24 потеряна');
+  }
+  if (!auth) throw new ApiRequestError(401, 'UNAUTHORIZED', 'Откройте приложение из Битрикс24');
+  const res = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${auth.token}`, 'X-B24-Member-Id': auth.memberId } });
+  if (res.ok) return res.blob();
+  const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
+  if (res.status === 401 && (err.code === 'TOKEN_EXPIRED' || err.code === 'INVALID_TOKEN') && !retried) return apiBlob(path, true);
+  throw new ApiRequestError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? `Ошибка ${res.status}`);
+}
+
 /** Загрузка файла (multipart, поле `file`). */
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData();

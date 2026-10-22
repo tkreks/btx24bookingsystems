@@ -6,11 +6,11 @@ import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { avatarTone, dayKey, initials } from './chat-list.js';
 import { Channel } from './Channel.js';
-import { fileSize } from './format.js';
 import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
 import { InvoicesBadge } from '../bookings/InvoicesBadge.js';
+import { ChatFile } from './ChatFile.js';
 
 /** Новые сообщения открытого чата подтягиваем раз в 15 секунд. */
 const POLL_MS = 15_000;
@@ -107,6 +107,17 @@ export function ChatView({
       setError(e instanceof Error ? e.message : 'Не удалось присоединиться');
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Шаблон с переменными — сразу подставляем данные сделки чата: сотрудник видит готовый текст.
+  const insertTemplate = async (t: MessageTemplateDto) => {
+    try {
+      const r = await apiPost<{ texts: string[]; unresolved: string[] }>(`/openlines/chats/${chatId}/render`, { texts: t.steps.map((s) => s.text) });
+      setChain(appendTemplate(chain, { ...t, steps: t.steps.map((s, i) => ({ ...s, text: r.texts[i] ?? s.text })) }));
+      setNotice(r.unresolved.length ? `Не подставлено: ${r.unresolved.join(', ')} — проверьте текст перед отправкой` : '');
+    } catch {
+      setChain(appendTemplate(chain, t));
     }
   };
 
@@ -227,8 +238,8 @@ export function ChatView({
               disabled={busy || !templates?.length}
               onChange={(e) => {
                 const t = templates?.find((x) => x.id === e.target.value);
-                if (t) setChain(appendTemplate(chain, t));
                 setTemplatePick('');
+                if (t) void insertTemplate(t);
               }}
             >
               <option value="">{templates?.length ? 'Вставить шаблон…' : 'Шаблонов нет'}</option>
@@ -328,10 +339,7 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
         </div>
         {m.text && <div className="cv-bubble-text">{m.text}</div>}
         {m.files.map((f) => (
-          <a key={f.id} className="msg-file" href={f.url ?? undefined} target="_blank" rel="noreferrer">
-            {f.type === 'image' && f.previewUrl ? <img src={f.previewUrl} alt={f.name} loading="lazy" /> : <Icon name="clip" size={14} />}{' '}
-            {f.name} <span className="muted">{fileSize(f.size)}</span>
-          </a>
+          <ChatFile key={f.id} chatId={chatId} f={f} />
         ))}
       </div>
       {!incoming && <span className="cv-msg-avatar agent">{initials(m.author.name || 'Оператор')}</span>}

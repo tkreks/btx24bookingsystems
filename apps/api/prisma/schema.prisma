@@ -267,12 +267,15 @@ model MessageTemplate {
   portal      Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
   ownerUserId Int
   name        String   @db.VarChar(100)
+  /// Общий (системный) шаблон: видят все сотрудники портала, меняют администраторы приложения.
+  shared      Boolean  @default(false)
   /// `[{ text, fileIds }]` в порядке отправки (`TemplateStepDto` в @btx24/shared).
   steps       Json
   createdAt   DateTime @default(now()) @db.DateTime(3)
   updatedAt   DateTime @updatedAt @db.DateTime(3)
 
   @@index([portalId, ownerUserId])
+  @@index([portalId, shared])
 }
 
 /// Файл вложения для отправки в чат (из шаблона или разовый). Хранится в БД, до 10 МБ: отдаётся

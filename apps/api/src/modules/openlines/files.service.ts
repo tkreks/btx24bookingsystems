@@ -41,20 +41,31 @@ export class FilesService {
     return row;
   }
 
+  /** Свои файлы и файлы общих шаблонов портала (их отправляют все сотрудники). */
+  private async visible(user: B24UserContext, ids: string[]) {
+    const shared = await this.sharedFileIds(user.portal.id);
+    return { id: { in: ids }, portalId: user.portal.id, OR: [{ ownerUserId: user.userId }, { id: { in: ids.filter((x) => shared.has(x)) } }] };
+  }
+
+  async sharedFileIds(portalId: string): Promise<Set<string>> {
+    const rows = await this.prisma.messageTemplate.findMany({ where: { portalId, shared: true }, select: { steps: true } });
+    return new Set(rows.flatMap((t) => (t.steps as { fileIds?: string[] }[]).flatMap((s) => s.fileIds ?? [])));
+  }
+
   async meta(user: B24UserContext, ids: string[]): Promise<Map<string, StoredFileDto>> {
     if (!ids.length) return new Map();
     const rows = await this.prisma.storedFile.findMany({
-      where: { id: { in: ids }, portalId: user.portal.id, ownerUserId: user.userId },
+      where: await this.visible(user, ids),
       select: { id: true, name: true, mime: true, size: true },
     });
     return new Map(rows.map((r) => [r.id, r]));
   }
 
-  /** Содержимое своих файлов; чужой или несуществующий id — 404 (не раскрываем, что он есть). */
+  /** Содержимое своих файлов и файлов общих шаблонов; чужой или несуществующий id — 404. */
   async loadOwned(user: B24UserContext, ids: string[]): Promise<Map<string, { name: string; data: Buffer }>> {
     if (!ids.length) return new Map();
     const rows = await this.prisma.storedFile.findMany({
-      where: { id: { in: ids }, portalId: user.portal.id, ownerUserId: user.userId },
+      where: await this.visible(user, ids),
       select: { id: true, name: true, data: true },
     });
     if (rows.length !== ids.length)
@@ -68,10 +79,10 @@ export class FilesService {
       throw new NotFoundException({ code: 'FILE_NOT_FOUND', message: 'Вложение не найдено' });
   }
 
-  /** Удалить файлы из `ids`, если они не входят ни в один шаблон автора (разовые после отправки). */
+  /** Удалить свои файлы из `ids`, если они не входят ни в один шаблон автора и ни в один общий. */
   async dropUnused(user: B24UserContext, ids: string[]): Promise<void> {
     if (!ids.length) return;
-    const used = await this.usedByTemplates(user);
+    const used = new Set([...(await this.usedByTemplates(user)), ...(await this.sharedFileIds(user.portal.id))]);
     const drop = ids.filter((id) => !used.has(id));
     if (drop.length)
       await this.prisma.storedFile.deleteMany({

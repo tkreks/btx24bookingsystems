@@ -107,12 +107,20 @@ export interface StoredFileDto {
 export interface MessageTemplateDto {
   id: string;
   name: string;
+  /** Общий (системный) шаблон — виден всем сотрудникам портала. */
+  shared: boolean;
+  /** Мой шаблон (я автор). */
+  mine: boolean;
+  /** Можно менять: свой личный или общий для администратора приложения. */
+  canEdit: boolean;
   steps: (TemplateStepDto & { files: StoredFileDto[] })[];
   updatedAt: string;
 }
 
 export interface SaveTemplateDto {
   name: string;
+  /** Общий шаблон — только администратор приложения. */
+  shared?: boolean;
   steps: TemplateStepDto[];
 }
 

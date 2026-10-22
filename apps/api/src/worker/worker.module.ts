@@ -13,6 +13,7 @@ import { OpenlineIndexJob } from './openline-index.job.js';
 import { PaymentJob } from './payment.job.js';
 import { PaymentFlow } from '../modules/payments/payment-flow.js';
 import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
+import { MessageContextService } from '../modules/bookings/message-context.service.js';
 
 // Фоновые задачи (обновление кэша календаря, контроль оплат по таймауту, рассылки) живут здесь,
 // а не в api: api отвечает на запросы, worker выполняет работу по расписанию.
@@ -27,6 +28,7 @@ import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.
     BookingSyncService,
     BookingSyncJob,
     DealFieldMapService,
+    MessageContextService,
     PaymentFlow,
     PaymentJob,
   ],

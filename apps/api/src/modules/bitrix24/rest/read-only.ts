@@ -23,6 +23,8 @@ const READ_METHODS = new Set([
   'disk.folder.getchildren',
   // статус своего рабочего дня
   'timeman.status',
+  // одноразовая ссылка на файл чата (картинки и видео в чате приложения)
+  'im.v2.file.download',
 ]);
 
 export function isReadMethod(method: string): boolean {

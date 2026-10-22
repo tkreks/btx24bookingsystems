@@ -3243,3 +3243,146 @@ main.loading {
   color: var(--muted);
   background: rgba(17, 24, 39, 0.05);
 }
+
+/* Файлы сообщений чата: картинки, видео, аудио через сервер приложения (ChatFile). */
+.msg-file {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.msg-file video {
+  max-width: min(320px, 100%);
+  max-height: 240px;
+  border-radius: 10px;
+}
+.msg-file audio {
+  max-width: 100%;
+}
+.msg-media-ph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 160px;
+  min-height: 60px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.05);
+  color: var(--muted);
+  font-size: 12.5px;
+  border: 0;
+}
+button.msg-media-ph {
+  cursor: pointer;
+  color: #2455df;
+}
+.msg-file-name {
+  text-align: left;
+  font-size: 12.5px;
+}
+
+/* Мастер брони из чата: сделка → группа → детали. */
+.form-groups {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.form-groups legend {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.group-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.group-choice.selected {
+  border-color: #2455df;
+  box-shadow: 0 0 0 2px rgba(36, 85, 223, 0.15);
+}
+.wizard-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+/* Страница «Шаблоны». */
+.templates-page .tabs-row {
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.templates-embedded .settings-groups {
+  margin-top: 8px;
+}
+.auto-messages {
+  display: grid;
+  gap: 12px;
+}
+.auto-group h3 {
+  margin: 0 0 8px;
+}
+.auto-step {
+  margin: 8px 0;
+}
+.auto-step pre,
+.vars-result {
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 13px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.04);
+}
+.auto-type summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.vars-page {
+  display: grid;
+  gap: 12px;
+}
+.vars-text,
+.vars-page input,
+.vars-page select {
+  font: inherit;
+  font-size: 16px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+.vars-text {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+}
+.var-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.var-chip {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.var-chip.copied {
+  border-color: var(--ok);
+  color: var(--ok);
+}

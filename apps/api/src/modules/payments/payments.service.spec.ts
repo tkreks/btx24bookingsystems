@@ -4,6 +4,7 @@ import type { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { PaymentFlow } from './payment-flow.js';
+import { MessageContextService } from '../bookings/message-context.service.js';
 import { PaymentsService } from './payments.service.js';
 import type { BookingJournalService } from '../bookings/booking-journal.service.js';
 
@@ -57,7 +58,7 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
   const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options }, permissions: o.permissions ?? ['payment.send'] };
   const access = { resolve: vi.fn(async () => ({ groups: [group] })) } as unknown as AccessService;
   const fieldMap = { get: vi.fn(async () => ({ prepayment: 'UF_PRE', prepaymentInvoiceId: 'UF_INV', prepaymentLink: 'UF_LINK' })) } as unknown as DealFieldMapService;
-  const flow = new PaymentFlow(prisma, { find: vi.fn() } as unknown as BookingJournalService, fieldMap);
+  const flow = new PaymentFlow(prisma, { find: vi.fn() } as unknown as BookingJournalService, fieldMap, new MessageContextService(prisma, fieldMap));
   const svc = new PaymentsService(prisma, access, fieldMap, flow);
   svc.sleep = async () => {};
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 242, userName: 'Тест', client: { call, listAll } } as unknown as B24UserContext;
