@@ -1126,7 +1126,7 @@ main.loading {
 /* Ряд плиток дашборда: 4 (главный экран) или 6 (звонки) в строку, на узком — по две. */
 .dash-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin: 14px 0;
 }
@@ -1211,6 +1211,9 @@ main.loading {
   font-weight: 700;
 }
 @media (max-width: 1100px) {
+  .dash-row:not(.dash-row-6) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
   .dash-row-6 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -4239,5 +4242,287 @@ input[role='switch']:checked::after {
   }
   .action-log-details {
     padding-left: 14px;
+  }
+}
+
+/* ---------- чат: «Не требует ответа», каналы клиента, отправка ---------- */
+.cl-status.noreply {
+  color: #475467;
+  background: #eef1f6;
+}
+.cv-reply {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cv-reply .cl-btn {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cv-channels {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cv-channel {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+.cv-channel.active {
+  border-color: var(--primary);
+  background: rgba(0, 122, 255, 0.08);
+}
+.cv-channel-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f04438;
+}
+.cv-composer.sending {
+  position: relative;
+}
+.cv-sending {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(1px);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(0, 122, 255, 0.25);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Дашборд: «Требуют внимания» — последние сообщения клиентов без ответа. */
+.dash-attention {
+  margin-bottom: 12px;
+}
+.attention-rows {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attention-rows li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+.attention-rows li:first-child {
+  border-top: 0;
+}
+.attention-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 260px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-weight: 400;
+}
+.attention-row:hover {
+  background: #f9fafb;
+}
+.attention-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.attention-title b {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.attention-preview {
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.attention-time {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.attention-deal {
+  flex: none;
+  font-size: 12.5px;
+}
+@media (max-width: 760px) {
+  .attention-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .attention-preview {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- форма брони: поиск клиента/сделки и товары ---------- */
+.bk-client {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.bk-title-hint {
+  color: var(--muted);
+  font-weight: 500;
+}
+.cp {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cp-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cp-kind {
+  flex: none;
+}
+.cp-bar input {
+  flex: 1;
+}
+.cp-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.cp-hint.error {
+  color: #b42318;
+}
+.cp-hits {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
+}
+.cp-hits button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  font-weight: 400;
+}
+.cp-hits button:hover,
+.cp-hits button:focus-visible {
+  background: rgba(0, 122, 255, 0.06);
+}
+.cp-hits .muted {
+  font-size: 12.5px;
+}
+.pe {
+  display: grid;
+  gap: 10px;
+}
+.pe-rows {
+  display: grid;
+  gap: 6px;
+}
+.pe-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px auto 104px 96px 40px;
+  align-items: center;
+  gap: 8px;
+}
+.pe-name {
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pe-x {
+  color: var(--muted);
+}
+.pe-sum {
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pe-total {
+  justify-self: end;
+  padding-top: 4px;
+  font-size: 14px;
+}
+.pe-add {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .cp-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pe-row {
+    grid-template-columns: minmax(0, 1fr) 64px auto 88px 40px;
+  }
+  .pe-name {
+    grid-column: 1 / -1;
+  }
+  .pe-sum {
+    display: none;
   }
 }

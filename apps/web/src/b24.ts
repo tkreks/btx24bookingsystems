@@ -123,9 +123,13 @@ export function frameChromeHeight(placement: string): number {
   return placement.startsWith('CRM_') ? 300 : 220;
 }
 
-/** Высота фрейма по окну пользователя: внутри фрейма outerHeight — это окно браузера целиком. */
+/**
+ * Высота фрейма по окну пользователя: внутри фрейма outerHeight — это окно браузера целиком. Во
+ * вкладке карточки CRM — на 10% ниже (решение владельца 2026-10-22): иначе низ окна уходит под прокрутку.
+ */
 export function screenFrameHeight(outerHeight: number, placement: string): number {
-  return Math.max(560, Math.round(outerHeight - frameChromeHeight(placement)));
+  const h = outerHeight - frameChromeHeight(placement);
+  return Math.max(560, Math.round(placement.startsWith('CRM_') ? h * 0.9 : h));
 }
 
 let framePlacement = 'DEFAULT';

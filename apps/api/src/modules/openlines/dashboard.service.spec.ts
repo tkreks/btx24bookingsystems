@@ -6,6 +6,7 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 
 const emptyJournal = {
   forPeriod: vi.fn(async () => ({ created: [], removed: [], pending: new Set<number>() })),
+  activeBetween: vi.fn(async () => 0),
 } as unknown as BookingJournalService;
 
 describe('DashboardService', () => {
@@ -29,10 +30,7 @@ describe('DashboardService', () => {
 
   it('counts waiting chats, unread messages and unique CRM items of own sessions', async () => {
     const chats = {
-      list: vi.fn(async () => ({
-        items: [{ waitingReply: true }, { waitingReply: false }, { waitingReply: true }],
-        nextOffset: null,
-      })),
+      attention: vi.fn(async () => ({ waiting: 2, items: [{ chatId: 1 }, { chatId: 2 }] })),
     } as unknown as ChatsService;
     const call = vi.fn(async () => ({ result: { items: [{ counter: 3 }, { counter: 54 }, {}] } }));
     const listAll = vi.fn(async (_method: string, params?: { filter?: { PROVIDER_ID?: string } }) => params?.filter?.PROVIDER_ID !== 'IMOPENLINES_SESSION' ? [] : [
@@ -51,7 +49,7 @@ describe('DashboardService', () => {
     expect(d).toMatchObject({
       from: '2026-10-15',
       to: '2026-10-21',
-      chats: { waitingReply: 2, unreadMessages: 57 },
+      chats: { waitingReply: 2, unreadMessages: 57, attention: [{ chatId: 1 }, { chatId: 2 }] },
       contacts: { leads: 1, contacts: 1, deals: 1, companies: 0 },
       bookings: { created: { total: 0, items: [] }, removed: { total: 0, items: [] } },
     });
@@ -150,6 +148,7 @@ describe('DashboardService', () => {
         ],
         pending: new Set([3]),
       })),
+      activeBetween: vi.fn(async () => 0),
     } as unknown as BookingJournalService;
     const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) =>
       method === 'crm.deal.list' && params?.filter?.['@ID']

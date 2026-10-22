@@ -206,6 +206,16 @@ export class BookingJournalService {
   }
 
   /** Брони сотрудника: клиентские, созданные в `[from, to)`, и отменённые в `[from, to)` — новые сверху. */
+  /** Активные брони, пересекающие `[from, to)`, на ресурсах `resourceIds` (null — все). */
+  async activeBetween(portalId: string, from: Date, to: Date, resourceIds: number[] | null): Promise<number> {
+    const rows = await this.prisma.bookingRecord.findMany({
+      where: { portalId, status: 'active', startsAt: { lt: to }, endsAt: { gt: from } },
+      select: { resourceIds: true },
+      take: PERIOD_LIMIT,
+    });
+    return rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id)))).length;
+  }
+
   /**
    * Брони за период для дашборда — любого источника (приложение и найденные в Битрикс24): новые
    * (появились в журнале за период) и удалённые (отменены за период), плюс брони приложения, пропавшие

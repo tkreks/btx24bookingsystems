@@ -10,6 +10,7 @@ const chat = (chatId: number, title: string, waitingReply: boolean, preview = ''
   responsibleId: 1,
   lastMessage: { id: 1, date: '2026-10-21T10:00:00Z', author: 'client', preview, hasFiles: false },
   waitingReply,
+  noReply: null,
   joined: true,
   sessionClosed: false,
   crm: { leadId: null, contactId: null, companyId: null, dealId: null },

@@ -18,6 +18,7 @@ import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
+import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
@@ -282,12 +283,23 @@ export function DashboardPage({
           <span className="dash-tile-label">Чатов ждут ответа</span>
           <span className="dash-tile-value">{openlines ? n(d?.chats?.waitingReply) : '—'}</span>
           {openlines ? (
-            <button className="primary dash-tile-action" onClick={() => onChats({})}>
+            // Есть ждущие ответа — сразу к ним (все доступные); нет — ко всем чатам.
+            <button className="primary dash-tile-action" onClick={() => onChats({ waiting: !!d?.chats?.waitingReply })}>
               Открыть чаты
             </button>
           ) : (
             <span className="dash-tile-hint">Открытые линии не включены в ваших группах</span>
           )}
+        </div>
+        <div className="dash-tile" title="Активные брони на ресурсах ваших групп: на сегодня / на завтра">
+          <span className="dash-tile-label">Бронирований сегодня / завтра</span>
+          <span className="dash-tile-value">
+            {n(d?.bookingDays?.today)}
+            <small> / {n(d?.bookingDays?.tomorrow)}</small>
+          </span>
+          <button className="dash-tile-action" onClick={onBack}>
+            Календарь
+          </button>
         </div>
         <div className="dash-tile">
           <span className="dash-tile-label">Все звонки {word}</span>
@@ -315,6 +327,42 @@ export function DashboardPage({
         </div>
       </div>
       {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
+
+      {openlines && (
+        <section className="day-panel dash-attention">
+          <div className="day-header">
+            <b>Требуют внимания</b>
+            <span className="muted">последние сообщения клиентов без ответа</span>
+            {d?.chats && <span className={`pill${d.chats.waitingReply ? ' waiting' : ''}`}>{d.chats.waitingReply}</span>}
+          </div>
+          {!d && <p className="muted">Загрузка…</p>}
+          {d?.chats && !d.chats.attention?.length && <p className="muted">Все клиенты получили ответ.</p>}
+          <ul className="attention-rows">
+            {d?.chats?.attention?.map((c) => (
+              <li key={c.chatId}>
+                <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
+                  <span className="attention-title">
+                    <b>{c.title}</b>
+                    <Channel connector={c.connector} />
+                  </span>
+                  <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
+                  <span className="attention-time">{fmtDateTime(c.lastMessageAt, tz)}</span>
+                </button>
+                {c.dealId && (
+                  <button className="link attention-deal" onClick={() => openCrm('deal', c.dealId!)}>
+                    Сделка #{c.dealId}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {!!d?.chats && d.chats.waitingReply > (d.chats.attention?.length ?? 0) && (
+            <button className="link" onClick={() => onChats({ waiting: true })}>
+              Все ждущие ответа ({d.chats.waitingReply}) →
+            </button>
+          )}
+        </section>
+      )}
 
       <div className="dash-lists">
         <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings.created} tz={tz} variant="created" />

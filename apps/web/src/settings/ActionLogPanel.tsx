@@ -55,22 +55,34 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
     ...(who === 'system' || who === 'bitrix' ? { actorKind: who } : who ? { userId: who } : {}),
   }).toString();
 
-  const load = async (before: string | null) => {
+  // Первая страница — при смене фильтров; поздний ответ на старые фильтры отбрасывается.
+  useEffect(() => {
+    let active = true;
+    apiGet<ActionLogDto>(`/admin/action-log?${query}`).then(
+      (r) => {
+        if (!active) return;
+        setData({ key: query, items: r.items, next: r.nextCursor });
+        setError('');
+      },
+      (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить журнал'),
+    );
+    return () => {
+      active = false;
+    };
+  }, [query]);
+
+  /** «Показать ещё» — следующая (более старая) страница. */
+  const more = async (before: string) => {
     setBusy(true);
     try {
-      const r = await apiGet<ActionLogDto>(`/admin/action-log?${query}${before ? `&before=${before}` : ''}`);
-      setData((prev) => ({ key: query, items: before && prev?.key === query ? [...prev.items, ...r.items] : r.items, next: r.nextCursor }));
-      setError('');
+      const r = await apiGet<ActionLogDto>(`/admin/action-log?${query}&before=${before}`);
+      setData((prev) => ({ key: query, items: prev?.key === query ? [...prev.items, ...r.items] : r.items, next: r.nextCursor }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить журнал');
     } finally {
       setBusy(false);
     }
   };
-  useEffect(() => {
-    void load(null);
-    // query — всё, от чего зависит выборка.
-  }, [query]);
 
   const rows = data?.key === query ? data.items : null;
 
@@ -172,7 +184,7 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
         </ol>
       )}
       {data?.next && data.key === query && (
-        <button type="button" disabled={busy} onClick={() => void load(data.next)}>
+        <button type="button" disabled={busy} onClick={() => void more(data.next!)}>
           {busy ? 'Загрузка…' : 'Показать ещё'}
         </button>
       )}

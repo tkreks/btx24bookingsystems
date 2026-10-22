@@ -42,6 +42,7 @@ const SKIP = new Set([
   'POST /api/bookings',
   'POST /api/bookings/:bookingId/cancel',
   'PUT /api/deals/:dealId/fields',
+  'PUT /api/openlines/chats/:chatId/reply-status',
   'POST /api/admin/groups',
   'PUT /api/admin/groups/:id',
   'DELETE /api/admin/groups/:id',
@@ -94,7 +95,7 @@ export class RequestLogInterceptor implements NestInterceptor {
       void this.log.user(user, {
         action: 'request',
         summary: ok ? label : `${label} — не удалось`,
-        ...(entityOf(params, req.body) ?? {}),
+        ...entityOf(params, req.body),
         details: {
           route,
           params,

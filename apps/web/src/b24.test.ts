@@ -53,7 +53,7 @@ describe('getAuth', () => {
 describe('screenFrameHeight', () => {
   it('вкладка сделки — окно браузера без шапки портала и слайдера', async () => {
     const { screenFrameHeight } = await import('./b24.js');
-    expect(screenFrameHeight(1000, 'CRM_DEAL_DETAIL_TAB')).toBe(700);
+    expect(screenFrameHeight(1100, 'CRM_DEAL_DETAIL_TAB')).toBe(720);
     expect(screenFrameHeight(1000, 'DEFAULT')).toBe(780);
   });
   it('не ниже 560 px на маленьком окне', async () => {

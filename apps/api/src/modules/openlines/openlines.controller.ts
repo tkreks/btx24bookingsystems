@@ -18,6 +18,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  ChatChannelDto,
+  ChatReplyStatusDto,
   CallListDto,
   CallLogDto,
   ChatFolderDto,
@@ -29,6 +31,7 @@ import type {
   StoredFileDto,
 } from '@btx24/shared';
 import { AccessService, type UserAccess } from '../access/access.service.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { ChatFoldersService } from './chat-folders.service.js';
@@ -56,6 +59,7 @@ export class OpenlinesController {
     private readonly files: FilesService,
     private readonly dashboard: DashboardService,
     private readonly folderService: ChatFoldersService,
+    private readonly actions: ActionLogService,
   ) {}
 
   @Get('dashboard')
@@ -186,6 +190,27 @@ export class OpenlinesController {
   async render(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number, @Body() body: unknown) {
     await this.require(user, 'openlines.send');
     return this.chats.render(user, chatId, body);
+  }
+
+  /** Другие открытые линии того же клиента — переключатель мессенджера в чате. */
+  @Get('openlines/chats/:chatId/channels')
+  async channels(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<ChatChannelDto[]> {
+    await this.require(user, 'openlines.read');
+    return this.chats.channels(user, chatId);
+  }
+
+  /** «Не требует ответа» / снова «ждёт ответа» — одна отметка для всех сотрудников. */
+  @Put('openlines/chats/:chatId/reply-status')
+  async replyStatus(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number, @Body() body: unknown): Promise<ChatReplyStatusDto> {
+    await this.require(user, 'openlines.read');
+    const r = await this.chats.setReplyStatus(user, chatId, body);
+    await this.actions.user(user, {
+      action: 'chat.reply_status',
+      summary: r.noReply ? `Отметил чат #${chatId}: «Не требует ответа»` : `Вернул чату #${chatId} статус «Ждёт ответа»`,
+      entityType: 'chat',
+      entityId: chatId,
+    });
+    return r;
   }
 
   @Post('openlines/chats/:chatId/join')

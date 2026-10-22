@@ -22,8 +22,10 @@ export interface ChatSummary {
   connector: string;
   responsibleId: number | null;
   lastMessage: { id: number; date: string; author: MessageAuthorKind; preview: string; hasFiles: boolean } | null;
-  /** Последнее значимое сообщение — от клиента, а сессия открыта: ждёт ответа. */
+  /** Последнее значимое сообщение — от клиента, сессия открыта и никто не отметил «Не требует ответа». */
   waitingReply: boolean;
+  /** «Не требует ответа» — общая отметка (кто и когда); действует до нового сообщения клиента. */
+  noReply: { byName: string | null; at: string } | null;
   /** Пользователь — участник чата (иначе сначала «Присоединиться»). */
   joined: boolean;
   sessionClosed: boolean;
@@ -170,8 +172,14 @@ export interface DashboardDto {
   /** Период — дни `[from, to]` включительно (YYYY-MM-DD) в часовом поясе портала. */
   from: string;
   to: string;
-  /** null — нет права на открытые линии ни в одной группе. Счётчики «сейчас», не за период. */
-  chats: { waitingReply: number; unreadMessages: number } | null;
+  /**
+   * null — нет права на открытые линии ни в одной группе. Счётчики «сейчас», не за период:
+   * ждут ответа — среди **всех доступных** сотруднику чатов; `attention` — последние сообщения
+   * клиентов, на которые ещё не ответили (новые сверху).
+   */
+  chats: { waitingReply: number; unreadMessages: number; attention: AttentionChatDto[] } | null;
+  /** Активные брони на ресурсах групп пользователя: на сегодня и на завтра (пересекают день). */
+  bookingDays: { today: number; tomorrow: number };
   /** С кем общались в открытых линиях за период (уникальные элементы CRM). */
   contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
   /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
@@ -285,3 +293,33 @@ export interface CallLogDto {
   truncated: boolean;
 }
 
+
+/** `PUT /api/openlines/chats/:chatId/reply-status` `{ needed }` — общая для всех отметка «ждёт ответа». */
+export interface ChatReplyStatusDto {
+  chatId: number;
+  waitingReply: boolean;
+  noReply: ChatSummary['noReply'];
+}
+
+/** Чат, требующий внимания: клиент написал последним, ответа нет. */
+export interface AttentionChatDto {
+  chatId: number;
+  title: string;
+  connector: string;
+  lastMessageAt: string;
+  /** Текст — только при включённом «сборе текстов». */
+  preview: string;
+  hasFiles: boolean;
+  dealId: number | null;
+  contactId: number | null;
+  responsibleId: number | null;
+}
+
+/** `GET /api/openlines/chats/:chatId/channels` — чаты того же клиента в других открытых линиях. */
+export interface ChatChannelDto {
+  chatId: number;
+  connector: string;
+  title: string;
+  lastMessageAt: string | null;
+  waitingReply: boolean;
+}

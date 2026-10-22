@@ -1,6 +1,9 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import type {
   BookingAlertDto,
+  BookingCatalogDto,
+  CrmSearchDto,
+  DealProductRowDto,
   BookingAlertListDto,
   BookingHistoryDto,
   BookingStateDto,
@@ -20,6 +23,7 @@ import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
 import { BookingCancelService } from './booking-cancel.service.js';
+import { BookingDirectoryService } from './booking-directory.service.js';
 import { BookingCreateService } from './booking-create.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
@@ -41,7 +45,27 @@ export class BookingsController {
     private readonly clients: ClientBookingsService,
     private readonly dealForm: DealFormService,
     private readonly canceller: BookingCancelService,
+    private readonly directory: BookingDirectoryService,
   ) {}
+
+  /** Товары группы для формы брони (разделы каталога из настроек группы) и товары по умолчанию. */
+  @Get('booking-catalog')
+  catalog(@B24User() user: B24UserContext, @Query('groupId') groupId?: string): Promise<BookingCatalogDto> {
+    if (!groupId) throw new BadRequestException({ code: 'GROUP_REQUIRED', message: 'Укажите группу' });
+    return this.directory.catalog(user, groupId);
+  }
+
+  /** Товары сделки — форма брони показывает их (строки заменяются целиком). */
+  @Get('deals/:dealId/products')
+  dealProducts(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<DealProductRowDto[]> {
+    return this.directory.dealProducts(user, dealId);
+  }
+
+  /** Поиск клиента или сделки для брони: от 2 символов; `contactId` — сделки выбранного клиента. */
+  @Get('crm/search')
+  search(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<CrmSearchDto> {
+    return this.directory.search(user, query);
+  }
 
   @Get('booking-alerts')
   async list(@B24User() user: B24UserContext, @Query('status') status?: string): Promise<BookingAlertListDto> {

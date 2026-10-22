@@ -1,8 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
   ChatListDto,
+  ChatReplyStatusDto,
+  ChatChannelDto,
+  AttentionChatDto,
   ChatScope,
   ChatSummary,
   MessageAuthorKind,
@@ -297,10 +300,11 @@ export class ChatsService {
       .filter((x): x is { s: SessionRef; d: ImDialog } => Boolean(x.d?.id));
     const unique = [...new Map(pairs.map((x) => [x.d.id, x])).values()];
     if (!unique.length) return [];
-    const [phones, unread, folders] = await Promise.all([
+    const [phones, unread, folders, marks] = await Promise.all([
       this.phonesOf(user, unique.map(({ d }) => crmLinksOf(d.entity_data_2))),
       this.unreadByChat(user),
       this.myFolders(user),
+      this.noReplyMarks(user.portal.id, unique.map(({ d }) => Number(d.id))),
     ]);
     const msgs = await user.client.batch(
       Object.fromEntries(
@@ -332,7 +336,8 @@ export class ChatsService {
               hasFiles: Boolean(last.message.params?.FILE_ID?.length),
             }
           : null,
-        waitingReply: !sessionClosed && last?.human === true && last.kind === 'client',
+        waitingReply: isWaiting(sessionClosed, last?.human ? last.kind : null, last ? Number(last.message.id) : null, marks.get(Number(d.id)) ?? null),
+        noReply: noReplyOf(marks.get(Number(d.id)) ?? null, last ? Number(last.message.id) : null),
         joined: isMember(d.role),
         sessionClosed,
         crm: crmLinksOf(d.entity_data_2),
@@ -452,7 +457,8 @@ export class ChatsService {
             r.lastMessageId && r.lastMessageAt
               ? { id: r.lastMessageId, date: r.lastMessageAt.toISOString(), author: (r.lastAuthor ?? 'client') as MessageAuthorKind, preview: r.lastPreview ?? '', hasFiles: r.lastHasFiles }
               : null,
-          waitingReply: !r.completed && r.lastAuthor === 'client',
+          waitingReply: isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r),
+          noReply: noReplyOf(r, r.lastMessageId),
           joined: acc.get(id)!.joined,
           sessionClosed: r.completed,
           crm,
@@ -598,6 +604,104 @@ export class ChatsService {
   }
 
   /** Войти в диалог оператором (`imopenlines.session.join`). В режиме «только чтение» запрещено. */
+  /**
+   * Ждут ответа среди всех доступных сотруднику чатов (кэш: сводки общие, доступ — его) и самые
+   * свежие из них — «требуют внимания» на дашборде.
+   */
+  async attention(user: B24UserContext, limit = 15): Promise<{ waiting: number; items: AttentionChatDto[] }> {
+    if (!this.prisma) return { waiting: 0, items: [] };
+    const portalId = user.portal.id;
+    const allowed = await this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: true }, select: { chatId: true } });
+    if (!allowed.length) return { waiting: 0, items: [] };
+    const rows = await this.prisma.openlineChat.findMany({
+      where: { portalId, completed: false, lastAuthor: 'client', chatId: { in: allowed.map((a) => a.chatId) } },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+    const waiting = rows.filter((r) => isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));
+    return {
+      waiting: waiting.length,
+      items: waiting.slice(0, limit).map((r) => {
+        const crm = (r.crm as ChatSummary['crm'] | null) ?? null;
+        return {
+          chatId: r.chatId,
+          title: r.title ?? `Чат #${r.chatId}`,
+          connector: r.connector,
+          lastMessageAt: (r.lastMessageAt ?? r.checkedAt).toISOString(),
+          preview: r.lastPreview ?? '',
+          hasFiles: r.lastHasFiles,
+          dealId: crm?.dealId ?? null,
+          contactId: crm?.contactId ?? null,
+          responsibleId: r.responsibleId,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Каналы клиента: у контакта может быть несколько открытых линий (WhatsApp, Telegram…) — у каждой
+   * свой чат. Чаты того же контакта из кэша, кроме явно недоступных сотруднику (открытие чата всё
+   * равно проверит доступ его токеном).
+   */
+  async channels(user: B24UserContext, chatId: number): Promise<ChatChannelDto[]> {
+    if (!this.prisma) return [];
+    const portalId = user.portal.id;
+    const me = await this.prisma.openlineChat.findUnique({ where: { portalId_chatId: { portalId, chatId } }, select: { crm: true } });
+    const contactId = (me?.crm as ChatSummary['crm'] | null)?.contactId ?? null;
+    if (!contactId) return [];
+    const [rows, denied] = await Promise.all([
+      this.prisma.openlineChat.findMany({ where: { portalId }, orderBy: { lastMessageAt: 'desc' }, take: 5000 }),
+      this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: false }, select: { chatId: true } }),
+    ]);
+    const no = new Set(denied.map((d) => d.chatId));
+    return rows
+      .filter((r) => (r.crm as ChatSummary['crm'] | null)?.contactId === contactId && !no.has(r.chatId))
+      .map((r) => ({
+        chatId: r.chatId,
+        connector: r.connector,
+        title: r.title ?? `Чат #${r.chatId}`,
+        lastMessageAt: r.lastMessageAt?.toISOString() ?? null,
+        waitingReply: isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r),
+      }));
+  }
+
+  /** Отметки «Не требует ответа» чатов (общие для всех сотрудников). */
+  private async noReplyMarks(portalId: string, chatIds: number[]): Promise<Map<number, NoReplyMark>> {
+    if (!this.prisma || !chatIds.length) return new Map();
+    const rows = await this.prisma.openlineChat.findMany({
+      where: { portalId, chatId: { in: chatIds }, noReplyMessageId: { not: null } },
+      select: { chatId: true, noReplyMessageId: true, noReplyByName: true, noReplyAt: true },
+    });
+    return new Map(rows.map((r) => [r.chatId, r]));
+  }
+
+  /**
+   * «Не требует ответа» / снова «ждёт ответа» — одна отметка для всех сотрудников (решение владельца
+   * 2026-10-22). Привязана к последнему сообщению клиента: новое сообщение клиента снова «ждёт ответа».
+   * Последнее сообщение читается токеном сотрудника — заодно проверка, что чат ему доступен.
+   */
+  async setReplyStatus(user: B24UserContext, chatId: number, body: unknown): Promise<ChatReplyStatusDto> {
+    const needed = (body as { needed?: unknown } | null)?.needed;
+    if (typeof needed !== 'boolean') throw new BadRequestException({ code: 'INVALID_REPLY_STATUS', message: 'Ожидается { needed: true | false }' });
+    if (!this.prisma) throw new BadRequestException({ code: 'NO_CACHE', message: 'Кэш чатов недоступен' });
+    const m = (await user.client.call<ImMessages>('im.dialog.messages.get', { DIALOG_ID: `chat${chatId}`, LIMIT: SUMMARY_MESSAGES })).result ?? {};
+    const last = lastMeaningful(m.messages ?? [], m.users ?? []);
+    const lastId = last ? Number(last.message.id) : null;
+    const row = await this.prisma.openlineChat.findUnique({ where: { portalId_chatId: { portalId: user.portal.id, chatId } } });
+    if (!row) throw new NotFoundException({ code: 'CHAT_NOT_CACHED', message: 'Чат ещё не загружен в список — обновите список чатов' });
+    const mark = needed
+      ? { noReplyMessageId: null, noReplyByUserId: null, noReplyByName: null, noReplyAt: null }
+      : { noReplyMessageId: lastId ?? 0, noReplyByUserId: user.userId, noReplyByName: user.userName.slice(0, 255), noReplyAt: new Date() };
+    const updated = await this.prisma.openlineChat.update({
+      where: { id: row.id },
+      data: { ...mark, ...(last?.human ? { lastMessageId: lastId, lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}) },
+    });
+    return {
+      chatId,
+      waitingReply: isWaiting(updated.completed, updated.lastAuthor, updated.lastMessageId, updated),
+      noReply: noReplyOf(updated, updated.lastMessageId),
+    };
+  }
+
   async join(user: B24UserContext, chatId: number): Promise<void> {
     await user.client.call('imopenlines.session.join', { CHAT_ID: chatId });
   }
@@ -719,4 +823,18 @@ export function phoneVariants(q: string): string[] {
     return [`+7${rest}`, `8${rest}`, `7${rest}`];
   }
   return [`+${digits}`, digits];
+}
+
+type NoReplyMark = { noReplyMessageId: number | null; noReplyByName: string | null; noReplyAt: Date | null };
+
+/** Отметка «Не требует ответа» действует, пока последнее сообщение — то, на котором её поставили. */
+function noReplyOf(mark: NoReplyMark | null, lastMessageId: number | null): ChatSummary['noReply'] {
+  if (!mark?.noReplyMessageId && mark?.noReplyMessageId !== 0) return null;
+  if (lastMessageId !== null && lastMessageId > mark.noReplyMessageId) return null;
+  return { byName: mark.noReplyByName, at: (mark.noReplyAt ?? new Date(0)).toISOString() };
+}
+
+/** Ждёт ответа: сессия открыта, последнее сообщение — клиента, и на нём нет отметки «Не требует ответа». */
+export function isWaiting(closed: boolean, lastAuthor: string | null, lastMessageId: number | null, mark: NoReplyMark | null): boolean {
+  return !closed && lastAuthor === 'client' && noReplyOf(mark, lastMessageId) === null;
 }

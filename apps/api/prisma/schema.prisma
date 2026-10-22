@@ -338,6 +338,12 @@ model OpenlineChat {
   lastHasFiles  Boolean   @default(false)
   /// Когда сводку обновили (worker или живой запрос сотрудника).
   summaryAt     DateTime? @db.DateTime(3)
+  /// «Не требует ответа» — общая отметка для всех сотрудников (решение владельца 2026-10-22): действует,
+  /// пока последнее сообщение клиента — это `noReplyMessageId`; новое сообщение клиента снова «ждёт ответа».
+  noReplyMessageId Int?
+  noReplyByUserId  Int?
+  noReplyByName    String?   @db.VarChar(255)
+  noReplyAt        DateTime? @db.DateTime(3)
 
   @@unique([portalId, chatId])
   @@index([portalId, lastMessageAt])

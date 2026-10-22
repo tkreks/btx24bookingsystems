@@ -10,6 +10,9 @@
 | `GET /api/bookings/:bookingId/history` | `booking.details` | история брони (аудит) |
 | `POST /api/bookings` | `booking.create` в группе | создать бронь — сага `booking-create.service.ts` (журнал `BookingOperation`, ключ идемпотентности, компенсация) |
 | `POST /api/bookings/:bookingId/cancel` `{groupId, comment?}` | `booking.cancel` в группе | снять бронь: удалить в Битрикс24 и отменить в журнале (`manual` + причина); ожидание оплаты по брони закрывается |
+| `GET /api/booking-catalog?groupId=` | `booking.create` | товары группы (разделы каталога группы с вложенными) и товары по умолчанию ресурсов |
+| `GET /api/deals/:dealId/products` | `booking.create` | товары сделки — форма показывает их (строки заменяются целиком) |
+| `GET /api/crm/search?kind=contact\|deal&q=` / `?contactId=` | `booking.create` | поиск клиента (ID, телефон, e-mail, ФИО) или сделки (название, ID, имя клиента), от 2 символов; сделки контакта — открытые первыми |
 | `GET /api/deal-form?groupId=&dealId=` | `booking.create` или `booking.edit` в группе (+ `booking.details` со сделкой) | поля сделки группы для формы брони и карточки: тип, варианты, «два в строку», значения сделки |
 | `PUT /api/deals/:dealId/fields` `{groupId, values}` | `booking.edit` + `booking.details` в группе | правка полей сделки из карточки брони (только изменённые; режим «только чтение» → 403 `DEAL_READ_ONLY`) |
 | `GET /api/deals/:dealId/bookings` | `calendar.view` | брони сделки и её клиента (встройка открывается на дате брони) |

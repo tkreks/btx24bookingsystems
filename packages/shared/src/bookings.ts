@@ -251,3 +251,45 @@ export interface CancelBookingResultDto {
   bookingId: number;
   warnings: string[];
 }
+
+/** `GET /api/booking-catalog?groupId=` — товары группы (разделы каталога из настроек) для формы брони. */
+export interface BookingCatalogDto {
+  products: { id: number; name: string; price: number | null; currency: string | null; section: string | null }[];
+  /** resourceId → товары по умолчанию (⚙ → группа → ресурсы). */
+  defaults: Record<string, { productId: number; quantity: number }[]>;
+  /** false — разделы в группе не выбраны: показаны все активные товары. */
+  restricted: boolean;
+}
+
+/** Строка товаров сделки (`GET /api/deals/:dealId/products`) — форма брони заменяет строки целиком. */
+export interface DealProductRowDto {
+  productId: number;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+/** Поиск клиента в форме брони (`GET /api/crm/search?kind=contact&q=`): ID, телефон, e-mail, ФИО. */
+export interface CrmContactHit {
+  id: number;
+  name: string;
+  phones: string[];
+  emails: string[];
+}
+
+/** Поиск сделки (`kind=deal`): название, ID или имя клиента; открытые — первыми. */
+export interface CrmDealHit {
+  id: number;
+  title: string;
+  categoryId: number | null;
+  closed: boolean;
+  opportunity: number | null;
+  currency: string | null;
+  contact: { id: number; name: string | null } | null;
+  createdAt: string | null;
+}
+
+export interface CrmSearchDto {
+  contacts: CrmContactHit[];
+  deals: CrmDealHit[];
+}

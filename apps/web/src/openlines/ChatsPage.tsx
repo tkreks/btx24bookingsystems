@@ -508,6 +508,17 @@ export function ChatsPage({
           onTemplates={setTemplates}
           onBack={() => setOpenId(null)}
           onChanged={() => void refresh()}
+          status={(list?.items ?? []).concat(phoneHits?.items ?? []).find((c) => c.chatId === openId)}
+          onStatus={(r) => {
+            // Отметка общая: в списке сразу, остальные сотрудники увидят при обновлении.
+            const apply = (items: ChatSummary[]) => items.map((c) => (c.chatId === r.chatId ? { ...c, waitingReply: r.waitingReply, noReply: r.noReply } : c));
+            setList((prev) => (prev ? { ...prev, items: apply(prev.items) } : prev));
+            setPhoneHits((prev) => (prev?.items ? { ...prev, items: apply(prev.items) } : prev));
+          }}
+          onOpenChat={(id) => {
+            setOpenId(id);
+            setCreated(null);
+          }}
           onPayment={canPay ? (dealId) => setPayment({ dealId, bookingId: null }) : undefined}
           paymentRevision={paymentRev}
           bookings={
@@ -605,8 +616,8 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
           {c.sessionClosed ? (
             <span className="cl-status closed">Закрыт</span>
           ) : (
-            <span className={`cl-status ${c.waitingReply ? 'waiting' : 'answered'}`}>
-              {c.waitingReply ? 'Ждёт ответ' : 'Отвечен'}
+            <span className={`cl-status ${c.waitingReply ? 'waiting' : c.noReply ? 'noreply' : 'answered'}`} title={c.noReply?.byName ? `Отметил: ${c.noReply.byName}` : undefined}>
+              {c.waitingReply ? 'Ждёт ответ' : c.noReply ? 'Не требует ответа' : 'Отвечен'}
             </span>
           )}
         </span>

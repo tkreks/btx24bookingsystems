@@ -62,27 +62,42 @@ export class DashboardService {
     const { from, to, start, end } = parsePeriod(user.portal.timezone, query);
     const callsScope = parseScope(query.callsScope);
     const callsFunnel = pickFunnel(query.callsFunnel, funnelIds);
-    const [bookings, calls, callsTotal, newDeals, callFunnels, chats] = await Promise.all([
+    const [bookings, bookingDays, calls, callsTotal, newDeals, callFunnels, chats] = await Promise.all([
       this.bookings(user, start, end, callsScope, resourceIds),
+      this.bookingDays(user, resourceIds),
       this.callCounts(user, start, end, callsScope, callsFunnel),
       this.callsTotal(user, start, end, callsScope),
       this.newDeals(user, start, end, callsScope, funnelIds),
       this.funnelNames(user, funnelIds),
       openlines
-        ? Promise.all([this.chats.list(user, { scope: 'mine' }), this.unreadMessages(user), this.contacts(user, start, end)])
+        ? Promise.all([this.chats.attention(user), this.unreadMessages(user), this.contacts(user, start, end)])
         : null,
     ]);
     const callInfo = { calls, callsTotal, newDeals, callsScope, callsFunnel, callFunnels };
-    if (!chats) return { from, to, chats: null, contacts: null, ...callInfo, bookings };
-    const [mine, unread, contacts] = chats;
+    if (!chats) return { from, to, chats: null, contacts: null, ...callInfo, bookings, bookingDays };
+    const [attention, unread, contacts] = chats;
     return {
       from,
       to,
-      chats: { waitingReply: mine.items.filter((c) => c.waitingReply).length, unreadMessages: unread },
+      chats: { waitingReply: attention.waiting, unreadMessages: unread, attention: attention.items },
       contacts,
       ...callInfo,
       bookings,
+      bookingDays,
     };
+  }
+
+  /** Активные брони на сегодня и на завтра (дни портала) — по ресурсам групп пользователя. */
+  private async bookingDays(user: B24UserContext, resourceIds: number[] | null): Promise<DashboardDto['bookingDays']> {
+    const tz = user.portal.timezone;
+    const today = zonedDayRange(todayIn(tz), tz);
+    // Завтра — следующий день портала (а не +24 часа: переход на летнее время).
+    const tomorrow = zonedDayRange(todayIn(tz, today.end), tz);
+    const [a, b] = await Promise.all([
+      this.journal.activeBetween(user.portal.id, today.start, today.end, resourceIds),
+      this.journal.activeBetween(user.portal.id, tomorrow.start, tomorrow.end, resourceIds),
+    ]);
+    return { today: a, tomorrow: b };
   }
 
   /** Клиенты выбранного вида звонков за период — для окна со сделками. */

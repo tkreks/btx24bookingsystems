@@ -4,14 +4,21 @@ import {
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
   type CalendarDay,
+  type BookingCatalogDto,
   type CreateBookingResultDto,
+  type CrmContactHit,
+  type CrmDealHit,
+  type CrmSearchDto,
   type DealFormDto,
+  type DealProductRowDto,
   type MyGroupDto,
   type PaymentMode,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
+import { ClientPicker } from './ClientPicker.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
+import { ProductsEditor, productsTotal, type ProductRow } from './ProductsEditor.js';
 
 export interface BookingFormContext {
   date: string;
@@ -71,8 +78,14 @@ export function BookingForm({
   );
   const [resources, setResources] = useState<{ groupId: string; list: { id: number; name: string }[] } | null>(null);
   const [resourceIds, setResourceIds] = useState<number[]>(context.resourceId ? [context.resourceId] : []);
-  // Сделки клиента: сделка, из которой открыли, — первой, дальше самые новые (больший ID).
-  const deals = [...(context.openDeals ?? [])].sort((a, b) => Number(b.id === context.dealId) - Number(a.id === context.dealId) || b.id - a.id);
+  // Клиент брони: из чата/сделки — сразу; из календаря — поиском (контакт или сделка).
+  const [client, setClient] = useState<{ contactId: number | null; name: string | null }>({ contactId: context.contactId ?? null, name: context.clientName ?? null });
+  const [dealList, setDealList] = useState<{ id: number; title: string; categoryId?: number | null; closed?: boolean }[]>(context.openDeals ?? []);
+  const [searching, setSearching] = useState(!context.contactId && !context.dealId && !(context.openDeals ?? []).length);
+  // Сделки клиента: сделка, из которой открыли, — первой, дальше открытые, самые новые (больший ID).
+  const deals = [...dealList].sort(
+    (a, b) => Number(b.id === context.dealId) - Number(a.id === context.dealId) || Number(!!a.closed) - Number(!!b.closed) || b.id - a.id,
+  );
   const [deal, setDeal] = useState<DealChoice>(() =>
     context.dealId
       ? { mode: 'existing', dealId: context.dealId }
@@ -127,6 +140,56 @@ export function BookingForm({
   // Тип брони — отдельным выбором (с автоопределением по товарам).
   const createFields = useMemo(() => (currentForm?.form?.fields ?? []).filter((f) => f.showCreate && f.role !== 'bookingType'), [currentForm]);
   const fieldState = useDealFieldValues(createFields, 'create', currentForm ? formKey : '');
+  // Товары: каталог группы (разделы из настроек группы); у существующей сделки — её товары (строки
+  // заменяются целиком), у новой — товары по умолчанию выбранных ресурсов.
+  const [catalog, setCatalog] = useState<{ groupId: string; data: BookingCatalogDto | null } | null>(null);
+  useEffect(() => {
+    if (!groupId) return;
+    let active = true;
+    apiGet<BookingCatalogDto>(`/booking-catalog?groupId=${encodeURIComponent(groupId)}`).then(
+      (data) => active && setCatalog({ groupId, data }),
+      () => active && setCatalog({ groupId, data: null }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [groupId]);
+  const cat = catalog?.groupId === groupId ? catalog.data : null;
+  const [products, setProducts] = useState<{ key: string; rows: ProductRow[]; dirty: boolean } | null>(null);
+  const existingDealId = deal.mode === 'existing' ? deal.dealId : null;
+  const productsKey = existingDealId ? `deal:${existingDealId}` : deal.mode;
+  useEffect(() => {
+    if (!existingDealId) return;
+    let active = true;
+    const key = `deal:${existingDealId}`;
+    apiGet<DealProductRowDto[]>(`/deals/${existingDealId}/products`).then(
+      (r) => active && setProducts((prev) => (prev?.key === key && prev.dirty ? prev : { key, rows: Array.isArray(r) ? r : [], dirty: false })),
+      () => active && setProducts((prev) => (prev?.key === key ? prev : { key, rows: [], dirty: false })),
+    );
+    return () => {
+      active = false;
+    };
+  }, [existingDealId]);
+  const nights =
+    group?.bookingMode === 'interval' ? Math.max(1, Math.round((Date.parse(period.endDate) - Date.parse(period.startDate)) / 86_400_000) || 1) : 1;
+  const defaultRows: ProductRow[] = cat
+    ? resourceIds.flatMap((rid) =>
+        (cat.defaults?.[String(rid)] ?? []).flatMap((dp) => {
+          const p = cat.products?.find((x) => x.id === dp.productId);
+          // В режиме «заезд/выезд» количество — по числу ночей (как в прототипе).
+          return p ? [{ productId: p.id, name: p.name, price: p.price ?? 0, quantity: dp.quantity * nights }] : [];
+        }),
+      )
+    : [];
+  const loadedProducts = products?.key === productsKey ? products : null;
+  const productRows = deal.mode === 'new' ? (loadedProducts?.dirty ? loadedProducts.rows : defaultRows) : (loadedProducts?.rows ?? []);
+  const productsLoading = deal.mode === 'existing' && !loadedProducts;
+  const setProductRows = (rows: ProductRow[]) => {
+    setProducts({ key: productsKey, rows, dirty: true });
+    // Сумма сделки — по товарам (Битрикс24 пересчитает её из строк; форма — для формул, например 50%).
+    if (createFields.some((f) => f.code === 'OPPORTUNITY' && !f.readOnly)) fieldState.set('OPPORTUNITY', String(productsTotal(rows)));
+  };
+
   const roleField = (role: string) => createFields.find((f) => f.role === role && !f.readOnly);
   // Гости и комментарий менеджера есть среди полей группы — отдельные поля формы не нужны.
   const guestsField = roleField('guests');
@@ -169,7 +232,8 @@ export function BookingForm({
     if ('error' in p) return setError(p.error);
     if (!resourceIds.length) return setError('Выберите ресурс');
     if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
-    if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId) return setError('Выберите тип брони: у новой сделки ещё нет товаров');
+    if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId && !productRows.length)
+      return setError('Выберите тип брони или добавьте товары: у новой сделки ещё нет товаров');
     if (deal.mode !== 'service' && formKey && !currentForm) return setError('Поля сделки ещё загружаются');
     const missing = deal.mode === 'service' ? undefined : createFields.find((f) => f.required && !f.readOnly && !values[f.code]?.trim());
     if (missing) return setError(`Заполните поле «${missing.label}»`);
@@ -186,13 +250,17 @@ export function BookingForm({
         start: p.start,
         end: p.end,
         dealId: deal.mode === 'existing' ? deal.dealId : null,
-        newDeal: deal.mode === 'new' ? { title: deal.title.trim(), contactId: context.contactId ?? null } : null,
-        contactId: context.contactId ?? null,
+        newDeal: deal.mode === 'new' ? { title: deal.title.trim(), contactId: client.contactId } : null,
+        contactId: client.contactId,
         guests: !guestsField && guests ? Number(guests) : null,
         comment: commentText || undefined,
         paymentMode,
         bookingTypeId: deal.mode === 'service' ? null : bookingTypeId || null,
         ...(deal.mode === 'service' ? {} : { dealFields }),
+        // Товары — если их меняли (или у новой сделки есть товары по умолчанию): строки сделки заменяются.
+        ...(deal.mode !== 'service' && (loadedProducts?.dirty || (deal.mode === 'new' && productRows.length))
+          ? { products: productRows.filter((r) => r.quantity > 0).map((r) => ({ productId: r.productId, quantity: r.quantity, price: r.price })) }
+          : {}),
       });
       onDone(r, deal.mode === 'service' ? null : paymentMode);
     } catch (e) {
@@ -226,9 +294,47 @@ export function BookingForm({
     'error' in utc ? null : durationText(Date.parse(utc.end) - Date.parse(utc.start)),
   ].filter(Boolean);
 
+  // Выбран клиент поиском — его сделки (последняя открытая — первой); нет открытых — новая сделка.
+  const chooseContact = async (c: CrmContactHit) => {
+    setClient({ contactId: c.id, name: c.name });
+    setSearching(false);
+    setMoreDeals(false);
+    try {
+      const r = await apiGet<CrmSearchDto>(`/crm/search?contactId=${c.id}`);
+      setDealList(r.deals.map((d) => ({ id: d.id, title: d.title, categoryId: d.categoryId, closed: d.closed })));
+      const open = r.deals.find((d) => !d.closed);
+      pick(open ? { mode: 'existing', dealId: open.id } : canNewDeal ? { mode: 'new', title: c.name } : { mode: 'service' });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось загрузить сделки клиента');
+    }
+  };
+  const chooseDeal = (d: CrmDealHit) => {
+    setDealList((prev) => [{ id: d.id, title: d.title, categoryId: d.categoryId, closed: d.closed }, ...prev.filter((x) => x.id !== d.id)]);
+    if (d.contact) setClient({ contactId: d.contact.id, name: d.contact.name });
+    setSearching(false);
+    pick({ mode: 'existing', dealId: d.id });
+  };
+
   const dealBlock = (
     <section className="bk-section">
-      <h4 className="bk-title">{wizard ? 'По какой сделке бронь?' : 'Сделка'}</h4>
+      <h4 className="bk-title">{wizard ? 'По какой сделке бронь?' : 'Клиент и сделка'}</h4>
+      {searching ? (
+        <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus={!wizard} />
+      ) : (
+        <p className="bk-client">
+          {client.name || client.contactId ? (
+            <>
+              Клиент: <b>{client.name ?? `#${client.contactId}`}</b>
+              {client.contactId && <span className="muted"> · контакт #{client.contactId}</span>}
+            </>
+          ) : (
+            <span className="muted">Клиент не выбран</span>
+          )}
+          <button type="button" className="bk-more" onClick={() => setSearching(true)}>
+            {client.contactId ? 'Другой клиент или сделка' : 'Найти клиента или сделку'}
+          </button>
+        </p>
+      )}
       <div className="bk-choices" role="radiogroup" aria-label="Сделка">
         {visibleDeals.map((d) => (
           <button
@@ -243,7 +349,7 @@ export function BookingForm({
             <b>{d.title}</b>
             <span className="bk-meta">
               #{d.id}
-              {d.id === context.dealId ? ' · открыта сейчас' : d.id === dealCards[0]?.id ? ' · последняя' : ''}
+              {d.id === context.dealId ? ' · открыта сейчас' : 'closed' in d && d.closed ? ' · закрыта' : d.id === dealCards[0]?.id ? ' · последняя' : ''}
             </span>
           </button>
         ))}
@@ -266,7 +372,7 @@ export function BookingForm({
               />
             </div>
           ) : (
-            <button type="button" className="bk-choice bk-add-deal" onClick={() => pick({ mode: 'new', title: context.clientName ?? '' })}>
+            <button type="button" className="bk-choice bk-add-deal" onClick={() => pick({ mode: 'new', title: client.name ?? '' })}>
               ＋ Создать новую сделку
             </button>
           ))}
@@ -295,7 +401,7 @@ export function BookingForm({
         <header className="bk-head">
           <div>
             <h3>Новая бронь</h3>
-            <span className="bk-sub">{[group?.name, context.clientName].filter(Boolean).join(' · ')}</span>
+            <span className="bk-sub">{[group?.name, client.name].filter(Boolean).join(' · ')}</span>
           </div>
           <button type="button" className="bk-close" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
@@ -441,8 +547,8 @@ export function BookingForm({
                                 Тип брони{group.bookingTypeRequired && <i className="df-req">*</i>}
                               </span>
                               <select value={bookingTypeId} onChange={(e) => setBookingTypeId(e.target.value)}>
-                                {!(group.bookingTypeRequired && deal.mode === 'new') && <option value="">По товарам сделки</option>}
-                                {group.bookingTypeRequired && deal.mode === 'new' && !bookingTypeId && <option value="">Выберите…</option>}
+                                {!(group.bookingTypeRequired && deal.mode === 'new' && !productRows.length) && <option value="">По товарам сделки</option>}
+                                {group.bookingTypeRequired && deal.mode === 'new' && !productRows.length && !bookingTypeId && <option value="">Выберите…</option>}
                                 {(group.bookingTypes ?? []).map((t) => (
                                   <option key={t.id} value={t.id}>
                                     {t.title}
@@ -474,6 +580,16 @@ export function BookingForm({
                           </div>
                         )}
                       </div>
+                    </section>
+                  )}
+
+                  {deal.mode !== 'service' && (
+                    <section className="bk-section">
+                      <h4 className="bk-title">
+                        Товары
+                        {deal.mode === 'existing' && <span className="bk-title-hint"> · изменения заменят товары сделки</span>}
+                      </h4>
+                      <ProductsEditor catalog={cat} rows={productRows} onChange={setProductRows} loading={productsLoading} />
                     </section>
                   )}
 

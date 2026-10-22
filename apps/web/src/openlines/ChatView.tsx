@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { ChatHistoryDto, ChatMessageDto, MessageTemplateDto, SendResultDto } from '@btx24/shared';
-import { apiGet, apiPost } from '../api.js';
+import type { ChatChannelDto, ChatHistoryDto, ChatMessageDto, ChatReplyStatusDto, ChatSummary, MessageTemplateDto, SendResultDto } from '@btx24/shared';
+import { apiGet, apiPost, apiPut } from '../api.js';
 import { openCrm, openMessenger } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
@@ -26,6 +26,9 @@ export function ChatView({
   onPayment,
   paymentRevision = 0,
   bookings,
+  status,
+  onStatus,
+  onOpenChat,
 }: {
   chatId: number;
   timezone: string;
@@ -40,6 +43,11 @@ export function ChatView({
   paymentRevision?: number;
   /** Брони клиента и «Создать бронирование» (рендерит страница чатов — у неё группы). */
   bookings?: ReactNode;
+  /** Статус из списка чатов: ждёт ответа / «Не требует ответа» (общий для всех). */
+  status?: Pick<ChatSummary, 'waitingReply' | 'noReply' | 'sessionClosed'>;
+  onStatus?: (r: ChatReplyStatusDto) => void;
+  /** Открыть другой чат (канал того же клиента). */
+  onOpenChat?: (chatId: number) => void;
 }) {
   const [chat, setChat] = useState<ChatHistoryDto | null>(null);
   const [error, setError] = useState('');
@@ -47,6 +55,34 @@ export function ChatView({
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  // Отправка — отдельно от прочих действий: блок сообщения закрывается загрузчиком.
+  const [sending, setSending] = useState(false);
+  const [channels, setChannels] = useState<ChatChannelDto[]>([]);
+  const [marking, setMarking] = useState(false);
+
+  // Каналы клиента: у контакта может быть несколько открытых линий — у каждой свой чат.
+  useEffect(() => {
+    let active = true;
+    apiGet<ChatChannelDto[]>(`/openlines/chats/${chatId}/channels`).then(
+      (c) => active && setChannels(c),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [chatId]);
+
+  const setReply = async (needed: boolean) => {
+    setMarking(true);
+    setError('');
+    try {
+      onStatus?.(await apiPut<ChatReplyStatusDto>(`/openlines/chats/${chatId}/reply-status`, { needed }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось изменить статус');
+    } finally {
+      setMarking(false);
+    }
+  };
   const [chain, setChain] = useState<ChainStep[]>(() => [newStep()]);
   const [templatesOpen, setTemplatesOpen] = useState<'list' | 'save' | null>(null);
   const [templatePick, setTemplatePick] = useState('');
@@ -125,6 +161,7 @@ export function ChatView({
     const steps = toSteps(chain);
     if (!steps.length || busy) return;
     setBusy(true);
+    setSending(true);
     setError('');
     setNotice('');
     try {
@@ -141,6 +178,7 @@ export function ChatView({
       setError(e instanceof Error ? e.message : 'Не удалось отправить');
     } finally {
       setBusy(false);
+      setSending(false);
     }
   };
 
@@ -166,7 +204,25 @@ export function ChatView({
         title={chat.title}
         subtitle={
           <>
-            <Channel connector={chat.connector} />
+            {channels.length > 1 && onOpenChat ? (
+              <span className="cv-channels" role="group" aria-label="Мессенджер клиента">
+                {channels.map((c) => (
+                  <button
+                    key={c.chatId}
+                    type="button"
+                    className={`cv-channel${c.chatId === chat.chatId ? ' active' : ''}`}
+                    aria-pressed={c.chatId === chat.chatId}
+                    title={c.waitingReply ? 'Ждёт ответа' : undefined}
+                    onClick={() => c.chatId !== chat.chatId && onOpenChat(c.chatId)}
+                  >
+                    <Channel connector={c.connector} />
+                    {c.waitingReply && <i className="cv-channel-dot" aria-label="ждёт ответа" />}
+                  </button>
+                ))}
+              </span>
+            ) : (
+              <Channel connector={chat.connector} />
+            )}
             {crm.dealId && (
               <>
                 <span className="cv-sep">|</span>
@@ -181,6 +237,24 @@ export function ChatView({
         onBack={onBack}
         details={bookings}
       >
+        {status && !status.sessionClosed && onStatus && (status.waitingReply || status.noReply) && (
+          <span className="cv-reply">
+            {status.noReply ? (
+              <>
+                <span className="cl-status noreply" title={status.noReply.byName ? `Отметил: ${status.noReply.byName}` : undefined}>
+                  Не требует ответа
+                </span>
+                <button type="button" className="cl-btn" disabled={marking} onClick={() => void setReply(true)}>
+                  Ждёт ответа
+                </button>
+              </>
+            ) : (
+              <button type="button" className="cl-btn" disabled={marking} onClick={() => void setReply(false)} title="Отметка видна всем сотрудникам">
+                Не требует ответа
+              </button>
+            )}
+          </span>
+        )}
         <button
           className="cl-btn cv-open"
           onClick={() => openMessenger(chat.chatId)}
@@ -230,7 +304,13 @@ export function ChatView({
       ) : !chat.canSend ? (
         <p className="muted pad">Нет права отправлять сообщения в открытые линии (настраивается в группе).</p>
       ) : (
-        <div className="composer cv-composer">
+        <div className={`composer cv-composer${sending ? ' sending' : ''}`} aria-busy={sending}>
+          {sending && (
+            <div className="cv-sending" role="status">
+              <span className="spinner" aria-hidden="true" />
+              Отправляем сообщение, ожидайте…
+            </div>
+          )}
           <div className="composer-tools">
             <select
               aria-label="Шаблон"
