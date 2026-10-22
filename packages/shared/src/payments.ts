@@ -82,9 +82,33 @@ export interface PaymentPreviewDto {
   timeoutMinutes: number | null;
   /** Текст клиенту (ссылка — `{link}`, подставится после создания счёта). */
   message: string;
+  /** Группа требует бронь перед оплатой (настройка «Требовать бронь перед оплатой»). */
+  requireBooking: boolean;
+  /** Действующие брони сделки (ещё не закончились), ближайшие сверху — к какой привязать счёт. */
+  bookings: PaymentBookingOption[];
+  /** Бронь по умолчанию (ближайшая); null — броней нет. */
+  bookingId: number | null;
+  /** Брони нет, а группа её требует — сначала создать бронь. */
+  bookingMissing: boolean;
   /** Чего не хватает, чтобы выставить счёт (настройки, сумма, права). Пусто — можно. */
   problems: string[];
 }
+
+export interface PaymentBookingOption {
+  bookingId: number;
+  start: string;
+  end: string;
+  resources: string[];
+}
+
+/** `GET /api/payments/deal-options?dealId` — сделки клиента в работе, новые сверху. */
+export interface PaymentDealOptionsDto {
+  deals: { id: number; title: string; createdAt: string; categoryId: number | null }[];
+  /** Самая новая сделка в работе; null — у клиента нет сделок в работе. */
+  defaultDealId: number | null;
+}
+
+export const BOOKING_REQUIRED_MESSAGE = 'Создайте бронирование, а потом переходите к отправке оплаты';
 
 /** `POST /api/payments` */
 export interface CreatePaymentDto {

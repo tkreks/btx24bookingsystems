@@ -8,7 +8,10 @@ import {
   renderMessage,
   type GroupOptionsDto,
   type PaymentKind,
+  BOOKING_REQUIRED_MESSAGE,
   type DealInvoicesDto,
+  type PaymentBookingOption,
+  type PaymentDealOptionsDto,
   type PaymentPreviewDto,
   type PaymentRequestDto,
 } from '@btx24/shared';
@@ -68,6 +71,13 @@ export class PaymentsService {
     });
     if (a.amount === null)
       problems.push(kind === 'surcharge' ? 'Заполните «Ручную сумму доплаты» в сделке или укажите сумму' : 'Нет суммы: заполните сделку или укажите сумму');
+    if (deal.STAGE_SEMANTIC_ID && deal.STAGE_SEMANTIC_ID !== 'P') problems.push(`Сделка #${dealId} закрыта — выберите сделку в работе`);
+    // Бронь сделки: к ней привязывается счёт (неоплата в срок снимает именно её).
+    const bookings = await this.dealBookings(user, dealId);
+    const requireBooking = opts?.payments.requireBooking !== false;
+    const bookingMissing = requireBooking && !bookings.length;
+    if (bookingMissing) problems.push(BOOKING_REQUIRED_MESSAGE);
+    const chosenBooking = bookings.find((x) => x.bookingId === bookingId)?.bookingId ?? bookings[0]?.bookingId ?? null;
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
     const template = kind === 'prepayment' ? opts?.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts?.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
@@ -76,7 +86,63 @@ export class PaymentsService {
       ...mc,
       vars: { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' },
     });
-    return { dealId, kind, groupId: g?.group.id ?? null, groupName: g?.group.name ?? null, amount: a.amount, source: a.source, timeoutMinutes: minutes, message, problems };
+    return {
+      dealId,
+      kind,
+      groupId: g?.group.id ?? null,
+      groupName: g?.group.name ?? null,
+      amount: a.amount,
+      source: a.source,
+      timeoutMinutes: minutes,
+      message,
+      problems,
+      requireBooking,
+      bookings,
+      bookingId: chosenBooking,
+      bookingMissing,
+    };
+  }
+
+  /** Действующие брони сделки (журнал приложения: свои и найденные сверкой), ближайшие сверху. */
+  private async dealBookings(user: B24UserContext, dealId: number): Promise<PaymentBookingOption[]> {
+    const rows = await this.prisma.bookingRecord.findMany({
+      where: { portalId: user.portal.id, dealId, status: 'active', endsAt: { gt: new Date() } },
+      orderBy: { startsAt: 'asc' },
+      take: 20,
+    });
+    if (!rows.length) return [];
+    const ids = [...new Set(rows.flatMap((r) => (r.resourceIds as number[]) ?? []))];
+    const names = new Map((await this.prisma.resource.findMany({ where: { portalId: user.portal.id, resourceId: { in: ids } } })).map((r) => [r.resourceId, r.name]));
+    return rows.map((r) => ({
+      bookingId: r.bookingId,
+      start: r.startsAt.toISOString(),
+      end: r.endsAt.toISOString(),
+      resources: ((r.resourceIds as number[]) ?? []).map((id) => names.get(id) ?? `Ресурс ${id}`),
+    }));
+  }
+
+  /**
+   * Сделки клиента в работе для счёта — новые (по дате создания) сверху; по умолчанию самая новая.
+   * Клиент — контакт сделки, из которой открыли окно; без контакта — только она сама.
+   */
+  async dealOptions(user: B24UserContext, dealId: number): Promise<PaymentDealOptionsDto> {
+    const deal = await this.flow.deal(user, dealId);
+    if (!deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена или нет доступа` });
+    const contactId = Number(deal.CONTACT_ID) || 0;
+    type Row = { ID: string; TITLE?: string; DATE_CREATE?: string; CATEGORY_ID?: string | null; STAGE_SEMANTIC_ID?: string };
+    const rows: Row[] = contactId
+      ? await user.client.listAll<Row>(
+          'crm.deal.list',
+          { filter: { CONTACT_ID: contactId, STAGE_SEMANTIC_ID: 'P' }, select: ['ID', 'TITLE', 'DATE_CREATE', 'CATEGORY_ID'], order: { DATE_CREATE: 'DESC' } },
+          { max: 50 },
+        )
+      : deal.STAGE_SEMANTIC_ID === 'P'
+        ? [deal as unknown as Row]
+        : [];
+    const deals = rows
+      .map((d) => ({ id: Number(d.ID), title: d.TITLE ?? `Сделка #${d.ID}`, createdAt: d.DATE_CREATE ? new Date(d.DATE_CREATE).toISOString() : '', categoryId: d.CATEGORY_ID == null ? null : Number(d.CATEGORY_ID) }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return { deals, defaultDealId: deals[0]?.id ?? null };
   }
 
   async create(user: B24UserContext, body: unknown): Promise<PaymentRequestDto> {
@@ -95,6 +161,10 @@ export class PaymentsService {
       where: { portalId: user.portal.id, dealId: b.dealId, kind: b.kind, status: { in: ['link_pending', 'sent'] } },
     });
     if (active) throw new ConflictException({ code: 'PAYMENT_ACTIVE', message: 'По этой сделке уже выставлен такой счёт и ждём оплату' });
+    // Бронь — только действующая бронь этой сделки; при требовании брони без неё счёт не выставить.
+    if (b.bookingId && !p.bookings.some((x) => x.bookingId === b.bookingId))
+      throw new BadRequestException({ code: 'BOOKING_NOT_OF_DEAL', message: `Бронь #${b.bookingId} не относится к сделке #${b.dealId} или уже закончилась` });
+    const bookingId = b.bookingId ?? p.bookingId;
 
     const g = (await this.access.resolve(user)).groups.find((x) => x.group.id === p.groupId)!;
     const opts = g.group.options as unknown as GroupOptionsDto;
@@ -104,7 +174,7 @@ export class PaymentsService {
         portalId: user.portal.id,
         idempotencyKey: b.idempotencyKey,
         dealId: b.dealId,
-        bookingId: b.bookingId ?? null,
+        bookingId,
         groupId: g.group.id,
         kind: b.kind,
         amount: new Prisma.Decimal(amount),

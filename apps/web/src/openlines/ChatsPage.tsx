@@ -85,7 +85,7 @@ export function ChatsPage({
   const [openId, setOpenId] = useState<number | null>(initialChatId ?? null);
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [form, setForm] = useState<{ chatId: number; data: ClientBookingsDto | null } | null>(null);
+  const [form, setForm] = useState<{ chatId: number; data: ClientBookingsDto | null; dealId?: number } | null>(null);
   const [created, setCreated] = useState<CreateBookingResultDto | null>(null);
   const [bookingsRev, setBookingsRev] = useState(0);
   const canCreate = groups.some((g) => g.permissions.includes('booking.create'));
@@ -540,6 +540,7 @@ export function ChatsPage({
           context={{
             date: todayIn(timezone),
             contactId: form.data?.contactId ?? null,
+            dealId: form.dealId ?? null,
             clientName: items.find((c) => c.chatId === form.chatId)?.title ?? all.find((c) => c.chatId === form.chatId)?.title ?? null,
             openDeals: form.data?.openDeals ?? [],
           }}
@@ -561,6 +562,17 @@ export function ChatsPage({
             setPayment(null);
             setPaymentRev((n) => n + 1);
           }}
+          onCreateBooking={
+            canCreate && openId
+              ? (dealId) => {
+                  setPayment(null);
+                  void apiGet<ClientBookingsDto>(`/openlines/chats/${openId}/bookings`).then(
+                    (data) => setForm({ chatId: openId, data, dealId }),
+                    () => setForm({ chatId: openId, data: null, dealId }),
+                  );
+                }
+              : undefined
+          }
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { PAYMENT_KINDS, type DealInvoicesDto, type PaymentKind, type PaymentPreviewDto, type PaymentRequestDto } from '@btx24/shared';
+import { PAYMENT_KINDS, type DealInvoicesDto, type PaymentDealOptionsDto, type PaymentKind, type PaymentPreviewDto, type PaymentRequestDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -29,6 +29,13 @@ export class PaymentsController {
   ): Promise<PaymentPreviewDto> {
     if (!PAYMENT_KINDS.includes(kind as PaymentKind)) throw new BadRequestException({ code: 'INVALID_QUERY', message: 'kind: prepayment | surcharge' });
     return this.payments.preview(user, int(dealId, 'dealId'), kind as PaymentKind, groupId || undefined, bookingId ? int(bookingId, 'bookingId') : undefined);
+  }
+
+  /** Сделки клиента в работе для счёта (новые сверху) — выбор в окне счетов. */
+  @Get('deal-options')
+  async dealOptions(@B24User() user: B24UserContext, @Query('dealId') dealId?: string): Promise<PaymentDealOptionsDto> {
+    await this.requireDetails(user);
+    return this.payments.dealOptions(user, int(dealId, 'dealId'));
   }
 
   @Post()

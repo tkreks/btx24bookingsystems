@@ -73,6 +73,7 @@ export const groupOptionsSchema = z
         prepaymentPercent: z.number().min(1).max(100).optional(),
         invoice: invoiceConfig.optional(),
         sendConfirmation: z.boolean().optional(),
+        requireBooking: z.boolean().optional(),
       })
       .strict(),
   })

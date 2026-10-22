@@ -3386,3 +3386,55 @@ button.msg-media-ph {
   border-color: var(--ok);
   color: var(--ok);
 }
+
+/* Счёт без брони: сначала создать бронь. */
+.notice.booking-required {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.payment-deal {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.payment-dialog select {
+  font: inherit;
+  font-size: 16px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  max-width: 100%;
+}
+input[role='switch'] {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.2);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+input[role='switch']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s;
+}
+input[role='switch']:checked {
+  background: #2455df;
+}
+input[role='switch']:checked::after {
+  left: 18px;
+}

@@ -22,11 +22,11 @@ const options = {
   },
 };
 
-function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<PaymentRequest>; link?: string } = {}) {
+function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<PaymentRequest>; link?: string; bookings?: number[] } = {}) {
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
-    if (method === 'crm.deal.get') return { result: { ID: '678', CATEGORY_ID: '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '' } };
+    if (method === 'crm.deal.get') return { result: { ID: '678', CATEGORY_ID: '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P' } };
     if (method === 'crm.item.add') return { result: { item: { id: 6001 } } };
     if (method === 'crm.item.get') return { result: { item: { id: 6001, ufCrmLink: o.link ?? '' } } };
     if (method === 'imopenlines.crm.chat.get') return { result: [{ CHAT_ID: '3301' }] };
@@ -52,7 +52,13 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
       update: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { ...row!, ...data } as PaymentRequest)),
     },
     workGroup: { findUnique: vi.fn(async () => ({ options })) },
-    bookingRecord: { findUnique: vi.fn(async () => null) },
+    bookingRecord: {
+      findUnique: vi.fn(async () => null),
+      findMany: vi.fn(async () =>
+        (o.bookings ?? [5918]).map((id, i) => ({ bookingId: id, startsAt: new Date(Date.now() + (i + 1) * 86_400_000), endsAt: new Date(Date.now() + (i + 1) * 86_400_000 + 4 * 3_600_000), resourceIds: [2] })),
+      ),
+    },
+    resource: { findMany: vi.fn(async () => [{ resourceId: 2, name: 'Баня 2' }]) },
     appCreatedEntity: { findUnique: vi.fn(async () => ({})), upsert: vi.fn() },
   } as unknown as PrismaService;
   const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options }, permissions: o.permissions ?? ['payment.send'] };
@@ -111,5 +117,39 @@ describe('PaymentsService', () => {
     ]);
     expect(r.invoices.filter(invoiceInWork).map((i) => i.invoiceId)).toEqual([6003, 6001]);
     expect(r.invoices[2].request?.deadline).toBe('2026-10-22T12:00:00.000Z');
+  });
+
+  it('links the invoice to the nearest booking of the deal; foreign booking refused', async () => {
+    const t = setup({ link: 'https://pay.example/x', bookings: [5918, 5920] });
+    const p = await t.svc.preview(t.user, 678, 'prepayment');
+    expect(p).toMatchObject({ requireBooking: true, bookingMissing: false, bookingId: 5918, bookings: [{ bookingId: 5918, resources: ['Баня 2'] }, { bookingId: 5920 }] });
+    expect(await t.svc.create(t.user, body())).toMatchObject({ bookingId: 5918 });
+    await expect(t.svc.create(t.user, body({ idempotencyKey: 'pay-87654321', bookingId: 1 }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('«Требовать бронь перед оплатой»: no booking → «Создайте бронирование…»; switched off → allowed', async () => {
+    const t = setup({ bookings: [] });
+    const p = await t.svc.preview(t.user, 678, 'prepayment');
+    expect(p.bookingMissing).toBe(true);
+    expect(p.problems).toContain('Создайте бронирование, а потом переходите к отправке оплаты');
+    await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ status: 400 });
+    (options.payments as { requireBooking?: boolean }).requireBooking = false;
+    try {
+      const off = setup({ bookings: [] });
+      expect(await off.svc.create(off.user, body())).toMatchObject({ bookingId: null, invoiceId: 6001 });
+    } finally {
+      delete (options.payments as { requireBooking?: boolean }).requireBooking;
+    }
+  });
+
+  it('deal options: client deals in work, newest first by creation date', async () => {
+    const t = setup();
+    (t.user.client as unknown as { listAll: ReturnType<typeof vi.fn> }).listAll = vi.fn(async () => [
+      { ID: '600', TITLE: 'Старая', DATE_CREATE: '2026-09-01T10:00:00+03:00', CATEGORY_ID: '0' },
+      { ID: '700', TITLE: 'Новая', DATE_CREATE: '2026-10-20T10:00:00+03:00', CATEGORY_ID: '14' },
+    ]);
+    const r = await t.svc.dealOptions(t.user, 678);
+    expect(r.defaultDealId).toBe(700);
+    expect(r.deals.map((d) => d.id)).toEqual([700, 600]);
   });
 });

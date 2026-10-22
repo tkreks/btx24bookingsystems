@@ -428,7 +428,18 @@ export function CalendarPage({
           }}
         />
       )}
-      {payment && <PaymentDialog dealId={payment.dealId} bookingId={payment.bookingId} timezone={tz} onClose={() => setPayment(null)} />}
+      {payment && (
+        <PaymentDialog
+          dealId={payment.dealId}
+          bookingId={payment.bookingId}
+          timezone={tz}
+          onClose={() => setPayment(null)}
+          onCreateBooking={() => {
+            setPayment(null);
+            setBookingForm(true);
+          }}
+        />
+      )}
     </div>
   );
 }

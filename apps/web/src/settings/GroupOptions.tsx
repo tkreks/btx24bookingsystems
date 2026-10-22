@@ -104,6 +104,19 @@ export function PaymentsSection({
         {step('prepayment', 'Предоплата')}
         {step('surcharge', 'Доплата')}
       </div>
+      <label className="check switch-row">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={payments.requireBooking !== false}
+          onChange={(e) => onChange({ ...payments, requireBooking: e.target.checked })}
+        />
+        <b>Требовать бронь перед оплатой</b>
+      </label>
+      <p className="muted">
+        Включено — счёт выставляется только к действующей брони сделки (неоплата в срок снимет именно её); без брони сотрудник увидит
+        «Создайте бронирование, а потом переходите к отправке оплаты».
+      </p>
       <h4>Счёт на оплату</h4>
       <InvoiceSettings value={payments.invoice} onChange={(invoice) => onChange({ ...payments, invoice })} />
       <h4>Предоплата и сообщение клиенту</h4>

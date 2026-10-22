@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  BOOKING_REQUIRED_MESSAGE,
   invoiceInWork,
   PAYMENT_KIND_LABELS,
   PAYMENT_KINDS,
   PAYMENT_STATUS_LABELS,
   type DealInvoiceDto,
   type DealInvoicesDto,
+  type PaymentDealOptionsDto,
   type PaymentKind,
   type PaymentPreviewDto,
   type PaymentRequestDto,
@@ -20,23 +22,53 @@ const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   none: '',
 };
 const rub = (v: number) => `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v)} ₽`;
-const STATE_LABELS: Record<DealInvoiceDto['state'], string> = { open: 'ждёт оплаты', paid: 'оплачен', failed: 'не оплачен' };
+const STATE_LABELS: Record<DealInvoiceDto['state'], string> = {
+  open: 'ждёт оплаты',
+  paid: 'оплачен',
+  failed: 'не оплачен',
+};
 
 /**
  * Счёт и ссылка на оплату по сделке (ADR 0009): сумма и текст клиенту — до отправки; после —
  * статус (ссылка формируется → ждём оплату → оплачено / не оплачено в срок) и сама ссылка.
  */
 export function PaymentDialog({
-  dealId,
-  bookingId,
+  dealId: initialDealId,
+  bookingId: initialBookingId,
   timezone,
   onClose,
+  onCreateBooking,
 }: {
   dealId: number;
   bookingId?: number | null;
   timezone: string;
   onClose: () => void;
+  /** «Создать бронь» по выбранной сделке (группа требует бронь перед оплатой). */
+  onCreateBooking?: (dealId: number) => void;
 }) {
+  // Сделка — по умолчанию самая новая в работе (если окно открыли не сразу после брони).
+  const [dealId, setDealId] = useState(initialDealId);
+  const [dealOptions, setDealOptions] = useState<PaymentDealOptionsDto | null>(null);
+  const [bookingId, setBookingId] = useState<number | null>(initialBookingId ?? null);
+  // Бронь выбрал сотрудник (в т. ч. «без привязки») — подсказку сервера больше не подставляем.
+  const [bookingChosen, setBookingChosen] = useState(!!initialBookingId);
+  useEffect(() => {
+    apiGet<PaymentDealOptionsDto>(`/payments/deal-options?dealId=${initialDealId}`).then(
+      (o) => {
+        setDealOptions(o);
+        if (!initialBookingId && o.defaultDealId && o.defaultDealId !== initialDealId) setDealId(o.defaultDealId);
+      },
+      () => undefined,
+    );
+  }, [initialDealId, initialBookingId]);
+  const chooseDeal = (id: number) => {
+    setDealId(id);
+    setBookingId(null);
+    setBookingChosen(false);
+    setPreview(null);
+    setInvoices(null);
+    setError('');
+  };
   const [kind, setKind] = useState<PaymentKind>('prepayment');
   const [preview, setPreview] = useState<PaymentPreviewDto | null>(null);
   const [amount, setAmount] = useState('');
@@ -45,11 +77,19 @@ export function PaymentDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
-  // Новый ключ на каждый вид платежа: повторное нажатие не выставит второй счёт.
-  const keys = useMemo(() => ({ prepayment: crypto.randomUUID(), surcharge: crypto.randomUUID() }), []);
+  // Свой ключ на сделку и вид платежа: повторное нажатие не выставит второй счёт.
+  const keys = useRef(new Map<string, string>());
+  const keyFor = (k: string) => {
+    if (!keys.current.has(k)) keys.current.set(k, crypto.randomUUID());
+    return keys.current.get(k)!;
+  };
 
   const loadHistory = useCallback(
-    () => apiGet<DealInvoicesDto>(`/payments/invoices?dealId=${dealId}`).then((d) => setInvoices(d.invoices), () => undefined),
+    () =>
+      apiGet<DealInvoicesDto>(`/payments/invoices?dealId=${dealId}`).then(
+        (d) => setInvoices(d.invoices),
+        () => undefined,
+      ),
     [dealId],
   );
   const chooseKind = (k: PaymentKind) => {
@@ -58,14 +98,17 @@ export function PaymentDialog({
     setError('');
   };
   useEffect(() => {
-    apiGet<PaymentPreviewDto>(`/payments/preview?dealId=${dealId}&kind=${kind}${bookingId ? `&bookingId=${bookingId}` : ''}`).then(
+    apiGet<PaymentPreviewDto>(
+      `/payments/preview?dealId=${dealId}&kind=${kind}${bookingId ? `&bookingId=${bookingId}` : ''}`,
+    ).then(
       (p) => {
         setPreview(p);
         setAmount(p.amount !== null ? String(p.amount) : '');
+        if (!bookingChosen && p.bookingId !== bookingId) setBookingId(p.bookingId);
       },
       (e) => setError(e instanceof Error ? e.message : 'Не удалось рассчитать счёт'),
     );
-  }, [dealId, kind, bookingId]);
+  }, [dealId, kind, bookingId, bookingChosen]);
   useEffect(() => void loadHistory(), [loadHistory]);
   const inWork = (invoices ?? []).filter(invoiceInWork);
   // Пока ссылка формируется или ждём оплату — обновляем статус.
@@ -82,7 +125,7 @@ export function PaymentDialog({
     setError('');
     try {
       await apiPost<PaymentRequestDto>('/payments', {
-        idempotencyKey: keys[kind],
+        idempotencyKey: keyFor(`${dealId}:${kind}:${bookingId ?? ''}`),
         dealId,
         kind,
         groupId: preview?.groupId ?? undefined,
@@ -105,23 +148,62 @@ export function PaymentDialog({
       setCopied('');
     }
   };
-  const fmt = (iso: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+  const fmt = (iso: string) =>
+    new Intl.DateTimeFormat('ru-RU', {
+      timeZone: timezone,
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(iso));
 
   return (
     <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
-      <div className="sheet payment-dialog" role="dialog" aria-modal="true" aria-label="Счета сделки" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="sheet payment-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Счета сделки"
+        onClick={(e) => e.stopPropagation()}
+      >
         <header>
           <h3>Счета сделки #{dealId}</h3>
           <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
         </header>
+        {dealOptions && dealOptions.deals.length > 1 && (
+          <label className="payment-deal">
+            Сделка
+            <select value={dealId} onChange={(e) => chooseDeal(Number(e.target.value))}>
+              {!dealOptions.deals.some((d) => d.id === dealId) && (
+                <option value={dealId}>#{dealId} (не в работе)</option>
+              )}
+              {dealOptions.deals.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title} · #{d.id}
+                  {d.createdAt ? ` · от ${new Date(d.createdAt).toLocaleDateString('ru-RU')}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <section className="payment-history">
           <div className="segmented" role="group" aria-label="Счета">
-            <button type="button" aria-pressed={tab === 'work'} className={tab === 'work' ? 'active' : ''} onClick={() => setTab('work')}>
+            <button
+              type="button"
+              aria-pressed={tab === 'work'}
+              className={tab === 'work' ? 'active' : ''}
+              onClick={() => setTab('work')}
+            >
               В работе {inWork.length}
             </button>
-            <button type="button" aria-pressed={tab === 'all'} className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>
+            <button
+              type="button"
+              aria-pressed={tab === 'all'}
+              className={tab === 'all' ? 'active' : ''}
+              onClick={() => setTab('all')}
+            >
               Все счета {invoices?.length ?? ''}
             </button>
           </div>
@@ -129,13 +211,26 @@ export function PaymentDialog({
           {invoices && tab === 'work' && !inWork.length && <p className="muted">Счетов, ожидающих оплаты, нет.</p>}
           {invoices && tab === 'all' && !invoices.length && <p className="muted">У сделки нет счетов.</p>}
           {(tab === 'work' ? inWork : (invoices ?? [])).map((i) => (
-            <InvoiceRow key={`${i.invoiceId}:${i.request?.id ?? ''}`} i={i} work={tab === 'work'} fmt={fmt} copied={copied} onCopy={copy} />
+            <InvoiceRow
+              key={`${i.invoiceId}:${i.request?.id ?? ''}`}
+              i={i}
+              work={tab === 'work'}
+              fmt={fmt}
+              copied={copied}
+              onCopy={copy}
+            />
           ))}
         </section>
         <h4 className="payment-new">Выставить счёт</h4>
         <div className="segmented" role="group" aria-label="Что выставить">
           {PAYMENT_KINDS.map((k) => (
-            <button key={k} type="button" aria-pressed={kind === k} className={kind === k ? 'active' : ''} onClick={() => chooseKind(k)}>
+            <button
+              key={k}
+              type="button"
+              aria-pressed={kind === k}
+              className={kind === k ? 'active' : ''}
+              onClick={() => chooseKind(k)}
+            >
               {PAYMENT_KIND_LABELS[k]}
             </button>
           ))}
@@ -143,22 +238,69 @@ export function PaymentDialog({
         {!preview && !error && <p className="muted">Расчёт…</p>}
         {preview && (
           <>
-            {preview.groupName && <p className="muted">Группа «{preview.groupName}»{preview.timeoutMinutes ? ` · на оплату ${preview.timeoutMinutes} мин` : ''}</p>}
-            <label>
-              Сумма, ₽
-              <input type="number" min={1} step={100} value={amount} onChange={(e) => setAmount(e.target.value)} />
-              {preview.amount !== null && <span className="muted">Рассчитано: {rub(preview.amount)} — {SOURCE[preview.source]}</span>}
-            </label>
-            <label className="settings-block">
-              Сообщение клиенту
-              <textarea rows={4} readOnly value={preview.message} />
-              <span className="muted">{'{link}'} заменится ссылкой, когда портал её выдаст; срок оплаты считается с момента отправки.</span>
-            </label>
-            {blocking.map((p) => (
-              <p key={p} className="notice error">
-                {p}
+            {preview.groupName && (
+              <p className="muted">
+                Группа «{preview.groupName}»{preview.timeoutMinutes ? ` · на оплату ${preview.timeoutMinutes} мин` : ''}
               </p>
-            ))}
+            )}
+            {preview.bookingMissing ? (
+              <div className="notice booking-required" role="alert">
+                <b>{BOOKING_REQUIRED_MESSAGE}.</b>
+                {onCreateBooking && (
+                  <button type="button" className="primary" onClick={() => onCreateBooking(dealId)}>
+                    + Создать бронь
+                  </button>
+                )}
+              </div>
+            ) : (
+              preview.bookings.length > 0 && (
+                <label>
+                  Бронь
+                  <select
+                    value={bookingId ?? ''}
+                    onChange={(e) => {
+                      setBookingChosen(true);
+                      setBookingId(e.target.value ? Number(e.target.value) : null);
+                    }}
+                  >
+                    {!preview.requireBooking && <option value="">Без привязки к брони</option>}
+                    {preview.bookings.map((b) => (
+                      <option key={b.bookingId} value={b.bookingId}>
+                        {fmt(b.start)} — {fmt(b.end)} · {b.resources.join(', ')} · #{b.bookingId}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="muted">Не оплатят в срок — снимется именно эта бронь.</span>
+                </label>
+              )
+            )}
+            {!preview.bookingMissing && (
+              <>
+                <label>
+                  Сумма, ₽
+                  <input type="number" min={1} step={100} value={amount} onChange={(e) => setAmount(e.target.value)} />
+                  {preview.amount !== null && (
+                    <span className="muted">
+                      Рассчитано: {rub(preview.amount)} — {SOURCE[preview.source]}
+                    </span>
+                  )}
+                </label>
+                <label className="settings-block">
+                  Сообщение клиенту
+                  <textarea rows={4} readOnly value={preview.message} />
+                  <span className="muted">
+                    {'{link}'} заменится ссылкой, когда портал её выдаст; срок оплаты считается с момента отправки.
+                  </span>
+                </label>
+              </>
+            )}
+            {blocking
+              .filter((p) => p !== BOOKING_REQUIRED_MESSAGE)
+              .map((p) => (
+                <p key={p} className="notice error">
+                  {p}
+                </p>
+              ))}
           </>
         )}
         {error && (
@@ -166,11 +308,18 @@ export function PaymentDialog({
             {error}
           </p>
         )}
-        <div className="sheet-actions">
-          <button type="button" className="primary" disabled={busy || !preview || blocking.length > 0 || !(Number(amount) > 0)} onClick={() => void submit()}>
-            {busy ? 'Выставляем счёт…' : 'Выставить счёт и отправить ссылку'}
-          </button>
-        </div>
+        {!preview?.bookingMissing && (
+          <div className="sheet-actions">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !preview || blocking.length > 0 || !(Number(amount) > 0)}
+              onClick={() => void submit()}
+            >
+              {busy ? 'Выставляем счёт…' : 'Выставить счёт и отправить ссылку'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -224,12 +373,12 @@ function InvoiceRow({
         </button>
       )}
       {h?.error && <p className="notice error">{h.error}</p>}
-      {work && h?.warnings.map((w) => (
-        <p key={w} className="notice">
-          {w}
-        </p>
-      ))}
+      {work &&
+        h?.warnings.map((w) => (
+          <p key={w} className="notice">
+            {w}
+          </p>
+        ))}
     </div>
   );
 }
-
