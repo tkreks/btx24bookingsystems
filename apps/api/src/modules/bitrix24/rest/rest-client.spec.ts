@@ -136,3 +136,33 @@ describe('Bitrix24RestClient.download', () => {
     await expect(make('0123456789').client.download('https://portal.example/x', 5)).rejects.toMatchObject({ code: 'FILE_TOO_LARGE' });
   });
 });
+
+describe('Bitrix24RestClient — окончательный сбой запроса сообщается наружу (журнал действий)', () => {
+  it('после повторов лимита и при сети — onFailure с методом, кодом, записью и сотрудником', async () => {
+    const failures: unknown[] = [];
+    const limit = { status: 503, body: { error: 'QUERY_LIMIT_EXCEEDED', error_description: 'Too many requests' } };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(limit.body), { status: 503 }));
+    const client = new Bitrix24RestClient({
+      clientEndpoint: 'https://portal.example/rest/',
+      access: { getAccessToken: async () => 't', refresh: async () => 't' },
+      limiter: new RateLimiter(1000, 1000),
+      limiterKey: 'm1',
+      fetch: fetchMock as unknown as typeof fetch,
+      sleep: async () => undefined,
+      maxRateLimitRetries: 2,
+      onFailure: (f) => failures.push(f),
+    });
+    client.actor = { userId: 7, name: 'Анна' };
+    await expect(client.call('booking.v1.booking.add', {})).rejects.toMatchObject({ code: 'QUERY_LIMIT_EXCEEDED' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(failures).toEqual([{ method: 'booking.v1.booking.add', code: 'QUERY_LIMIT_EXCEEDED', message: 'Too many requests', write: true, actor: { userId: 7, name: 'Анна' } }]);
+  });
+
+  it('удачный запрос — без onFailure', async () => {
+    const onFailure = vi.fn();
+    const { client } = setup([{ body: { result: true } }]);
+    (client as unknown as { opts: { onFailure: unknown } }).opts.onFailure = onFailure;
+    await client.call('crm.deal.get', { id: 1 });
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+});

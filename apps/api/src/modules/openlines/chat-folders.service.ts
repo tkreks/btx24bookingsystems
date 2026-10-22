@@ -6,6 +6,11 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { ChatsService } from './chats.service.js';
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(60) }).strict();
+/** Правка папки: название и/или «Не обращать внимания». */
+const updateSchema = z
+  .object({ name: z.string().trim().min(1).max(60).optional(), ignoreAttention: z.boolean().optional() })
+  .strict()
+  .refine((b) => b.name !== undefined || b.ignoreAttention !== undefined, { message: 'Нечего менять' });
 const MAX_FOLDERS = 30;
 
 /**
@@ -42,6 +47,7 @@ export class ChatFoldersService {
         id: f.id,
         name: f.name,
         sort: f.sort,
+        ignoreAttention: f.ignoreAttention,
         chatCount: f.items.length,
         unread: f.items.reduce((n, i) => n + (unread.get(i.chatId) ?? 0), 0),
         last: last?.lastMessage
@@ -65,9 +71,12 @@ export class ChatFoldersService {
     return { id: f.id };
   }
 
+  /** Переименовать папку и/или отметить «Не обращать внимания». */
   async rename(user: B24UserContext, id: string, body: unknown): Promise<void> {
     await this.own(user, id);
-    await this.prisma.chatFolder.update({ where: { id }, data: this.name(body) });
+    const p = updateSchema.safeParse(body);
+    if (!p.success) throw new BadRequestException({ code: 'INVALID_FOLDER', message: 'Название папки — от 1 до 60 символов' });
+    await this.prisma.chatFolder.update({ where: { id }, data: p.data });
   }
 
   /** Удалить папку: её чаты возвращаются в общий список (записи папки удаляются каскадом). */

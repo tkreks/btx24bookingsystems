@@ -7,7 +7,9 @@ import {
   type CallKind,
   type CallScope,
   type DashboardBookingRow,
+  DASHBOARD_PARTS,
   type DashboardDto,
+  type DashboardPart,
   type DashboardNewDeal,
   type SessionInfo,
 } from '@btx24/shared';
@@ -64,7 +66,8 @@ export function DashboardPage({
   const [preset, setPreset] = useState<PeriodPreset>('today');
   const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
   const [draft, setDraft] = useState(range);
-  const [data, setData] = useState<DashboardDto | null>(null);
+  // Части дашборда грузятся отдельно: основа — сразу, звонки и новые сделки — когда посчитаются.
+  const [parts, setParts] = useState<Partial<Record<DashboardPart, { key: string; dto: Partial<DashboardDto> }>>>({});
   const [error, setError] = useState('');
   const [alertCount, setAlertCount] = useState<number | null>(null);
   const [askCode, setAskCode] = useState(false);
@@ -86,22 +89,22 @@ export function DashboardPage({
     };
   }, [bookingAlerts]);
 
+  const query = `from=${range.from}&to=${range.to}&callsScope=${callsScope}${callsFunnel === null ? '' : `&callsFunnel=${callsFunnel}`}`;
   useEffect(() => {
     let active = true;
-    const funnel = callsFunnel === null ? '' : `&callsFunnel=${callsFunnel}`;
-    apiGet<DashboardDto>(`/dashboard?from=${range.from}&to=${range.to}&callsScope=${callsScope}${funnel}`).then(
-      (dto) => {
-        if (active) {
-          setData(dto);
+    for (const part of DASHBOARD_PARTS)
+      apiGet<Partial<DashboardDto>>(`/dashboard?${query}&part=${part}`).then(
+        (dto) => {
+          if (!active) return;
+          setParts((prev) => ({ ...prev, [part]: { key: query, dto } }));
           setError('');
-        }
-      },
-      (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить дашборд'),
-    );
+        },
+        (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить дашборд'),
+      );
     return () => {
       active = false;
     };
-  }, [range, callsScope, callsFunnel]);
+  }, [query]);
 
   const choose = (p: PeriodPreset) => {
     setPreset(p);
@@ -110,15 +113,14 @@ export function DashboardPage({
   };
   const draftError = periodError(draft.from, draft.to);
 
-  const d =
-    data?.from === range.from &&
-    data.to === range.to &&
-    data.callsScope === callsScope &&
-    (callsFunnel === null || data.callsFunnel === callsFunnel)
-      ? data
-      : null;
+  // Дашборд — из частей текущего запроса; нет основы — ещё грузится. Нет части — её плитки «…».
+  const fresh = (p: DashboardPart) => (parts[p]?.key === query ? parts[p]!.dto : undefined);
+  const base = fresh('base');
+  const d: Partial<DashboardDto> | null = base ? { ...base, ...fresh('calls'), ...fresh('deals') } : null;
+  const data = d ?? parts.base?.dto ?? null;
   const funnels = data?.callFunnels ?? [];
-  const n = (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v));
+  // null — недоступно (нет прав), undefined — ещё считается.
+  const n = (v: number | null | undefined) => (v === undefined ? '…' : v === null ? '—' : String(v));
   const word = periodWord(preset);
 
   const periodBar = (
@@ -310,7 +312,7 @@ export function DashboardPage({
         </div>
         <div className="dash-tile">
           <span className="dash-tile-label">Новых сделок {word}</span>
-          <span className="dash-tile-value">{n(d?.newDeals?.total)}</span>
+          <span className="dash-tile-value">{n(d?.newDeals === null ? null : d?.newDeals?.total)}</span>
           <button className="dash-tile-action" disabled={!d?.newDeals?.total} onClick={() => setDealsOpen('all')}>
             Показать сделки
           </button>
@@ -318,7 +320,7 @@ export function DashboardPage({
         <div className="dash-tile">
           <span className="dash-tile-label">Повторные клиенты</span>
           <span className="dash-tile-value">
-            {n(d?.newDeals?.repeat)}
+            {n(d?.newDeals === null ? null : d?.newDeals?.repeat)}
             {!!d?.newDeals?.total && <small> из {d.newDeals.total}</small>}
           </span>
           <button className="dash-tile-action" disabled={!d?.newDeals?.repeat} onClick={() => setDealsOpen('repeat')}>
@@ -365,8 +367,8 @@ export function DashboardPage({
       )}
 
       <div className="dash-lists">
-        <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings.created} tz={tz} variant="created" />
-        <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings.removed} tz={tz} variant="removed" />
+        <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings?.created} tz={tz} variant="created" />
+        <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings?.removed} tz={tz} variant="removed" />
       </div>
       <p className="muted dash-note">
         Новые сделки — созданные {word} в воронках ваших групп; повторный клиент — у контакта уже была состоявшаяся сделка той же

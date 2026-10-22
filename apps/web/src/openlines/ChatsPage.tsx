@@ -337,6 +337,14 @@ export function ChatsPage({
               <strong>📁 {currentFolder?.name ?? 'Папка'}</strong>
               <span className="row-actions">
                 <button
+                  className={`cl-ignore${currentFolder?.ignoreAttention ? ' on' : ''}`}
+                  aria-pressed={!!currentFolder?.ignoreAttention}
+                  title="Чаты этой папки не попадают в «Требуют внимания» и «ждут ответа» на вашем дашборде"
+                  onClick={() => void folderAction(() => apiPut(`/openlines/folders/${folderId}`, { ignoreAttention: !currentFolder?.ignoreAttention }))}
+                >
+                  {currentFolder?.ignoreAttention ? '🔕 Не обращать внимания' : '🔔 Обращать внимание'}
+                </button>
+                <button
                   title="Переименовать папку"
                   aria-label="Переименовать папку"
                   onClick={() => {

@@ -5015,3 +5015,17 @@ input[role='switch']:checked::after {
     border-radius: 16px 16px 0 0;
   }
 }
+
+/* Папка «Не обращать внимания». */
+.cl-ignore {
+  width: auto !important;
+  padding: 0 10px !important;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cl-ignore.on {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: #f2f4f7;
+  color: #475467;
+}

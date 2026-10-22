@@ -13,7 +13,15 @@ const STATUS: Record<string, number> = {
   OPERATION_TIME_LIMIT: HttpStatus.SERVICE_UNAVAILABLE,
   PORTAL_INACTIVE: HttpStatus.UNAUTHORIZED,
   REAUTH_REQUIRED: HttpStatus.SERVICE_UNAVAILABLE,
+  OVERLOAD_LIMIT: HttpStatus.SERVICE_UNAVAILABLE,
+  NETWORK_ERROR: HttpStatus.SERVICE_UNAVAILABLE,
+  HTTP_ERROR: HttpStatus.SERVICE_UNAVAILABLE,
+  ERROR_UNEXPECTED_ANSWER: HttpStatus.SERVICE_UNAVAILABLE,
+  INTERNAL_SERVER_ERROR: HttpStatus.SERVICE_UNAVAILABLE,
 };
+
+/** Портал не выполнил запрос (перегрузка, сеть, сбой) — действие не выполнено, можно повторить. */
+const RETRY_LATER = 'Битрикс24 сейчас не ответил — действие не выполнено, повторите через минуту';
 
 const MESSAGE: Record<string, string> = {
   READ_ONLY_MODE: 'Изменения в Битрикс24 сейчас запрещены (режим только чтения)',
@@ -21,7 +29,13 @@ const MESSAGE: Record<string, string> = {
   ACCESS_ERROR: 'Нет доступа к этому диалогу в Битрикс24',
   insufficient_scope: 'У приложения нет нужных прав в Битрикс24',
   expired_token: 'Токен Битрикс24 истёк — обновите авторизацию',
-  QUERY_LIMIT_EXCEEDED: 'Битрикс24 ограничил частоту запросов — повторите позже',
+  QUERY_LIMIT_EXCEEDED: 'Битрикс24 ограничил частоту запросов — действие не выполнено, повторите через минуту',
+  OPERATION_TIME_LIMIT: RETRY_LATER,
+  OVERLOAD_LIMIT: RETRY_LATER,
+  NETWORK_ERROR: 'Нет связи с Битрикс24 — действие не выполнено, повторите через минуту',
+  HTTP_ERROR: RETRY_LATER,
+  ERROR_UNEXPECTED_ANSWER: RETRY_LATER,
+  INTERNAL_SERVER_ERROR: RETRY_LATER,
 };
 
 /** Понятный пользователю текст ошибки Битрикс24 (для ответов, где ошибка — часть результата). */

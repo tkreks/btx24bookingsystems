@@ -15,15 +15,16 @@ describe('«Не требует ответа» — общая отметка ч�
     expect(isWaiting(true, 'client', 100, null)).toBe(false);
   });
 
-  function setup(rows: Record<string, unknown>[]) {
+  function setup(rows: Record<string, unknown>[], ignored: number[] = []) {
     const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...rows[0], ...data }));
     const prisma = {
       openlineChat: {
         findUnique: vi.fn(async () => rows[0] ?? null),
         update,
-        findMany: vi.fn(async () => rows),
+        findMany: vi.fn(async (args?: { where?: { chatId?: { in?: number[] } } }) => rows.filter((r) => !args?.where?.chatId?.in || args.where.chatId.in.includes(r.chatId as number))),
       },
       openlineChatAccess: { findMany: vi.fn(async () => rows.map((r) => ({ chatId: r.chatId }))) },
+      chatFolderItem: { findMany: vi.fn(async () => ignored.map((chatId) => ({ chatId }))) },
     } as unknown as PrismaService;
     const call = vi.fn(async () => ({
       result: { messages: [{ id: 100, author_id: 55, date: '2026-10-22T09:00:00Z', text: 'Здравствуйте' }], users: [{ id: 55, connector: true }] },
@@ -46,6 +47,12 @@ describe('«Не требует ответа» — общая отметка ч�
     const a = await t.svc.attention(t.user);
     expect(a.waiting).toBe(2);
     expect(a.items.map((i) => [i.chatId, i.dealId])).toEqual([[50580, 678], [3, 678]]);
+  });
+
+  it('чаты моих папок «Не обращать внимания» — не требуют внимания', async () => {
+    const t = setup([row({}), row({ chatId: 3 })], [3]);
+    const a = await t.svc.attention(t.user);
+    expect(a.items.map((i) => i.chatId)).toEqual([50580]);
   });
 
   it('каналы клиента: чаты того же контакта, кроме явно недоступных', async () => {

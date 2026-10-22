@@ -34,7 +34,11 @@ export class UserTokenVerifier {
 
     const key = sha256Hex(`${memberId}:${token}`);
     const hit = this.cache.get(key);
-    if (hit && hit.expiresAt > Date.now()) return { portal, client, ...hit.value };
+    if (hit && hit.expiresAt > Date.now()) {
+      // Сбои запросов этого клиента в журнале — от имени сотрудника.
+      client.actor = { userId: hit.value.userId, name: hit.value.userName };
+      return { portal, client, ...hit.value };
+    }
 
     let value: Verified;
     try {
@@ -57,6 +61,7 @@ export class UserTokenVerifier {
       throw err;
     }
     this.remember(key, value);
+    client.actor = { userId: value.userId, name: value.userName };
     return { portal, client, ...value };
   }
 

@@ -48,6 +48,8 @@ export interface ChatFolderDto {
   unread: number;
   /** Последнее сообщение среди чатов папки. */
   last: { chatId: number; title: string; preview: string; date: string; author: MessageAuthorKind } | null;
+  /** «Не обращать внимания»: чаты папки не попадают в «Требуют внимания» на дашборде. */
+  ignoreAttention: boolean;
 }
 
 export interface ChatListDto {
@@ -177,11 +179,9 @@ export interface DashboardDto {
    * ждут ответа — среди **всех доступных** сотруднику чатов; `attention` — последние сообщения
    * клиентов, на которые ещё не ответили (новые сверху).
    */
-  chats: { waitingReply: number; unreadMessages: number; attention: AttentionChatDto[] } | null;
+  chats: { waitingReply: number; attention: AttentionChatDto[] } | null;
   /** Активные брони на ресурсах групп пользователя: на сегодня и на завтра (пересекают день). */
   bookingDays: { today: number; tomorrow: number };
-  /** С кем общались в открытых линиях за период (уникальные элементы CRM). */
-  contacts: { leads: number; contacts: number; deals: number; companies: number } | null;
   /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
   calls: Record<CallKind, number> | null;
   /** Все звонки за период (входящие и исходящие, по `callsScope`); null — нет доступа к делам CRM. */
@@ -323,3 +323,10 @@ export interface ChatChannelDto {
   lastMessageAt: string | null;
   waitingReply: boolean;
 }
+
+/**
+ * Часть дашборда (`/api/dashboard?part=`): быстрая основа (чаты, брони, сегодня/завтра) и медленные
+ * звонки и новые сделки — грузятся отдельно, чтобы экран не ждал самую долгую часть.
+ */
+export const DASHBOARD_PARTS = ['base', 'calls', 'deals'] as const;
+export type DashboardPart = (typeof DASHBOARD_PARTS)[number];

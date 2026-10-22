@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   CALL_KINDS,
+  DASHBOARD_PARTS,
+  type DashboardPart,
   DASHBOARD_MAX_DAYS,
   type CallKind,
   type CallListDto,
@@ -23,15 +25,8 @@ import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { callClients, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
 
-/** CRM: OWNER_TYPE_ID дела → тип элемента. */
-const OWNER_TYPES: Record<string, keyof NonNullable<DashboardDto['contacts']>> = {
-  '1': 'leads',
-  '2': 'deals',
-  '3': 'contacts',
-  '4': 'companies',
-};
-/** Сколько сессий за период разбираем для «с кем общались» (больше — аномалия для одного менеджера). */
-const MAX_SESSIONS = 2000;
+/** Готовый ответ дашборда живёт столько — снимает нагрузку с лимита запросов портала. */
+const CACHE_MS = 30_000;
 const DAY_MS = 86_400_000;
 /** Звонков с начала периода по сейчас — больше не разбираем (за 92 дня у комплекса — сотни-тысячи). */
 const MAX_CALLS = 5000;
@@ -50,41 +45,71 @@ export class DashboardService {
     private readonly fieldMap?: DealFieldMapService,
   ) {}
 
+  /** Готовый дашборд сотрудника на 30 секунд: переключение периода и возврат — без новых запросов к порталу. */
+  private readonly cache = new Map<string, { expiresAt: number; value: Promise<Partial<DashboardDto>> }>();
+
+  /** `query.part` — только эта часть (см. `DashboardPart`); без него — весь дашборд. */
   async get(
     user: B24UserContext,
-    query: { from?: unknown; to?: unknown; callsScope?: unknown; callsFunnel?: unknown },
+    query: { from?: unknown; to?: unknown; callsScope?: unknown; callsFunnel?: unknown; part?: unknown },
+    openlines: boolean,
+    funnelIds: number[] = [],
+    resourceIds: number[] | null = null,
+  ): Promise<Partial<DashboardDto>> {
+    const key = JSON.stringify([user.portal.id, user.userId, query.from, query.to, query.callsScope, query.callsFunnel, query.part, openlines, funnelIds, resourceIds]);
+    const now = Date.now();
+    const hit = this.cache.get(key);
+    if (hit && hit.expiresAt > now) return hit.value;
+    if (this.cache.size > 500) for (const [k, v] of this.cache) if (v.expiresAt <= now) this.cache.delete(k);
+    const value = this.compute(user, query, openlines, funnelIds, resourceIds);
+    this.cache.set(key, { expiresAt: now + CACHE_MS, value });
+    // Ошибку не кэшируем — следующий запрос попробует снова.
+    value.catch(() => this.cache.delete(key));
+    return value;
+  }
+
+  private async compute(
+    user: B24UserContext,
+    query: { from?: unknown; to?: unknown; callsScope?: unknown; callsFunnel?: unknown; part?: unknown },
     openlines: boolean,
     /** Воронки групп пользователя — для «повторных» клиентов. */
     funnelIds: number[] = [],
     /** Ресурсы групп пользователя — какие брони показывать; null — все (администратор). */
     resourceIds: number[] | null = null,
-  ): Promise<DashboardDto> {
+  ): Promise<Partial<DashboardDto>> {
     const { from, to, start, end } = parsePeriod(user.portal.timezone, query);
+    if (query.part !== undefined && !DASHBOARD_PARTS.includes(query.part as DashboardPart))
+      throw new BadRequestException({ code: 'INVALID_PART', message: `part: ${DASHBOARD_PARTS.join(', ')}` });
+    const want = (p: DashboardPart) => query.part === undefined || query.part === p;
     const callsScope = parseScope(query.callsScope);
     const callsFunnel = pickFunnel(query.callsFunnel, funnelIds);
-    const [bookings, bookingDays, calls, callsTotal, newDeals, callFunnels, chats] = await Promise.all([
-      this.bookings(user, start, end, callsScope, resourceIds),
-      this.bookingDays(user, resourceIds),
-      this.callCounts(user, start, end, callsScope, callsFunnel),
-      this.callsTotal(user, start, end, callsScope),
-      this.newDeals(user, start, end, callsScope, funnelIds),
+    // Звонки периода — один запрос на плитки звонков и «все звонки»; нет доступа к делам — null.
+    const callRows = (want('calls') ? this.fetchCalls(user, start) : Promise.resolve({ rows: [] as CallActivity[] })).then(
+      (r) => r.rows,
+      (err: unknown) => {
+        if (err instanceof Bitrix24Error) return null;
+        throw err;
+      },
+    );
+    const [bookings, bookingDays, calls, callsTotal, newDeals, callFunnels, attention] = await Promise.all([
+      want('base') ? this.bookings(user, start, end, callsScope, resourceIds) : undefined,
+      want('base') ? this.bookingDays(user, resourceIds) : undefined,
+      want('calls') ? callRows.then((rows) => (rows ? this.callCounts(user, rows, start, end, callsScope, callsFunnel) : null)) : undefined,
+      want('calls')
+        ? callRows.then((rows) =>
+            rows ? rows.filter((c) => Date.parse(c.START_TIME) < end.getTime() && (callsScope !== 'mine' || Number(c.RESPONSIBLE_ID) === user.userId)).length : null,
+          )
+        : undefined,
+      want('deals') ? this.newDeals(user, start, end, callsScope, funnelIds) : undefined,
       this.funnelNames(user, funnelIds),
-      openlines
-        ? Promise.all([this.chats.attention(user), this.unreadMessages(user), this.contacts(user, start, end)])
-        : null,
+      // Чаты — из кэша (без запросов к порталу).
+      want('base') && openlines ? this.chats.attention(user) : null,
     ]);
-    const callInfo = { calls, callsTotal, newDeals, callsScope, callsFunnel, callFunnels };
-    if (!chats) return { from, to, chats: null, contacts: null, ...callInfo, bookings, bookingDays };
-    const [attention, unread, contacts] = chats;
-    return {
-      from,
-      to,
-      chats: { waitingReply: attention.waiting, unreadMessages: unread, attention: attention.items },
-      contacts,
-      ...callInfo,
-      bookings,
-      bookingDays,
-    };
+    const out: Partial<DashboardDto> = { from, to, callsScope, callsFunnel, callFunnels };
+    if (want('base')) Object.assign(out, { chats: attention ? { waitingReply: attention.waiting, attention: attention.items } : null, bookings, bookingDays });
+    if (want('calls')) Object.assign(out, { calls, callsTotal });
+    if (want('deals')) Object.assign(out, { newDeals });
+    return out;
   }
 
   /** Активные брони на сегодня и на завтра (дни портала) — по ресурсам групп пользователя. */
@@ -189,17 +214,6 @@ export class DashboardService {
     };
   }
 
-  /** Все звонки за период (входящие и исходящие); нет доступа к делам CRM — null. */
-  private async callsTotal(user: B24UserContext, start: Date, end: Date, scope: CallScope): Promise<number | null> {
-    try {
-      const { rows } = await this.fetchCalls(user, start, end);
-      return rows.filter((c) => scope !== 'mine' || Number(c.RESPONSIBLE_ID) === user.userId).length;
-    } catch (err) {
-      if (err instanceof Bitrix24Error) return null;
-      throw err;
-    }
-  }
-
   private async employeeNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
     const out = new Map<number, string>();
     const unique = [...new Set(ids.filter((x) => x > 0))].slice(0, 200);
@@ -216,13 +230,13 @@ export class DashboardService {
   /** Клиенты по видам; нет доступа к делам CRM — null (дашборд работает без них). */
   private async callCounts(
     user: B24UserContext,
+    rows: CallActivity[],
     start: Date,
     end: Date,
     scope: CallScope,
     funnel: number | null,
   ): Promise<DashboardDto['calls']> {
     try {
-      const { rows } = await this.fetchCalls(user, start);
       const clients = callClients(rows, start, end, scope === 'mine' ? user.userId : null);
       const repeat = await this.repeatClients(user, clients, funnel);
       return Object.fromEntries(CALL_KINDS.map((k) => [k, clients.filter((c) => matches(c, k, repeat)).length])) as Record<
@@ -259,19 +273,23 @@ export class DashboardService {
       );
       const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
       const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
-      const earlier: Row[] = [];
-      for (let i = 0; i < contactIds.length; i += CONTACT_CHUNK)
-        earlier.push(
-          ...(await user.client.listAll<Row>(
-            'crm.deal.list',
-            {
-              filter: { '@CONTACT_ID': contactIds.slice(i, i + CONTACT_CHUNK), '!STAGE_SEMANTIC_ID': 'F', '<DATE_CREATE': end.toISOString() },
-              select: ['ID', 'CONTACT_ID', 'CATEGORY_ID', 'DATE_CREATE', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
-            },
-            { max: 5000 },
-          )),
-        );
-      const names = await this.contactNames(user, contactIds);
+      // Сделки клиентов — пачками параллельно (темп держит ограничитель портала), имена — заодно.
+      const [earlierChunks, names] = await Promise.all([
+        Promise.all(
+          chunks(contactIds, CONTACT_CHUNK).map((ids) =>
+            user.client.listAll<Row>(
+              'crm.deal.list',
+              {
+                filter: { '@CONTACT_ID': ids, '!STAGE_SEMANTIC_ID': 'F', '<DATE_CREATE': end.toISOString() },
+                select: ['ID', 'CONTACT_ID', 'CATEGORY_ID', 'DATE_CREATE', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
+              },
+              { max: 5000 },
+            ),
+          ),
+        ),
+        this.contactNames(user, contactIds),
+      ]);
+      const earlier = earlierChunks.flat();
       const items: DashboardNewDeal[] = rows.map((d) => {
         const contactId = Number(d.CONTACT_ID) || 0;
         const created = Date.parse(String(d.DATE_CREATE));
@@ -313,18 +331,20 @@ export class DashboardService {
     if (funnel === null || !contactIds.length) return out;
     const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
     type Row = { CONTACT_ID: string | null; CLOSEDATE: string | null; STAGE_SEMANTIC_ID: string | null } & Record<string, string | null>;
-    const deals: Row[] = [];
-    for (let i = 0; i < contactIds.length; i += CONTACT_CHUNK)
-      deals.push(
-        ...(await user.client.listAll<Row>(
-          'crm.deal.list',
-          {
-            filter: { '@CONTACT_ID': contactIds.slice(i, i + CONTACT_CHUNK), CATEGORY_ID: funnel, '!STAGE_SEMANTIC_ID': 'F' },
-            select: ['ID', 'CONTACT_ID', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
-          },
-          { max: 5000 },
-        )),
-      );
+    const deals = (
+      await Promise.all(
+        chunks(contactIds, CONTACT_CHUNK).map((ids) =>
+          user.client.listAll<Row>(
+            'crm.deal.list',
+            {
+              filter: { '@CONTACT_ID': ids, CATEGORY_ID: funnel, '!STAGE_SEMANTIC_ID': 'F' },
+              select: ['ID', 'CONTACT_ID', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
+            },
+            { max: 5000 },
+          ),
+        ),
+      )
+    ).flat();
     for (const c of clients) {
       if (!c.contactId) continue;
       if (deals.some((d) => Number(d.CONTACT_ID) === c.contactId && dealHappened(d, endField ? d[endField] : null, c.firstIncomingAt)))
@@ -471,46 +491,12 @@ export class DashboardService {
   }
 
   /** Непрочитанные сообщения в своих диалогах открытых линий (счётчики мессенджера). */
-  private async unreadMessages(user: B24UserContext): Promise<number> {
-    const res = await user.client.call<{ items?: { counter?: number }[] }>('im.recent.list', {
-      ONLY_OPENLINES: 'Y',
-      SKIP_DIALOG: 'Y',
-      SKIP_CHAT: 'Y',
-      LIMIT: 200,
-    });
-    return (res.result?.items ?? []).reduce((sum, i) => sum + Math.max(0, Number(i.counter ?? 0)), 0);
-  }
-
-  /** Уникальные лиды, контакты, сделки и компании из своих сессий открытых линий за период. */
-  private async contacts(user: B24UserContext, start: Date, end: Date): Promise<NonNullable<DashboardDto['contacts']>> {
-    const rows = await user.client.listAll<{ OWNER_TYPE_ID: string; OWNER_ID: string }>(
-      'crm.activity.list',
-      {
-        filter: {
-          PROVIDER_ID: 'IMOPENLINES_SESSION',
-          RESPONSIBLE_ID: user.userId,
-          '>=LAST_UPDATED': start.toISOString(),
-          '<LAST_UPDATED': end.toISOString(),
-        },
-        select: ['ID', 'OWNER_TYPE_ID', 'OWNER_ID'],
-      },
-      { max: MAX_SESSIONS },
-    );
-    const out = { leads: 0, contacts: 0, deals: 0, companies: 0 };
-    const seen = new Set<string>();
-    for (const r of rows) {
-      const key = OWNER_TYPES[r.OWNER_TYPE_ID];
-      if (!key || seen.has(`${r.OWNER_TYPE_ID}:${r.OWNER_ID}`)) continue;
-      seen.add(`${r.OWNER_TYPE_ID}:${r.OWNER_ID}`);
-      out[key]++;
-    }
-    return out;
-  }
 }
 
 const parseScope = (v: unknown): CallScope => (v === 'mine' ? 'mine' : 'all');
 /** Контактов в одном запросе сделок. */
 const CONTACT_CHUNK = 50;
+const chunks = <T>(list: T[], size: number): T[][] => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
 
 /** Выбранная воронка, если она среди воронок групп пользователя; иначе — первая из них. */
 function pickFunnel(v: unknown, ids: number[]): number | null {

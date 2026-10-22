@@ -28,39 +28,30 @@ describe('DashboardService', () => {
     expect(() => parsePeriod('Europe/Moscow', { from: '2026-07-22', to: '2026-10-21' })).not.toThrow();
   });
 
-  it('counts waiting chats, unread messages and unique CRM items of own sessions', async () => {
+  it('ждут ответа — из кэша чатов; звонки — одним запросом; ответ кэшируется на 30 секунд', async () => {
     const chats = {
       attention: vi.fn(async () => ({ waiting: 2, items: [{ chatId: 1 }, { chatId: 2 }] })),
     } as unknown as ChatsService;
-    const call = vi.fn(async () => ({ result: { items: [{ counter: 3 }, { counter: 54 }, {}] } }));
-    const listAll = vi.fn(async (_method: string, params?: { filter?: { PROVIDER_ID?: string } }) => params?.filter?.PROVIDER_ID !== 'IMOPENLINES_SESSION' ? [] : [
-      { OWNER_TYPE_ID: '1', OWNER_ID: '5' },
-      { OWNER_TYPE_ID: '1', OWNER_ID: '5' },
-      { OWNER_TYPE_ID: '3', OWNER_ID: '140' },
-      { OWNER_TYPE_ID: '2', OWNER_ID: '678' },
-      { OWNER_TYPE_ID: '14', OWNER_ID: '1' },
-    ]);
+    const call = vi.fn(async () => ({ result: {} }));
+    const listAll = vi.fn(async (_method: string, _params?: { filter?: { PROVIDER_ID?: string } }) => [] as unknown[]);
     const user = {
       portal: { id: 'p1', timezone: 'Europe/Moscow' },
       userId: 7,
       client: { call, listAll },
     } as unknown as B24UserContext;
-    const d = await new DashboardService(chats, emptyJournal).get(user, { from: '2026-10-15', to: '2026-10-21' }, true);
+    const svc = new DashboardService(chats, emptyJournal);
+    const d = await svc.get(user, { from: '2026-10-15', to: '2026-10-21' }, true);
     expect(d).toMatchObject({
       from: '2026-10-15',
       to: '2026-10-21',
-      chats: { waitingReply: 2, unreadMessages: 57, attention: [{ chatId: 1 }, { chatId: 2 }] },
-      contacts: { leads: 1, contacts: 1, deals: 1, companies: 0 },
+      chats: { waitingReply: 2, attention: [{ chatId: 1 }, { chatId: 2 }] },
       bookings: { created: { total: 0, items: [] }, removed: { total: 0, items: [] } },
     });
-    expect(listAll.mock.calls.find((c) => (c[1] as { filter: { PROVIDER_ID: string } }).filter.PROVIDER_ID === 'IMOPENLINES_SESSION')?.[1]).toMatchObject({
-      filter: {
-        RESPONSIBLE_ID: 7,
-        PROVIDER_ID: 'IMOPENLINES_SESSION',
-        '>=LAST_UPDATED': '2026-10-14T21:00:00.000Z',
-        '<LAST_UPDATED': '2026-10-21T21:00:00.000Z',
-      },
-    });
+    expect(listAll.mock.calls.filter((c) => c[1]?.filter?.PROVIDER_ID === 'VOXIMPLANT_CALL')).toHaveLength(1);
+    expect(listAll.mock.calls.some((c) => c[1]?.filter?.PROVIDER_ID === 'IMOPENLINES_SESSION')).toBe(false);
+    const before = listAll.mock.calls.length;
+    await svc.get(user, { from: '2026-10-15', to: '2026-10-21' }, true);
+    expect(listAll.mock.calls.length).toBe(before);
   });
 
   it('calls by client: new vs repeat by won deals in the chosen funnel before the first call', async () => {
@@ -190,7 +181,7 @@ describe('DashboardService', () => {
       client: { call, listAll },
     } as unknown as B24UserContext;
     const d = await new DashboardService({} as ChatsService, emptyJournal).get(user, {}, false);
-    expect(d).toMatchObject({ chats: null, contacts: null, calls: { incoming: 0, new: 0, repeat: 0, lost: 0 }, callsScope: 'all', callsFunnel: null, callFunnels: [], bookings: { created: { total: 0 } } });
+    expect(d).toMatchObject({ chats: null, calls: { incoming: 0, new: 0, repeat: 0, lost: 0 }, callsScope: 'all', callsFunnel: null, callFunnels: [], bookings: { created: { total: 0 } } });
     expect(call).not.toHaveBeenCalled();
     expect(listAll).toHaveBeenCalledWith('crm.activity.list', expect.objectContaining({ filter: expect.objectContaining({ PROVIDER_ID: 'VOXIMPLANT_CALL' }) }), expect.anything());
     await expect(new DashboardService({} as ChatsService, emptyJournal).get(user, { from: 'x' }, false)).rejects.toMatchObject({

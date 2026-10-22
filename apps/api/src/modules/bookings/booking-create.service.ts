@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import {
   canUsePaymentMode,
   discountedPrice,
@@ -17,6 +17,7 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { TRANSIENT_CODES } from '../bitrix24/portals/portal.service.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { ActionLogService } from '../audit/action-log.service.js';
@@ -61,6 +62,8 @@ export const createSchema = z
   .refine((b) => Date.parse(b.end) > Date.parse(b.start), { message: 'Конец брони раньше начала', path: ['end'] })
   .refine((b) => b.kind === 'service' || !!b.dealId !== !!b.newDeal, { message: 'Нужна сделка: существующая или новая', path: ['dealId'] });
 
+/** Заявка «выполняется» дольше — считаем зависшей (процесс упал), повтор разрешён. */
+const STUCK_MS = 2 * 60_000;
 /** Код пересечения броней в Битрикс24. */
 const OVERLAP = '1018';
 
@@ -136,24 +139,34 @@ export class BookingCreateService {
     const prev = await this.prisma.bookingOperation.findUnique({
       where: { portalId_idempotencyKey: { portalId: user.portal.id, idempotencyKey: b.idempotencyKey } },
     });
-    if (prev) {
-      if (prev.status === 'done' && prev.bookingId)
-        return { bookingId: prev.bookingId, dealId: prev.dealId, bookingType: null, warnings: ['Повтор заявки: бронь уже создана'] };
-      throw new ConflictException({
-        code: prev.status === 'running' ? 'OPERATION_RUNNING' : 'OPERATION_FAILED',
-        message: prev.status === 'running' ? 'Бронь уже создаётся' : `Заявка завершилась ошибкой: ${prev.error ?? ''}`,
-      });
+    if (prev?.status === 'done' && prev.bookingId)
+      return { bookingId: prev.bookingId, dealId: prev.dealId, bookingType: null, warnings: ['Повтор заявки: бронь уже создана'] };
+    // Идёт прямо сейчас (не зависла дольше 2 минут) — второй раз не запускаем.
+    if (prev?.status === 'running' && prev.updatedAt.getTime() > Date.now() - STUCK_MS)
+      throw new ConflictException({ code: 'OPERATION_RUNNING', message: 'Бронь уже создаётся — дождитесь результата' });
+    // Прошлая попытка сорвалась — повтор безопасен: созданная тогда новая сделка используется снова,
+    // а бронь, которую не удалось снять откатом, сначала снимаем.
+    const reuseDealId = prev && b.newDeal ? prev.dealId : null;
+    if (prev?.bookingId) {
+      try {
+        await user.client.call('booking.v1.booking.delete', { id: prev.bookingId });
+      } catch (err) {
+        if (!(err instanceof Bitrix24Error && String(err.code) === '1021'))
+          throw new ServiceUnavailableException({ code: 'BITRIX_UNAVAILABLE', message: `Бронь не создана: не удалось убрать бронь #${prev.bookingId} прошлой попытки — повторите через минуту` });
+      }
     }
-    const op = await this.prisma.bookingOperation.create({
-      data: {
-        portalId: user.portal.id,
-        idempotencyKey: b.idempotencyKey,
-        userId: user.userId,
-        status: 'running',
-        steps: [],
-        request: b as unknown as Prisma.InputJsonValue,
-      },
-    });
+    const op = prev
+      ? await this.prisma.bookingOperation.update({ where: { id: prev.id }, data: { status: 'running', error: null, bookingId: null, steps: [] } })
+      : await this.prisma.bookingOperation.create({
+          data: {
+            portalId: user.portal.id,
+            idempotencyKey: b.idempotencyKey,
+            userId: user.userId,
+            status: 'running',
+            steps: [],
+            request: b as unknown as Prisma.InputJsonValue,
+          },
+        });
     const steps: Step[] = [];
     const log = async (step: string, ok: boolean, detail?: unknown) => {
       steps.push({ step, at: new Date().toISOString(), ok, ...(detail === undefined ? {} : { detail }) });
@@ -167,7 +180,11 @@ export class BookingCreateService {
     let bookingId: number | null = null;
     try {
       // 1. Сделка
-      if (b.kind === 'client' && b.newDeal) {
+      if (b.kind === 'client' && b.newDeal && reuseDealId) {
+        dealId = reuseDealId;
+        createdDeal = true;
+        await log('deal.reused', true, { dealId });
+      } else if (b.kind === 'client' && b.newDeal) {
         const res = await user.client.call<number>('crm.deal.add', {
           fields: {
             TITLE: b.newDeal.title,
@@ -283,6 +300,7 @@ export class BookingCreateService {
       return { bookingId, dealId, bookingType: type?.rule.title ?? null, warnings };
     } catch (err) {
       // Компенсация: снять бронь — слот свободен; созданную сделку не удаляем (сообщаем).
+      let leftBooking: number | null = null;
       if (bookingId) {
         try {
           await user.client.call('booking.v1.booking.delete', { id: bookingId });
@@ -290,10 +308,18 @@ export class BookingCreateService {
         } catch (e) {
           this.logger.error(`booking ${bookingId}: compensation failed: ${msg(e)}`);
           await log('compensate.booking.delete', false, msg(e));
+          // Повтор заявки сначала снимет её.
+          leftBooking = bookingId;
         }
       }
-      const text = `${msg(err)}${createdDeal ? ` (создана сделка #${dealId} — проверьте её)` : ''}`.slice(0, 1000);
-      await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { status: 'failed', error: text, dealId } });
+      const text = `${msg(err)}${createdDeal ? ` (создана сделка #${dealId} — повтор использует её)` : ''}`.slice(0, 1000);
+      await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { status: 'failed', error: text, dealId, bookingId: leftBooking } });
+      // Портал не ответил (лимит, сеть, сбой) — понятная ошибка «повторите»: повтор той же заявки безопасен.
+      if (err instanceof Bitrix24Error && TRANSIENT_CODES.has(String(err.code)))
+        throw new ServiceUnavailableException({
+          code: 'BITRIX_UNAVAILABLE',
+          message: `Бронь не создана: Битрикс24 сейчас не ответил. Повторите через минуту — ничего не задвоится${createdDeal ? ` (сделка #${dealId} уже создана и будет использована)` : ''}.`,
+        });
       throw err;
     }
   }

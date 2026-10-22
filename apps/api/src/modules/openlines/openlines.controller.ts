@@ -69,13 +69,14 @@ export class OpenlinesController {
     @Query('to') to?: string,
     @Query('callsScope') callsScope?: string,
     @Query('callsFunnel') callsFunnel?: string,
-  ): Promise<DashboardDto> {
+    @Query('part') part?: string,
+  ): Promise<Partial<DashboardDto>> {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
     return this.dashboard.get(
       user,
-      { from, to, callsScope, callsFunnel },
+      { from, to, callsScope, callsFunnel, part },
       await this.can(user, 'openlines.read'),
       funnelsOf(a),
       // Брони — по ресурсам групп сотрудника; администратору приложения — все.

@@ -51,8 +51,8 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
     ...(ent.entityType ? { entityType: ent.entityType } : {}),
     ...(ent.entityId ? { entityId: ent.entityId } : {}),
     // Объект не разобрался как «сделка 678» — ищем этот текст в описании.
-    ...(applied.text || (applied.object && !ent.entityId) ? { q: applied.text || applied.object } : {}),
-    ...(who === 'system' || who === 'bitrix' ? { actorKind: who } : who ? { userId: who } : {}),
+    ...(who === 'errors' ? { q: 'bitrix.error' } : applied.text || (applied.object && !ent.entityId) ? { q: applied.text || applied.object } : {}),
+    ...(who === 'system' || who === 'bitrix' ? { actorKind: who } : who && who !== 'errors' ? { userId: who } : {}),
   }).toString();
 
   // Первая страница — при смене фильтров; поздний ответ на старые фильтры отбрасывается.
@@ -106,6 +106,7 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
           <option value="">Все</option>
           <option value="system">Система</option>
           <option value="bitrix">Битрикс24</option>
+          <option value="errors">Ошибки запросов к Битрикс24</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}

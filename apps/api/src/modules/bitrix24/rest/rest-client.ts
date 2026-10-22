@@ -53,6 +53,23 @@ export interface RestClientOptions {
   readOnly?: boolean;
   /** Точечные исключения из readOnly (песочница записи). */
   writePolicy?: WritePolicy;
+  /** Запрос окончательно не удался (после повторов) — для журнала действий. */
+  onFailure?: (f: RestFailure) => void;
+}
+
+/** Кто делал запрос (сотрудник — для токена пользователя; нет — приложение). */
+export interface RestActor {
+  userId: number;
+  name: string;
+}
+
+/** Неудавшийся запрос: метод, код ошибки, изменяющий ли он, кто делал. */
+export interface RestFailure {
+  method: string;
+  code: string;
+  message: string;
+  write: boolean;
+  actor: RestActor | null;
 }
 
 const METHOD_RE = /^[a-z][a-z0-9_.]*$/i;
@@ -64,6 +81,8 @@ const BATCH_MAX = 50;
  * `expired_token`. Сетевые ошибки и таймауты НЕ повторяются — иначе `*.add` мог бы создать дубль.
  */
 export class Bitrix24RestClient {
+  /** Сотрудник, чьим токеном идут запросы (ставит проверка токена) — для журнала ошибок. */
+  actor: RestActor | null = null;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
 
@@ -73,6 +92,20 @@ export class Bitrix24RestClient {
   }
 
   async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<RestResponse<T>> {
+    try {
+      return await this.callOnce<T>(method, params);
+    } catch (err) {
+      if (err instanceof Bitrix24Error && this.opts.onFailure)
+        try {
+          this.opts.onFailure({ method, code: String(err.code), message: err.message, write: method !== 'batch' && !isReadMethod(method), actor: this.actor });
+        } catch {
+          /* журнал не должен ломать запрос */
+        }
+      throw err;
+    }
+  }
+
+  private async callOnce<T>(method: string, params: Record<string, unknown>): Promise<RestResponse<T>> {
     if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
     const viaPolicy = await this.assertAllowed(method, params);
     let token = await this.opts.access.getAccessToken();

@@ -593,6 +593,8 @@ model ChatFolder {
   ownerUserId Int
   name        String           @db.VarChar(60)
   sort        Int              @default(0)
+  /// «Не обращать внимания»: чаты папки не попадают в «Требуют внимания» и «ждут ответа» на дашборде владельца.
+  ignoreAttention Boolean      @default(false)
   createdAt   DateTime         @default(now()) @db.DateTime(3)
   items       ChatFolderItem[]
 

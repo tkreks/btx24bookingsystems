@@ -46,9 +46,14 @@ export const envSchema = z.object({
     .refine((v) => /^(\d+(,\d+)*)?$/.test(v.replace(/\s/g, '')), 'comma-separated deal ids'),
   B24_SANDBOX_BOOKINGS_FROM: optionalString(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
   B24_SANDBOX_BOOKINGS_TO: optionalString(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
-  /** Лимит REST-запросов к одному порталу: устойчивая скорость и всплеск. */
+  /**
+   * Лимит REST-запросов к одному порталу: устойчивая скорость и всплеск. Битрикс24 — «дырявое
+   * ведро» (~50 запросов в запасе, 2 в секунду); api и worker считают отдельно, поэтому всплеск у
+   * каждого — 30 (запас 10 давал очередь: дашборд ждал за списком чатов до 16 секунд).
+   * Превышение портал отвечает `QUERY_LIMIT_EXCEEDED` — клиент повторяет с паузой.
+   */
   B24_RATE_PER_SEC: z.coerce.number().positive().default(2),
-  B24_RATE_BURST: z.coerce.number().int().positive().default(10),
+  B24_RATE_BURST: z.coerce.number().int().positive().default(30),
 });
 
 const withSandbox = envSchema.transform((e) => {

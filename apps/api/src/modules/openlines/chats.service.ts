@@ -611,10 +611,15 @@ export class ChatsService {
   async attention(user: B24UserContext, limit = 15): Promise<{ waiting: number; items: AttentionChatDto[] }> {
     if (!this.prisma) return { waiting: 0, items: [] };
     const portalId = user.portal.id;
-    const allowed = await this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: true }, select: { chatId: true } });
+    const [allowed, ignored] = await Promise.all([
+      this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: true }, select: { chatId: true } }),
+      // Чаты моих папок «Не обращать внимания» — не требуют внимания на моём дашборде.
+      this.prisma.chatFolderItem.findMany({ where: { portalId, ownerUserId: user.userId, folder: { ignoreAttention: true } }, select: { chatId: true } }),
+    ]);
+    const skip = new Set(ignored.map((i) => i.chatId));
     if (!allowed.length) return { waiting: 0, items: [] };
     const rows = await this.prisma.openlineChat.findMany({
-      where: { portalId, completed: false, lastAuthor: 'client', chatId: { in: allowed.map((a) => a.chatId) } },
+      where: { portalId, completed: false, lastAuthor: 'client', chatId: { in: allowed.map((a) => a.chatId).filter((id) => !skip.has(id)) } },
       orderBy: { lastMessageAt: 'desc' },
     });
     const waiting = rows.filter((r) => isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));

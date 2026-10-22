@@ -31,7 +31,7 @@ function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions
         ops.push(r);
         return r;
       }),
-      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(ops[0], data)),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(ops[0] ?? (ops[0] = { id: 'op1', ...o.prevOp }), data)),
     },
   } as unknown as PrismaService;
   const access = {
@@ -116,12 +116,28 @@ describe('BookingCreateService', () => {
     expect(t.ops[0]).toMatchObject({ status: 'failed' });
   });
 
-  it('repeat with the same key returns the first result; failed → 409', async () => {
+  it('повтор с тем же ключом: готово — прежний результат; идёт — 409; сорвалось — выполняется заново', async () => {
     const done = setup({ prevOp: { status: 'done', bookingId: 555, dealId: 678 } });
     expect(await done.svc.create(done.user, body())).toMatchObject({ bookingId: 555, warnings: [expect.stringContaining('Повтор')] });
     expect(done.calls).toEqual([]);
-    const failed = setup({ prevOp: { status: 'failed', error: 'x' } });
-    await expect(failed.svc.create(failed.user, body())).rejects.toMatchObject({ status: 409 });
+    const running = setup({ prevOp: { status: 'running', updatedAt: new Date() } });
+    await expect(running.svc.create(running.user, body())).rejects.toMatchObject({ status: 409 });
+    const failed = setup({ prevOp: { status: 'failed', error: 'x', updatedAt: new Date(), dealId: null } });
+    expect(await failed.svc.create(failed.user, body())).toMatchObject({ bookingId: 555 });
+  });
+
+  it('после сбоя: новая сделка прошлой попытки используется снова, оставшаяся бронь сначала снимается', async () => {
+    const t = setup({ prevOp: { status: 'failed', updatedAt: new Date(0), dealId: 900, bookingId: 554 } });
+    const r = await t.svc.create(t.user, body({ dealId: undefined, newDeal: { title: 'Баня', contactId: 140 } }));
+    expect(r.dealId).toBe(900);
+    expect(t.calls[0]).toEqual(['booking.v1.booking.delete', { id: 554 }]);
+    expect(t.calls.some(([m]) => m === 'crm.deal.add')).toBe(false);
+  });
+
+  it('портал не ответил (лимит) — 503 «повторите», бронь снята', async () => {
+    const t = setup({ fail: 'crm.deal.update', failCode: 'QUERY_LIMIT_EXCEEDED' });
+    await expect(t.svc.create(t.user, body({ bookingTypeId: 'hourly' }))).rejects.toMatchObject({ status: 503, response: { code: 'BITRIX_UNAVAILABLE' } });
+    expect(t.calls.map((c) => c[0])).toContain('booking.v1.booking.delete');
   });
 
   it('validates: rights, group resources, deal required, end after start', async () => {
