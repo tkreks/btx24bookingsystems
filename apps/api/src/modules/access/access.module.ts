@@ -8,10 +8,11 @@ import { PermanentAdminGuard } from './permanent-admin.guard.js';
 import { SessionController } from './session.controller.js';
 import { SettingsAccessController, SettingsCodesAdminController } from './settings-access.controller.js';
 import { SettingsAccessService } from './settings-access.service.js';
+import { WebLoginController } from './web-login.controller.js';
 
 @Module({
   imports: [Bitrix24Module],
-  controllers: [SessionController, SettingsAccessController, SettingsCodesAdminController],
+  controllers: [SessionController, SettingsAccessController, SettingsCodesAdminController, WebLoginController],
   providers: [AccessService, AppAdminGuard, PermanentAdminGuard, SettingsAccessService, { provide: APP_INTERCEPTOR, useClass: AppAccessInterceptor }],
   exports: [AccessService, AppAdminGuard, PermanentAdminGuard, Bitrix24Module],
 })

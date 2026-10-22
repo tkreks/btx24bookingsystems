@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CalendarBooking, CalendarDay, CancelBookingResultDto, DealFormDto } from '@btx24/shared';
 import { apiGet, apiPost, apiPut } from '../api.js';
+import { openPortalPath } from '../b24.js';
 import { DealFieldsEditor, initialValues, useDealFieldValues } from '../bookings/DealFieldsEditor.js';
 import { fmtDateTime, fmtMoney } from '../format.js';
 
@@ -40,7 +41,7 @@ export function BookingDetails({
   const [cancelling, setCancelling] = useState<{ comment: string } | null>(null);
   const [error, setError] = useState('');
   const openDeal = () => {
-    if (booking.dealId) window.BX24?.openPath?.(`/crm/deal/details/${booking.dealId}/`);
+    if (booking.dealId) openPortalPath(`/crm/deal/details/${booking.dealId}/`);
   };
   const editable = canEdit && !!groupId && !!booking.deal;
 

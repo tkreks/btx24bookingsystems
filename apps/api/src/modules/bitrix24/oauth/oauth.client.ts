@@ -43,12 +43,31 @@ export class OAuthClient {
     return Boolean(this.clientId && this.clientSecret);
   }
 
+  /** Страница входа портала: сотрудник подтверждает вход, портал возвращает его на `redirectUri` с `code`. */
+  authorizeUrl(portalDomain: string, state: string, redirectUri: string): string {
+    if (!this.clientId) throw new Bitrix24Error('APP_NOT_CONFIGURED', 'B24_CLIENT_ID is not set');
+    const qs = new URLSearchParams({ client_id: this.clientId, state, redirect_uri: redirectUri });
+    return `https://${portalDomain}/oauth/authorize/?${qs}`;
+  }
+
   /** Обмен refresh_token на новую пару. client_secret уходит только на сервер авторизации. */
-  async refresh(oauthHost: string, refreshToken: string): Promise<TokenSet> {
+  refresh(oauthHost: string, refreshToken: string): Promise<TokenSet> {
+    return this.token(oauthHost, { grant_type: 'refresh_token', refresh_token: refreshToken });
+  }
+
+  /**
+   * Вход через Битрикс24 вне портала (решение владельца 2026-10-22): одноразовый `code`, которым
+   * портал вернул сотрудника в приложение, → токены этого сотрудника.
+   */
+  exchangeCode(oauthHost: string, code: string): Promise<TokenSet> {
+    return this.token(oauthHost, { grant_type: 'authorization_code', code });
+  }
+
+  private async token(oauthHost: string, grant: Record<string, string>): Promise<TokenSet> {
     if (!this.clientId || !this.clientSecret) {
       throw new Bitrix24Error('APP_NOT_CONFIGURED', 'B24_CLIENT_ID / B24_CLIENT_SECRET are not set');
     }
-    const qs = new URLSearchParams({ grant_type: 'refresh_token', client_id: this.clientId, client_secret: this.clientSecret, refresh_token: refreshToken });
+    const qs = new URLSearchParams({ ...grant, client_id: this.clientId, client_secret: this.clientSecret });
     let res: Response;
     try {
       res = await this.fetchImpl(`https://${oauthHost}/oauth/token/?${qs}`, { signal: AbortSignal.timeout(15_000) });

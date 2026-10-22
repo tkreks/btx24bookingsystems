@@ -13,6 +13,7 @@
 | `GET /api/session` | кто открыл приложение (`B24AuthGuard`): портал, пользователь, isAdmin, readOnly |
 | `GET /api/admin/placements`, `POST …/sync` | статус и регистрация встроек (сделка: вкладка и кнопка, левое меню) — только администратор, только явным действием |
 | `POST /api/b24/app` | вход из Битрикс24: nginx отдаёт сюда `POST /`. Если портал не зарегистрирован и открыл администратор — регистрация по данным фрейма (та же проверка), затем `303` на SPA |
+| `GET /api/auth/login?domain=` → `GET /api/auth/callback`, `POST /api/auth/logout` | вход вне портала через аккаунт Битрикс24 (контроллер — в `access`, сессии — `auth/web-session.service.ts`) |
 | `POST /api/b24/events` | обработчик событий (`event.bind`). Проверка `auth.application_token` → журнал `Bitrix24Event` → 200 |
 
 ## Инварианты
@@ -28,6 +29,16 @@
   `*.bitrix24.tech`, ответы идентичны `oauth.bitrix.info`), «коробка» — домен портала. Новый хост
   добавлять только после такой же проверки: на него уходит `client_secret`.
 - **Установить может только администратор** (`user.admin === true`).
+- **Вход вне портала (решение владельца 2026-10-22).** `GET /api/auth/login` → `https://{портал}/oauth/authorize/`
+  (`state` = `{portalId}.{случайное}` в cookie `btx24_login`, 10 мин) → `callback` с `code`: `state`
+  совпадает с cookie, `server_domain` — из `B24_TRUSTED_OAUTH_HOSTS`, `grant_type=authorization_code`,
+  `member_id` ответа = портал входа, затем `user.current` (тот же `UserTokenVerifier`) и
+  `AccessService.canEnter`. Сессия `WebSession`: в cookie `btx24_session` (HttpOnly, Secure, Lax,
+  30 дней скользящих) — случайный секрет, в БД — его sha256 и зашифрованные токены сотрудника;
+  refresh — заранее, одним запросом на сессию; отказ сервера авторизации удаляет сессию.
+  `B24AuthGuard` берёт cookie только при отсутствии Bearer и только с заголовком
+  `X-Btx24-Standalone: 1` (CSRF: чужой сайт не поставит заголовок без CORS). `redirect_uri` —
+  `APP_BASE_URL/api/auth/callback`: домен должен совпадать с обработчиком приложения на портале.
 - **Секреты:** access/refresh-токены — AES-256-GCM (`ENCRYPTION_KEY`), `application_token` — только
   sha256. Токены из `auth` входящих событий в журнал не пишутся. Смена `ENCRYPTION_KEY` делает
   сохранённые токены нечитаемыми — нужна переустановка.

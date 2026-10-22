@@ -5029,3 +5029,26 @@ input[role='switch']:checked::after {
   background: #f2f4f7;
   color: #475467;
 }
+
+/* Вход вне портала */
+.login-card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.login-card h1 {
+  margin: 0;
+}
+
+.login-domain {
+  display: grid;
+  gap: 4px;
+}
+
+.login-domain input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+}

@@ -1,5 +1,5 @@
 import type { ApiError } from '@btx24/shared';
-import { getAuth, placementContext, refreshAuth, type B24Auth } from './b24.js';
+import { getAuth, isStandalone, placementContext, refreshAuth, type B24Auth } from './b24.js';
 import { reportSessionLost } from './session-guard.js';
 
 export class ApiRequestError extends Error {
@@ -26,6 +26,33 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: {
+      ...(await authHeaders(retried)),
+      // Откуда открыто приложение (сделка, меню) — для журнала действий.
+      'X-Btx24-Placement': isStandalone() ? 'STANDALONE' : placementContext().placement,
+      // FormData: Content-Type с границей частей выставит браузер.
+      ...(body === undefined || body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    },
+    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
+  });
+  if (res.ok) return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
+  if (res.status === 401 && isStandalone()) reportSessionLost();
+  else if (res.status === 401 && (err.code === 'TOKEN_EXPIRED' || err.code === 'INVALID_TOKEN')) {
+    if (!retried) return request<T>(method, path, body, true);
+    reportSessionLost();
+  }
+  throw new ApiRequestError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? `Ошибка ${res.status}`);
+}
+
+/**
+ * Авторизация запроса: во фрейме — токен сотрудника от портала; вне портала — cookie сессии
+ * (браузер отправит сам) и заголовок, без которого сервер cookie не примет (защита от CSRF).
+ */
+async function authHeaders(retried: boolean): Promise<Record<string, string>> {
+  if (isStandalone()) return { 'X-Btx24-Standalone': '1' };
   let auth: B24Auth | null;
   try {
     auth = retried ? await refreshAuth() : await getAuth();
@@ -34,25 +61,7 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     throw new ApiRequestError(401, 'SESSION_LOST', e instanceof Error ? e.message : 'Авторизация Битрикс24 потеряна');
   }
   if (!auth) throw new ApiRequestError(401, 'UNAUTHORIZED', 'Откройте приложение из Битрикс24');
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${auth.token}`,
-      'X-B24-Member-Id': auth.memberId,
-      // Откуда открыто приложение (сделка, меню) — для журнала действий.
-      'X-Btx24-Placement': placementContext().placement,
-      // FormData: Content-Type с границей частей выставит браузер.
-      ...(body === undefined || body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-    },
-    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
-  });
-  if (res.ok) return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
-  const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
-  if (res.status === 401 && (err.code === 'TOKEN_EXPIRED' || err.code === 'INVALID_TOKEN')) {
-    if (!retried) return request<T>(method, path, body, true);
-    reportSessionLost();
-  }
-  throw new ApiRequestError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? `Ошибка ${res.status}`);
+  return { Authorization: `Bearer ${auth.token}`, 'X-B24-Member-Id': auth.memberId };
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
@@ -65,18 +74,10 @@ export async function apiDelete(path: string): Promise<void> {
 
 /** Файл с нашего API (картинки чата и т. п.): `<img src>` не умеет передать токен — берём Blob. */
 export async function apiBlob(path: string, retried = false): Promise<Blob> {
-  let auth: B24Auth | null;
-  try {
-    auth = retried ? await refreshAuth() : await getAuth();
-  } catch (e) {
-    reportSessionLost();
-    throw new ApiRequestError(401, 'SESSION_LOST', e instanceof Error ? e.message : 'Авторизация Битрикс24 потеряна');
-  }
-  if (!auth) throw new ApiRequestError(401, 'UNAUTHORIZED', 'Откройте приложение из Битрикс24');
-  const res = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${auth.token}`, 'X-B24-Member-Id': auth.memberId } });
+  const res = await fetch(`/api${path}`, { headers: await authHeaders(retried) });
   if (res.ok) return res.blob();
   const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
-  if (res.status === 401 && (err.code === 'TOKEN_EXPIRED' || err.code === 'INVALID_TOKEN') && !retried) return apiBlob(path, true);
+  if (res.status === 401 && !isStandalone() && (err.code === 'TOKEN_EXPIRED' || err.code === 'INVALID_TOKEN') && !retried) return apiBlob(path, true);
   throw new ApiRequestError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? `Ошибка ${res.status}`);
 }
 
@@ -85,4 +86,10 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append('file', file, file.name);
   return request<T>('POST', path, form);
+}
+
+/** Выход из приложения, открытого вне портала: сессия удаляется на сервере, затем страница входа. */
+export async function logout(): Promise<void> {
+  await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Btx24-Standalone': '1' } }).catch(() => undefined);
+  window.location.assign('/');
 }

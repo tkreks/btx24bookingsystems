@@ -13,8 +13,8 @@ import {
   type DashboardNewDeal,
   type SessionInfo,
 } from '@btx24/shared';
-import { apiGet } from '../api.js';
-import { openCrm } from '../b24.js';
+import { apiGet, logout } from '../api.js';
+import { isStandalone, openCrm, openPortalPath } from '../b24.js';
 import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
@@ -264,6 +264,12 @@ export function DashboardPage({
               <span aria-hidden="true">⚙</span> Настройки
             </button>
           )}
+          {/* Вне портала (вход через Битрикс24) — выход из сессии приложения. */}
+          {isStandalone() && (
+            <button className="settings-button" onClick={() => void logout()} title={`Выйти: ${session.user.name}`}>
+              Выйти
+            </button>
+          )}
         </div>
       </header>
       {askCode && (
@@ -465,7 +471,7 @@ function BookingList({
   tz: string;
   variant: 'created' | 'removed';
 }) {
-  const openDeal = (id: number) => window.BX24?.openPath?.(`/crm/deal/details/${id}/`);
+  const openDeal = (id: number) => openPortalPath(`/crm/deal/details/${id}/`);
   const rows = list?.items;
   return (
     <section className="day-panel dash-list">

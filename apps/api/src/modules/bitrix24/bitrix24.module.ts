@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.js';
 import { B24AuthGuard } from './auth/b24-auth.guard.js';
 import { UserTokenVerifier } from './auth/user-token.verifier.js';
+import { WebSessionService } from './auth/web-session.service.js';
 import { SecretBox } from './crypto/secret-box.js';
 import { EventsController } from './events/events.controller.js';
 import { EventsService } from './events/events.service.js';
@@ -49,8 +50,9 @@ import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from './bitrix24.tokens.js
     EventsService,
     PlacementsService,
     UserTokenVerifier,
+    WebSessionService,
     B24AuthGuard,
   ],
-  exports: [PortalService, UserTokenVerifier, B24AuthGuard, B24_CONFIG],
+  exports: [PortalService, UserTokenVerifier, WebSessionService, B24AuthGuard, B24_CONFIG],
 })
 export class Bitrix24Module {}

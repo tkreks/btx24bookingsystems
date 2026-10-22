@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { AppEnterDto, SessionInfo } from '@btx24/shared';
 import { apiGet, apiPost, ApiRequestError } from './api.js';
-import { initB24, placementContext, type PlacementContext } from './b24.js';
+import { initB24, placementContext, setStandalone, type PlacementContext } from './b24.js';
+import { LoginPage } from './LoginPage.js';
 import { CalendarPage } from './calendar/CalendarPage.js';
 import { SessionOverlay } from './SessionOverlay.js';
 import { startSessionWatch } from './session-guard.js';
 
 type Boot =
   | { state: 'loading' }
-  | { state: 'outside' }
+  | { state: 'login'; error: string }
   | { state: 'error'; message: string }
   | { state: 'ready'; session: SessionInfo; placement: PlacementContext };
 
@@ -17,22 +18,26 @@ export function App() {
 
   useEffect(() => {
     void (async () => {
-      if (!(await initB24())) return setBoot({ state: 'outside' });
+      const inFrame = await initB24();
+      // Вне портала — вход через аккаунт Битрикс24 и cookie-сессия (WebLoginController).
+      if (!inFrame) setStandalone();
       try {
         const session = await apiGet<SessionInfo>('/session');
-        const placement = placementContext();
+        if (!inFrame) setStandalone(session.portal.domain);
+        const placement: PlacementContext = inFrame ? placementContext() : { placement: 'STANDALONE', dealId: null };
         setBoot({ state: 'ready', session, placement });
         // Вход — в журнал действий (откуда открыли); сбой записи не мешает работе.
         void apiPost('/activity/enter', { placement: placement.placement, dealId: placement.dealId } satisfies AppEnterDto).catch(() => undefined);
         startSessionWatch();
       } catch (e) {
+        if (!inFrame && e instanceof ApiRequestError && e.status === 401) return setBoot({ state: 'login', error: loginError() });
         setBoot({ state: 'error', message: e instanceof ApiRequestError ? e.message : 'Не удалось подключиться к серверу приложения' });
       }
     })();
   }, []);
 
   if (boot.state === 'loading') return <div className="screen-center muted">Загрузка…</div>;
-  if (boot.state === 'outside') return <div className="screen-center"><div className="card"><h1>Система бронирования</h1><p className="muted">Откройте приложение из Битрикс24.</p></div></div>;
+  if (boot.state === 'login') return <LoginPage error={boot.error} />;
   if (boot.state === 'error') return <div className="screen-center"><div className="card error">{boot.message}</div></div>;
   if (!boot.session.appAccess)
     return (
@@ -49,4 +54,15 @@ export function App() {
       <SessionOverlay />
     </>
   );
+}
+
+/** Ошибка возврата с портала (`/?login_error=…`) — показать один раз и убрать из адреса. */
+function loginError(): string {
+  const url = new URL(window.location.href);
+  const error = url.searchParams.get('login_error') ?? '';
+  if (error) {
+    url.searchParams.delete('login_error');
+    window.history.replaceState(null, '', url);
+  }
+  return error;
 }

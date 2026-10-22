@@ -38,6 +38,11 @@
 - При открытии во фрейме портал присылает POST с `AUTH_ID`, `REFRESH_ID`, `SERVER_ENDPOINT`,
   `APPLICATION_TOKEN`, `APPLICATION_SCOPE`, `member_id`, `PLACEMENT`; в query — `DOMAIN`, `LANG`,
   `APP_SID`. `status` — справочно, доверенный — только через `app.info` на сервере авторизации.
+- Вход вне портала (OAuth «authorization code»): `https://{портал}/oauth/authorize/?client_id&state&redirect_uri`
+  → портал возвращает на `redirect_uri` с `code`, `state`, `domain`, `member_id`, `server_domain` →
+  `GET https://{server_domain}/oauth/token/?grant_type=authorization_code&client_id&client_secret&code`.
+  Код одноразовый и короткоживущий; токены — сотрудника, его права. Реализация — `WebSessionService`.
+  Поиск MCP `bitrix24-docs` по OAuth 2026-10-22 ничего не нашёл — схема проверяется входом на живом портале.
 - Каждое входящее событие проверяем по `auth.application_token`, сохранённому при установке.
 - Реализация — модуль `apps/api/src/modules/bitrix24` (см. его `MODULE.md`).
 

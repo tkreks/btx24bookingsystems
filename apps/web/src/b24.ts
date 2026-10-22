@@ -31,6 +31,26 @@ export interface PlacementContext {
 }
 
 let ready: Promise<boolean> | null = null;
+/** Приложение открыто вне портала: вход через Битрикс24, запросы — по cookie-сессии. */
+let standalone = false;
+/** Домен портала для ссылок вне фрейма (из сессии). */
+let portalDomain = '';
+
+export function setStandalone(domain = ''): void {
+  standalone = true;
+  if (domain) portalDomain = domain;
+}
+
+export function isStandalone(): boolean {
+  return standalone;
+}
+
+/** Страница портала: во фрейме — слайдером портала, вне портала — в новой вкладке. */
+export function openPortalPath(path: string): void {
+  if (standalone) {
+    if (portalDomain) window.open(`https://${portalDomain}${path}`, '_blank', 'noopener');
+  } else window.BX24?.openPath?.(path);
+}
 
 /** true — приложение открыто во фрейме Битрикс24 и SDK готов. */
 export function initB24(timeoutMs = 4000): Promise<boolean> {
@@ -153,7 +173,7 @@ export function fitFrame(): void {
 
 /** Диалог может закрыться без callback — не блокируем форму ожиданием Promise. */
 export function selectEmployees(onSelect: (users: { id: number; name: string }[]) => void): void {
-  const sdk = window.BX24;
+  const sdk = standalone ? undefined : window.BX24;
   if (!sdk?.selectUsers) throw new Error('Выбор сотрудников доступен только в Битрикс24');
   sdk.selectUsers((users) =>
     onSelect(
@@ -164,12 +184,12 @@ export function selectEmployees(onSelect: (users: { id: number; name: string }[]
 
 /** Открыть чат в мессенджере портала (поверх приложения). */
 export function openMessenger(chatId: number): void {
-  const sdk = window.BX24;
+  const sdk = standalone ? undefined : window.BX24;
   if (sdk?.im?.openMessenger) sdk.im.openMessenger(`chat${chatId}`);
-  else sdk?.openPath?.(`/online/?IM_DIALOG=chat${chatId}`);
+  else openPortalPath(`/online/?IM_DIALOG=chat${chatId}`);
 }
 
 /** Карточка CRM в слайдере портала. */
 export function openCrm(type: 'lead' | 'contact' | 'company' | 'deal', id: number): void {
-  window.BX24?.openPath?.(`/crm/${type}/details/${id}/`);
+  openPortalPath(`/crm/${type}/details/${id}/`);
 }

@@ -64,7 +64,7 @@ describe('B24AuthGuard', () => {
 
   it('requires Bearer token and a sane member id', async () => {
     const { verifier } = await setup();
-    const guard = new B24AuthGuard(verifier);
+    const guard = new B24AuthGuard(verifier, {} as never);
     await expect(guard.canActivate(ctxFor({}).ctx)).rejects.toMatchObject({ response: { code: 'UNAUTHORIZED' } });
     await expect(guard.canActivate(ctxFor({ authorization: 'Bearer user-token', 'x-b24-member-id': '../../x' }).ctx)).rejects.toMatchObject({ response: { code: 'UNAUTHORIZED' } });
   });
@@ -74,7 +74,7 @@ describe('B24AuthGuard', () => {
     const { req, ctx } = ctxFor({ authorization: 'Bearer user-token', 'x-b24-member-id': 'memberabc123' });
     // Верификацию проверяют тесты UserTokenVerifier; здесь — только что guard кладёт контекст в запрос.
     vi.spyOn(verifier, 'verify').mockResolvedValue({ userId: 242 } as never);
-    await expect(new B24AuthGuard(verifier).canActivate(ctx)).resolves.toBe(true);
+    await expect(new B24AuthGuard(verifier, {} as never).canActivate(ctx)).resolves.toBe(true);
     expect(req.b24).toMatchObject({ userId: 242 });
   });
 });

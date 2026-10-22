@@ -57,6 +57,7 @@ model Portal {
   resources            Resource[]
   bookingAlerts        BookingAlert[]
   actionLogs           ActionLog[]
+  webSessions          WebSession[]
 }
 
 enum PortalStatus {
@@ -694,3 +695,27 @@ model ActionLog {
   @@index([portalId, userId, at])
 }
 
+
+// ---------- Вход через Битрикс24 вне портала ----------
+
+/// Сессия входа в приложение напрямую (не из фрейма портала) через OAuth Битрикс24 (решение владельца
+/// 2026-10-22). В cookie — только случайный секрет; здесь — его sha256 и токены сотрудника (зашифрованы).
+model WebSession {
+  id              String   @id @default(cuid())
+  portalId        String
+  portal          Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  /// sha256(секрет из cookie) — по украденной базе сессию не подделать.
+  tokenHash       String   @unique @db.VarChar(64)
+  userId          Int
+  userName        String   @db.VarChar(255)
+  accessTokenEnc  String   @db.Text
+  refreshTokenEnc String   @db.Text
+  accessExpiresAt DateTime @db.DateTime(3)
+  /// Сервер авторизации (oauth.bitrix24.tech) — для обновления токенов.
+  oauthHost       String   @db.VarChar(255)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  lastSeenAt      DateTime @default(now()) @db.DateTime(3)
+  expiresAt       DateTime @db.DateTime(3)
+
+  @@index([portalId, userId])
+}

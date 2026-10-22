@@ -16,3 +16,5 @@ export interface B24UserContext {
 /** Заголовки, которые интерфейс передаёт с каждым запросом (значения — из BX24.getAuth()). */
 export const AUTH_HEADER = 'authorization';
 export const MEMBER_HEADER = 'x-b24-member-id';
+/** Запрос из приложения, открытого вне портала (cookie-сессия); без него cookie не принимается. */
+export const STANDALONE_HEADER = 'x-btx24-standalone';
