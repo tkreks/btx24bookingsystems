@@ -70,6 +70,19 @@ export function AppSettingsForm({
           />
         </fieldset>
         <fieldset>
+          <legend>Доступ к приложению</legend>
+          <p className="muted">
+            Открыть приложение могут только администраторы и сотрудники из этого списка (отдел — вместе с вложенными).
+            Остальные увидят «Доступ к приложению ограничен».
+          </p>
+          <MembersEditor
+            members={draft.appUsers}
+            users={users}
+            departments={departments}
+            onChange={(members) => update({ appUsers: members.map(({ kind, bitrixId }) => ({ kind, bitrixId })) })}
+          />
+        </fieldset>
+        <fieldset>
           <legend>Сбор данных открытых линий</legend>
           <label className="check">
             <input

@@ -40,6 +40,7 @@ model Portal {
   events               Bitrix24Event[]
   groups               WorkGroup[]
   admins               AppAdmin[]
+  appUsers             AppUser[]
   settings             PortalSettings?
   externalUsers        ExternalUser[]
   sandboxBookings      SandboxBooking[]
@@ -159,6 +160,18 @@ model WorkGroupMember {
 
 /// Администраторы приложения (помимо администраторов портала, которые имеют доступ всегда).
 model AppAdmin {
+  id       String     @id @default(cuid())
+  portalId String
+  portal   Portal     @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  kind     MemberKind
+  bitrixId Int
+
+  @@unique([portalId, kind, bitrixId])
+}
+
+/// Кто может открыть приложение (решение владельца 2026-10-22): сотрудники и отделы (с вложенными).
+/// Администраторы портала и приложения входят всегда; остальные видят «Доступ ограничен».
+model AppUser {
   id       String     @id @default(cuid())
   portalId String
   portal   Portal     @relation(fields: [portalId], references: [id], onDelete: Cascade)

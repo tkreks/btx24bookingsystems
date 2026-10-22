@@ -4,9 +4,11 @@ import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { B24_CONFIG, type Bitrix24Config } from '../bitrix24/bitrix24.tokens.js';
 import { AccessService } from './access.service.js';
+import { OpenWithoutAppAccess } from './app-access.interceptor.js';
 
 @Controller('session')
 @UseGuards(B24AuthGuard)
+@OpenWithoutAppAccess()
 export class SessionController {
   constructor(
     private readonly access: AccessService,
@@ -20,6 +22,7 @@ export class SessionController {
       portal: { domain: user.portal.domain, timezone: user.portal.timezone },
       user: { id: user.userId, name: user.userName, isAdmin: user.isAdmin },
       canManageApp: access.isAppAdmin,
+      appAccess: access.canEnter,
       settingsAccessUntil: access.tempAdminUntil?.toISOString() ?? null,
       readOnly: this.config.readOnly,
     };

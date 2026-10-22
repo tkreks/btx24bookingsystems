@@ -3,9 +3,11 @@
 // новая версия приложения. Если нет — интерфейс блокируется окном «Обновите страницу»,
 // чтобы сотрудник не работал с формой, которая уже не сохранится.
 import { useSyncExternalStore } from 'react';
+import type { SessionInfo } from '@btx24/shared';
 import { apiGet } from './api.js';
 
-export type SessionProblem = null | 'auth' | 'update';
+/** denied — сотрудника убрали из списка доступа к приложению. */
+export type SessionProblem = null | 'auth' | 'update' | 'denied';
 
 const CHECK_EVERY_MS = 5 * 60_000;
 /** Возврат на вкладку — проверяем, если с прошлой проверки прошло больше минуты. */
@@ -20,8 +22,8 @@ let lastCheck = 0;
 let started = false;
 
 function set(p: Exclude<SessionProblem, null>) {
-  // Потеря авторизации важнее обновления: её окно не заменяем.
-  if (problem === 'auth' || problem === p) return;
+  // Потеря авторизации и доступа важнее обновления: их окна не заменяем.
+  if (problem === 'auth' || problem === 'denied' || problem === p) return;
   problem = p;
   for (const l of listeners) l();
 }
@@ -45,7 +47,8 @@ export function useSessionProblem(): SessionProblem {
 export async function checkSession(): Promise<void> {
   lastCheck = Date.now();
   try {
-    await apiGet('/session');
+    const s = await apiGet<SessionInfo>('/session');
+    if (!s.appAccess) set('denied');
   } catch {
     // 401 после обновления токена уже отмечен в api.ts; сеть/сервер — не повод блокировать.
   }

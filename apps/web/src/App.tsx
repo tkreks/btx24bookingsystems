@@ -31,6 +31,15 @@ export function App() {
   if (boot.state === 'loading') return <div className="screen-center muted">Загрузка…</div>;
   if (boot.state === 'outside') return <div className="screen-center"><div className="card"><h1>Система бронирования</h1><p className="muted">Откройте приложение из Битрикс24.</p></div></div>;
   if (boot.state === 'error') return <div className="screen-center"><div className="card error">{boot.message}</div></div>;
+  if (!boot.session.appAccess)
+    return (
+      <div className="screen-center">
+        <div className="card">
+          <h1>Доступ к приложению ограничен</h1>
+          <p className="muted">Приложение бронирования доступно администраторам и сотрудникам из списка доступа. Обратитесь к администратору портала.</p>
+        </div>
+      </div>
+    );
   return (
     <>
       <CalendarPage session={boot.session} placement={boot.placement} />

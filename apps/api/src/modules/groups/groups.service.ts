@@ -65,7 +65,11 @@ export class GroupsService {
   }
 
   async settings(portalId: string): Promise<AppSettingsDto> {
-    const [s, admins] = await Promise.all([this.prisma.portalSettings.findUnique({ where: { portalId } }), this.prisma.appAdmin.findMany({ where: { portalId } })]);
+    const [s, admins, appUsers] = await Promise.all([
+      this.prisma.portalSettings.findUnique({ where: { portalId } }),
+      this.prisma.appAdmin.findMany({ where: { portalId } }),
+      this.prisma.appUser.findMany({ where: { portalId } }),
+    ]);
     return {
       dialogMetadataEnabled: s?.dialogMetadataEnabled ?? false,
       dialogTextsEnabled: s?.dialogTextsEnabled ?? false,
@@ -74,6 +78,7 @@ export class GroupsService {
       createGrantedAt: s?.createGrantedAt?.toISOString() ?? null,
       updateDealFields: s?.updateDealFields ?? false,
       admins: admins.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
+      appUsers: appUsers.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
     };
   }
 
@@ -96,10 +101,14 @@ export class GroupsService {
       updatedByUserId: userId,
     };
     const admins = [...new Map(s.admins.map((a) => [`${a.kind}:${a.bitrixId}`, a])).values()];
+    const appUsers = s.appUsers && [...new Map(s.appUsers.map((a) => [`${a.kind}:${a.bitrixId}`, a])).values()];
     await this.prisma.$transaction([
       this.prisma.portalSettings.upsert({ where: { portalId }, create: { portalId, ...flags }, update: flags }),
       this.prisma.appAdmin.deleteMany({ where: { portalId } }),
       this.prisma.appAdmin.createMany({ data: admins.map((a) => ({ portalId, ...a })) }),
+      ...(appUsers
+        ? [this.prisma.appUser.deleteMany({ where: { portalId } }), this.prisma.appUser.createMany({ data: appUsers.map((a) => ({ portalId, ...a })) })]
+        : []),
     ]);
     return this.settings(portalId);
   }

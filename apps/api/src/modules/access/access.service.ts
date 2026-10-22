@@ -18,6 +18,8 @@ export interface UserAccess {
   isAppAdmin: boolean;
   /** Доступ по временному паролю — до этого момента; null — постоянный админ или не админ. */
   tempAdminUntil: Date | null;
+  /** Может открыть приложение: администратор или есть в списке доступа (`AppUser`). */
+  canEnter: boolean;
   groups: GroupAccess[];
 }
 
@@ -34,19 +36,7 @@ export class AccessService {
   constructor(private readonly prisma: PrismaService) {}
 
   async resolve(user: B24UserContext): Promise<UserAccess> {
-    const depts = await this.departmentsWithAncestors(user);
-    const matches = (m: { kind: string; bitrixId: number }) => (m.kind === 'USER' ? m.bitrixId === user.userId : depts.has(m.bitrixId));
-
-    const admins = await this.prisma.appAdmin.findMany({ where: { portalId: user.portal.id } });
-    const permanentAdmin = user.isAdmin || admins.some(matches);
-    // Временный пароль к настройкам: активированный этим сотрудником, не отозван и не истёк.
-    const grant = permanentAdmin
-      ? null
-      : await this.prisma.settingsAccessCode.findFirst({
-          where: { portalId: user.portal.id, usedByUserId: user.userId, revokedAt: null, expiresAt: { gt: new Date() } },
-          orderBy: { expiresAt: 'desc' },
-        });
-    const isAppAdmin = permanentAdmin || grant !== null;
+    const { matches, isAppAdmin, grant, canEnter } = await this.entry(user);
 
     const groups = await this.prisma.workGroup.findMany({
       where: { portalId: user.portal.id, archivedAt: null },
@@ -71,7 +61,35 @@ export class AccessService {
         for (const m of members) if (m.kind === 'DEPARTMENT' && matches(m)) role = higherRole(role, m.role as GroupRole);
       if (role) out.push({ group, role, permissions: effectivePermissions(role, features) });
     }
-    return { isAppAdmin, tempAdminUntil: grant?.expiresAt ?? null, groups: out };
+    return { isAppAdmin, tempAdminUntil: grant?.expiresAt ?? null, canEnter, groups: out };
+  }
+
+  /**
+   * Вход в приложение (решение владельца 2026-10-22): администраторы портала и приложения (в т.ч.
+   * по временному паролю) и сотрудники из списка доступа — сами или через отдел (с вложенными).
+   */
+  async canEnter(user: B24UserContext): Promise<boolean> {
+    return (await this.entry(user)).canEnter;
+  }
+
+  private async entry(user: B24UserContext) {
+    const depts = await this.departmentsWithAncestors(user);
+    const matches = (m: { kind: string; bitrixId: number }) => (m.kind === 'USER' ? m.bitrixId === user.userId : depts.has(m.bitrixId));
+
+    const [admins, appUsers] = await Promise.all([
+      this.prisma.appAdmin.findMany({ where: { portalId: user.portal.id } }),
+      this.prisma.appUser.findMany({ where: { portalId: user.portal.id } }),
+    ]);
+    const permanentAdmin = user.isAdmin || admins.some(matches);
+    // Временный пароль к настройкам: активированный этим сотрудником, не отозван и не истёк.
+    const grant = permanentAdmin
+      ? null
+      : await this.prisma.settingsAccessCode.findFirst({
+          where: { portalId: user.portal.id, usedByUserId: user.userId, revokedAt: null, expiresAt: { gt: new Date() } },
+          orderBy: { expiresAt: 'desc' },
+        });
+    const isAppAdmin = permanentAdmin || grant !== null;
+    return { matches, isAppAdmin, grant, canEnter: isAppAdmin || appUsers.some(matches) };
   }
 
   /** Группа, доступная пользователю, с нужным правом — иначе null. */

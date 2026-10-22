@@ -10,9 +10,10 @@ const group = (id: string, members: Member[], features: string[] = ['booking.det
   resources: resources.map((resourceId) => ({ groupId: id, resourceId })), members,
 });
 
-function setup(opts: { groups: ReturnType<typeof group>[]; admins?: { kind: string; bitrixId: number }[]; departments?: { ID: string; PARENT: string | null }[] | 'denied'; grantUntil?: Date }) {
+function setup(opts: { groups: ReturnType<typeof group>[]; admins?: { kind: string; bitrixId: number }[]; departments?: { ID: string; PARENT: string | null }[] | 'denied'; grantUntil?: Date; appUsers?: { kind: string; bitrixId: number }[] }) {
   const prisma = {
     appAdmin: { findMany: vi.fn(async () => opts.admins ?? []) },
+    appUser: { findMany: vi.fn(async () => opts.appUsers ?? []) },
     settingsAccessCode: { findFirst: vi.fn(async () => (opts.grantUntil ? { expiresAt: opts.grantUntil } : null)) },
     workGroup: { findMany: vi.fn(async () => opts.groups) },
   } as unknown as PrismaService;
@@ -97,5 +98,27 @@ describe('AccessService', () => {
     expect(svc.pick(a, 'g1', 'booking.create')).toBeNull();
     expect(svc.pick(a, undefined, 'booking.create')?.group.id).toBe('g2');
     expect(svc.pick(a, 'other', 'calendar.view')).toBeNull();
+  });
+});
+
+describe('AccessService.canEnter — доступ к приложению', () => {
+  it('администраторы портала и приложения входят всегда', async () => {
+    const t = setup({ groups: [], admins: [{ kind: 'USER', bitrixId: 10 }] });
+    expect(await t.svc.canEnter(t.user())).toBe(true);
+    const p = setup({ groups: [] });
+    expect(await p.svc.canEnter(p.user({ isAdmin: true }))).toBe(true);
+  });
+  it('по временному паролю к настройкам — тоже', async () => {
+    const t = setup({ groups: [], grantUntil: new Date(Date.now() + 3600e3) });
+    expect(await t.svc.canEnter(t.user())).toBe(true);
+  });
+  it('сотрудник из списка — сам или через отдел (с вложенными); остальные — нет', async () => {
+    const t = setup({ groups: [], appUsers: [{ kind: 'USER', bitrixId: 10 }] });
+    expect(await t.svc.canEnter(t.user())).toBe(true);
+    const d = setup({ groups: [], appUsers: [{ kind: 'DEPARTMENT', bitrixId: 1 }], departments: [{ ID: '1', PARENT: null }, { ID: '5', PARENT: '1' }] });
+    expect(await d.svc.canEnter(d.user({ departmentIds: [5] }))).toBe(true);
+    const n = setup({ groups: [group('g1', [{ kind: 'USER', bitrixId: 10, role: 'MANAGER' }])], appUsers: [{ kind: 'USER', bitrixId: 11 }] });
+    expect(await n.svc.canEnter(n.user())).toBe(false);
+    expect((await n.svc.resolve(n.user())).canEnter).toBe(false);
   });
 });
