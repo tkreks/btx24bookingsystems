@@ -88,13 +88,26 @@ export class ClientBookingsService {
     const items: ClientBookingDto[] = byClient.map((b) =>
       item(sec(b, 'from'), sec(b, 'to'), Number(b.id), (b.resourceIds ?? []).map(Number), links.get(Number(b.id)) ?? null),
     );
+    // Удалённая в модуле бронь: ресурсы — из журнала приложения, если бронь создавали через него
+    // (встройка по ним открывает группу ресурса и объясняет, что брони уже нет).
+    const missing = fromDeals.filter((x) => !(fetched.result[`b${x.id}`] as { booking?: RawBooking } | undefined)?.booking).map((x) => x.id);
+    const journal = new Map(
+      missing.length
+        ? (
+            await this.prisma.bookingRecord.findMany({
+              where: { portalId: user.portal.id, bookingId: { in: missing } },
+              select: { bookingId: true, resourceIds: true },
+            })
+          ).map((r) => [r.bookingId, Array.isArray(r.resourceIds) ? r.resourceIds.map(Number) : []])
+        : [],
+    );
     for (const { d, id } of fromDeals) {
       const b = (fetched.result[`b${id}`] as { booking?: RawBooking } | undefined)?.booking;
       if (b) items.push(item(sec(b, 'from'), sec(b, 'to'), id, (b.resourceIds ?? []).map(Number), Number(d.ID)));
       else {
         const s = map.bookingStart ? Date.parse(String(d[map.bookingStart] ?? '')) : NaN;
         const e = map.bookingEnd ? Date.parse(String(d[map.bookingEnd] ?? '')) : NaN;
-        if (Number.isFinite(s) && Number.isFinite(e)) items.push(item(s, e, null, [], Number(d.ID)));
+        if (Number.isFinite(s) && Number.isFinite(e)) items.push(item(s, e, null, journal.get(id) ?? [], Number(d.ID)));
       }
     }
     const upcoming = items.filter((i) => i.when !== 'past').sort((a, b) => a.start.localeCompare(b.start));

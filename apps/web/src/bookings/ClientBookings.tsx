@@ -145,7 +145,7 @@ function Row({ b, tz, onOpenDay }: { b: ClientBookingDto; tz: string; onOpenDay?
       <div>
         <b>{range}</b> {b.when === 'now' && <span className="pill waiting">идёт сейчас</span>}
         <div className="muted">
-          {b.resources.join(', ') || (b.bookingId ? '' : 'бронь удалена, даты из сделки')}
+          {[b.resources.join(', '), b.bookingId ? '' : 'бронь удалена в Битрикс24, даты из сделки'].filter(Boolean).join(' · ')}
           {b.deal && ` · ${b.deal.title}${b.deal.stageSemantic === 'S' ? ' (выиграна)' : b.deal.stageSemantic === 'F' ? ' (проиграна)' : ''}`}
         </div>
       </div>

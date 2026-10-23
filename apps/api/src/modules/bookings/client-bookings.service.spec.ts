@@ -27,7 +27,10 @@ describe('ClientBookingsService', () => {
       if (Object.keys(cmds)[0].startsWith('b1') || 'b2' in cmds) return { result: { b1: { externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '700' }] }, b2: { externalData: [] } } };
       return { result: { b3: { booking: bk(3, '2026-10-21T09:00:00Z', '2026-10-21T13:00:00Z') } } }; // b4 — удалена
     });
-    const prisma = { resource: { findMany: vi.fn(async () => [{ resourceId: 10, name: 'Баня 1' }]) } } as unknown as PrismaService;
+    const prisma = {
+      resource: { findMany: vi.fn(async () => [{ resourceId: 10, name: 'Баня 1' }, { resourceId: 14, name: 'Теремок' }]) },
+      bookingRecord: { findMany: vi.fn(async () => [{ bookingId: 4, resourceIds: [14] }]) },
+    } as unknown as PrismaService;
     const fieldMap = { get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S', bookingEnd: 'UF_E' })) } as unknown as DealFieldMapService;
     const user = { portal: { id: 'p1' }, client: { call, listAll, batch } } as unknown as B24UserContext;
     const r = await new ClientBookingsService(prisma, fieldMap).forContact(user, 140, [], new Date('2026-10-21T10:00:00Z'));
@@ -40,7 +43,8 @@ describe('ClientBookingsService', () => {
     ]);
     expect(r.recent.map((b) => [b.bookingId, b.dealId, b.deal?.title, b.resources])).toEqual([
       [1, 700, 'Баня, октябрь', ['Баня 1']],
-      [null, 702, 'Старая', []],
+      // b4 удалена в модуле — ресурс из журнала приложения, bookingId null.
+      [null, 702, 'Старая', ['Теремок']],
     ]);
     expect(r.openDeals).toEqual([{ id: 701, title: 'Баня, сейчас', categoryId: 0 }]);
   });

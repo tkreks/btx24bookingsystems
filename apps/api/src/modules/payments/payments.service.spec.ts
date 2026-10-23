@@ -22,7 +22,7 @@ const options = {
   },
 };
 
-type Grp = { group: { id: string; name: string; dealCategoryId: number; options: unknown }; permissions: string[] };
+type Grp = { group: { id: string; name: string; dealCategoryId: number; options: unknown; resourceIds?: number[] }; permissions: string[] };
 function setup(
   o: {
     permissions?: string[];
@@ -34,6 +34,7 @@ function setup(
     category?: string;
     groups?: Grp[];
     bookingGroup?: string;
+    bookingResources?: number[];
     template?: { id: string; name: string; steps: { text: string; fileIds: string[] }[] };
   } = {},
 ) {
@@ -68,7 +69,7 @@ function setup(
     },
     workGroup: { findUnique: vi.fn(async () => ({ options })) },
     bookingRecord: {
-      findUnique: vi.fn(async () => (o.bookingGroup ? { groupId: o.bookingGroup } : null)),
+      findUnique: vi.fn(async () => (o.bookingGroup || o.bookingResources ? { groupId: o.bookingGroup ?? null, resourceIds: o.bookingResources ?? [] } : null)),
       // Прошедшая бронь сделки (для подсказки «уже прошла»).
       findFirst: vi.fn(async () => (o.pastBooking ? { bookingId: o.pastBooking, startsAt: new Date(Date.now() - 86_400_000), endsAt: new Date(Date.now() - 82_800_000), resourceIds: [2] } : null)),
       findMany: vi.fn(async () =>
@@ -80,7 +81,7 @@ function setup(
     messageTemplate: { findFirst: vi.fn(async ({ where }: { where: { id: string } }) => (o.template?.id === where.id ? o.template : null)) },
     storedFile: { findMany: vi.fn(async () => [{ id: 'f1', name: 'прайс.pdf', data: Buffer.from('x') }]) },
   } as unknown as PrismaService;
-  const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options }, permissions: o.permissions ?? ['payment.send'] };
+  const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options, resourceIds: [2, 14] }, permissions: o.permissions ?? ['payment.send'] };
   const access = { resolve: vi.fn(async () => ({ groups: [group, ...(o.groups ?? [])] })) } as unknown as AccessService;
   const fieldMap = { get: vi.fn(async () => ({ prepayment: 'UF_PRE', prepaymentInvoiceId: 'UF_INV', prepaymentLink: 'UF_LINK' })) } as unknown as DealFieldMapService;
   const flow = new PaymentFlow(prisma, { find: vi.fn() } as unknown as BookingJournalService, fieldMap, new MessageContextService(prisma, fieldMap));
@@ -195,6 +196,12 @@ describe('PaymentsService', () => {
     const r = await t.svc.create(t.user, body({ groupId: 'g1' }));
     expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 678, fields: { UF_INV: 6001 } });
     expect(r.warnings.join(' ')).toContain('из другой воронки');
+  });
+
+  it('group of the booking is the group of its resource, whatever the journal says', async () => {
+    // Журнал помнит «Домики», но ресурс брони (Теремок, 14) состоит в «Банях».
+    const t = setup({ category: '14', bookingGroup: 'h1', bookingResources: [14], groups: [houses('h1', 'Домики')] });
+    expect(await t.svc.preview(t.user, 678, 'prepayment')).toMatchObject({ groupId: 'g1', groupName: 'Бани' });
   });
 
   it('several groups on one funnel: the chosen one is used', async () => {

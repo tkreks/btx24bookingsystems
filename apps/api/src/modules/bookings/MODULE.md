@@ -15,7 +15,7 @@
 | `GET /api/crm/search?kind=contact\|deal&q=` / `?contactId=` | `booking.create` | поиск клиента (ID, телефон, e-mail, ФИО) или сделки (название, ID, имя клиента), от 2 символов; сделки контакта — открытые первыми |
 | `GET /api/deal-form?groupId=&dealId=` | `booking.create` или `booking.edit` в группе (+ `booking.details` со сделкой) | поля сделки группы для формы брони и карточки: тип, варианты, «два в строку», значения сделки |
 | `PUT /api/deals/:dealId/fields` `{groupId, values}` | `booking.edit` + `booking.details` в группе | правка полей сделки из карточки брони (только изменённые; режим «только чтение» → 403 `DEAL_READ_ONLY`) |
-| `GET /api/deals/:dealId/bookings` | `calendar.view` | брони сделки и её клиента (встройка открывается на дате брони) |
+| `GET /api/deals/:dealId/bookings` | `calendar.view` | брони сделки и её клиента (встройка открывается на дате брони и в группе её ресурса; бронь из полей сделки, удалённая в Битрикс24, — `bookingId: null`, ресурсы из журнала) |
 | `GET /api/openlines/chats/:chatId/bookings` | `openlines.read` | брони клиента чата: было / сейчас / будет, открытые сделки |
 | `GET/PUT /api/admin/booking-sync/deal-fields`, `…/detect` | админ приложения | системные поля сделки портала (роль → код), автоопределение по названиям |
 | `GET/PUT /api/admin/booking-sync` | админ приложения | горизонт сверки, время и ошибка последней сверки |

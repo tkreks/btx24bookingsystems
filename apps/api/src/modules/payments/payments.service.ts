@@ -321,7 +321,9 @@ export class PaymentsService {
     const a = await this.access.resolve(user);
     const pay = a.groups.filter((g) => g.permissions.includes('payment.send'));
     const rec = bookingId ? await this.prisma.bookingRecord.findUnique({ where: { portalId_bookingId: { portalId: user.portal.id, bookingId } } }) : null;
-    const own = pay.find((g) => g.group.id === rec?.groupId);
+    // Группа брони — по её ресурсу (ресурс состоит ровно в одной группе); запись журнала — запасной путь.
+    const recRes = Array.isArray(rec?.resourceIds) ? (rec.resourceIds as unknown[]).map(Number) : [];
+    const own = pay.find((g) => recRes.some((id) => g.group.resourceIds.includes(id))) ?? pay.find((g) => g.group.id === rec?.groupId);
     const can = [...(own ? [own] : []), ...pay.filter((g) => g !== own && (g.group.dealCategoryId ?? 0) === categoryId)];
     const options = can.map((g) => ({ id: g.group.id, name: g.group.name }));
     if (groupId) return { group: can.find((g) => g.group.id === groupId) ?? null, options };

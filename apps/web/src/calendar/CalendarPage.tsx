@@ -182,10 +182,11 @@ export function CalendarPage({
   }, [placement.dealId, tz]);
 
   // Бронь сделки в другой группе — переключаемся на неё один раз (выбор сотрудника не сохраняем).
+  // Группа определяется только ресурсом брони (ресурс — ровно в одной группе), не воронкой сделки.
+  const targetGroup = dealTarget && groups ? groups.find((x) => dealTarget.resourceIds.some((id) => x.resourceIds.includes(id))) ?? null : null;
   if (dealTarget && groups && !targetGroupApplied) {
     setTargetGroupApplied(true);
-    const g = groups.find((x) => (dealTarget.resourceIds ?? []).some((id) => x.resourceIds.includes(id)));
-    if (g && g.id !== activeGroup?.id) setGroupId(g.id);
+    if (targetGroup && targetGroup.id !== activeGroup?.id) setGroupId(targetGroup.id);
   }
 
   useEffect(() => fitFrame(), [day, view, selected, adminOpen, screen]);
@@ -384,7 +385,11 @@ export function CalendarPage({
                   Показать
                 </button>
               )}
-              {dayKey(dealTarget.start, tz) === date && !dealBookings && ' · в этой группе её не видно — выберите группу ресурса'}
+              {dealTarget.bookingId === null
+                ? ' · в Битрикс24 этой брони уже нет (удалена) — даты и ресурс из сделки'
+                : dayKey(dealTarget.start, tz) === date &&
+                  !dealBookings &&
+                  (targetGroup ? ' · в календаре её нет — обновите страницу' : ' · ресурс брони не входит в ваши группы')}
             </>
           ) : (
             <>Сделка #{placement.dealId}: брони нет — показан сегодняшний день.</>
