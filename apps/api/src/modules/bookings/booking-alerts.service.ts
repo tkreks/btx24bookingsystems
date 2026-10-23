@@ -16,7 +16,7 @@ import { PortalService } from '../bitrix24/portals/portal.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { alertMessage } from './alert-message.js';
 import { BookingJournalService } from './booking-journal.service.js';
-import type { BookingRestoreService } from './booking-restore.service.js';
+import { BookingRestoreService } from './booking-restore.service.js';
 
 export interface RaiseAlertInput {
   kind: 'new_booking' | 'discrepancy';
