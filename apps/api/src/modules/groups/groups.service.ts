@@ -118,10 +118,17 @@ export class GroupsService {
   private async checkTemplates(portalId: string, s: Settings): Promise<void> {
     const p = s.options?.payments;
     const ids = [...new Set([p?.prepaymentTemplateId, p?.surchargeTemplateId].filter((x): x is string => !!x))];
-    if (!ids.length) return;
-    const found = await this.prisma.messageTemplate.count({ where: { portalId, id: { in: ids }, purpose: 'payment', shared: true } });
-    if (found !== ids.length)
-      throw new BadRequestException({ code: 'INVALID_PAYMENT_TEMPLATE', message: 'Шаблон сообщения об оплате не найден — выберите системный шаблон оплаты' });
+    if (ids.length) {
+      const found = await this.prisma.messageTemplate.count({ where: { portalId, id: { in: ids }, purpose: 'payment', shared: true } });
+      if (found !== ids.length)
+        throw new BadRequestException({ code: 'INVALID_PAYMENT_TEMPLATE', message: 'Шаблон сообщения об оплате не найден — выберите системный шаблон оплаты' });
+    }
+    const auto = [...new Set((s.options?.autoMessages ?? []).map((r) => r.templateId))];
+    if (auto.length) {
+      const found = await this.prisma.messageTemplate.count({ where: { portalId, id: { in: auto }, purpose: 'auto', shared: true } });
+      if (found !== auto.length)
+        throw new BadRequestException({ code: 'INVALID_AUTO_TEMPLATE', message: 'Шаблон рассылки не найден — выберите системный шаблон с назначением «Автоматическая рассылка»' });
+    }
   }
 
   private columns(s: Settings): Omit<Prisma.WorkGroupUncheckedCreateInput, 'portalId'> {

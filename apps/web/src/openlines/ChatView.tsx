@@ -87,7 +87,7 @@ export function ChatView({
   const [chain, setChain] = useState<ChainStep[]>(() => [newStep()]);
   const [templatesOpen, setTemplatesOpen] = useState<'list' | 'save' | null>(null);
   // Шаблоны оплаты отправляет автоматизация (со ссылкой) — в чат их не вставляем.
-  const chatTemplates = templates?.filter((t) => t.purpose !== 'payment');
+  const chatTemplates = templates?.filter((t) => t.purpose === 'chat');
   const [templatePick, setTemplatePick] = useState('');
   const list = useRef<HTMLDivElement>(null);
 

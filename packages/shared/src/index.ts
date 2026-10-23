@@ -5,6 +5,7 @@ export * from './calendar.js';
 export * from './health.js';
 export * from './session.js';
 export * from './time.js';
+export * from './auto-messages.js';
 export * from './group-admin.js';
 export * from './openlines.js';
 export * from './bookings.js';

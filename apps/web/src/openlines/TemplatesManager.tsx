@@ -30,7 +30,7 @@ export function TemplatesManager({
 }) {
   const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial, shared: false, purpose: 'chat' } : null);
   // В чате шаблоны оплаты не нужны (ссылку подставляет автоматизация); на странице «Шаблоны» — администраторам.
-  const shown = templates.filter((t) => t.purpose !== 'payment' || (admin && embedded));
+  const shown = templates.filter((t) => t.purpose === 'chat' || (admin && embedded));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -39,7 +39,7 @@ export function TemplatesManager({
     const body: SaveTemplateDto = {
       name: editing.name,
       steps: toSteps(editing.steps),
-      ...(admin ? { shared: editing.purpose === 'payment' || editing.shared, purpose: editing.purpose } : {}),
+      ...(admin ? { shared: editing.purpose !== 'chat' || editing.shared, purpose: editing.purpose } : {}),
     };
     setBusy(true);
     setError('');
@@ -111,11 +111,12 @@ export function TemplatesManager({
                   onChange={(e) => {
                     const purpose = e.target.value as MessageTemplatePurpose;
                     const blank = editing.steps.every(isEmpty);
-                    setEditing({ ...editing, purpose, shared: purpose === 'payment' || editing.shared, steps: purpose === 'payment' && blank ? [newStep(DEFAULT_CLIENT_MESSAGE)] : editing.steps });
+                    setEditing({ ...editing, purpose, shared: purpose !== 'chat' || editing.shared, steps: purpose === 'payment' && blank ? [newStep(DEFAULT_CLIENT_MESSAGE)] : editing.steps });
                   }}
                 >
                   <option value="chat">Шаблон для чатов</option>
                   <option value="payment">Сообщение об оплате (системный — выбирается в настройках группы)</option>
+                  <option value="auto">Автоматическая рассылка (системный — выбирается в правилах рассылки группы)</option>
                 </select>
               </label>
             )}
@@ -129,6 +130,11 @@ export function TemplatesManager({
               <p className="muted">
                 Уйдёт клиенту автоматически, когда портал выдаст ссылку на оплату. {'{link}'} — ссылка (обязательно), {'{prepayment}'} — сумма к оплате,{' '}
                 {'{minutes}'} — минут на оплату, {'{deadline}'} — оплатить до; остальные переменные — по сделке. Сообщения — по порядку, файлы — после текста.
+              </p>
+            ) : editing.purpose === 'auto' ? (
+              <p className="muted">
+                Уйдёт клиенту автоматически по правилу рассылки группы (например, за сутки до начала брони, в рабочее время). Переменные
+                ({'{{Дата начала визита}}'}, {'{{Контакт: Имя}}'} и др.) — по сделке брони. Сообщения — по порядку, файлы — после текста.
               </p>
             ) : (
               <p className="muted">
@@ -173,7 +179,13 @@ export function TemplatesManager({
               {shown.map((t) => (
                 <li key={t.id}>
                   <div>
-                    <strong>{t.name}</strong> {t.purpose === 'payment' ? <span className="pill paid">оплата · системный</span> : t.shared && <span className="pill">общий</span>}
+                    <strong>{t.name}</strong> {t.purpose === 'payment' ? (
+                      <span className="pill paid">оплата · системный</span>
+                    ) : t.purpose === 'auto' ? (
+                      <span className="pill paid">рассылка · системный</span>
+                    ) : (
+                      t.shared && <span className="pill">общий</span>
+                    )}
                     <p className="muted">
                       Сообщений: {t.steps.length} · Вложений: {t.steps.reduce((n, s) => n + s.files.length, 0)}
                     </p>

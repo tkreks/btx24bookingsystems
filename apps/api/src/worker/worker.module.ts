@@ -17,6 +17,8 @@ import { BookingTypeFillService } from '../modules/bookings/booking-type-fill.se
 import { PaymentFlow } from '../modules/payments/payment-flow.js';
 import { PaidAmountService } from '../modules/payments/paid-amount.service.js';
 import { PaidAmountJob } from './paid-amount.job.js';
+import { AutoMessageJob } from './auto-message.job.js';
+import { AutoMessagesService } from '../modules/payments/auto-messages.service.js';
 import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
 import { MessageContextService } from '../modules/bookings/message-context.service.js';
 
@@ -38,6 +40,8 @@ import { MessageContextService } from '../modules/bookings/message-context.servi
     PaymentJob,
     PaidAmountService,
     PaidAmountJob,
+    AutoMessagesService,
+    AutoMessageJob,
     BookingTypeFillService,
     BookingTypeJob,
   ],

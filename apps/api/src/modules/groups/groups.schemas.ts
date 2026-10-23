@@ -68,6 +68,24 @@ export const groupOptionsSchema = z
     views: z.object({ desktop: view, mobile: view }).strict(),
     bookingTypes: z.array(bookingTypeRule).max(30).optional(),
     bookingTypeRequired: z.boolean().optional(),
+    autoMessages: z
+      .array(
+        z
+          .object({
+            id: z.string().regex(/^[a-z0-9_-]{1,40}$/i),
+            enabled: z.boolean(),
+            name: z.string().trim().min(1).max(100),
+            trigger: z.literal('before_start'),
+            hoursBefore: z.number().min(0.5).max(24 * 14),
+            windowFrom: time,
+            windowTo: time,
+            templateId: z.string().min(1).max(40),
+          })
+          .strict()
+          .refine((r) => r.windowFrom < r.windowTo, { message: 'Окно отправки: «с» раньше «до»', path: ['windowTo'] }),
+      )
+      .max(20)
+      .optional(),
     payments: z
       .object({
         prepayment: payStep,

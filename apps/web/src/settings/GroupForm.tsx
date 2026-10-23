@@ -11,6 +11,7 @@ import {
 import { apiDelete, apiPost, apiPut } from '../api.js';
 import { MembersEditor } from './MembersEditor.js';
 import { CatalogSection, DealFieldsSection, PaymentsSection, ResourcesSection, Section } from './GroupOptions.js';
+import { AutoMessagesSection } from './AutoMessagesSection.js';
 import { BookingTypesSection } from './BookingTypesSection.js';
 import { defaultOptions, groupSettings, newGroup } from './group-form.js';
 import { useGroupReferences } from './references.js';
@@ -233,6 +234,8 @@ export function GroupForm({
           stages={refs.stages}
           onChange={(payments) => updateOptions({ payments })}
         />
+
+        <AutoMessagesSection rules={options.autoMessages ?? []} onChange={(autoMessages) => updateOptions({ autoMessages })} />
 
         <ResourcesSection
           resources={resources}

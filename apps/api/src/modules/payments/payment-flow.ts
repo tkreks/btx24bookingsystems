@@ -42,7 +42,16 @@ export interface PaymentMessageStep {
   files: { fileId: string; name: string }[];
 }
 /** Шаг цепочки к отправке: файл — с Диска Битрикс24 (`id`) или уже загруженный (`data`). */
-type ChainStep = { text: string; files: (ClientMessageStep['files'][number] | { name: string; data: Buffer })[] };
+export type ChainStep = { text: string; files: (ClientMessageStep['files'][number] | { name: string; data: Buffer })[] };
+
+/** Кому и от кого: чат открытой линии сделки, отправитель (иначе — ответственный), метка автосообщения. */
+export interface SendTarget {
+  dealId: number;
+  userId: number | null;
+  /** `SystemMessage.source`: payment, auto. */
+  source: string;
+}
+const target = (req: Pick<PaymentRequest, 'dealId' | 'createdByUserId'>): SendTarget => ({ dealId: req.dealId, userId: req.createdByUserId, source: 'payment' });
 
 export interface FlowContext {
   portal: Portal;
@@ -160,7 +169,7 @@ export class PaymentFlow {
       warnings,
     );
     const text = steps.map((x) => x.text).filter((x) => x.trim()).join('\n\n');
-    const sent = await this.sendChain(ctx, req, deal, steps, warnings);
+    const sent = await this.sendChain(ctx, target(req), deal, steps, warnings);
     await this.audit(req, sent ? 'link_sent' : 'link_not_sent', sent ? 'Ссылка на оплату отправлена клиенту' : 'Ссылка на оплату НЕ отправлена клиенту', {
       deadline: sent ? deadline?.toISOString() : null,
       warnings,
@@ -255,7 +264,7 @@ export class PaymentFlow {
     if (failText.trim()) {
       const mc = await this.messages(ctx, req.dealId);
       const text = renderMessage(failText, { ...mc, vars: { ...mc.vars, minutes: opts?.payments.timeoutMinutes ?? '' } });
-      await this.sendToClient(ctx, req, mc.deal, text, warnings);
+      await this.sendToClient(ctx, target(req), mc.deal, text, warnings);
     }
     await this.comment(ctx, req.dealId, `Предоплата по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}.`, warnings);
     await this.refreshPaid(ctx, req);
@@ -302,7 +311,7 @@ export class PaymentFlow {
    * Сообщение клиенту в чат открытой линии сделки от сотрудника, выставившего счёт, иначе — от
    * ответственного за сделку. Не вышло — предупреждение (ссылку можно отправить вручную).
    */
-  private async sendToClient(ctx: FlowContext, req: PaymentRequest, deal: Deal | null, text: string, warnings: string[]): Promise<boolean> {
+  private async sendToClient(ctx: FlowContext, req: SendTarget, deal: Deal | null, text: string, warnings: string[]): Promise<boolean> {
     let chats: number[] = [];
     try {
       const r = await ctx.client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, ACTIVE_ONLY: 'N' });
@@ -315,7 +324,7 @@ export class PaymentFlow {
       warnings.push('У сделки нет чата открытой линии — ссылку нужно отправить клиенту вручную');
       return false;
     }
-    const senders = [...new Set([req.createdByUserId, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
+    const senders = [...new Set([req.userId ?? 0, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
     let last = '';
     // Чат клиента со временем переходит к его новой сделке: такой (CHAT_NOT_IN_CRM) пропускаем,
     // берём самый новый чат, который сейчас привязан к этой сделке.
@@ -323,7 +332,7 @@ export class PaymentFlow {
       for (const userId of senders) {
         try {
           const r = await ctx.client.call<unknown>('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
-          await this.markSystem(ctx, chatId, userId, r.result);
+          await this.markSystem(ctx, chatId, userId, r.result, req.source);
           return true;
         } catch (e) {
           last = msg(e);
@@ -338,7 +347,7 @@ export class PaymentFlow {
         const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
         if (dealOfBindings(d.result?.entity_data_2) !== req.dealId) continue;
         const r = await ctx.client.call<unknown>('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
-        await this.markSystem(ctx, chatId, null, r.result);
+        await this.markSystem(ctx, chatId, null, r.result, req.source);
         return true;
       } catch (e) {
         last = msg(e);
@@ -362,7 +371,7 @@ export class PaymentFlow {
       return;
     }
     const steps = rule.confirmation.map((st) => ({ ...st, text: renderMessage(st.text, mc) }));
-    const sent = await this.sendChain(ctx, req, mc.deal, steps, warnings);
+    const sent = await this.sendChain(ctx, target(req), mc.deal, steps, warnings);
     await this.comment(
       ctx,
       req.dealId,
@@ -371,8 +380,11 @@ export class PaymentFlow {
     );
   }
 
-  /** Цепочка по порядку: у шага — текст, затем файлы (Диска или шаблона) отдельными сообщениями; пауза между ними. */
-  private async sendChain(ctx: FlowContext, req: PaymentRequest, deal: Deal | null, steps: ChainStep[], warnings: string[]): Promise<boolean> {
+  /**
+   * Цепочка по порядку: у шага — текст, затем файлы (Диска или шаблона) отдельными сообщениями; пауза
+   * между ними. Общая для оплаты и автоматических рассылок.
+   */
+  async sendChain(ctx: FlowContext, req: SendTarget, deal: Deal | null, steps: ChainStep[], warnings: string[]): Promise<boolean> {
     let first = true;
     const gap = async () => {
       if (!first && this.sendGapMs > 0) await this.sleep(this.sendGapMs);
@@ -401,7 +413,7 @@ export class PaymentFlow {
             name = file?.NAME ?? f.name;
           }
           const r = await ctx.client.call<{ messageId?: number }>('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name, content: data.toString('base64') } });
-          await this.markSystem(ctx, chatId!, null, r.result?.messageId);
+          await this.markSystem(ctx, chatId!, null, r.result?.messageId, req.source);
         });
         if (!ok) return false;
       }
@@ -413,11 +425,11 @@ export class PaymentFlow {
    * Автосообщение клиенту (ссылка, подтверждение) — в SystemMessage: в «Активности сотрудников» оно
    * не считается работой того, от чьего имени ушло. Сбой записи не мешает отправке.
    */
-  private async markSystem(ctx: FlowContext, chatId: number, userId: number | null, result: unknown): Promise<void> {
+  private async markSystem(ctx: FlowContext, chatId: number, userId: number | null, result: unknown, source: string): Promise<void> {
     const messageId = Number(result);
     try {
       await this.prisma.systemMessage.create({
-        data: { portalId: ctx.portal.id, chatId, userId, messageId: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null, source: 'payment' },
+        data: { portalId: ctx.portal.id, chatId, userId, messageId: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null, source },
       });
     } catch (e) {
       this.logger.warn(`system message mark failed: ${msg(e)}`);
@@ -464,7 +476,7 @@ export class PaymentFlow {
   }
 
   /** Файлы шаблона оплаты (`StoredFile`) — содержимое для отправки; пропавший файл — предупреждение. */
-  private async withFileData(portalId: string, steps: PaymentMessageStep[], warnings: string[]): Promise<ChainStep[]> {
+  async withFileData(portalId: string, steps: PaymentMessageStep[], warnings: string[]): Promise<ChainStep[]> {
     const ids = [...new Set(steps.flatMap((st) => st.files.map((f) => f.fileId)))];
     const rows = ids.length ? await this.prisma.storedFile.findMany({ where: { portalId, id: { in: ids } }, select: { id: true, name: true, data: true } }) : [];
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -472,7 +484,7 @@ export class PaymentFlow {
       text: st.text,
       files: st.files.flatMap((f) => {
         const r = byId.get(f.fileId);
-        if (!r) warnings.push('Файл шаблона оплаты удалён — отправлено без него');
+        if (!r) warnings.push('Файл шаблона удалён — отправлено без него');
         return r ? [{ name: r.name, data: Buffer.from(r.data) }] : [];
       }),
     }));
@@ -495,7 +507,7 @@ export class PaymentFlow {
     return this.safe(warnings, `сделка #${dealId}: ${what}`, () => ctx.client.call('crm.deal.update', { id: dealId, fields }));
   }
 
-  private async comment(ctx: FlowContext, dealId: number, text: string, warnings: string[]): Promise<void> {
+  async comment(ctx: FlowContext, dealId: number, text: string, warnings: string[]): Promise<void> {
     await this.safe(warnings, 'комментарий в сделке', () => ctx.client.call('crm.timeline.comment.add', { fields: { ENTITY_ID: dealId, ENTITY_TYPE: 'deal', COMMENT: text } }));
   }
 

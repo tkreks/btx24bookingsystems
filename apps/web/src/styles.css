@@ -5759,3 +5759,42 @@ input[role='switch']:checked::after {
 .missing-decision .form-actions {
   margin-top: 4px;
 }
+
+/* ---------- автоматические рассылки (настройки группы) ---------- */
+.auto-rules {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.auto-rules > li {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.auto-rules > li.off {
+  opacity: 0.65;
+}
+.auto-rule-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.auto-rule-head input:not([type='checkbox']) {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.auto-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+.auto-rule-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}

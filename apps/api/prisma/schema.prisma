@@ -59,6 +59,7 @@ model Portal {
   actionLogs           ActionLog[]
   webSessions          WebSession[]
   systemMessages       SystemMessage[]
+  autoMessages         AutoMessageLog[]
 }
 
 enum PortalStatus {
@@ -281,6 +282,8 @@ model AppCreatedEntity {
 enum MessageTemplatePurpose {
   chat
   payment
+  /// Автоматическая рассылка по брони (например, «подтвердите бронь» за сутки) — системный.
+  auto
 }
 
 model MessageTemplate {
@@ -678,6 +681,24 @@ model PaymentRequest {
 
 /// Сообщения клиенту, которые приложение отправило само (ссылка на оплату, подтверждение — часто
 /// от имени сотрудника): в «Активности сотрудников» не считаются его работой.
+/// Автосообщение клиенту по правилу группы (`options.autoMessages`) — одно на правило и бронь.
+model AutoMessageLog {
+  id        String   @id @default(cuid())
+  portalId  String
+  portal    Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ruleId    String   @db.VarChar(40)
+  bookingId Int
+  dealId    Int
+  /// sending → sent / failed. failed не повторяется (клиент мог получить часть цепочки).
+  status    String   @db.VarChar(16)
+  error     String?  @db.VarChar(1000)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  sentAt    DateTime? @db.DateTime(3)
+
+  @@unique([portalId, ruleId, bookingId])
+  @@index([portalId, createdAt])
+}
+
 model SystemMessage {
   id        String   @id @default(cuid())
   portalId  String

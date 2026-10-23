@@ -17,7 +17,7 @@ export const stepsSchema = z
   .max(20);
 
 const templateSchema = z
-  .object({ name: z.string().trim().min(1).max(100), steps: stepsSchema, shared: z.boolean().optional(), purpose: z.enum(['chat', 'payment']).optional() })
+  .object({ name: z.string().trim().min(1).max(100), steps: stepsSchema, shared: z.boolean().optional(), purpose: z.enum(['chat', 'payment', 'auto']).optional() })
   .strict();
 const MAX_TEMPLATES = 100;
 
@@ -69,13 +69,14 @@ export class TemplatesService {
   async update(user: B24UserContext, id: string, body: unknown, admin = false): Promise<MessageTemplateDto> {
     const before = await this.editable(user, id, admin);
     const data = await this.validate(user, body, admin, fileIds(before.steps));
-    if (before.purpose === 'payment' && data.purpose === 'chat') await this.assertUnused(user, before.id, before.name);
+    // Системный шаблон (оплата, рассылка) сменил назначение — проверяем, что он нигде не выбран.
+    if (before.purpose !== 'chat' && data.purpose !== undefined && data.purpose !== before.purpose) await this.assertUnused(user, before.id, before.name);
     await this.prisma.messageTemplate.update({
       where: { id: before.id },
       data: {
         name: data.name,
         steps: data.steps,
-        ...((data.purpose ?? before.purpose) === 'payment' ? { shared: true } : data.shared === undefined ? {} : { shared: data.shared }),
+        ...((data.purpose ?? before.purpose) !== 'chat' ? { shared: true } : data.shared === undefined ? {} : { shared: data.shared }),
         ...(data.purpose === undefined ? {} : { purpose: data.purpose }),
       },
     });
@@ -85,7 +86,7 @@ export class TemplatesService {
 
   async remove(user: B24UserContext, id: string, admin = false): Promise<void> {
     const before = await this.editable(user, id, admin);
-    if (before.purpose === 'payment') await this.assertUnused(user, before.id, before.name);
+    if (before.purpose !== 'chat') await this.assertUnused(user, before.id, before.name);
     await this.prisma.messageTemplate.delete({ where: { id: before.id } });
     await this.files.dropUnused(user, fileIds(before.steps));
   }
@@ -97,21 +98,27 @@ export class TemplatesService {
         code: 'INVALID_TEMPLATE',
         message: 'Нужно название (до 100 символов) и от 1 до 20 сообщений с текстом или вложением',
       });
-    if ((parsed.data.shared || parsed.data.purpose === 'payment') && !admin)
+    const system = parsed.data.purpose === 'payment' || parsed.data.purpose === 'auto';
+    if ((parsed.data.shared || system) && !admin)
       throw new ForbiddenException({ code: 'SHARED_TEMPLATES_ADMIN_ONLY', message: 'Общие шаблоны меняют только администраторы приложения' });
-    // Шаблон оплаты — системный: всегда общий (его отправляет автоматизация от имени любого сотрудника).
-    if (parsed.data.purpose === 'payment') parsed.data.shared = true;
+    // Шаблоны оплаты и рассылок — системные: всегда общие (их отправляет автоматизация от имени любого сотрудника).
+    if (system) parsed.data.shared = true;
     // Файлы — свои или уже бывшие в этом шаблоне (общий шаблон мог собрать другой администратор).
     await this.files.assertOwned(user, [...new Set(parsed.data.steps.flatMap((s) => s.fileIds))].filter((id) => !keep.includes(id)));
     return parsed.data;
   }
 
-  /** Шаблон оплаты, выбранный в группе, не удаляем: сообщение со ссылкой молча сменилось бы на стандартное. */
+  /** Системный шаблон, выбранный в группе (оплата, рассылка), не удаляем: сообщение молча сменилось бы или пропало. */
   private async assertUnused(user: B24UserContext, id: string, name: string): Promise<void> {
     const groups = await this.prisma.workGroup.findMany({ where: { portalId: user.portal.id, archivedAt: null }, select: { name: true, options: true } });
     const used = groups.flatMap((g) => {
-      const p = (g.options as GroupOptionsDto | null)?.payments;
-      return [p?.prepaymentTemplateId === id ? `${g.name} (предоплата)` : null, p?.surchargeTemplateId === id ? `${g.name} (доплата)` : null].filter((x): x is string => !!x);
+      const o = g.options as GroupOptionsDto | null;
+      const p = o?.payments;
+      return [
+        p?.prepaymentTemplateId === id ? `${g.name} (предоплата)` : null,
+        p?.surchargeTemplateId === id ? `${g.name} (доплата)` : null,
+        ...(o?.autoMessages ?? []).filter((r) => r.templateId === id).map((r) => `${g.name} (рассылка «${r.name}»)`),
+      ].filter((x): x is string => !!x);
     });
     if (used.length)
       throw new ConflictException({

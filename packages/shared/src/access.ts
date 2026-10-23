@@ -1,3 +1,4 @@
+import type { AutoMessageRule } from './auto-messages.js';
 // Роли и права в группах (ADR 0005). Источник правды и для api (проверка), и для web (скрытие
 // недоступного). Право в группе = права роли ∩ функции, включённые в группе.
 
@@ -121,6 +122,8 @@ export interface GroupOptionsDto {
   bookingTypes?: BookingTypeRule[];
   /** Тип брони обязателен при создании брони (решение владельца 2026-10-22 — для «Бань»). */
   bookingTypeRequired?: boolean;
+  /** Автоматические рассылки клиентам по броням группы (например, «подтвердите бронь» за сутки). */
+  autoMessages?: AutoMessageRule[];
   payments: {
     prepayment: PaymentStepConfig;
     surcharge: PaymentStepConfig;

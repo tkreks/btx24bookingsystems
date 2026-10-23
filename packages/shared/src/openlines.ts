@@ -127,7 +127,7 @@ export interface MessageTemplateDto {
   updatedAt: string;
 }
 
-export type MessageTemplatePurpose = 'chat' | 'payment';
+export type MessageTemplatePurpose = 'chat' | 'payment' | 'auto';
 
 export interface SaveTemplateDto {
   name: string;
