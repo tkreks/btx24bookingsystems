@@ -90,7 +90,7 @@ export function DayGrid({
               <button
                 key={p.booking.id}
                 ref={p.booking.dealId && p.booking.dealId === highlightDealId ? mine : undefined}
-                className={`booking${p.booking.dealId && p.booking.dealId === highlightDealId ? ' highlight' : ''}${p.continuesBefore ? ' cont-before' : ''}${p.continuesAfter ? ' cont-after' : ''}`}
+                className={`booking${p.booking.dealId && p.booking.dealId === highlightDealId ? ' highlight' : ''}${p.continuesBefore ? ' cont-before' : ''}${p.continuesAfter ? ' cont-after' : ''}${p.booking.missing ? ' missing' : ''}`}
                 style={{
                   top: p.top * PX_PER_MIN,
                   height: Math.max(p.height * PX_PER_MIN - 2, 30),
@@ -117,12 +117,22 @@ export function DayGrid({
                       <b>{f.label}:</b> {f.value}
                     </small>
                   ))}
+                {p.booking.missing && <MissingVeil />}
               </button>
             ))}
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+/** Слой поверх брони, удалённой в Битрикс24: она на месте, пока сотрудник не решит, что с ней делать. */
+export function MissingVeil() {
+  return (
+    <span className="missing-veil" title="Бронь удалена в Битрикс24. Откройте её: создать заново или подтвердить удаление">
+      Удалена в Битрикс24 — нужно решение
+    </span>
   );
 }
 

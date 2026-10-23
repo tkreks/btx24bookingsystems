@@ -166,6 +166,16 @@ export class BookingJournalService {
     return updated;
   }
 
+  /**
+   * Бронь, пропавшую в Битрикс24, создали там заново по данным приложения: у неё новый ID. Запись
+   * журнала (тип, автор, история) та же — меняется только ID брони; прежний — в истории.
+   */
+  async recordRecreated(record: BookingRecord, bookingId: number, actor: BookingActor): Promise<BookingRecord> {
+    const updated = await this.prisma.bookingRecord.update({ where: { id: record.id }, data: { bookingId, syncedAt: new Date() } });
+    await this.history(updated, 'recreated_in_bitrix', actor, { after: stateOf(updated), details: { previousBookingId: record.bookingId }, via: 'app' });
+    return updated;
+  }
+
   /** Отмена: статус `cancelled` + запись в истории. Уже отменённая или неизвестная бронь — null. */
   async recordCancelled(portalId: string, bookingId: number, input: BookingCancelInput): Promise<BookingRecord | null> {
     const at = new Date();
@@ -224,6 +234,16 @@ export class BookingJournalService {
       take: PERIOD_LIMIT,
     });
     return rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id))));
+  }
+
+  /** Брони из списка, пропавшие в Битрикс24 и ждущие решения (открытое уведомление «брони нет»). */
+  async pendingRemoval(portalId: string, bookingIds: number[]): Promise<Set<number>> {
+    if (!bookingIds.length) return new Set();
+    const rows = await this.prisma.bookingAlert.findMany({
+      where: { portalId, bookingId: { in: bookingIds }, kind: 'discrepancy', problem: { contains: 'missing' }, status: { not: 'resolved' } },
+      select: { bookingId: true },
+    });
+    return new Set(rows.map((r) => r.bookingId));
   }
 
   /** Бронь по сделкам: есть активная — booked, и оплачен счёт приложения по сделке — paid. */
@@ -315,6 +335,7 @@ const ACTION_TEXT: Record<string, string> = {
   changed_in_bitrix: 'изменена в Битрикс24',
   discrepancy_found: 'не совпадает с Битрикс24 — уведомление',
   deleted_in_bitrix: 'удалена в Битрикс24 по решению сотрудника',
+  recreated_in_bitrix: 'создана в Битрикс24 заново по данным приложения',
   paid: 'оплата получена',
   payment_cancelled: 'счёт переведён в «Не оплачен» в Битрикс24',
 };

@@ -7,6 +7,7 @@ import { BookingAlertsService } from './booking-alerts.service.js';
 import { BookingCancelService } from './booking-cancel.service.js';
 import { BookingDirectoryService } from './booking-directory.service.js';
 import { BookingCreateService } from './booking-create.service.js';
+import { BookingRestoreService } from './booking-restore.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { DealFormService } from './deal-form.service.js';
@@ -22,6 +23,7 @@ import { MessageContextService } from './message-context.service.js';
     BookingAlertsService,
     BookingSyncService,
     BookingCreateService,
+    BookingRestoreService,
     BookingCancelService,
     BookingDirectoryService,
     ClientBookingsService,

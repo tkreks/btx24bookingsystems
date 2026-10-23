@@ -187,3 +187,37 @@ describe('CalendarService', () => {
     expect((dealCall![1] as { select: string[] }).select).not.toContain('UF_HIDDEN');
   });
 });
+
+describe('CalendarService — bookings deleted in Bitrix24', () => {
+  it('keeps an app booking that is gone in Bitrix24 on its place, marked missing, until a decision', async () => {
+    const { client } = fakeClient(() => [booking(7, D + 3600, D + 7200)]);
+    // booking.get пачкой: 8 — удалена, 9 — перенесли на другой день (есть), 10 — сбой проверки.
+    (client.batch as ReturnType<typeof vi.fn>).mockImplementation(async (cmds: Record<string, { method: string }>) =>
+      Object.values(cmds)[0].method === 'booking.v1.booking.get'
+        ? { result: { b9: { booking: { id: 9 } } }, errors: { b8: { error: '1021', error_description: 'Booking not found' }, b10: { error: 'INTERNAL' } }, total: {}, next: {} }
+        : { result: {}, errors: {}, total: {}, next: {} },
+    );
+    const rec = (bookingId: number, resourceIds = [1]) => ({
+      bookingId,
+      title: `R${bookingId}`,
+      dealId: null,
+      resourceIds,
+      startsAt: new Date((D + 10_800) * 1000),
+      endsAt: new Date((D + 14_400) * 1000),
+    });
+    const prisma = {
+      bookingRecord: { findMany: vi.fn(async () => [rec(7), rec(8), rec(9), rec(10), rec(11, [2])]) },
+      bookingAlert: { findMany: vi.fn(async () => [{ id: 'a8', bookingId: 8 }]) },
+    };
+    const day = await new CalendarService(prisma as never).day({ ...user(client), portal: { id: 'p1', timezone: 'Europe/Moscow' } } as B24UserContext, '2026-10-21', {
+      resourceIds: [1],
+    });
+    expect(day.bookings.map((b) => [b.id, b.missing ?? null])).toEqual([
+      [7, null],
+      [8, { alertId: 'a8' }],
+    ]);
+    expect(day.bookings[1]).toMatchObject({ name: 'R8', resourceIds: [1], start: new Date((D + 10_800) * 1000).toISOString() });
+    // Пропавшая бронь не даёт тех. окна: слот в Битрикс24 свободен.
+    expect(day.techWindows.every((t) => t.bookingId !== 8)).toBe(true);
+  });
+});

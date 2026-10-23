@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import type {
   BookingAlertDto,
   BookingCatalogDto,
@@ -89,8 +89,22 @@ export class BookingsController {
   @Post('booking-alerts/:id/resolve')
   async resolve(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<BookingAlertDto> {
     const resolution = (body as { resolution?: unknown } | null)?.resolution;
-    await this.require(user, resolution === 'cancel_booking' ? 'booking.cancel' : 'booking.edit');
+    await this.require(user, resolution === 'cancel_booking' ? 'booking.cancel' : resolution === 'recreate' ? 'booking.create' : 'booking.edit');
     return this.alerts.resolve(user, id, body);
+  }
+
+  /** Бронь приложения пропала в Битрикс24 — создать там заново по данным журнала (право в группе ресурса — в сервисе). */
+  @Post('bookings/:bookingId/recreate')
+  @HttpCode(204)
+  async recreate(@B24User() user: B24UserContext, @Param('bookingId', ParseIntPipe) bookingId: number): Promise<void> {
+    await this.alerts.resolveMissing(user, bookingId, 'recreate');
+  }
+
+  /** Бронь приложения пропала в Битрикс24 — согласиться: отменить в приложении (право в группе ресурса — в сервисе). */
+  @Post('bookings/:bookingId/remove-in-app')
+  @HttpCode(204)
+  async removeInApp(@B24User() user: B24UserContext, @Param('bookingId', ParseIntPipe) bookingId: number): Promise<void> {
+    await this.alerts.resolveMissing(user, bookingId, 'accept_bitrix');
   }
 
   /** Создать бронь (сага). Право `booking.create` в группе проверяет сервис. */

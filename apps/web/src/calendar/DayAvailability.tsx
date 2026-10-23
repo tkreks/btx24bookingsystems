@@ -67,9 +67,9 @@ export function DayAvailability({
                     return (
                       <button
                         key={i}
-                        className={`piece booked${booking.dealId && booking.dealId === highlightDealId ? ' highlight' : ''}`}
+                        className={`piece booked${booking.dealId && booking.dealId === highlightDealId ? ' highlight' : ''}${booking.missing ? ' missing' : ''}`}
                         style={style}
-                        title={`${fmtDateTime(booking.start, day.timezone)} → ${fmtDateTime(booking.end, day.timezone)}`}
+                        title={`${fmtDateTime(booking.start, day.timezone)} → ${fmtDateTime(booking.end, day.timezone)}${booking.missing ? ' · удалена в Битрикс24 — нужно решение' : ''}`}
                         aria-label={`Бронь ${fmtDateTime(booking.start, day.timezone)} — ${fmtDateTime(booking.end, day.timezone)}`}
                         onClick={() => onSelect(booking)}
                       >

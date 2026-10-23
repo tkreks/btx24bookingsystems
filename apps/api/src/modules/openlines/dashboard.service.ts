@@ -7,6 +7,8 @@ import {
   type CallKind,
   type CallListDto,
   type CallLogDto,
+  type CallLogRowDto,
+  type RecentCallsDto,
   type CallFunnelDto,
   type CallScope,
   isIsoDate,
@@ -122,7 +124,8 @@ export class DashboardService {
       this.journal.activeListBetween(user.portal.id, today.start, today.end, resourceIds),
       this.journal.activeListBetween(user.portal.id, tomorrow.start, tomorrow.end, resourceIds),
     ]);
-    const rows = await this.toRows(user, [...a, ...b], new Set());
+    const pending = await this.journal.pendingRemoval(user.portal.id, [...a, ...b].map((r) => r.bookingId));
+    const rows = await this.toRows(user, [...a, ...b], pending);
     return { today: a.length, tomorrow: b.length, todayItems: rows.slice(0, a.length), tomorrowItems: rows.slice(a.length) };
   }
 
@@ -187,17 +190,31 @@ export class DashboardService {
     const { rows, truncated } = await this.fetchCalls(user, start, end);
     const mine = rows.filter((c) => scope !== 'mine' || Number(c.RESPONSIBLE_ID) === user.userId);
     mine.sort((a, b) => Date.parse(b.START_TIME) - Date.parse(a.START_TIME));
+    return { date, scope, truncated, items: await this.logRows(user, mine) };
+  }
+
+  /**
+   * Последние звонки из журнала (блок «Звонки» на дашборде): новые сверху, до 50 — дашборд
+   * показывает по 5. Правами сотрудника: только звонки, которые он видит в CRM.
+   */
+  async recentCalls(user: B24UserContext, query: { scope?: unknown }): Promise<RecentCallsDto> {
+    const scope = parseScope(query.scope);
+    const res = await user.client.call<CallActivity[]>('crm.activity.list', {
+      filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', ...(scope === 'mine' ? { RESPONSIBLE_ID: user.userId } : {}) },
+      order: { START_TIME: 'DESC' },
+      select: ['ID', 'OWNER_ID', 'OWNER_TYPE_ID', 'DIRECTION', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'SETTINGS', 'COMMUNICATIONS'],
+    });
+    return { scope, items: await this.logRows(user, res.result ?? []) };
+  }
+
+  private async logRows(user: B24UserContext, mine: CallActivity[]): Promise<CallLogRowDto[]> {
     const contactIds = mine.map((c) => Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0).filter((x) => x > 0);
     const [titles, contacts, employees] = await Promise.all([
       this.ownerTitles(user, mine),
       this.contactNames(user, contactIds),
       this.employeeNames(user, mine.map((c) => Number(c.RESPONSIBLE_ID) || 0)),
     ]);
-    return {
-      date,
-      scope,
-      truncated,
-      items: mine.map((c) => {
+    return mine.map((c) => {
         const contactId = Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0;
         const emp = Number(c.RESPONSIBLE_ID) || 0;
         return {
@@ -211,8 +228,7 @@ export class DashboardService {
           contact: contactId ? { id: contactId, name: contacts.get(contactId) ?? null } : null,
           owner: { typeId: Number(c.OWNER_TYPE_ID), id: Number(c.OWNER_ID), title: titles.get(`${c.OWNER_TYPE_ID}:${c.OWNER_ID}`) ?? null },
         };
-      }),
-    };
+      });
   }
 
   private async employeeNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {

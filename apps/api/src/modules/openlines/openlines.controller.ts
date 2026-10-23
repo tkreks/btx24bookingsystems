@@ -23,6 +23,7 @@ import type {
   ChatReplyStatusDto,
   CallListDto,
   CallLogDto,
+  RecentCallsDto,
   ChatFolderDto,
   ChatHistoryDto,
   ChatListDto,
@@ -111,6 +112,15 @@ export class OpenlinesController {
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
     return this.dashboard.callLog(user, query);
+  }
+
+  /** Последние звонки журнала (блок «Звонки» на дашборде). */
+  @Get('dashboard/recent-calls')
+  async recentCalls(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<RecentCallsDto> {
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
+    return this.dashboard.recentCalls(user, query);
   }
 
   @Get('openlines/chats')

@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import {
   ALERT_STATUSES,
   type AlertProblem,
+  type AlertResolution,
   type AlertStatus,
   type BookingAlertDto,
   type BookingAlertListDto,
@@ -14,6 +15,7 @@ import { PortalService } from '../bitrix24/portals/portal.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { alertMessage } from './alert-message.js';
 import { BookingJournalService } from './booking-journal.service.js';
+import type { BookingRestoreService } from './booking-restore.service.js';
 
 export interface RaiseAlertInput {
   kind: 'new_booking' | 'discrepancy';
@@ -42,6 +44,8 @@ export class BookingAlertsService {
     private readonly prisma: PrismaService,
     private readonly portals: PortalService,
     private readonly journal: BookingJournalService,
+    // Только в api (решения сотрудников); worker уведомления лишь создаёт и отправляет.
+    @Optional() private readonly restore?: BookingRestoreService,
   ) {}
 
   /** null — такое уведомление уже есть. */
@@ -100,7 +104,20 @@ export class BookingAlertsService {
     const status = (body as { status?: unknown } | null)?.status as AlertStatus;
     if (!ALERT_STATUSES.includes(status))
       throw new BadRequestException({ code: 'INVALID_STATUS', message: 'status: new, viewed, resolved или ignored' });
-    await this.get(user.portal.id, id);
+    const alert = await this.get(user.portal.id, id);
+    // Бронь пропала в Битрикс24 и ещё активна у нас: «Решено» — только решением (создать заново или удалить).
+    if (status === 'resolved' && alert.kind === 'discrepancy' && toDto(alert).problems.includes('missing')) {
+      const record = await this.journal.find(user.portal.id, alert.bookingId);
+      if (record?.status === 'active')
+        throw new BadRequestException({
+          code: 'DECISION_REQUIRED',
+          message: 'Выберите решение: «Создать бронирование в Битрикс24» или «Удалить бронирование в приложении»',
+        });
+    }
+    return this.applyStatus(user, id, status);
+  }
+
+  private async applyStatus(user: B24UserContext, id: string, status: AlertStatus): Promise<BookingAlertDto> {
     const updated = await this.prisma.bookingAlert.update({
       where: { id },
       data: { status, statusByUserId: user.userId, statusByName: user.userName, statusAt: new Date() },
@@ -114,25 +131,34 @@ export class BookingAlertsService {
   /**
    * Решение по уведомлению — от имени сотрудника, с записью в историю брони:
    * - `accept_bitrix` — принять как в Битрикс24 (нет брони — отменить у нас с причиной);
-   * - `cancel_booking` — отменить бронь: удалить в Битрикс24 (его токеном) и отменить у нас.
+   * - `cancel_booking` — отменить бронь: удалить в Битрикс24 (его токеном) и отменить у нас;
+   * - `recreate` — бронь пропала в Битрикс24: создать её там заново по данным приложения.
    * После — статус «Решено».
    */
   async resolve(user: B24UserContext, id: string, body: unknown): Promise<BookingAlertDto> {
     const resolution = (body as { resolution?: unknown } | null)?.resolution;
-    if (resolution !== 'accept_bitrix' && resolution !== 'cancel_booking')
-      throw new BadRequestException({ code: 'INVALID_RESOLUTION', message: 'resolution: accept_bitrix или cancel_booking' });
+    if (resolution !== 'accept_bitrix' && resolution !== 'cancel_booking' && resolution !== 'recreate')
+      throw new BadRequestException({ code: 'INVALID_RESOLUTION', message: 'resolution: accept_bitrix, cancel_booking или recreate' });
     const alert = await this.get(user.portal.id, id);
     const dto = toDto(alert);
     const actor = { kind: 'user' as const, userId: user.userId, name: user.userName };
     const record = await this.journal.find(user.portal.id, alert.bookingId);
-    if (resolution === 'accept_bitrix') {
+    if (resolution === 'recreate') {
+      if (!dto.problems.includes('missing'))
+        throw new BadRequestException({ code: 'CANNOT_RECREATE', message: 'Создать заново можно только бронь, которой нет в Битрикс24' });
+      if (!this.restore) throw new Error('BookingRestoreService is not available');
+      await this.restore.recreate(user, alert.bookingId);
+    } else if (resolution === 'accept_bitrix') {
       if (dto.problems.includes('not_cancelled'))
         throw new BadRequestException({
           code: 'CANNOT_ACCEPT',
           message: 'Бронь отменена в приложении — её можно только снять в Битрикс24 («Отменить бронь»)',
         });
       if (record && record.status === 'active') {
-        if (dto.actual) await this.journal.recordChanged(record, dto.actual, actor, 'accepted_bitrix', 'app');
+        // Пропала в Битрикс24 — «Удалить бронирование в приложении»: проверка, что её там правда нет,
+        // и право снимать брони в группе её ресурса.
+        if (!dto.actual && this.restore) await this.restore.removeInApp(user, alert.bookingId);
+        else if (dto.actual) await this.journal.recordChanged(record, dto.actual, actor, 'accepted_bitrix', 'app');
         else await this.journal.recordCancelled(user.portal.id, alert.bookingId, { reason: 'removed_in_bitrix', actor });
       }
     } else {
@@ -142,7 +168,25 @@ export class BookingAlertsService {
         await this.journal.recordCancelled(user.portal.id, alert.bookingId, { reason: 'manual', actor });
       else if (record) await this.journal.note(record, 'deleted_in_bitrix', actor, { alertId: id }, 'app');
     }
-    return this.setStatus(user, id, { status: 'resolved' });
+    return this.applyStatus(user, id, 'resolved');
+  }
+
+  /**
+   * Решение по брони, пропавшей в Битрикс24, из календаря: есть открытое уведомление — решаем через
+   * него (статус «Решено», сообщение в чате); сверка ещё не успела — действуем напрямую.
+   */
+  async resolveMissing(user: B24UserContext, bookingId: number, resolution: Extract<AlertResolution, 'recreate' | 'accept_bitrix'>): Promise<void> {
+    const alert = await this.prisma.bookingAlert.findFirst({
+      where: { portalId: user.portal.id, bookingId, kind: 'discrepancy', problem: { contains: 'missing' }, status: { not: 'resolved' } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (alert) {
+      await this.resolve(user, alert.id, { resolution });
+      return;
+    }
+    if (!this.restore) throw new Error('BookingRestoreService is not available');
+    if (resolution === 'recreate') await this.restore.recreate(user, bookingId);
+    else await this.restore.removeInApp(user, bookingId);
   }
 
   /** Отправить в чат уведомления, которые ещё не ушли (новые и недавние). Ошибка — повтор на следующем проходе. */

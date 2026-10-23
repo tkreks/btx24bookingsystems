@@ -23,6 +23,7 @@ const ACTION_LABELS: Record<string, string> = {
   discrepancy_found: 'Найдено расхождение',
   accepted_bitrix: 'Принято как в Битрикс24',
   deleted_in_bitrix: 'Удалена в Битрикс24 по решению',
+  recreated_in_bitrix: 'Создана в Битрикс24 заново по данным приложения',
   cancelled: 'Отменена',
   paid: 'Оплата получена',
   payment_cancelled: 'Счёт закрыт как неоплаченный (вручную)',
@@ -30,13 +31,16 @@ const ACTION_LABELS: Record<string, string> = {
 
 /**
  * Уведомления о бронях: новые брони мимо приложения и расхождения с Битрикс24. У каждого — статус
- * (Новый / Просмотрен / Решено / Игнорировать) и действия: сделка, изменить, отменить, история.
+ * (Новый / В работе / Решено / Игнорировать) и действия: сделка, изменить, отменить, история. Бронь
+ * приложения, пропавшая в Битрикс24, решается кнопками «Создать бронирование в Битрикс24» или
+ * «Удалить бронирование в приложении» (вместо «Решено»).
  */
 export function BookingAlertsPage({
   timezone,
   focusId,
   canEdit,
   canCancel,
+  canCreate = false,
   onBack,
   onOpenDay,
 }: {
@@ -44,6 +48,8 @@ export function BookingAlertsPage({
   focusId?: string | null;
   canEdit: boolean;
   canCancel: boolean;
+  /** Право `booking.create` — «Создать бронирование в Битрикс24» по данным приложения. */
+  canCreate?: boolean;
   onBack: () => void;
   /** «Изменить бронь» — открыть день брони в календаре. */
   onOpenDay: (date: string) => void;
@@ -144,12 +150,18 @@ export function BookingAlertsPage({
             names={names}
             canEdit={canEdit}
             canCancel={canCancel}
+            canCreate={canCreate}
             onStatus={(status) => void act(a.id, () => apiPut(`/booking-alerts/${a.id}`, { status }))}
             onResolve={(resolution: AlertResolution) => {
+              const missing = a.problems.includes('missing');
               const text =
-                resolution === 'cancel_booking'
-                  ? `Отменить бронь #${a.bookingId}? Она будет удалена в Битрикс24, у нас останется со статусом «отменена».`
-                  : `Принять бронь #${a.bookingId} как в Битрикс24? Запись приложения изменится, это попадёт в историю.`;
+                resolution === 'recreate'
+                  ? `Создать бронь #${a.bookingId} в Битрикс24 заново по данным приложения? У брони будет новый номер.`
+                  : resolution === 'cancel_booking'
+                    ? `Отменить бронь #${a.bookingId}? Она будет удалена в Битрикс24, у нас останется со статусом «отменена».`
+                    : missing
+                      ? `Удалить бронь #${a.bookingId} в приложении? В истории брони останется запись.`
+                      : `Принять бронь #${a.bookingId} как в Битрикс24? Запись приложения изменится, это попадёт в историю.`;
               if (confirm(text)) void act(a.id, () => apiPost(`/booking-alerts/${a.id}/resolve`, { resolution }));
             }}
             onOpenDay={onOpenDay}
@@ -168,6 +180,7 @@ function AlertCard({
   names,
   canEdit,
   canCancel,
+  canCreate,
   onStatus,
   onResolve,
   onOpenDay,
@@ -179,6 +192,7 @@ function AlertCard({
   names: (ids: number[]) => string;
   canEdit: boolean;
   canCancel: boolean;
+  canCreate: boolean;
   onStatus: (s: AlertStatus) => void;
   onResolve: (r: AlertResolution) => void;
   onOpenDay: (date: string) => void;
@@ -186,6 +200,9 @@ function AlertCard({
   const [history, setHistory] = useState<BookingHistoryDto | null | 'error'>(null);
   const [showHistory, setShowHistory] = useState(false);
   const state = a.actual ?? a.expected;
+  // Бронь приложения пропала в Битрикс24: «Решено» заменяют два решения.
+  const missing = a.kind === 'discrepancy' && a.problems.includes('missing');
+  const chips = ALERT_STATUSES.filter((s) => !(missing && s === 'resolved'));
   const dealId = a.actual?.dealId ?? a.expected?.dealId ?? a.dealId;
   const line = (s: BookingStateDto) =>
     `${range(s, timezone)} · ${names(s.resourceIds)} · ${s.dealId ? `сделка #${s.dealId}` : 'без сделки'}`;
@@ -228,7 +245,7 @@ function AlertCard({
       </dl>
 
       <div className="alert-status" role="group" aria-label={`Статус уведомления по брони ${a.bookingId}`}>
-        {ALERT_STATUSES.map((s) => (
+        {chips.map((s) => (
           <button
             key={s}
             className={`status-chip ${s}${a.status === s ? ' active' : ''}`}
@@ -239,6 +256,17 @@ function AlertCard({
             {ALERT_STATUS_LABELS[s]}
           </button>
         ))}
+        {missing && a.status !== 'resolved' && (
+          <>
+            <button className="status-chip resolved" disabled={busy || !canCreate} onClick={() => onResolve('recreate')}>
+              Создать бронирование в Битрикс24
+            </button>
+            <button className="status-chip danger" disabled={busy || !canCancel} onClick={() => onResolve('accept_bitrix')}>
+              Удалить бронирование в приложении
+            </button>
+          </>
+        )}
+        {missing && a.status === 'resolved' && <span className="status-chip resolved active">{ALERT_STATUS_LABELS.resolved}</span>}
         {a.statusBy && a.statusAt && (
           <span className="muted">
             {a.statusBy.name}, {fmtDateTime(a.statusAt, timezone)}
@@ -257,14 +285,16 @@ function AlertCard({
             Изменить бронь
           </button>
         )}
-        {a.kind === 'discrepancy' && !a.problems.includes('not_cancelled') && (
+        {a.kind === 'discrepancy' && !missing && !a.problems.includes('not_cancelled') && (
           <button onClick={() => onResolve('accept_bitrix')} disabled={busy || !canEdit}>
             Принять как в Битрикс24
           </button>
         )}
-        <button className="danger" onClick={() => onResolve('cancel_booking')} disabled={busy || !canCancel}>
-          Отменить бронь
-        </button>
+        {!missing && (
+          <button className="danger" onClick={() => onResolve('cancel_booking')} disabled={busy || !canCancel}>
+            Отменить бронь
+          </button>
+        )}
         <button className="link" onClick={() => void toggleHistory()}>
           {showHistory ? 'Скрыть историю' : 'История брони'}
         </button>

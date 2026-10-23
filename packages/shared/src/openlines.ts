@@ -297,6 +297,12 @@ export interface CallLogRowDto {
   owner: { typeId: number; id: number; title: string | null };
 }
 
+/** `GET /api/dashboard/recent-calls?scope=` — последние звонки журнала (до 50), новые сверху. */
+export interface RecentCallsDto {
+  scope: CallScope;
+  items: CallLogRowDto[];
+}
+
 /** `GET /api/dashboard/call-log?date=&scope=` — все звонки дня, новые сверху. */
 export interface CallLogDto {
   date: string;

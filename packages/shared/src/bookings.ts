@@ -5,7 +5,7 @@ export type AlertStatus = (typeof ALERT_STATUSES)[number];
 
 export const ALERT_STATUS_LABELS: Record<AlertStatus, string> = {
   new: 'Новый',
-  viewed: 'Просмотрен',
+  viewed: 'В работе',
   resolved: 'Решено',
   ignored: 'Игнорировать',
 };
@@ -61,8 +61,18 @@ export interface SetAlertStatusDto {
   status: AlertStatus;
 }
 
-/** `POST /api/booking-alerts/:id/resolve` — решение по расхождению. */
-export type AlertResolution = 'accept_bitrix' | 'cancel_booking';
+/**
+ * `POST /api/booking-alerts/:id/resolve` — решение по расхождению. Для брони, пропавшей в Битрикс24:
+ * `recreate` — создать её в Битрикс24 заново по данным приложения, `accept_bitrix` — удалить в приложении.
+ */
+export type AlertResolution = 'accept_bitrix' | 'cancel_booking' | 'recreate';
+
+/** `POST /api/bookings/:bookingId/recreate` — бронь создана в Битрикс24 заново (новый ID). */
+export interface RecreateBookingResultDto {
+  previousBookingId: number;
+  bookingId: number;
+  warnings: string[];
+}
 
 /** `GET/PUT /api/admin/booking-sync` — сверка с Битрикс24 и чат уведомлений. */
 export interface BookingSyncSettingsDto {

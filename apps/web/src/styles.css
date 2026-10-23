@@ -1907,9 +1907,13 @@ main.loading {
 .status-chip.viewed.active { background: #6b7a90; }
 .status-chip.resolved.active { background: #169a68; }
 .status-chip.ignored.active { background: #9aa3b2; }
+/* Решения по брони, пропавшей в Битрикс24 (вместо «Решено»). */
+.status-chip.resolved:not(.active) { color: #169a68; border-color: rgba(22, 154, 104, 0.45); }
+.status-chip.danger { color: #c2272d; background: var(--surface); border-color: rgba(194, 39, 45, 0.4); }
 
 .alert-actions button.danger {
   color: #c2272d;
+  background: var(--surface);
   border-color: rgba(194, 39, 45, 0.35);
 }
 
@@ -5325,22 +5329,76 @@ input[role='switch']:checked::after {
   background: #0062cc;
 }
 
-/* Дашборд: «Требуют внимания» и «Сделки сегодня» — в один ряд, одной высоты; на телефоне — друг под другом. */
+/* Дашборд: две колонки самостоятельных блоков — слева сообщения клиентов и звонки, справа брони
+   сегодня и сделки за сегодня; на телефоне — друг под другом. */
 .dash-pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
-  align-items: stretch;
+  align-items: start;
   margin-bottom: 12px;
 }
-.dash-pair.single {
-  grid-template-columns: minmax(0, 1fr);
+.dash-col {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
 }
-.dash-pair > .day-panel {
+.dash-col > .day-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
   margin: 0;
+}
+/* Иконка блока — в правом верхнем углу самого блока (не у подписи). */
+.dash-tile,
+.dash-block {
+  position: relative;
+}
+.dash-tile {
+  padding-right: 58px;
+}
+.dash-block > .dash-attention-title {
+  min-height: 36px;
+  padding: 0 40px;
+}
+.dash-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #eef4ff;
+  color: #1d4ed8;
+  pointer-events: none;
+}
+.dash-badge .icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.dash-tile.warn .dash-badge,
+.dash-attention .dash-badge {
+  background: #fef3f2;
+  color: #d92d20;
+}
+.dash-today-bookings .dash-badge {
+  background: #ecfdf3;
+  color: #079455;
+}
+.dt-row.today.missing {
+  border-color: #fda29b;
+  background: repeating-linear-gradient(135deg, #fff 0 8px, #fef3f2 8px 16px);
+}
+.call-dir {
+  color: var(--muted);
+}
+.dt-row .call-status {
+  font-size: 11px;
 }
 @media (max-width: 760px) {
   .dash-pair {
@@ -5609,4 +5667,52 @@ input[role='switch']:checked::after {
 }
 .act-who button b {
   font-size: 13px;
+}
+
+/* ---------- бронь, удалённая в Битрикс24 (ждёт решения) ---------- */
+
+.booking.missing,
+.list-item.missing {
+  position: relative;
+}
+.booking.missing {
+  background: repeating-linear-gradient(135deg, #9ca3af 0 8px, #b4bac3 8px 16px);
+  color: #fff;
+}
+.missing-veil {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+  background: rgba(185, 28, 28, 0.72);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.list-item.missing {
+  overflow: hidden;
+}
+.piece.booked.missing {
+  background: repeating-linear-gradient(135deg, #b91c1c 0 6px, #9ca3af 6px 12px);
+}
+.missing-decision {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(185, 28, 28, 0.35);
+  background: #fef2f2;
+}
+.missing-decision > b {
+  color: var(--danger);
+}
+.missing-decision .form-actions {
+  margin-top: 4px;
 }

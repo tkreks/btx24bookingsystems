@@ -1,6 +1,6 @@
 import type { CalendarBooking, CalendarDay, CalendarTechWindow } from '@btx24/shared';
 import { fmtDateTime, fmtMoney } from '../format.js';
-import { bookingTitle } from './DayGrid.js';
+import { bookingTitle, MissingVeil } from './DayGrid.js';
 import { DayHeader } from './DayHeader.js';
 
 type Entry =
@@ -73,7 +73,7 @@ export function DayList({
           ) : (
             <li key={e.item.id}>
               <button
-                className={`list-item${e.item.dealId && e.item.dealId === highlightDealId ? ' highlight' : ''}`}
+                className={`list-item${e.item.dealId && e.item.dealId === highlightDealId ? ' highlight' : ''}${e.item.missing ? ' missing' : ''}`}
                 onClick={() => onSelect(e.item)}
               >
                 <span className="list-top">
@@ -93,6 +93,7 @@ export function DayList({
                       <b>{f.label}:</b> {f.value}
                     </span>
                   ))}
+                {e.item.missing && <MissingVeil />}
               </button>
             </li>
           ),

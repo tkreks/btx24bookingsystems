@@ -8,6 +8,7 @@ const emptyJournal = {
   forPeriod: vi.fn(async () => ({ created: [], removed: [], pending: new Set<number>() })),
   activeBetween: vi.fn(async () => 0),
   activeListBetween: vi.fn(async () => []),
+  pendingRemoval: vi.fn(async () => new Set<number>()),
   dealBookingState: vi.fn(async () => new Map()),
 } as unknown as BookingJournalService;
 
@@ -143,6 +144,7 @@ describe('DashboardService', () => {
       })),
       activeBetween: vi.fn(async () => 0),
   activeListBetween: vi.fn(async () => []),
+  pendingRemoval: vi.fn(async () => new Set<number>()),
   dealBookingState: vi.fn(async () => new Map()),
     } as unknown as BookingJournalService;
     const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) =>

@@ -23,6 +23,7 @@ import { CallLog } from './CallLog.js';
 import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
 import { EmployeeActivity } from './EmployeeActivity.js';
+import { DashBadge, RecentCalls } from './RecentCalls.js';
 import { Icon } from './icons.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
@@ -38,8 +39,9 @@ const ATTENTION_STEP = 5;
 const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p === 'yesterday' ? 'вчера' : 'за период');
 
 /**
- * Дашборд менеджера: в одном ряду — чаты ждут ответа, все звонки, новые сделки и повторные клиенты
- * среди них; ниже — сделки с бронью и отменённые. «Показать звонки» — страница статистики звонков.
+ * Дашборд менеджера: в одном ряду — плитки (чаты ждут ответа, брони, звонки, новые сделки, повторные
+ * клиенты); ниже две колонки блоков: сообщения клиентов без ответа и последние звонки | брони сегодня
+ * и сделки за сегодня (по 5, «Ещё»); дальше — новые и удалённые брони. У каждого блока — иконка.
  */
 export function DashboardPage({
   session,
@@ -294,6 +296,7 @@ export function DashboardPage({
 
       <div className={`dash-row${d ? '' : ' loading'}`}>
         <div className={`dash-tile${openlines && d?.chats?.waitingReply ? ' warn' : ''}`}>
+          <DashBadge name="alert" />
           <span className="dash-tile-label">Чатов ждут ответа</span>
           <span className="dash-tile-value">{openlines ? n(d?.chats?.waitingReply) : '—'}</span>
           {openlines ? (
@@ -306,6 +309,7 @@ export function DashboardPage({
           )}
         </div>
         <div className="dash-tile" title="Активные брони на ресурсах ваших групп: на сегодня / на завтра">
+          <DashBadge name="calendar" />
           <span className="dash-tile-label">Бронирований сегодня / завтра</span>
           <span className="dash-tile-value">
             {n(d?.bookingDays?.today)}
@@ -316,6 +320,7 @@ export function DashboardPage({
           </button>
         </div>
         <div className="dash-tile">
+          <DashBadge name="phone" />
           <span className="dash-tile-label">Все звонки {word}</span>
           <span className="dash-tile-value">{n(d?.callsTotal)}</span>
           <button className="dash-tile-action" onClick={() => setView('calls')}>
@@ -323,6 +328,7 @@ export function DashboardPage({
           </button>
         </div>
         <div className="dash-tile">
+          <DashBadge name="person" />
           <span className="dash-tile-label">Новых сделок {word}</span>
           <span className="dash-tile-value">{n(d?.newDeals === null ? null : d?.newDeals?.total)}</span>
           <button className="dash-tile-action" disabled={!d?.newDeals?.total} onClick={() => setDealsOpen('all')}>
@@ -330,6 +336,7 @@ export function DashboardPage({
           </button>
         </div>
         <div className="dash-tile">
+          <DashBadge name="people" />
           <span className="dash-tile-label">Повторные клиенты</span>
           <span className="dash-tile-value">
             {n(d?.newDeals === null ? null : d?.newDeals?.repeat)}
@@ -342,9 +349,11 @@ export function DashboardPage({
       </div>
       {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
 
-      <div className={`dash-pair${openlines ? '' : ' single'}`}>
+      <div className="dash-pair">
+      <div className="dash-col">
       {openlines && (
-        <section className="day-panel dash-attention">
+        <section className="day-panel dash-block dash-attention">
+          <DashBadge name="chats" />
           <p className="dash-attention-title muted">
             Последние сообщения клиентов без ответа
             {d?.chats && <span className={`pill${d.chats.waitingReply ? ' waiting' : ''}`}>{d.chats.waitingReply}</span>}
@@ -384,7 +393,12 @@ export function DashboardPage({
             ))}
         </section>
       )}
-        <DealsToday d={d} tz={tz} word={word} />
+        <RecentCalls scope={callsScope} timezone={tz} />
+      </div>
+      <div className="dash-col">
+        <TodayBookings d={d} tz={tz} />
+        <DealsCreated d={d} tz={tz} word={word} />
+      </div>
       </div>
 
       {session.canManageApp && <EmployeeActivity timezone={tz} />}
@@ -575,24 +589,39 @@ function BookingMark({ state }: { state: DashboardNewDeal['booking'] }) {
   return <span className="deal-mark none">без брони</span>;
 }
 
-/**
- * «Сделки сегодня» (рядом с «Требуют внимания»): сверху зелёным — сделки с бронью на сегодня,
- * ниже — созданные за период, со значком брони (🪙 — оплачена).
- */
-function DealsToday({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: string; word: string }) {
-  const booked = [...new Map((d?.bookingDays?.todayItems ?? []).filter((r) => r.dealId).map((r) => [r.dealId!, r])).values()];
-  const created = d?.newDeals?.items ?? [];
+/** «Ещё N» для списков дашборда: сразу — 5 строк, кнопка добавляет по 5. */
+const LIST_STEP = 5;
+function MoreButton({ total, shown, onMore }: { total: number; shown: number; onMore: () => void }) {
+  if (total <= shown) return null;
   return (
-    <section className="day-panel dash-deals-today">
-      <p className="dash-attention-title muted">Сделки сегодня</p>
+    <button className="dash-more" onClick={onMore}>
+      Ещё {Math.min(LIST_STEP, total - shown)}
+    </button>
+  );
+}
+
+/** «Брони сегодня»: сделки с бронью на сегодня (зелёным), по 5. */
+function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string }) {
+  const [shown, setShown] = useState(LIST_STEP);
+  const booked = [...new Map((d?.bookingDays?.todayItems ?? []).filter((r) => r.dealId).map((r) => [r.dealId!, r])).values()];
+  return (
+    <section className="day-panel dash-block dash-today-bookings">
+      <DashBadge name="calendar" />
+      <p className="dash-attention-title muted">
+        Брони сегодня
+        {d?.bookingDays && <span className="pill">{booked.length}</span>}
+      </p>
       {!d?.bookingDays && <p className="muted">Загрузка…</p>}
       <ul className="dt-rows">
-        {booked.map((r) => (
+        {booked.slice(0, shown).map((r) => (
           <li key={`b${r.bookingId}`}>
-            <button className="dt-row today" onClick={() => openCrm('deal', r.dealId!)}>
+            <button className={`dt-row today${r.pendingRemoval ? ' missing' : ''}`} onClick={() => openCrm('deal', r.dealId!)}>
               <span className="dt-main">
                 <b>{r.deal?.client || r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
-                <span className="muted">{r.resources.join(', ')}</span>
+                <span className="muted">
+                  {r.resources.join(', ')}
+                  {r.pendingRemoval ? ' · удалена в Битрикс24 — ждёт решения' : ''}
+                </span>
               </span>
               <span className="dt-side">
                 <span>{bookingRange(r.start, r.end, tz)}</span>
@@ -603,14 +632,26 @@ function DealsToday({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: stri
         ))}
         {d?.bookingDays && !booked.length && <li className="muted dt-empty">Броней по сделкам на сегодня нет.</li>}
       </ul>
-      <p className="dt-sub muted">
-        Созданы {word}
-        {d?.newDeals ? ` · ${d.newDeals.total}` : ''}
+      <MoreButton total={booked.length} shown={shown} onMore={() => setShown((n) => n + LIST_STEP)} />
+    </section>
+  );
+}
+
+/** «Сделки за сегодня» (или за период): созданные сделки со значком брони (🪙 — оплачена), по 5. */
+function DealsCreated({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: string; word: string }) {
+  const [shown, setShown] = useState(LIST_STEP);
+  const created = d?.newDeals?.items ?? [];
+  return (
+    <section className="day-panel dash-block dash-deals-created">
+      <DashBadge name="handshake" />
+      <p className="dash-attention-title muted">
+        Сделки {word === 'сегодня' ? 'за сегодня' : word}
+        {d?.newDeals && <span className="pill">{d.newDeals.total}</span>}
       </p>
-      {d && d.newDeals === undefined && <p className="muted">Загрузка…</p>}
+      {(!d || d.newDeals === undefined) && <p className="muted">Загрузка…</p>}
       {d?.newDeals === null && <p className="muted">Нет доступа к сделкам CRM.</p>}
       <ul className="dt-rows">
-        {created.map((i) => (
+        {created.slice(0, shown).map((i) => (
           <li key={`n${i.id}`}>
             <button className="dt-row" onClick={() => openCrm('deal', i.id)}>
               <span className="dt-main">
@@ -630,6 +671,7 @@ function DealsToday({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: stri
         ))}
         {d?.newDeals && !created.length && <li className="muted dt-empty">Новых сделок нет.</li>}
       </ul>
+      <MoreButton total={created.length} shown={shown} onMore={() => setShown((n) => n + LIST_STEP)} />
     </section>
   );
 }

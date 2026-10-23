@@ -1,6 +1,7 @@
 import { Prisma } from '../../generated/prisma/client.js';
 import { BookingAlertsService, fingerprint } from './booking-alerts.service.js';
 import type { BookingJournalService } from './booking-journal.service.js';
+import type { BookingRestoreService } from './booking-restore.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { PortalService } from '../bitrix24/portals/portal.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -30,7 +31,7 @@ const alertRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function setup(o: { alerts?: ReturnType<typeof alertRow>[]; chatId?: number | null; record?: Record<string, unknown> | null } = {}) {
+function setup(o: { alerts?: ReturnType<typeof alertRow>[]; chatId?: number | null; record?: Record<string, unknown> | null; restore?: boolean } = {}) {
   const rows = o.alerts ?? [alertRow()];
   const prisma = {
     bookingAlert: {
@@ -58,7 +59,17 @@ function setup(o: { alerts?: ReturnType<typeof alertRow>[]; chatId?: number | nu
   };
   const userClient = { call: vi.fn(async () => ({ result: true })) };
   const user = { portal, userId: 7, userName: 'Анна', client: userClient } as unknown as B24UserContext;
-  return { svc: new BookingAlertsService(prisma, portals, journal as unknown as BookingJournalService), prisma, appClient, journal, user, userClient, rows };
+  const restore = o.restore ? { recreate: vi.fn(async () => ({ previousBookingId: 55, bookingId: 60, warnings: [] })), removeInApp: vi.fn(async () => undefined) } : undefined;
+  return {
+    svc: new BookingAlertsService(prisma, portals, journal as unknown as BookingJournalService, restore as unknown as BookingRestoreService),
+    prisma,
+    appClient,
+    journal,
+    user,
+    userClient,
+    rows,
+    restore,
+  };
 }
 
 describe('BookingAlertsService', () => {
@@ -93,7 +104,7 @@ describe('BookingAlertsService', () => {
     const t = setup({ alerts: [alertRow({ chatId: 777, messageId: 9001 })] });
     const dto = await t.svc.setStatus(t.user, 'a1', { status: 'viewed' });
     expect(dto).toMatchObject({ status: 'viewed', statusBy: { id: 7, name: 'Анна' } });
-    expect(t.appClient.call).toHaveBeenCalledWith('im.message.update', expect.objectContaining({ MESSAGE_ID: 9001, MESSAGE: expect.stringContaining('Просмотрен') }));
+    expect(t.appClient.call).toHaveBeenCalledWith('im.message.update', expect.objectContaining({ MESSAGE_ID: 9001, MESSAGE: expect.stringContaining('В работе') }));
     await expect(t.svc.setStatus(t.user, 'a1', { status: 'done' })).rejects.toMatchObject({ status: 400 });
     await expect(t.svc.setStatus(t.user, 'zzz', { status: 'viewed' })).rejects.toMatchObject({ status: 404 });
   });
@@ -126,5 +137,25 @@ describe('BookingAlertsService', () => {
     const t2 = setup({ alerts: [alertRow({ problem: 'missing', actual: null })] });
     await t2.svc.resolve(t2.user, 'a1', { resolution: 'cancel_booking' });
     expect(t2.userClient.call).not.toHaveBeenCalled();
+  });
+
+  it('missing booking: «create in Bitrix24» and «remove in the app» go through the restore service, then «resolved»', async () => {
+    const t = setup({ alerts: [alertRow({ problem: 'missing', actual: null })], restore: true });
+    const r = await t.svc.resolve(t.user, 'a1', { resolution: 'recreate' });
+    expect(t.restore!.recreate).toHaveBeenCalledWith(t.user, 55);
+    expect(r.status).toBe('resolved');
+    const t2 = setup({ alerts: [alertRow({ problem: 'missing', actual: null })], restore: true });
+    await t2.svc.resolve(t2.user, 'a1', { resolution: 'accept_bitrix' });
+    expect(t2.restore!.removeInApp).toHaveBeenCalledWith(t2.user, 55);
+    expect(t2.journal.recordCancelled).not.toHaveBeenCalled();
+    // «Создать заново» — только для пропавшей брони.
+    const t3 = setup({ restore: true });
+    await expect(t3.svc.resolve(t3.user, 'a1', { resolution: 'recreate' })).rejects.toMatchObject({ response: { code: 'CANNOT_RECREATE' } });
+  });
+
+  it('a missing booking still active in the app cannot be just marked «resolved»', async () => {
+    const t = setup({ alerts: [alertRow({ problem: 'missing', actual: null })] });
+    await expect(t.svc.setStatus(t.user, 'a1', { status: 'resolved' })).rejects.toMatchObject({ response: { code: 'DECISION_REQUIRED' } });
+    await expect(t.svc.setStatus(t.user, 'a1', { status: 'viewed' })).resolves.toMatchObject({ status: 'viewed' });
   });
 });

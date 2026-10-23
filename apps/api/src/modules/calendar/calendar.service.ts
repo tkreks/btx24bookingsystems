@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   techWindowsFor,
   zonedDayRange,
@@ -8,6 +8,8 @@ import {
   type CalendarResource,
   type DealFieldConfig,
 } from '@btx24/shared';
+import type { BookingRecord } from '../../generated/prisma/client.js';
+import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { dealLinks, listBookings, listResources, type RawBooking } from '../bookings/bitrix-bookings.js';
@@ -37,6 +39,9 @@ export class CalendarService {
   /** portalId → описание полей сделки (`crm.deal.fields`). Подписи и варианты меняются редко. */
   private readonly fieldMeta = new Map<string, { meta: Record<string, DealFieldMeta>; expiresAt: number }>();
 
+  // Без БД (юнит-тесты дня) — без броней, пропавших в Битрикс24.
+  constructor(@Optional() private readonly prisma?: PrismaService) {}
+
   async day(user: B24UserContext, date: string, scope: DayScope = {}): Promise<CalendarDay> {
     const { resourceIds = null, withDetails = true, techWindowMinutes = 0, dealFields = [] } = scope;
     const timezone = user.portal.timezone;
@@ -60,13 +65,14 @@ export class CalendarService {
     );
     const inDay = new Set(mapped.filter((b) => overlaps(b, start, end)).map((b) => b.id));
     const dayRaw = raw.filter((b) => inDay.has(Number(b.id)));
+    // Брони приложения, удалённые в Битрикс24, — на месте до решения (тех. окна у них нет: слот свободен).
+    const gone = await this.missing(user, start, end, allowed, new Set(allBookings.map((b) => Number(b.id))));
     if (!withDetails)
       return {
         date,
         timezone,
         resources,
-        bookings: mapped
-          .filter((b) => inDay.has(b.id))
+        bookings: [...mapped.filter((b) => inDay.has(b.id)), ...gone.map((g) => this.fromRecord(g.record, g.alertId, null))]
           .map(occupancyOnly)
           .sort(byStart),
         techWindows,
@@ -80,7 +86,7 @@ export class CalendarService {
     const [deals, meta] = await Promise.all([
       this.deals(
         client,
-        [...new Set(dealIds.values())],
+        [...new Set([...dealIds.values(), ...gone.flatMap((g) => (g.record.dealId ? [g.record.dealId] : []))])],
         shown.map((f) => f.name),
       ),
       shown.length ? this.dealFieldMeta(user) : Promise.resolve({}),
@@ -94,6 +100,14 @@ export class CalendarService {
         if (deal) booking.fields = bookingFields(deal.raw, shown, meta, timezone);
         return booking;
       })
+      .concat(
+        gone.map(({ record, alertId }) => {
+          const deal = record.dealId ? deals.get(record.dealId) : undefined;
+          const booking = this.fromRecord(record, alertId, deal?.dto ?? null);
+          if (deal) booking.fields = bookingFields(deal.raw, shown, meta, timezone);
+          return booking;
+        }),
+      )
       .sort(byStart);
 
     return { date, timezone, resources, bookings, techWindows };
@@ -106,6 +120,57 @@ export class CalendarService {
     const meta = res.result ?? {};
     this.fieldMeta.set(user.portal.id, { meta, expiresAt: Date.now() + FIELDS_TTL_MS });
     return meta;
+  }
+
+  /**
+   * Активные брони приложения дня, которых нет в Битрикс24 (не в списке дня — проверяем точечно:
+   * бронь могли перенести на другой день, тогда она не «пропала»).
+   */
+  private async missing(
+    user: B24UserContext,
+    start: Date,
+    end: Date,
+    allowed: Set<number> | null,
+    listed: Set<number>,
+  ): Promise<{ record: BookingRecord; alertId: string | null }[]> {
+    if (!this.prisma) return [];
+    const records = (
+      await this.prisma.bookingRecord.findMany({
+        where: { portalId: user.portal.id, source: 'app', status: 'active', startsAt: { lt: end }, endsAt: { gt: start } },
+        take: 200,
+      })
+    ).filter((r) => !listed.has(r.bookingId) && (!allowed || (r.resourceIds as number[]).some((id) => allowed.has(Number(id)))));
+    if (!records.length) return [];
+    const res = await user.client.batch(
+      Object.fromEntries(records.map((r) => [`b${r.bookingId}`, { method: 'booking.v1.booking.get', params: { id: r.bookingId } }])),
+    );
+    // Только достоверно удалённые («Booking not found»); сбой проверки — бронь не показываем как пропавшую.
+    const gone = records.filter((r) => {
+      const err = res.errors[`b${r.bookingId}`] as { error?: string; error_description?: string } | undefined;
+      return !!err && (String(err.error) === '1021' || /not found/i.test(`${err.error_description ?? ''} ${err.error ?? ''}`));
+    });
+    if (!gone.length) return [];
+    const alerts = await this.prisma.bookingAlert.findMany({
+      where: { portalId: user.portal.id, bookingId: { in: gone.map((r) => r.bookingId) }, kind: 'discrepancy', problem: { contains: 'missing' }, status: { not: 'resolved' } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, bookingId: true },
+    });
+    return gone.map((record) => ({ record, alertId: alerts.find((a) => a.bookingId === record.bookingId)?.id ?? null }));
+  }
+
+  private fromRecord(r: BookingRecord, alertId: string | null, deal: CalendarDeal | null): CalendarBooking {
+    return {
+      id: r.bookingId,
+      name: r.title ?? '',
+      description: null,
+      resourceIds: (r.resourceIds as number[]).map(Number),
+      start: r.startsAt.toISOString(),
+      end: r.endsAt.toISOString(),
+      dealId: r.dealId,
+      deal,
+      fields: [],
+      missing: { alertId },
+    };
   }
 
   private toBooking(b: RawBooking, dealId: number | null, deal: CalendarDeal | null): CalendarBooking {

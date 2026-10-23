@@ -46,6 +46,11 @@ export interface CalendarBooking {
   deal: CalendarDeal | null;
   /** Поля сделки по настройке группы; пусто без права на данные броней. */
   fields: CalendarField[];
+  /**
+   * Бронь приложения, которой больше нет в Битрикс24: показывается до решения сотрудника
+   * (создать заново или удалить в приложении). `alertId` — уведомление о расхождении, если уже есть.
+   */
+  missing?: { alertId: string | null };
 }
 
 export interface CalendarDay {

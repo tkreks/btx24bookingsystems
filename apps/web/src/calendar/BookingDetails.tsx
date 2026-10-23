@@ -11,9 +11,11 @@ export function BookingDetails({
   groupId,
   canEdit,
   canCancel,
+  canCreate = false,
   onClose,
   onChanged,
   onCancelled,
+  onResolved,
 }: {
   booking: CalendarBooking;
   day: CalendarDay;
@@ -28,6 +30,10 @@ export function BookingDetails({
   onChanged: () => void;
   /** Бронь снята — календарь закрывает карточку, показывает итог и перечитывает день. */
   onCancelled: (r: CancelBookingResultDto) => void;
+  /** Право `booking.create` в группе — «Создать бронирование заново» для брони, удалённой в Битрикс24. */
+  canCreate?: boolean;
+  /** Решение по брони, удалённой в Битрикс24, принято — итог словами. */
+  onResolved?: (note: string) => void;
 }) {
   const names = new Map(day.resources.map((r) => [r.id, r.name]));
   // Правка полей сделки: форма с сервера (поля группы и текущие значения) и введённые значения.
@@ -95,6 +101,24 @@ export function BookingDetails({
     }
   };
 
+  // Бронь удалена в Битрикс24: создать заново по данным приложения или подтвердить удаление.
+  const decide = async (what: 'recreate' | 'remove-in-app') => {
+    const text =
+      what === 'recreate'
+        ? 'Создать бронирование в Битрикс24 заново по данным приложения? У брони будет новый номер.'
+        : 'Подтвердить удаление? Бронь будет удалена в приложении (в истории останется запись).';
+    if (!confirm(text)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await apiPost(`/bookings/${booking.id}/${what}`, {});
+      onResolved?.(what === 'recreate' ? `Бронь #${booking.id} создана в Битрикс24 заново.` : `Бронь #${booking.id} удалена в приложении.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось выполнить действие');
+      setBusy(false);
+    }
+  };
+
   const viewFields = saved
     ? saved.fields.filter((f) => f.showView && f.display).map((f) => ({ code: f.code, label: f.label, value: f.display }))
     : booking.fields.filter((f) => f.inView);
@@ -108,6 +132,23 @@ export function BookingDetails({
             ×
           </button>
         </header>
+        {booking.missing && (
+          <div className="missing-decision" role="alert">
+            <b>Бронь была удалена в Битрикс24</b>
+            <span className="muted">
+              В приложении она остаётся, пока вы не решите, что с ней делать. Слот в Битрикс24 сейчас свободен.
+            </span>
+            <div className="form-actions">
+              <button className="primary" disabled={busy || !canCreate} onClick={() => void decide('recreate')}>
+                Создать бронирование заново
+              </button>
+              <button className="danger-outline" disabled={busy || !canCancel} onClick={() => void decide('remove-in-app')}>
+                Подтвердить удаление
+              </button>
+            </div>
+            {error && <p className="notice error">{error}</p>}
+          </div>
+        )}
         <dl>
           <dt>Время</dt>
           <dd>
@@ -195,12 +236,12 @@ export function BookingDetails({
             </div>
           </div>
         )}
-        {!editing && error && (
+        {!editing && !booking.missing && error && (
           <p className="notice error" role="alert">
             {error}
           </p>
         )}
-        {!editing && !cancelling && (editable || (canCancel && !!groupId)) && (
+        {!booking.missing && !editing && !cancelling && (editable || (canCancel && !!groupId)) && (
           <div className="form-actions">
             {editable && (
               <button className="primary" disabled={busy} onClick={() => void startEdit()}>

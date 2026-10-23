@@ -227,6 +227,7 @@ export function CalendarPage({
         focusId={screen.alertId}
         canEdit={session.canManageApp || permissions.has('booking.edit')}
         canCancel={session.canManageApp || permissions.has('booking.cancel')}
+        canCreate={session.canManageApp || permissions.has('booking.create')}
         onBack={() => setScreen({ name: 'dashboard' })}
         onOpenDay={(d) => {
           setDate(d);
@@ -386,7 +387,9 @@ export function CalendarPage({
                 </button>
               )}
               {dealTarget.bookingId === null
-                ? ' · в Битрикс24 этой брони уже нет (удалена) — даты и ресурс из сделки'
+                ? dayKey(dealTarget.start, tz) === date && dealBookings
+                  ? ' · удалена в Битрикс24 — откройте её в календаре и решите: создать заново или подтвердить удаление'
+                  : ' · в Битрикс24 этой брони уже нет (удалена) — даты и ресурс из сделки'
                 : dayKey(dealTarget.start, tz) === date &&
                   !dealBookings &&
                   (targetGroup ? ' · в календаре её нет — обновите страницу' : ' · ресурс брони не входит в ваши группы')}
@@ -436,6 +439,12 @@ export function CalendarPage({
           groupId={activeGroup?.id ?? null}
           canEdit={!!activeGroup?.permissions.includes('booking.edit')}
           canCancel={!!activeGroup?.permissions.includes('booking.cancel')}
+          canCreate={!!activeGroup?.permissions.includes('booking.create')}
+          onResolved={(note) => {
+            setSelected(null);
+            setCreatedNote(note);
+            setSettingsRevision((n) => n + 1);
+          }}
           onClose={() => setSelected(null)}
           onChanged={() => setSettingsRevision((n) => n + 1)}
           onCancelled={(r) => {
