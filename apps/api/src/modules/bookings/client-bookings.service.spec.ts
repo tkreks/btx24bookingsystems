@@ -20,6 +20,9 @@ describe('ClientBookingsService', () => {
             { ID: '700', TITLE: 'Баня, октябрь', STAGE_SEMANTIC_ID: 'S', CATEGORY_ID: '0', OPPORTUNITY: '40000', UF_ID: '1', UF_S: null, UF_E: null },
             { ID: '701', TITLE: 'Баня, сейчас', STAGE_SEMANTIC_ID: 'P', CATEGORY_ID: '0', OPPORTUNITY: '0', UF_ID: '3', UF_S: null, UF_E: null },
             { ID: '702', TITLE: 'Старая', STAGE_SEMANTIC_ID: 'S', CATEGORY_ID: '0', OPPORTUNITY: '0', UF_ID: '4', UF_S: '2025-05-01T10:00:00+03:00', UF_E: '2025-05-01T12:00:00+03:00' },
+            // Оплаченный сертификат (в работе, брони нет) — состоявшаяся; неоплаченный — нет.
+            { ID: '703', TITLE: 'Сертификат', STAGE_SEMANTIC_ID: 'P', CATEGORY_ID: '0', OPPORTUNITY: '100000', UF_T: '74', UF_P: '100000|RUB' },
+            { ID: '704', TITLE: 'Сертификат, не оплачен', STAGE_SEMANTIC_ID: 'P', CATEGORY_ID: '0', OPPORTUNITY: '50000', UF_T: '74', UF_P: '' },
           ]
         : [],
     );
@@ -31,12 +34,15 @@ describe('ClientBookingsService', () => {
       resource: { findMany: vi.fn(async () => [{ resourceId: 10, name: 'Баня 1' }, { resourceId: 14, name: 'Теремок' }]) },
       bookingRecord: { findMany: vi.fn(async () => [{ bookingId: 4, resourceIds: [14] }]) },
     } as unknown as PrismaService;
-    const fieldMap = { get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S', bookingEnd: 'UF_E' })) } as unknown as DealFieldMapService;
+    const fieldMap = {
+      get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S', bookingEnd: 'UF_E' })),
+      outcome: vi.fn(async () => ({ bookingEnd: 'UF_E', dealType: 'UF_T', paidAmount: 'UF_P', certificateTypeId: '74' })),
+    } as unknown as DealFieldMapService;
     const user = { portal: { id: 'p1' }, client: { call, listAll, batch } } as unknown as B24UserContext;
     const r = await new ClientBookingsService(prisma, fieldMap).forContact(user, 140, [], new Date('2026-10-21T10:00:00Z'));
     expect(r.past).toBe(2);
     expect(r.contact).toEqual({ id: 140, name: 'Анна Иванова' });
-    expect(r.won).toEqual({ count: 2, avgCheck: 40000, currency: null });
+    expect(r.won).toEqual({ count: 3, avgCheck: 70000, currency: null });
     expect(r.upcoming.map((b) => [b.bookingId, b.when, b.dealId])).toEqual([
       [3, 'now', 701],
       [2, 'future', null],
@@ -46,7 +52,7 @@ describe('ClientBookingsService', () => {
       // b4 удалена в модуле — ресурс из журнала приложения, bookingId null.
       [null, 702, 'Старая', ['Теремок']],
     ]);
-    expect(r.openDeals).toEqual([{ id: 701, title: 'Баня, сейчас', categoryId: 0 }]);
+    expect(r.openDeals.map((d) => d.id)).toEqual([701, 703, 704]);
   });
 });
 
@@ -59,7 +65,7 @@ describe('ClientBookingsService recent', () => {
       result: Object.fromEntries(Object.keys(cmds).map((k) => [k, { externalData: k === 'b1' ? [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '678' }] : [] }])),
     }));
     const prisma = { resource: { findMany: vi.fn(async () => []) } } as unknown as PrismaService;
-    const fieldMap = { get: vi.fn(async () => ({})) } as unknown as DealFieldMapService;
+    const fieldMap = { get: vi.fn(async () => ({})), outcome: vi.fn(async () => ({ certificateTypeId: null })) } as unknown as DealFieldMapService;
     const user = { portal: { id: 'p1' }, client: { call, listAll, batch } } as unknown as B24UserContext;
     const r = await new ClientBookingsService(prisma, fieldMap).forContact(user, 140, [678], new Date('2026-10-21T10:00:00Z'));
     expect(r.past).toBe(7);

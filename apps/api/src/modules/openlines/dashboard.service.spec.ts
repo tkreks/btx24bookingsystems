@@ -88,7 +88,10 @@ describe('DashboardService', () => {
     const call = vi.fn(async () => ({ result: { categories: [{ id: 0, name: 'БК Алатырь' }, { id: 14, name: 'Домики и беседки' }] } }));
     const batch = vi.fn(async () => ({ result: { t2: [{ ID: '678', TITLE: 'Баня, Иванов' }], t3: [{ ID: '150', NAME: 'Олег' }] } }));
     const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call, listAll, batch } } as unknown as B24UserContext;
-    const fieldMap = { get: vi.fn(async () => ({ bookingEnd: 'UF_END' })) } as unknown as DealFieldMapService;
+    const fieldMap = {
+      get: vi.fn(async () => ({ bookingEnd: 'UF_END' })),
+      outcome: vi.fn(async () => ({ bookingEnd: 'UF_END', certificateTypeId: null })),
+    } as unknown as DealFieldMapService;
     const svc = new DashboardService({} as ChatsService, emptyJournal, fieldMap);
     const d = await svc.get(user, { from: '2026-10-21', to: '2026-10-21' }, false, [0, 14]);
     expect(d.calls).toEqual({ incoming: 2, new: 1, repeat: 1, answered: 1, missed: 2, lost: 1 });
@@ -249,7 +252,10 @@ describe('DashboardService — новые сделки за период', () =>
       return [];
     });
     const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, client: { call: vi.fn(async () => ({ result: {} })), listAll } } as unknown as B24UserContext;
-    const fieldMap = { get: vi.fn(async () => ({ bookingEnd: 'UF_END' })) } as unknown as DealFieldMapService;
+    const fieldMap = {
+      get: vi.fn(async () => ({ bookingEnd: 'UF_END' })),
+      outcome: vi.fn(async () => ({ bookingEnd: 'UF_END', certificateTypeId: null })),
+    } as unknown as DealFieldMapService;
     const d = await new DashboardService({} as ChatsService, emptyJournal, fieldMap).get(user, { from: '2026-10-21', to: '2026-10-21', callsScope: 'mine' }, false, [0]);
     expect(d.newDeals).toMatchObject({ total: 3, repeat: 1, truncated: false });
     expect(d.newDeals?.items.map((i) => [i.id, i.repeat])).toEqual([[900, true], [901, false], [902, false]]);

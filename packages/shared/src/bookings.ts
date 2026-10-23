@@ -170,8 +170,15 @@ export const DEAL_FIELD_ROLES = {
   surchargeLink: 'Ссылка на доплату',
   /** Пересчитывается приложением: сумма проведённых оплат по всем счетам сделки. */
   paidAmount: 'Сумма внесённых оплат',
+  /** Вид сделки: бронь, покупка сертификата (`CERTIFICATE_DEAL_TYPE`), бронь сертификатом. */
+  dealType: 'Тип сделки',
 } as const;
 export type DealFieldRole = keyof typeof DEAL_FIELD_ROLES;
+/**
+ * Значение поля «Тип сделки» у покупки сертификата: покупают не бронь, а сертификат на сумму, которой
+ * потом оплачивают бронь. Оплаченная (и не проигранная) — успешная сделка, хотя брони у неё нет.
+ */
+export const CERTIFICATE_DEAL_TYPE = 'Покупка сертификата';
 export type DealFieldMapDto = Partial<Record<DealFieldRole, string>>;
 
 /** Бронь клиента (в чате) или сделки (встройка): прошлая, текущая или будущая. */

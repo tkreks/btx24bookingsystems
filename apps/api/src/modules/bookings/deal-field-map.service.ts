@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { DEAL_FIELD_ROLES, type DealFieldMapDto, type DealFieldRole } from '@btx24/shared';
+import { CERTIFICATE_DEAL_TYPE, DEAL_FIELD_ROLES, type DealFieldMapDto, type DealFieldRole } from '@btx24/shared';
+import type { DealOutcomeFields } from './deal-outcome.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -41,6 +42,26 @@ export class DealFieldMapService {
     if (!hit.items.length) return v;
     const item = hit.items.find((i) => String(i.ID) === v) ?? hit.items.find((i) => i.XML_ID === v) ?? hit.items.find((i) => i.VALUE === v);
     return item ? String(item.ID) : null;
+  }
+
+  /** Поля для «сделка состоялась» (бронь прошла / сертификат оплачен) — см. `deal-outcome.ts`. */
+  async outcome(portalId: string, client: Bitrix24RestClient): Promise<DealOutcomeFields> {
+    const m = await this.get(portalId);
+    // Не настроено — ищем по названию («Тип сделки», «Сумма внесённых оплат» появились позже остальных).
+    const found = !m.dealType || !m.paidAmount ? await this.detected(portalId, client) : {};
+    const dealType = m.dealType ?? found.dealType;
+    const certificateTypeId = dealType ? await this.enumId(portalId, client, dealType, CERTIFICATE_DEAL_TYPE).catch(() => null) : null;
+    return { bookingEnd: m.bookingEnd, dealType, paidAmount: m.paidAmount ?? found.paidAmount, certificateTypeId };
+  }
+
+  private readonly detectCache = new Map<string, { map: DealFieldMapDto; expiresAt: number }>();
+  private async detected(portalId: string, client: Bitrix24RestClient): Promise<DealFieldMapDto> {
+    const hit = this.detectCache.get(portalId);
+    if (hit && hit.expiresAt > Date.now()) return hit.map;
+    const fields = await client.call<Record<string, FieldMeta>>('crm.deal.fields').then((r) => r.result ?? {}).catch(() => ({}));
+    const map = detectFieldMap(fields);
+    this.detectCache.set(portalId, { map, expiresAt: Date.now() + 10 * 60_000 });
+    return map;
   }
 
   async get(portalId: string): Promise<DealFieldMapDto> {

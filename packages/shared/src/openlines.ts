@@ -222,6 +222,8 @@ export interface DashboardNewDeal {
   repeat: boolean;
   /** Бронь по сделке (журнал приложения): нет, есть, есть и оплачена (счёт приложения оплачен). */
   booking: 'none' | 'booked' | 'paid';
+  /** Покупка сертификата (поле «Тип сделки»): брони у неё и не бывает. */
+  certificate: boolean;
   /** Источник сделки (SOURCE_ID и название из справочника CRM); null — не указан. */
   source: { id: string; name: string } | null;
 }

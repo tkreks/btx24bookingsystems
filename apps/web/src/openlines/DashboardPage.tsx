@@ -481,7 +481,7 @@ function NewDealsModal({
                 <span className="muted">без контакта</span>
               )}
               <span className={`pill${i.repeat ? '' : ' muted-pill'}`}>{i.repeat ? 'повторный' : 'новый'}</span>
-              <BookingMark state={i.booking} />
+              <BookingMark state={i.booking} certificate={i.certificate} />
               <span className="muted">
                 создана {fmtDateTime(i.createdAt, tz)}
                 {i.opportunity ? ` · ${fmtMoney(i.opportunity, i.currency)}` : ''}
@@ -573,8 +573,14 @@ function BookingList({
   );
 }
 
-/** Бронь по сделке: 🪙 — есть и оплачена, 📅 — есть, не оплачена, иначе — «без брони». */
-function BookingMark({ state }: { state: DashboardNewDeal['booking'] }) {
+/** Бронь по сделке: 🪙 — есть и оплачена, 📅 — есть, не оплачена, 🎟 — покупка сертификата, иначе — «без брони». */
+function BookingMark({ state, certificate = false }: { state: DashboardNewDeal['booking']; certificate?: boolean }) {
+  if (certificate)
+    return (
+      <span className="deal-mark cert" title="Покупка сертификата: брони нет, оплаченная — успешная сделка" aria-label="Сертификат">
+        🎟 сертификат
+      </span>
+    );
   if (state === 'paid')
     return (
       <span className="deal-mark paid" title="Есть бронь, оплачена" aria-label="Бронь оплачена">
@@ -664,7 +670,7 @@ function DealsCreated({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: st
                 </span>
               </span>
               <span className="dt-side">
-                <BookingMark state={i.booking} />
+                <BookingMark state={i.booking} certificate={i.certificate} />
                 {i.opportunity ? <span className="muted">{fmtMoney(i.opportunity, i.currency)}</span> : null}
               </span>
             </button>

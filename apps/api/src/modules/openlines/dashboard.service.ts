@@ -22,7 +22,7 @@ import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingJournalService } from '../bookings/booking-journal.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
-import { dealHappened } from '../bookings/deal-outcome.js';
+import { happened, isCertificatePurchase, outcomeSelect } from '../bookings/deal-outcome.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { callClients, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
@@ -275,6 +275,7 @@ export class DashboardService {
    */
   private async newDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['newDeals']> {
     type Row = Record<string, string | null>;
+    const outcome = (await this.fieldMap?.outcome(user.portal.id, user.client).catch(() => null)) ?? { certificateTypeId: null };
     try {
       const rows = await user.client.listAll<Row>(
         'crm.deal.list',
@@ -286,12 +287,11 @@ export class DashboardService {
             ...(scope === 'mine' ? { ASSIGNED_BY_ID: user.userId } : {}),
           },
           order: { DATE_CREATE: 'DESC' },
-          select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID', 'SOURCE_ID'],
+          select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID', 'SOURCE_ID', ...outcomeSelect(outcome)],
         },
         { max: MAX_NEW_DEALS },
       );
       const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
-      const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
       // Сделки клиентов — пачками параллельно (темп держит ограничитель портала), имена — заодно.
       const [earlierChunks, names, bookingState, sources] = await Promise.all([
         Promise.all(
@@ -300,7 +300,7 @@ export class DashboardService {
               'crm.deal.list',
               {
                 filter: { '@CONTACT_ID': ids, '!STAGE_SEMANTIC_ID': 'F', '<DATE_CREATE': end.toISOString() },
-                select: ['ID', 'CONTACT_ID', 'CATEGORY_ID', 'DATE_CREATE', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
+                select: ['ID', 'CONTACT_ID', 'CATEGORY_ID', 'DATE_CREATE', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...outcomeSelect(outcome)],
               },
               { max: 5000 },
             ),
@@ -322,7 +322,7 @@ export class DashboardService {
               Number(e.CONTACT_ID) === contactId &&
               e.CATEGORY_ID === d.CATEGORY_ID &&
               Date.parse(String(e.DATE_CREATE)) < created &&
-              dealHappened(e, endField ? e[endField] : null, created),
+              happened(e, outcome, created),
           );
         return {
           id: Number(d.ID),
@@ -333,6 +333,7 @@ export class DashboardService {
           contact: contactId ? { id: contactId, name: names.get(contactId) ?? null } : null,
           repeat,
           booking: bookingState.get(Number(d.ID)) ?? 'none',
+          certificate: isCertificatePurchase(d, outcome),
           source: d.SOURCE_ID ? { id: d.SOURCE_ID, name: sources.get(d.SOURCE_ID) ?? d.SOURCE_ID } : null,
         };
       });
@@ -352,7 +353,7 @@ export class DashboardService {
     const out = new Set<string>();
     const contactIds = [...new Set(clients.map((c) => c.contactId).filter((x): x is number => x !== null))];
     if (funnel === null || !contactIds.length) return out;
-    const endField = (await this.fieldMap?.get(user.portal.id))?.bookingEnd;
+    const outcome = (await this.fieldMap?.outcome(user.portal.id, user.client)) ?? { certificateTypeId: null };
     type Row = { CONTACT_ID: string | null; CLOSEDATE: string | null; STAGE_SEMANTIC_ID: string | null } & Record<string, string | null>;
     const deals = (
       await Promise.all(
@@ -361,7 +362,7 @@ export class DashboardService {
             'crm.deal.list',
             {
               filter: { '@CONTACT_ID': ids, CATEGORY_ID: funnel, '!STAGE_SEMANTIC_ID': 'F' },
-              select: ['ID', 'CONTACT_ID', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...(endField ? [endField] : [])],
+              select: ['ID', 'CONTACT_ID', 'CLOSEDATE', 'STAGE_SEMANTIC_ID', ...outcomeSelect(outcome)],
             },
             { max: 5000 },
           ),
@@ -370,7 +371,7 @@ export class DashboardService {
     ).flat();
     for (const c of clients) {
       if (!c.contactId) continue;
-      if (deals.some((d) => Number(d.CONTACT_ID) === c.contactId && dealHappened(d, endField ? d[endField] : null, c.firstIncomingAt)))
+      if (deals.some((d) => Number(d.CONTACT_ID) === c.contactId && happened(d, outcome, c.firstIncomingAt)))
         out.add(c.key);
     }
     return out;
