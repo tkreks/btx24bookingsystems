@@ -5,7 +5,7 @@ import { openCrm, openMessenger } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { avatarTone, dayKey, initials } from './chat-list.js';
-import { Channel } from './Channel.js';
+import { ChannelSwitch } from './ChannelSwitch.js';
 import { clipName } from './format.js';
 import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
@@ -205,27 +205,10 @@ export function ChatView({
       <ChatHeader
         chatId={chat.chatId}
         title={status?.clientName || chat.title}
+        onTitle={crm.contactId ? () => openCrm('contact', crm.contactId!) : undefined}
         subtitle={
           <>
-            {channels.length > 1 && onOpenChat ? (
-              <span className="cv-channels" role="group" aria-label="Мессенджер клиента">
-                {channels.map((c) => (
-                  <button
-                    key={c.chatId}
-                    type="button"
-                    className={`cv-channel${c.chatId === chat.chatId ? ' active' : ''}`}
-                    aria-pressed={c.chatId === chat.chatId}
-                    title={c.waitingReply ? 'Ждёт ответа' : undefined}
-                    onClick={() => c.chatId !== chat.chatId && onOpenChat(c.chatId)}
-                  >
-                    <Channel connector={c.connector} />
-                    {c.waitingReply && <i className="cv-channel-dot" aria-label="ждёт ответа" />}
-                  </button>
-                ))}
-              </span>
-            ) : (
-              <Channel connector={chat.connector} />
-            )}
+            <ChannelSwitch channels={channels} current={chat.chatId} connector={chat.connector} timezone={timezone} onOpen={onOpenChat} />
             {crm.dealId && (
               <>
                 <span className="cv-sep">|</span>
@@ -370,6 +353,7 @@ export function ChatView({
 function ChatHeader({
   chatId,
   title,
+  onTitle,
   subtitle,
   details,
   onBack,
@@ -377,6 +361,8 @@ function ChatHeader({
 }: {
   chatId: number;
   title: string;
+  /** Имя клиента — ссылка на контакт в CRM. */
+  onTitle?: () => void;
   subtitle?: ReactNode;
   /** Под каналом: клиент, его статистика и брони. */
   details?: ReactNode;
@@ -392,9 +378,15 @@ function ChatHeader({
         </button>
         <span className={`avatar large a${avatarTone(chatId)}`}>{initials(title)}</span>
         <div className="cv-contact-info">
-          <div className="cv-contact-name" title={title}>
-            {clipName(title)}
-          </div>
+          {onTitle ? (
+            <button type="button" className="cv-contact-name link" title={`${title} — открыть контакт в CRM`} onClick={onTitle}>
+              {clipName(title)}
+            </button>
+          ) : (
+            <div className="cv-contact-name" title={title}>
+              {clipName(title)}
+            </div>
+          )}
           {subtitle && <div className="cv-contact-sub">{subtitle}</div>}
           {details}
         </div>

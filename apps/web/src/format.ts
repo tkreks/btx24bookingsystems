@@ -8,6 +8,11 @@ export function fmtDateTime(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat('ru-RU', { timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 }
 
+/** «23.10.2026». */
+export function fmtDate(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone, day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(iso));
+}
+
 export function fmtDayTitle(date: string, timeZone: string): string {
   return new Intl.DateTimeFormat('ru-RU', { timeZone, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${date}T12:00:00Z`));
 }

@@ -19,7 +19,7 @@ import {
   type RecentDealsDto,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
-import { fmtMoney, fmtTime, shiftDate } from '../format.js';
+import { fmtDate, fmtDateTime, fmtMoney, fmtTime, shiftDate } from '../format.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
 import { ClientPicker } from './ClientPicker.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
@@ -35,14 +35,34 @@ export interface BookingFormContext {
   dealId?: number | null;
   contactId?: number | null;
   clientName?: string | null;
-  /** Открытые сделки клиента (из чата или сделки). */
-  openDeals?: { id: number; title: string; categoryId?: number | null }[];
+  /** Открытые сделки клиента (из чата или сделки): сумма, дата, бронь по сделке. */
+  openDeals?: {
+    id: number;
+    title: string;
+    categoryId?: number | null;
+    opportunity?: number | null;
+    createdAt?: string | null;
+    booking?: { start: string; end: string; resources: string[] } | null;
+  }[];
 }
 
 /** `none` — ещё не выбрали (мастер из меню: клиента и сделки пока нет). */
 type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new'; title: string } | { mode: 'service' } | { mode: 'none' };
 type Step = 'deal' | 'group' | 'slot' | 'details';
-type DealCard = { id: number; title: string; categoryId?: number | null; closed?: boolean; client?: string | null; opportunity?: number | null; lastActivityAt?: string | null };
+type DealCard = {
+  id: number;
+  title: string;
+  categoryId?: number | null;
+  closed?: boolean;
+  client?: string | null;
+  opportunity?: number | null;
+  lastActivityAt?: string | null;
+  createdAt?: string | null;
+  /** Бронь по сделке (текущая или будущая) — карточка красная: вторую бронь, скорее всего, не сюда. */
+  booking?: { start: string; end: string; resources: string[] } | null;
+};
+/** Сделок клиента на шаге сразу и сколько добавляет «Показать ещё» (по 2 в строке). */
+const DEALS_STEP = 4;
 
 /** Начало брони уже прошло. */
 const PAST_START_ERROR = 'Начало брони уже прошло — выберите сегодня позже текущего времени или другой день';
@@ -134,7 +154,7 @@ export function BookingForm({
           ? { mode: 'new', title: context.clientName ?? '' }
           : { mode: 'none' },
   );
-  const [moreDeals, setMoreDeals] = useState(false);
+  const [dealsShown, setDealsShown] = useState(DEALS_STEP);
   const [guests, setGuests] = useState('');
   const [comment, setComment] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('prepayment');
@@ -370,7 +390,7 @@ export function BookingForm({
   // Сделки клиента: последняя открытая видна сразу, остальные — по «Показать ещё».
   const dealCards: DealCard[] = [...(context.dealId && !deals.some((d) => d.id === context.dealId) ? [{ id: context.dealId, title: 'Эта сделка' }] : []), ...deals];
   const selectedId = deal.mode === 'existing' ? deal.dealId : null;
-  const visibleDeals = moreDeals ? dealCards : dealCards.filter((d, i) => i < 3 || d.id === selectedId);
+  const visibleDeals = dealCards.filter((d, i) => i < dealsShown || d.id === selectedId);
   const hiddenCount = dealCards.length - visibleDeals.length;
   const names = new Map((list ?? []).map((r) => [r.id, r.name]));
 
@@ -378,7 +398,7 @@ export function BookingForm({
   const chooseContact = async (c: CrmContactHit) => {
     setClient({ contactId: c.id, name: c.name });
     setSearching(false);
-    setMoreDeals(false);
+    setDealsShown(DEALS_STEP);
     try {
       const r = await apiGet<CrmSearchDto>(`/crm/search?contactId=${c.id}`);
       setDealList(r.deals.map(toCard));
@@ -434,7 +454,8 @@ export function BookingForm({
       type="button"
       role="radio"
       aria-checked={selectedId === d.id}
-      className={`bk-choice wz-deal${selectedId === d.id ? ' selected' : ''}`}
+      className={`bk-choice wz-deal${selectedId === d.id ? ' selected' : ''}${d.booking ? ' booked' : ''}`}
+      title={d.booking ? 'По сделке уже есть бронь' : undefined}
       onClick={() => {
         pick({ mode: 'existing', dealId: d.id });
         if (d.client !== undefined) setClient((c) => (c.contactId ? c : { contactId: null, name: d.client ?? null }));
@@ -444,8 +465,16 @@ export function BookingForm({
       <span className="wz-deal-main">
         <b>{d.title}</b>
         <span className="wz-deal-sub">
-          {[d.client, d.opportunity ? fmtMoney(d.opportunity, 'RUB') : null, `#${d.id}${meta}`].filter(Boolean).join(' · ')}
+          {[d.client, d.opportunity ? fmtMoney(d.opportunity, 'RUB') : null, `#${d.id}${meta}`, d.createdAt ? `от ${fmtDate(d.createdAt, timezone)}` : null]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
+        {d.booking && (
+          <span className="wz-deal-booking">
+            Бронь: {fmtDateTime(d.booking.start, timezone)}
+            {d.booking.resources.length ? ` · ${d.booking.resources.join(', ')}` : ''}
+          </span>
+        )}
       </span>
     </button>
   );
@@ -468,15 +497,15 @@ export function BookingForm({
           </p>
           {searching && <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />}
           <h4 className="bk-title">Сделки клиента</h4>
-          <div className="bk-choices" role="radiogroup" aria-label="Сделка">
+          <div className="bk-choices wz-deals" role="radiogroup" aria-label="Сделка">
             {visibleDeals.map((d) => dealCardButton(d, d.id === context.dealId ? ' · открыта сейчас' : d.closed ? ' · закрыта' : ''))}
-            {hiddenCount > 0 && (
-              <button type="button" className="bk-more" onClick={() => setMoreDeals(true)}>
-                Показать ещё ({hiddenCount})
-              </button>
-            )}
             {!dealCards.length && <p className="cp-hint">У клиента нет открытых сделок — создайте новую.</p>}
           </div>
+          {hiddenCount > 0 && (
+            <button type="button" className="bk-more wz-deals-more" onClick={() => setDealsShown((n) => n + DEALS_STEP)}>
+              Показать ещё {Math.min(DEALS_STEP, hiddenCount)} из {hiddenCount}
+            </button>
+          )}
         </>
       ) : (
         <>

@@ -53,6 +53,9 @@ describe('ClientBookingsService', () => {
       [null, 702, 'Старая', ['Теремок']],
     ]);
     expect(r.openDeals.map((d) => d.id)).toEqual([701, 703, 704]);
+    // Сделка с текущей бронью — с бронью (мастер выделит её).
+    expect(r.openDeals[0]).toMatchObject({ opportunity: 0, booking: { resources: ['Баня 1'] } });
+    expect(r.openDeals[1].booking).toBeNull();
   });
 });
 

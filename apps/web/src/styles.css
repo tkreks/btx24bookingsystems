@@ -4607,7 +4607,34 @@ input[role='switch']:checked::after {
 .wz-step-back:hover {
   color: var(--primary);
 }
-/* Карточки сделок: название и клиент слева, сумма · номер · давность справа. */
+/* Карточки сделок: название и клиент слева, сумма · номер · давность справа. Сделки клиента — по 2 в
+   строке; сделка, по которой уже есть бронь, — красная. */
+.wz-deals {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 560px) {
+  .wz-deals {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.wz-deal.booked {
+  border-color: #f04438;
+  background: #fef3f2;
+}
+.wz-deal.booked.selected {
+  box-shadow: 0 0 0 2px #f04438;
+}
+.wz-deal-booking {
+  overflow: hidden;
+  color: #b42318;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.wz-deals-more {
+  margin-top: 6px;
+}
 .wz-recent {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
 }
@@ -5797,4 +5824,156 @@ input[role='switch']:checked::after {
   display: grid;
   gap: 4px;
   font-size: 13px;
+}
+
+/* ---------- шапка чата: теги клиента, зелёный «+», кружок других чатов ---------- */
+.cb-stats {
+  gap: 6px;
+}
+.cb-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid #dde3ec;
+  border-radius: 999px;
+  background: #f6f8fb;
+  color: #5c6a80;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cb-tag b {
+  color: var(--c-ink, #172238);
+}
+.cb-tag .icon {
+  flex: none;
+  color: #8a96a8;
+}
+button.cb-tag {
+  cursor: pointer;
+}
+button.cb-tag:hover {
+  border-color: rgba(50, 105, 246, 0.45);
+  background: #eef4ff;
+}
+.cb-tag.cb-next {
+  border-color: #c7d7fe;
+  background: #eef4ff;
+}
+.cb-tag.cb-next.now {
+  border-color: #fda29b;
+  background: #fef3f2;
+}
+.cb-tag.cb-next.now .icon {
+  color: #d5444b;
+}
+.cb-add {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #16a34a;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);
+}
+.cb-add:hover {
+  background: #15803d;
+}
+.cv-channel-stack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 6px;
+  padding: 2px 8px 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+}
+.cv-stack-dot {
+  margin-left: -3px;
+}
+.cv-stack-dot:first-child {
+  margin-left: 0;
+}
+.cv-stack-dot .cl-channel-label {
+  display: none;
+}
+.cv-stack-dot .cl-channel-dot {
+  box-shadow: 0 0 0 2px #fff;
+}
+.cv-channel-stack b {
+  margin-left: 4px;
+  color: #5c6a80;
+}
+.channels-modal .channels-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.channels-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: left;
+  font-weight: 400;
+}
+.channels-row.current {
+  border-color: var(--primary);
+  background: rgba(0, 122, 255, 0.06);
+  opacity: 1;
+}
+.channels-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.channels-side {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: 12px;
+}
+button.cv-contact-name.link {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-ink, #172238);
+  text-align: left;
+}
+button.cv-contact-name.link:hover {
+  color: var(--primary);
+}
+/* Телефон: кнопки шапки — отдельной строкой под клиентом, теги — во всю ширину. */
+@media (max-width: 560px) {
+  .cv-head .cv-contact-line {
+    flex-wrap: wrap;
+  }
+  .cv-head .cv-actions {
+    order: 5;
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .cb-tag {
+    padding: 2px 8px;
+    font-size: 12px;
+  }
 }

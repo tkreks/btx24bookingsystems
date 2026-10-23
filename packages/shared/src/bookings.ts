@@ -206,8 +206,18 @@ export interface ClientBookingsDto {
   upcoming: ClientBookingDto[];
   /** Последние прошлые (до 5). */
   recent: ClientBookingDto[];
-  /** Открытые сделки клиента — для привязки новой брони. */
-  openDeals: { id: number; title: string; categoryId: number | null }[];
+  /**
+   * Открытые сделки клиента — для привязки новой брони: сумма, когда создана, бронь по сделке
+   * (текущая или будущая; мастер выделяет такую сделку красным).
+   */
+  openDeals: {
+    id: number;
+    title: string;
+    categoryId: number | null;
+    opportunity?: number | null;
+    createdAt?: string | null;
+    booking?: { start: string; end: string; resources: string[] } | null;
+  }[];
 }
 
 /** Сценарий оплаты брони (ADR 0008). */

@@ -26,7 +26,7 @@ export class ClientBookingsService {
     const map = await this.fieldMap.get(user.portal.id);
     const outcome = await this.fieldMap.outcome(user.portal.id, user.client);
     const ufSelect = [...new Set([map.bookingId, map.bookingStart, map.bookingEnd, ...outcomeSelect(outcome)].filter((x): x is string => !!x))];
-    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CURRENCY_ID', 'CLOSEDATE', ...ufSelect];
+    const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CURRENCY_ID', 'CLOSEDATE', 'DATE_CREATE', ...ufSelect];
     const [byClient, contactDeals, extraDeals, contact] = await Promise.all([
       contactId
         ? user.client
@@ -131,7 +131,17 @@ export class ClientBookingsService {
       recent: past.filter((b, i) => i < RECENT || (b.dealId !== null && extraDealIds.includes(b.dealId))),
       openDeals: [...deals.values()]
         .filter((d) => d.STAGE_SEMANTIC_ID === 'P')
-        .map((d) => ({ id: Number(d.ID), title: d.TITLE ?? `Сделка #${d.ID}`, categoryId: d.CATEGORY_ID === null ? null : Number(d.CATEGORY_ID) })),
+        .map((d) => {
+          const b = upcoming.find((x) => x.dealId === Number(d.ID));
+          return {
+            id: Number(d.ID),
+            title: d.TITLE ?? `Сделка #${d.ID}`,
+            categoryId: d.CATEGORY_ID === null ? null : Number(d.CATEGORY_ID),
+            opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
+            createdAt: d.DATE_CREATE ? new Date(d.DATE_CREATE).toISOString() : null,
+            booking: b ? { start: b.start, end: b.end, resources: b.resources } : null,
+          };
+        }),
     };
   }
 
