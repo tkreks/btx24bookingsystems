@@ -15,6 +15,7 @@ import { fmtDateTime, fmtDayTitle, fmtTime, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
 import { BookingForm } from '../bookings/BookingForm.js';
+import { CertificatesPage } from '../certificates/CertificatesPage.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { dayKey } from '../openlines/chat-list.js';
@@ -22,6 +23,7 @@ import { HeadDashboardPage } from '../openlines/HeadDashboardPage.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
 import { TemplatesPage } from '../openlines/TemplatesPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
+import { ThemeToggle } from '../theme/ThemeToggle.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { BookingDetails } from './BookingDetails.js';
 import { DayAvailability } from './DayAvailability.js';
@@ -87,6 +89,7 @@ export function CalendarPage({
     | { name: 'chats'; chatId?: number; waiting?: boolean }
     | { name: 'alerts'; alertId?: string | null }
     | { name: 'templates' }
+    | { name: 'certificates' }
   >(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
     if (alertId) return { name: 'alerts', alertId };
@@ -234,6 +237,8 @@ export function CalendarPage({
       />
     );
 
+  if (screen.name === 'certificates') return <CertificatesPage timezone={tz} onBack={() => setScreen({ name: 'dashboard' })} />;
+
   if (screen.name === 'templates')
     return (
       <>
@@ -267,6 +272,7 @@ export function CalendarPage({
           onAlerts={() => setScreen({ name: 'alerts' })}
           onSettings={() => setAdminOpen(true)}
           onTemplates={openlinesSend ? () => setScreen({ name: 'templates' }) : undefined}
+          onCertificates={() => setScreen({ name: 'certificates' })}
           onHead={session.isHead ? () => setScreen({ name: 'head' }) : undefined}
           onSession={(s) => {
             setSession(s);
@@ -347,6 +353,7 @@ export function CalendarPage({
               + Бронь
             </button>
           )}
+          <ThemeToggle />
           <WorkdayButton timezone={tz} />
           <button
             className="home-button"
@@ -388,11 +395,13 @@ export function CalendarPage({
               )}
               {dealTarget.bookingId === null
                 ? dayKey(dealTarget.start, tz) === date && dealBookings
-                  ? ' · удалена в Битрикс24 — откройте её в календаре и решите: создать заново или подтвердить удаление'
+                  ? ' · удалена в Битрикс24 — откройте её в календаре и решите: оставить или удалить из приложения'
                   : ' · в Битрикс24 этой брони уже нет (удалена) — даты и ресурс из сделки'
                 : dayKey(dealTarget.start, tz) === date &&
                   !dealBookings &&
                   (targetGroup ? ' · в календаре её нет — обновите страницу' : ' · ресурс брони не входит в ваши группы')}
+              {day?.bookings.some((x) => x.dealId === placement.dealId && x.missing) &&
+                ' · удалена в Битрикс24 и ждёт решения — откройте бронь: оставить или удалить из приложения'}
             </>
           ) : (
             <>Сделка #{placement.dealId}: брони нет — показан сегодняшний день.</>

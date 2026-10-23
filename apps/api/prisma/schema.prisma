@@ -64,6 +64,8 @@ model Portal {
   dashboardHiddenChats DashboardHiddenChat[]
   dealPaidAmounts      DealPaidAmount[]
   dealPayments         DealPayment[]
+  certificates         Certificate[]
+  certificateEvents    CertificateEvent[]
 }
 
 enum PortalStatus {
@@ -824,4 +826,55 @@ model WebSession {
   expiresAt       DateTime @db.DateTime(3)
 
   @@index([portalId, userId])
+}
+
+// ---------- Сертификаты (решение владельца 2026-10-23) ----------
+
+enum CertificateStatus {
+  new
+  used
+  expired
+}
+
+/// Подарочный сертификат: номер, номинал, на чьё имя, статус, дата оплаты, срок действия. Действия —
+/// выпуск, изменение срока, погашение (использован / истёк) — в `CertificateEvent`.
+model Certificate {
+  id              String            @id @default(cuid())
+  portalId        String
+  portal          Portal            @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  number          String            @db.VarChar(32)
+  nominal         Decimal           @db.Decimal(14, 2)
+  holderName      String            @db.VarChar(255)
+  status          CertificateStatus @default(new)
+  /// День оплаты (дата портала, полночь UTC — без времени).
+  paidOn          DateTime?         @db.Date
+  /// Действителен по этот день включительно (дата портала).
+  validUntil      DateTime          @db.Date
+  /// Сделка продажи сертификата (необязательно).
+  dealId          Int?
+  comment         String?           @db.VarChar(1000)
+  createdAt       DateTime          @default(now()) @db.DateTime(3)
+  createdByUserId Int
+  redeemedAt      DateTime?         @db.DateTime(3)
+  events          CertificateEvent[]
+
+  @@unique([portalId, number])
+  @@index([portalId, status, validUntil])
+}
+
+/// История сертификата: выпуск, изменение срока, погашение — кто, когда, было → стало.
+model CertificateEvent {
+  id            String      @id @default(cuid())
+  portalId      String
+  portal        Portal      @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  certificateId String
+  certificate   Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  /// issued | changed | redeemed
+  action        String      @db.VarChar(16)
+  userId        Int
+  userName      String      @db.VarChar(255)
+  at            DateTime    @default(now()) @db.DateTime(3)
+  details       Json?
+
+  @@index([portalId, certificateId, at])
 }

@@ -93,10 +93,13 @@ export class BookingSyncService {
         const res = await this.compare(r, toActual(b, links1.get(r.bookingId) ?? null));
         report.changed += res.changed;
         report.alerts += res.alerts;
-      } else if (r.source === 'bitrix') {
+      } else if (r.source === 'bitrix' && !r.dealId) {
+        // Служебная бронь из Битрикс24 без сделки — решать нечего, просто в историю.
         if (await this.journal.recordCancelled(portal.id, r.bookingId, { reason: 'removed_in_bitrix', actor: SYSTEM.bitrix, via: 'reconcile' }))
           report.removed++;
       } else if (await this.discrepancy(r, ['missing'], null)) report.alerts++;
+      // Бронь по сделке (из приложения или из Битрикс24) остаётся до решения сотрудника: оставить
+      // (создать заново) или удалить из приложения — решение владельца 2026-10-23.
     }
 
     if (!baseline)

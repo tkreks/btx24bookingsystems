@@ -381,10 +381,17 @@ export class DashboardService {
     }
   }
 
-  /** Сделки, по которым за период поступила оплата (учёт `DealPayment`), — в выборке «Новых сделок». */
+  /** Сделки, по которым за период поступила оплата (счета «Оплачен» и учёт `DealPayment`), — в выборке «Новых сделок». */
   private async paidDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['paidDeals']> {
     if (!this.payments) return { total: 0, items: [] };
-    const paid = await this.payments.paidIn(user.portal.id, start, end);
+    let paid: Map<number, { at: Date; amount: number }>;
+    try {
+      paid = await this.payments.paidIn(user.portal.id, user.client, start, end);
+    } catch (err) {
+      // Нет доступа к счетам — «с оплатой» недоступно, а не ошибка всего дашборда.
+      if (err instanceof Bitrix24Error) return null;
+      throw err;
+    }
     if (!paid.size) return { total: 0, items: [] };
     const ids = [...paid.keys()].slice(0, MAX_NEW_DEALS);
     const deals = await this.newDeals(user, start, end, scope, funnelIds, ids);

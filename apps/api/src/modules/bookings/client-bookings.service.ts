@@ -111,6 +111,15 @@ export class ClientBookingsService {
         if (Number.isFinite(s) && Number.isFinite(e)) items.push(item(s, e, null, journal.get(id) ?? [], Number(d.ID)));
       }
     }
+    // Брони сделок из журнала, которых нет выше, — прежде всего удалённые в Битрикс24 и ждущие решения:
+    // встройка и переход из чата открывают календарь на их дне (там — «оставить или удалить»).
+    const listed = new Set([...items.map((i) => i.bookingId), ...missing]);
+    const pending = deals.size
+      ? await this.prisma.bookingRecord.findMany({ where: { portalId: user.portal.id, status: 'active', dealId: { in: [...deals.keys()] } } })
+      : [];
+    for (const r of pending)
+      if (!listed.has(r.bookingId))
+        items.push(item(r.startsAt.getTime(), r.endsAt.getTime(), r.bookingId, Array.isArray(r.resourceIds) ? r.resourceIds.map(Number) : [], r.dealId));
     const upcoming = items.filter((i) => i.when !== 'past').sort((a, b) => a.start.localeCompare(b.start));
     const past = items.filter((i) => i.when === 'past').sort((a, b) => b.start.localeCompare(a.start));
     // Состоявшиеся сделки клиента (не проиграны, бронь прошла; без брони — выигранные; оплаченные

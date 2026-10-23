@@ -32,7 +32,8 @@ describe('ClientBookingsService', () => {
     });
     const prisma = {
       resource: { findMany: vi.fn(async () => [{ resourceId: 10, name: 'Баня 1' }, { resourceId: 14, name: 'Теремок' }]) },
-      bookingRecord: { findMany: vi.fn(async () => [{ bookingId: 4, resourceIds: [14] }]) },
+      // Журнал: ресурсы удалённой брони 4; активных броней сделок, которых нет в модуле, — нет.
+      bookingRecord: { findMany: vi.fn(async ({ where }: { where: { status?: string } }) => (where.status ? [] : [{ bookingId: 4, resourceIds: [14] }])) },
     } as unknown as PrismaService;
     const fieldMap = {
       get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S', bookingEnd: 'UF_E' })),

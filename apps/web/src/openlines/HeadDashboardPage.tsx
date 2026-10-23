@@ -10,6 +10,7 @@ import { EmployeeActivity } from './EmployeeActivity.js';
 import { DashBadge } from './RecentCalls.js';
 import { periodError } from './period.js';
 import { Avatar } from './Avatar.js';
+import { ThemeToggle } from '../theme/ThemeToggle.js';
 
 type Preset = 'today' | 'yesterday' | 'custom';
 
@@ -71,7 +72,10 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
             {session.user.name}
           </span>
         </div>
-        <button onClick={onManager}>Дашборд менеджера</button>
+        <div className="toolbar-controls">
+          <ThemeToggle />
+          <button onClick={onManager}>Дашборд менеджера</button>
+        </div>
       </header>
 
       <div className="period-bar head-period">

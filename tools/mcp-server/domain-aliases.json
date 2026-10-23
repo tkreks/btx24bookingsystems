@@ -271,5 +271,33 @@
     "journal",
     "BookingJournal",
     "history"
+  ],
+  "сертификат": [
+    "certificate",
+    "voucher"
+  ],
+  "сертификаты": [
+    "certificate",
+    "voucher"
+  ],
+  "погашение": [
+    "redeem",
+    "certificate"
+  ],
+  "номинал": [
+    "nominal",
+    "certificate"
+  ],
+  "тёмная": [
+    "dark",
+    "theme"
+  ],
+  "темная": [
+    "dark",
+    "theme"
+  ],
+  "тема": [
+    "theme",
+    "dark"
   ]
 }

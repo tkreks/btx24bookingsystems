@@ -5,6 +5,7 @@ import { openCrm } from '../b24.js';
 import { fmtAt, fmtDuration } from '../format.js';
 import { Avatar } from './Avatar.js';
 import { Icon } from './icons.js';
+import { ListMore } from './ListMore.js';
 
 const OWNER: Record<number, 'lead' | 'deal' | 'contact' | 'company' | undefined> = { 1: 'lead', 2: 'deal', 3: 'contact', 4: 'company' };
 /** Сколько звонков показывать сразу и сколько добавляет «Показать ещё». */
@@ -19,7 +20,7 @@ export function callTone(c: Pick<CallLogRowDto, 'direction' | 'status'>): 'in' |
 
 /**
  * Блок «Звонки» на дашборде: последние звонки периода дашборда из журнала звонков (дела CRM), к
- * которым у сотрудника есть доступ, — по 5, «Показать ещё 5». Цвет — по направлению и статусу,
+ * которым у сотрудника есть доступ, — по 5, «Показать ещё». Цвет — по направлению и статусу,
  * длительность разговора; за один день — только время, за период — с датой. Клик — карточка
  * сделки, лида или контакта.
  */
@@ -92,11 +93,7 @@ export function RecentCalls({ scope, timezone, from, to }: { scope: CallScope; t
           );
         })}
       </ul>
-      {items && items.length > shown && (
-        <button className="dash-more" onClick={() => setMore({ key, n: shown + STEP })}>
-          Показать ещё {Math.min(STEP, items.length - shown)}
-        </button>
-      )}
+      {items && <ListMore total={items.length} shown={shown} step={STEP} onShow={(n) => setMore({ key, n })} />}
     </section>
   );
 }

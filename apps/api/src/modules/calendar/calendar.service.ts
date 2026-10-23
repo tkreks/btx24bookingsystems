@@ -65,7 +65,7 @@ export class CalendarService {
     );
     const inDay = new Set(mapped.filter((b) => overlaps(b, start, end)).map((b) => b.id));
     const dayRaw = raw.filter((b) => inDay.has(Number(b.id)));
-    // Брони приложения, удалённые в Битрикс24, — на месте до решения (тех. окна у них нет: слот свободен).
+    // Брони приложения и по сделкам, удалённые в Битрикс24, — на месте до решения (тех. окна у них нет: слот свободен).
     const gone = await this.missing(user, start, end, allowed, new Set(allBookings.map((b) => Number(b.id))));
     if (!withDetails)
       return {
@@ -123,8 +123,8 @@ export class CalendarService {
   }
 
   /**
-   * Активные брони приложения дня, которых нет в Битрикс24 (не в списке дня — проверяем точечно:
-   * бронь могли перенести на другой день, тогда она не «пропала»).
+   * Активные брони дня — приложения и любые по сделке, — которых нет в Битрикс24 (не в списке дня —
+   * проверяем точечно: бронь могли перенести на другой день, тогда она не «пропала»).
    */
   private async missing(
     user: B24UserContext,
@@ -136,7 +136,7 @@ export class CalendarService {
     if (!this.prisma) return [];
     const records = (
       await this.prisma.bookingRecord.findMany({
-        where: { portalId: user.portal.id, source: 'app', status: 'active', startsAt: { lt: end }, endsAt: { gt: start } },
+        where: { portalId: user.portal.id, status: 'active', startsAt: { lt: end }, endsAt: { gt: start }, OR: [{ source: 'app' }, { dealId: { not: null } }] },
         take: 200,
       })
     ).filter((r) => !listed.has(r.bookingId) && (!allowed || (r.resourceIds as number[]).some((id) => allowed.has(Number(id)))));

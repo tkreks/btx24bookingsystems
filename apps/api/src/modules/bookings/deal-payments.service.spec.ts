@@ -53,4 +53,36 @@ describe('DealPaymentsService', () => {
       { dealId: 3, amount: 10000, total: 10000 },
     ]);
   });
+
+  it('оплаты периода — по счетам «Оплачен» (время перевода); учёт поля — только у сделок без оплаченных счетов', async () => {
+    const start = new Date('2026-10-22T21:00:00Z');
+    const end = new Date('2026-10-23T21:00:00Z');
+    const prisma = {
+      dealPayment: {
+        findMany: vi.fn(async () => [
+          // 10 — оплачена счётом вчера, поле изменилось сегодня: не оплата сегодня.
+          { dealId: 10, amount: 25000, at: new Date('2026-10-23T09:00:00Z') },
+          // 11 — внесли вручную, счетов нет.
+          { dealId: 11, amount: 5000, at: new Date('2026-10-23T08:00:00Z') },
+          // 12 — счёт оплачен сегодня: время — из счёта.
+          { dealId: 12, amount: 25000, at: new Date('2026-10-23T16:42:00Z') },
+        ]),
+      },
+    } as unknown as PrismaService;
+    const call = vi.fn(async (_m: string, p: { filter: Record<string, unknown> }) =>
+      p.filter['@parentId2']
+        ? [{ id: 2, parentId2: 10, stageId: 'DT31_2:P' }]
+        : [
+            { id: 1, parentId2: 12, opportunity: 25000, stageId: 'DT31_2:P', movedTime: '2026-10-23T10:10:03+03:00' },
+            { id: 3, parentId2: 13, opportunity: 9000, stageId: 'DT31_2:N', movedTime: '2026-10-23T11:00:00+03:00' },
+          ],
+    );
+    const client = { listAll: call } as unknown as Bitrix24RestClient;
+    const svc = new DealPaymentsService(prisma, {} as DealFieldMapService);
+    const paid = await svc.paidIn('p1', client, start, end);
+    expect([...paid.entries()]).toEqual([
+      [12, { at: new Date('2026-10-23T07:10:03Z'), amount: 25000 }],
+      [11, { at: new Date('2026-10-23T08:00:00Z'), amount: 5000 }],
+    ]);
+  });
 });

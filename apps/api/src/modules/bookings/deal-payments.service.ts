@@ -81,14 +81,55 @@ export class DealPaymentsService {
     return { payments };
   }
 
-  /** Сделки с поступившей за `[start, end)` оплатой: когда (последняя) и сколько всего за период. */
-  async paidIn(portalId: string, start: Date, end: Date): Promise<Map<number, { at: Date; amount: number }>> {
-    const rows = await this.prisma.dealPayment.findMany({ where: { portalId, at: { gte: start, lt: end } }, orderBy: { at: 'asc' } });
+  /**
+   * Сделки с поступившей за `[start, end)` оплатой: когда (последняя) и сколько всего за период.
+   * Главный источник — смарт-счета, переведённые в «Оплачен» за период (`movedTime` — точное время,
+   * и история есть за любой период, а не с первого прохода `scan`). Учёт `DealPayment` (рост «Суммы
+   * внесённых оплат») — только для сделок без оплаченных счетов: у оплаченной счётом сделки поле
+   * меняется позже (изменение сделки на другой день — не оплата этого дня).
+   */
+  async paidIn(portalId: string, client: Bitrix24RestClient, start: Date, end: Date): Promise<Map<number, { at: Date; amount: number }>> {
     const out = new Map<number, { at: Date; amount: number }>();
-    for (const r of rows) out.set(r.dealId, { at: r.at, amount: (out.get(r.dealId)?.amount ?? 0) + Number(r.amount) });
+    const add = (dealId: number, at: Date, amount: number) => {
+      const prev = out.get(dealId);
+      out.set(dealId, { at: prev && prev.at > at ? prev.at : at, amount: (prev?.amount ?? 0) + amount });
+    };
+    const invoices = await client.listAll<Invoice>(
+      'crm.item.list',
+      { entityTypeId: 31, filter: { '>=movedTime': start.toISOString(), '<movedTime': end.toISOString() }, select: ['id', 'parentId2', 'opportunity', 'stageId', 'movedTime'] },
+      { max: MAX_INVOICES, pick: items },
+    );
+    for (const i of invoices) {
+      const dealId = Number(i.parentId2) || 0;
+      const t = Date.parse(String(i.movedTime ?? ''));
+      if (dealId > 0 && invoicePaid(i.stageId) && Number.isFinite(t)) add(dealId, new Date(t), Number(i.opportunity) || 0);
+    }
+    const rows = await this.prisma.dealPayment.findMany({ where: { portalId, at: { gte: start, lt: end } }, orderBy: { at: 'asc' } });
+    const manual = [...new Set(rows.map((r) => r.dealId))].filter((id) => !out.has(id));
+    if (!manual.length) return out;
+    // Есть ли у этих сделок оплаченные счета вообще (за любое время) — тогда поле не в счёт.
+    const withInvoices = new Set(
+      (
+        await client.listAll<Invoice>(
+          'crm.item.list',
+          { entityTypeId: 31, filter: { '@parentId2': manual }, select: ['id', 'parentId2', 'stageId'] },
+          { max: MAX_INVOICES, pick: items },
+        )
+      )
+        .filter((i) => invoicePaid(i.stageId))
+        .map((i) => Number(i.parentId2)),
+    );
+    const counted = new Set(manual.filter((id) => !withInvoices.has(id)));
+    for (const r of rows) if (counted.has(r.dealId)) add(r.dealId, r.at, Number(r.amount));
     return out;
   }
 }
+
+type Invoice = { id: number; parentId2?: number | null; opportunity?: number | null; stageId?: string | null; movedTime?: string | null };
+const MAX_INVOICES = 5000;
+const items = (r: unknown) => ((r as { items?: Invoice[] } | null)?.items ?? []);
+/** Стадия счёта «Оплачен» (`DT31_<воронка>:P`) — как `invoicePaid` в payments (без цикла импортов). */
+const invoicePaid = (stageId: unknown) => String(stageId ?? '').endsWith(':P');
 
 /** Время оплаты — изменение сделки (не позже «сейчас»). */
 function at(r: Row, now: Date): Date {

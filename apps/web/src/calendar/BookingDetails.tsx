@@ -30,7 +30,7 @@ export function BookingDetails({
   onChanged: () => void;
   /** Бронь снята — календарь закрывает карточку, показывает итог и перечитывает день. */
   onCancelled: (r: CancelBookingResultDto) => void;
-  /** Право `booking.create` в группе — «Создать бронирование заново» для брони, удалённой в Битрикс24. */
+  /** Право `booking.create` в группе — «Оставить бронь» (создать заново) для брони, удалённой в Битрикс24. */
   canCreate?: boolean;
   /** Решение по брони, удалённой в Битрикс24, принято — итог словами. */
   onResolved?: (note: string) => void;
@@ -101,18 +101,18 @@ export function BookingDetails({
     }
   };
 
-  // Бронь удалена в Битрикс24: создать заново по данным приложения или подтвердить удаление.
+  // Бронь удалена в Битрикс24: оставить (создать заново по данным приложения) или удалить из приложения.
   const decide = async (what: 'recreate' | 'remove-in-app') => {
     const text =
       what === 'recreate'
-        ? 'Создать бронирование в Битрикс24 заново по данным приложения? У брони будет новый номер.'
-        : 'Подтвердить удаление? Бронь будет удалена в приложении (в истории останется запись).';
+        ? 'Оставить бронь? Она будет создана в Битрикс24 заново на то же время и ресурс, у брони будет новый номер.'
+        : 'Удалить бронь из приложения? В истории останется запись об удалении.';
     if (!confirm(text)) return;
     setBusy(true);
     setError('');
     try {
       await apiPost(`/bookings/${booking.id}/${what}`, {});
-      onResolved?.(what === 'recreate' ? `Бронь #${booking.id} создана в Битрикс24 заново.` : `Бронь #${booking.id} удалена в приложении.`);
+      onResolved?.(what === 'recreate' ? `Бронь #${booking.id} оставлена — создана в Битрикс24 заново.` : `Бронь #${booking.id} удалена из приложения.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось выполнить действие');
       setBusy(false);
@@ -134,16 +134,18 @@ export function BookingDetails({
         </header>
         {booking.missing && (
           <div className="missing-decision" role="alert">
-            <b>Бронь была удалена в Битрикс24</b>
+            <b>Бронь удалена в Битрикс24 — нужно решение</b>
             <span className="muted">
-              В приложении она остаётся, пока вы не решите, что с ней делать. Слот в Битрикс24 сейчас свободен.
+              В приложении она остаётся, пока вы не решите, что с ней делать. Слот в Битрикс24 сейчас свободен. «Оставить» — бронь снова
+              создаётся в Битрикс24 на это же время и ресурс (со связью со сделкой); «Удалить из приложения» — бронь уходит в историю как
+              удалённая.
             </span>
             <div className="form-actions">
               <button className="primary" disabled={busy || !canCreate} onClick={() => void decide('recreate')}>
-                Создать бронирование заново
+                Оставить бронь
               </button>
               <button className="danger-outline" disabled={busy || !canCancel} onClick={() => void decide('remove-in-app')}>
-                Подтвердить удаление
+                Удалить из приложения
               </button>
             </div>
             {error && <p className="notice error">{error}</p>}

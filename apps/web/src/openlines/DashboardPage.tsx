@@ -20,12 +20,14 @@ import { fmtAt, fmtDateTime, fmtMoney, fmtTime, fmtWhen } from '../format.js';
 import { Avatar } from './Avatar.js';
 import { avatarTone, dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
+import { ThemeToggle } from '../theme/ThemeToggle.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
 import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
 import { DashBadge, RecentCalls } from './RecentCalls.js';
 import { Icon } from './icons.js';
+import { ListMore } from './ListMore.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
@@ -35,14 +37,14 @@ const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, st
 };
 
 /** «сегодня» / «вчера» / «за период» — подпись плиток по выбранному периоду. */
-/** «Требуют внимания»: сколько чатов показывать сразу и сколько добавляет «Ещё». */
+/** «Требуют внимания»: сколько чатов показывать сразу и сколько добавляет «Показать ещё». */
 const ATTENTION_STEP = 5;
 const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p === 'yesterday' ? 'вчера' : 'за период');
 
 /**
  * Дашборд менеджера: в одном ряду — плитки (чаты ждут ответа, брони, звонки, новые сделки, повторные
  * клиенты); ниже две колонки блоков: сообщения клиентов без ответа и звонки периода | сделки за сегодня
- * и брони сегодня (по 5, «Ещё»); дальше — новые и удалённые брони. У каждого блока — иконка.
+ * и брони сегодня (по 5, «Показать ещё»); дальше — новые и удалённые брони. У каждого блока — иконка.
  */
 export function DashboardPage({
   session,
@@ -53,6 +55,7 @@ export function DashboardPage({
   onAlerts,
   onSettings,
   onTemplates,
+  onCertificates,
   onSession,
   onHead,
 }: {
@@ -67,6 +70,8 @@ export function DashboardPage({
   onSettings?: () => void;
   /** Шаблоны сообщений: свои, общие и автоматические. */
   onTemplates?: () => void;
+  /** Сертификаты: список, выпуск, изменение срока, погашение. */
+  onCertificates?: () => void;
   onSession?: (s: SessionInfo) => void;
   /** Дашборд руководителя (руководителям и администраторам). */
   onHead?: () => void;
@@ -263,6 +268,7 @@ export function DashboardPage({
           </span>
         </div>
         <div className="toolbar-controls">
+          <ThemeToggle />
           <WorkdayButton timezone={tz} />
           {bookingAlerts && (
             <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} title="Уведомления о бронях">
@@ -278,6 +284,11 @@ export function DashboardPage({
           {onTemplates && (
             <button className="settings-button" onClick={onTemplates} title="Шаблоны сообщений: свои, общие и автоматические">
               <span aria-hidden="true">✉</span> Шаблоны
+            </button>
+          )}
+          {onCertificates && (
+            <button className="settings-button" onClick={onCertificates} title="Сертификаты: выпуск, изменение срока, погашение">
+              <span aria-hidden="true">🎟</span> Сертификаты
             </button>
           )}
           {onSettings && (
@@ -425,18 +436,12 @@ export function DashboardPage({
               );
             })}
           </ul>
-          {!!d?.chats &&
-            (attention.length > attentionShown ? (
-              <button className="dash-more" onClick={() => setAttentionShown((n) => n + ATTENTION_STEP)}>
-                Ещё {Math.min(ATTENTION_STEP, attention.length - attentionShown)}
-              </button>
-            ) : (
-              waiting > attention.length && (
-                <button className="dash-more" onClick={() => onChats({ waiting: true })}>
-                  Все ждущие ответа ({waiting})
-                </button>
-              )
-            ))}
+          {!!d?.chats && <ListMore total={attention.length} shown={attentionShown} step={ATTENTION_STEP} onShow={setAttentionShown} />}
+          {!!d?.chats && attentionShown >= attention.length && waiting > attention.length && (
+            <button className="list-more" onClick={() => onChats({ waiting: true })}>
+              Все ждущие ответа в чатах · {waiting}
+            </button>
+          )}
         </section>
       )}
         <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} />
@@ -641,16 +646,8 @@ function BookingMark({ state, certificate = false }: { state: DashboardNewDeal['
   return <span className="deal-mark none">без брони</span>;
 }
 
-/** «Ещё N» для списков дашборда: сразу — 5 строк, кнопка добавляет по 5. */
+/** Списки дашборда: сразу — 5 строк, «Показать ещё» добавляет по 5. */
 const LIST_STEP = 5;
-function MoreButton({ total, shown, onMore }: { total: number; shown: number; onMore: () => void }) {
-  if (total <= shown) return null;
-  return (
-    <button className="dash-more" onClick={onMore}>
-      Ещё {Math.min(LIST_STEP, total - shown)}
-    </button>
-  );
-}
 
 /** Бронь относительно «сейчас»: прошла (голубая), идёт (зелёная), ещё впереди (жёлтая). */
 function slotState(start: string, end: string, now = Date.now()): 'past' | 'now' | 'soon' {
@@ -706,14 +703,15 @@ function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string 
         })}
         {d?.bookingDays && !booked.length && <li className="muted dt-empty">Броней по сделкам на сегодня нет.</li>}
       </ul>
-      <MoreButton total={booked.length} shown={shown} onMore={() => setShown((n) => n + LIST_STEP)} />
+      <ListMore total={booked.length} shown={shown} step={LIST_STEP} onShow={setShown} />
     </section>
   );
 }
 
 /**
  * «Сделки за сегодня» (или за период): созданные сделки, по 5. В строке — сумма, сделка и клиент,
- * ресурс и время брони (цвет брони — как в «Бронях сегодня»); оплаченные — зелёные, с 🪙.
+ * ресурс и время брони (цвет брони — как в «Бронях сегодня»); оплаченные — зелёные, с 🪙. Вкладка
+ * «С оплатой» — только сделки с оплатой в периоде (счета «Оплачен» по времени перевода), справа — оплата.
  */
 function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null; tz: string; word: string; oneDay: boolean }) {
   const [shown, setShown] = useState(LIST_STEP);
@@ -746,6 +744,12 @@ function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null
           🪙 {paidWhen[0].toUpperCase() + paidWhen.slice(1)} · {d?.paidDeals === undefined ? '…' : (d.paidDeals?.total ?? '—')}
         </button>
       </div>
+      {paidMode && (
+        <p className="muted dt-hint">
+          Только сделки, по которым {word === 'за период' ? 'за период' : word} поступила оплата: счёт переведён в «Оплачен» или внесена сумма. Справа — когда и
+          сколько оплачено; дата брони — в строке.
+        </p>
+      )}
       {(!d || d.newDeals === undefined) && <p className="muted">Загрузка…</p>}
       {d?.newDeals === null && <p className="muted">Нет доступа к сделкам CRM.</p>}
       <ul className="dt-rows">
@@ -765,16 +769,18 @@ function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null
                 <span className="dt-main">
                   <b>{i.title}</b>
                   <span className="muted">
-                    {i.contact?.name || 'без контакта'} ·{' '}
-                    {i.payment
-                      ? `оплата ${fmtMoney(i.payment.amount, i.currency)} в ${fmtAt(i.payment.at, tz, oneDay)}`
-                      : fmtAt(i.createdAt, tz, oneDay)}
+                    {i.contact?.name || 'без контакта'} · {paidMode && i.slot ? `бронь ${slotText(i.slot.start, i.slot.end, tz)}` : fmtAt(i.createdAt, tz, oneDay)}
                     {i.source ? ` · ${i.source.name}` : ''}
                     {i.repeat ? ' · повторный' : ''}
                   </span>
                 </span>
                 <span className="dt-res">{i.slot?.resources.join(', ') ?? ''}</span>
-                {i.slot && state ? (
+                {/* «С оплатой»: справа — когда и сколько оплачено (а не время брони). */}
+                {paidMode && i.payment ? (
+                  <span className="dt-time slot-chip paid" title={`Оплата ${fmtMoney(i.payment.amount, i.currency)}`}>
+                    🪙 {fmtMoney(i.payment.amount, i.currency)} · {fmtAt(i.payment.at, tz, oneDay)}
+                  </span>
+                ) : i.slot && state ? (
                   <span className={`dt-time slot-chip ${state}`} title={`Бронь ${SLOT_LABEL[state]}`}>
                     {slotText(i.slot.start, i.slot.end, tz)}
                   </span>
@@ -787,9 +793,9 @@ function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null
             </li>
           );
         })}
-        {d?.newDeals && !created.length && <li className="muted dt-empty">{paidMode ? 'Оплат за период нет.' : 'Новых сделок нет.'}</li>}
+        {d?.newDeals && !created.length && <li className="muted dt-empty">{paidMode ? `Оплат ${word === 'за период' ? 'за период' : word} нет.` : 'Новых сделок нет.'}</li>}
       </ul>
-      <MoreButton total={created.length} shown={shown} onMore={() => setShown((n) => n + LIST_STEP)} />
+      <ListMore total={created.length} shown={shown} step={LIST_STEP} onShow={setShown} />
     </section>
   );
 }

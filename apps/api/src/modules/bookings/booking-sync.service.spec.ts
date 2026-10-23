@@ -119,23 +119,26 @@ describe('BookingSyncService', () => {
     expect(t.alerts.raise).not.toHaveBeenCalled();
   });
 
-  it('missing: app booking → discrepancy «missing»; Bitrix booking → cancelled; moved out of horizon → compared', async () => {
+  it('missing: app booking and Bitrix booking with a deal → discrepancy «missing» (decision); Bitrix without deal → cancelled; moved → compared', async () => {
     const t = setup({
       bookings: [],
       records: [
         record({ bookingId: 5 }),
-        record({ bookingId: 6, source: 'bitrix' }),
+        record({ bookingId: 6, source: 'bitrix', dealId: null }),
         record({ bookingId: 7 }),
+        record({ bookingId: 9, source: 'bitrix' }),
       ],
       get: { 7: booking(7, '2026-10-23T11:00:00Z', '2026-10-23T13:00:00Z', [10]) },
       links: { 7: 678 },
       baseline: true,
     });
     const r = await t.svc.reconcile(portal, t.client, now);
-    expect(t.alerts.raise).toHaveBeenCalledTimes(1);
+    expect(t.alerts.raise).toHaveBeenCalledTimes(2);
     expect(t.alerts.raise).toHaveBeenCalledWith('p1', expect.objectContaining({ bookingId: 5, problems: ['missing'], actual: null }));
+    expect(t.alerts.raise).toHaveBeenCalledWith('p1', expect.objectContaining({ bookingId: 9, problems: ['missing'], actual: null }));
+    expect(t.journal.recordCancelled).toHaveBeenCalledTimes(1);
     expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 6, expect.objectContaining({ reason: 'removed_in_bitrix' }));
-    expect(r.bookings).toMatchObject({ removed: 1, alerts: 1 });
+    expect(r.bookings).toMatchObject({ removed: 1, alerts: 2 });
   });
 
   it('same discrepancy again (alert exists) → no second note', async () => {
@@ -158,10 +161,10 @@ describe('BookingSyncService — прошедшие брони (31 день на
     expect(t.alerts.raise).not.toHaveBeenCalled();
   });
 
-  it('известная прошедшая бронь из Битрикс24, которую там удалили, отмечается удалённой', async () => {
+  it('известная прошедшая служебная бронь из Битрикс24, которую там удалили, отмечается удалённой', async () => {
     const t = setup({
       bookings: [],
-      records: [record({ bookingId: 8, source: 'bitrix', startsAt: new Date('2026-10-12T10:00:00Z'), endsAt: new Date('2026-10-12T12:00:00Z') })],
+      records: [record({ bookingId: 8, source: 'bitrix', dealId: null, startsAt: new Date('2026-10-12T10:00:00Z'), endsAt: new Date('2026-10-12T12:00:00Z') })],
       baseline: true,
     });
     const r = await t.svc.reconcile(portal, t.client, now);

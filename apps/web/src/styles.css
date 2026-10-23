@@ -12,6 +12,15 @@
   --primary2: #5856d6;
   --danger: #b91c1c;
   --ok: #15803d;
+  --hover: #f5f7fb;
+  --surface-2: #f8fafc;
+  --info-bg: #eef4ff;
+  --info-text: #1d4ed8;
+  --ok-bg: #dcfae6;
+  --ok-text: #067647;
+  --warn-bg: #fffaeb;
+  --warn-text: #93370d;
+  --neutral-bg: #f2f4f7;
   --radius: 16px;
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
@@ -5356,20 +5365,42 @@ input[role='switch']:checked::after {
   font-weight: 600;
   text-align: center;
 }
+/* Низ списка блока: «Показать ещё · 5 из 12» / «Свернуть» — строка во всю ширину, как строки списка. */
+.list-more,
 .dash-more {
-  display: block;
-  min-width: 180px;
-  min-height: 38px;
-  margin: 12px auto 2px;
-  padding: 0 20px;
-  border: 1px solid #c7d7fe;
-  border-radius: 999px;
-  background: #eef4ff;
-  color: #1d4ed8;
-  font-weight: 650;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 40px;
+  margin: 4px 0 -4px;
+  padding: 0 12px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+  background: none;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
 }
-.dash-more:hover {
-  background: #e0eaff;
+.list-more:hover,
+.dash-more:hover:not(:disabled) {
+  background: var(--hover);
+}
+.list-more .icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.list-more-count {
+  color: var(--muted);
+  font-weight: 500;
+}
+.list-more + .list-more {
+  margin-top: 0;
 }
 .dash-calendar-btn {
   display: grid;
@@ -6071,7 +6102,7 @@ button.cv-contact-name.link:hover {
 
 /* «Последние сообщения клиентов без ответа»: канал → аватарка → имя; справа время и три кнопки. */
 .attention-row {
-  grid-template-columns: minmax(170px, 280px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(200px, 300px) minmax(0, 1fr) auto;
 }
 .attention-title .avatar {
   box-shadow: none;
@@ -6083,8 +6114,10 @@ button.cv-contact-name.link:hover {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* Канал — колонкой одной ширины: аватарки и имена начинаются в одной точке у всех строк. */
 .attention-title .cl-channel {
   flex: none;
+  width: 92px;
 }
 .attention-actions {
   display: flex;
@@ -6163,6 +6196,12 @@ button.cv-contact-name.link:hover {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.dt-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
 .slot-chip {
   padding: 2px 8px;
   border-radius: 999px;
@@ -6179,6 +6218,10 @@ button.cv-contact-name.link:hover {
 .slot-chip.soon {
   background: #fef0c7;
   color: #93370d;
+}
+.slot-chip.paid {
+  background: #dcfae6;
+  color: #067647;
 }
 /* Строка брони — цветом её состояния (прошла / идёт / впереди). */
 .dt-row.slot-past {
@@ -6350,4 +6393,188 @@ button.cv-contact-name.link:hover {
 }
 .dt-switch button {
   font-size: 12.5px;
+}
+
+/* ---------- Сертификаты ---------- */
+.cert-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.cert-filters .segmented {
+  flex-wrap: wrap;
+}
+.cert-count {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.cert-search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.cert-panel {
+  padding: 6px 8px;
+}
+.cert-table {
+  display: grid;
+}
+.cert-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 120px) minmax(0, 1fr) minmax(90px, 120px) 100px 110px 130px;
+  align-items: center;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 10px 8px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-weight: 400;
+}
+.cert-row.cert-head {
+  border-top: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+button.cert-row:hover {
+  background: var(--hover);
+}
+.cert-row.overdue {
+  background: var(--warn-bg);
+}
+.cert-number {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cert-holder {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cert-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cert-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.cert-status.new {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+.cert-status.used {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+.cert-status.expired {
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+.cert-status.overdue {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.cert-sheet {
+  max-width: 600px;
+}
+.cert-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin: 8px 0;
+}
+.cert-form .wide {
+  grid-column: 1 / -1;
+}
+.cert-form label,
+.cert-action label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.cert-form input,
+.cert-action input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+}
+.cert-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: -4px;
+}
+.cert-presets button {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.cert-presets button.active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.cert-action {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.cert-action .form-actions {
+  margin: 0;
+}
+.cert-history-title {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+.cert-history {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cert-history li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--line);
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .cert-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .cert-row > :nth-child(4),
+  .cert-row.cert-head {
+    display: none;
+  }
+  .cert-row > :nth-child(5) {
+    grid-column: 2;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  .cert-form {
+    grid-template-columns: 1fr;
+  }
 }

@@ -9,6 +9,7 @@ import { Bitrix24Module } from './modules/bitrix24/bitrix24.module.js';
 import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
+import { CertificatesModule } from './modules/certificates/certificates.module.js';
 import { GroupsModule } from './modules/groups/groups.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { OpenlinesModule } from './modules/openlines/openlines.module.js';
@@ -26,6 +27,7 @@ import { WorkdayModule } from './modules/workday/workday.module.js';
     BookingsModule,
     PaymentsModule,
     CalendarModule,
+    CertificatesModule,
     GroupsModule,
     HealthModule,
     OpenlinesModule,
