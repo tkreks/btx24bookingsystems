@@ -1831,57 +1831,101 @@ main.loading {
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
 }
 
-.alert-card.discrepancy {
-  border-left-color: #e5484d;
-}
-
 .alert-card.focused {
   box-shadow: 0 0 0 3px #a7c0ff;
 }
-
-.alert-head {
+.alert-card.done {
+  opacity: 0.75;
+}
+/* Тип уведомления: удаление — красным, изменение — оранжевым, новая бронь — синим. */
+.alert-card.type-removal { border-left-color: #dc2626; }
+.alert-card.type-change { border-left-color: #f79009; }
+.alert-card.type-not_cancelled { border-left-color: #7a5af8; }
+.alert-top {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 6px 10px;
 }
-
-.alert-head .muted {
-  margin-left: auto;
-  font-size: 13px;
+.alert-when {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
-
-.pill.alert-kind.new_booking {
-  color: #205add;
-  background: #eaf1ff;
+.pill.alert-type.new_booking { color: #205add; background: #eaf1ff; }
+.pill.alert-type.change { color: #b54708; background: #fffaeb; }
+.pill.alert-type.removal { color: #fff; background: #dc2626; }
+.pill.alert-type.not_cancelled { color: #5925dc; background: #f4f3ff; }
+.pill.alert-state { margin-left: auto; }
+.pill.alert-state.resolved { color: #067647; background: #ecfdf3; }
+.alert-name {
+  font-size: 16px;
 }
-
-.pill.alert-kind.discrepancy {
-  color: #c2272d;
-  background: #ffe6e8;
-}
-
-.alert-problems {
-  margin: 0;
-  font-weight: 600;
-  color: #c2272d;
-}
-
-.alert-states {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
-  margin: 0;
+.alert-booking {
   font-size: 14px;
 }
-
-.alert-states dt {
+.alert-note {
+  margin: 0;
+  font-size: 14px;
   color: var(--muted);
 }
-
-.alert-states dd {
-  margin: 0;
+.alert-note.removal {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.alert-diff-toggle {
+  justify-self: start;
+  padding: 0;
+  color: #b54708;
+}
+.alert-diff {
+  border-collapse: collapse;
+  font-size: 13.5px;
+  width: 100%;
+  max-width: 640px;
+}
+.alert-diff th,
+.alert-diff td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
   overflow-wrap: anywhere;
+}
+.alert-diff thead th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.alert-diff tr.changed td {
+  background: #fffaeb;
+  color: #93370d;
+  font-weight: 600;
+}
+button.warn-outline {
+  border-color: rgba(247, 144, 9, 0.55);
+  color: #b54708;
+}
+.alert-versions ol {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.alert-versions li {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 13.5px;
+}
+.alert-versions li.current {
+  border-color: #a6e9c3;
+  background: #f6fef9;
+}
+.alert-versions .pill {
+  margin-left: 6px;
 }
 
 .alert-status,
@@ -1907,9 +1951,6 @@ main.loading {
 .status-chip.viewed.active { background: #6b7a90; }
 .status-chip.resolved.active { background: #169a68; }
 .status-chip.ignored.active { background: #9aa3b2; }
-/* Решения по брони, пропавшей в Битрикс24 (вместо «Решено»). */
-.status-chip.resolved:not(.active) { color: #169a68; border-color: rgba(22, 154, 104, 0.45); }
-.status-chip.danger { color: #c2272d; background: var(--surface); border-color: rgba(194, 39, 45, 0.4); }
 
 .alert-actions button.danger {
   color: #c2272d;
@@ -1926,11 +1967,8 @@ main.loading {
 }
 
 @media (max-width: 560px) {
-  .alert-states {
-    grid-template-columns: 1fr;
-  }
-  .alert-states dd {
-    margin-bottom: 6px;
+  .alert-diff thead {
+    display: none;
   }
 }
 

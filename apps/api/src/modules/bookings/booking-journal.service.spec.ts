@@ -128,3 +128,30 @@ describe('BookingJournalService — bookings gone in Bitrix24', () => {
     expect(alertWhere[0]).not.toHaveProperty('status');
   });
 });
+
+describe('BookingJournalService — versions', () => {
+  it('snapshots «after» from history, newest first, repeated states collapsed, paged by 3', async () => {
+    const st = (h: number) => ({ startsAt: `2026-10-23T${String(h).padStart(2, '0')}:00:00.000Z`, endsAt: '2026-10-23T23:00:00.000Z', resourceIds: [14], dealId: 1 });
+    const rows = [
+      { id: 'h6', at: new Date('2026-10-23T12:00:00Z'), action: 'rolled_back', actorName: 'Анна', after: st(15) },
+      { id: 'h5', at: new Date('2026-10-23T11:00:00Z'), action: 'discrepancy_found', actorName: 'Система', after: null },
+      { id: 'h4', at: new Date('2026-10-23T10:00:00Z'), action: 'accepted_bitrix', actorName: 'Анна', after: st(17) },
+      { id: 'h3', at: new Date('2026-10-23T09:00:00Z'), action: 'accepted_bitrix', actorName: 'Анна', after: st(17) },
+      { id: 'h2', at: new Date('2026-10-23T08:00:00Z'), action: 'changed_in_bitrix', actorName: null, after: st(16) },
+      { id: 'h1', at: new Date('2026-10-23T07:00:00Z'), action: 'created', actorName: 'Анна', after: st(15) },
+    ];
+    const prisma = { bookingHistory: { findMany: vi.fn(async () => rows) } } as unknown as PrismaService;
+    const record = { id: 'r1', startsAt: new Date(st(15).startsAt), endsAt: new Date(st(15).endsAt), resourceIds: [14], dealId: 1 } as never;
+    const svc = new BookingJournalService(prisma);
+    const first = await svc.versions(record, 0, 3);
+    expect(first.items.map((v) => [v.id, v.current])).toEqual([
+      ['h6', true],
+      ['h4', false],
+      ['h2', false],
+    ]);
+    expect(first.hasMore).toBe(true);
+    const next = await svc.versions(record, 3, 3);
+    expect(next.items.map((v) => v.id)).toEqual(['h1']);
+    expect(next.hasMore).toBe(false);
+  });
+});

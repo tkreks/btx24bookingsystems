@@ -38,22 +38,25 @@ function setup(o: { exists?: boolean; overlap?: boolean; permissions?: string[];
     find: vi.fn(async () => ({ ...record, status: o.status ?? 'active' })),
     recordRecreated: vi.fn(async () => ({})),
     recordCancelled: vi.fn(async () => ({})),
+    recordChanged: vi.fn(async () => ({})),
+    version: vi.fn(async () => ({ startsAt: '2026-10-23T15:00:00.000Z', endsAt: '2026-10-23T19:00:00.000Z', resourceIds: [14], dealId: 18784 })),
   };
   const prisma = { paymentRequest: { updateMany: vi.fn(async () => ({ count: 1 })) } };
   const access = {
     resolve: vi.fn(async () => ({
       isAppAdmin: false,
-      groups: [{ group: { id: 'g1', resourceIds: [2, 14] }, permissions: o.permissions ?? ['booking.create', 'booking.cancel'] }],
+      groups: [{ group: { id: 'g1', resourceIds: [2, 14] }, permissions: o.permissions ?? ['booking.create', 'booking.cancel', 'booking.edit'] }],
     })),
   };
-  const fieldMap = { get: vi.fn(async () => ({ bookingId: 'UF_ID' })) };
+  const fieldMap = { get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S' })) };
   const svc = new BookingRestoreService(
     prisma as unknown as PrismaService,
     access as unknown as AccessService,
     journal as unknown as BookingJournalService,
     fieldMap as unknown as DealFieldMapService,
   );
-  const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call } } as unknown as B24UserContext;
+  const batch = vi.fn(async () => ({ result: { b5942: { externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '18784' }] } }, errors: {}, total: {}, next: {} }));
+  const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call, batch } } as unknown as B24UserContext;
   return { svc, user, calls, journal, prisma };
 }
 
@@ -69,7 +72,7 @@ describe('BookingRestoreService', () => {
       externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '18784' }],
     });
     expect(t.calls.find((c) => c[0] === 'booking.v1.booking.client.set')![1]).toMatchObject({ bookingId: 6001, clients: [{ id: 140 }] });
-    expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 18784, fields: { UF_ID: '6001' } });
+    expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 18784, fields: { UF_ID: '6001', UF_S: '2026-10-23T19:30:00+03:00' } });
     expect(t.journal.recordRecreated).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), 6001, { kind: 'user', userId: 7, name: 'Анна' });
     expect(t.prisma.paymentRequest.updateMany).toHaveBeenCalledWith({ where: { portalId: 'p1', bookingId: 5942 }, data: { bookingId: 6001 } });
   });
@@ -91,5 +94,29 @@ describe('BookingRestoreService', () => {
     await t.svc.removeInApp(t.user, 5942);
     expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 5942, { reason: 'removed_in_bitrix', actor: { kind: 'user', userId: 7, name: 'Анна' } });
     expect(t.calls.some((c) => c[0] === 'booking.v1.booking.delete')).toBe(false);
+  });
+
+  it('rollback: the booking in Bitrix24 returns to the chosen version, dates in the deal too', async () => {
+    const t = setup({ exists: true });
+    await t.svc.rollback(t.user, 5942, 'h1');
+    expect(t.journal.version).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), 'h1');
+    expect(t.calls.find((c) => c[0] === 'booking.v1.booking.update')![1]).toEqual({
+      id: 5942,
+      fields: { resourceIds: [14], datePeriod: { from: { timestamp: Date.parse('2026-10-23T15:00:00Z') / 1000, timezone: 'Europe/Moscow' }, to: { timestamp: Date.parse('2026-10-23T19:00:00Z') / 1000, timezone: 'Europe/Moscow' } } },
+    });
+    // Сделка та же — связь не трогаем.
+    expect(t.calls.some((c) => c[0].startsWith('booking.v1.booking.externalData'))).toBe(false);
+    expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 18784, fields: { UF_S: '2026-10-23T18:00:00+03:00' } });
+    expect(t.journal.recordChanged).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ startsAt: '2026-10-23T15:00:00.000Z' }), expect.anything(), 'rolled_back', 'app');
+  });
+
+  it('rollback of a booking deleted in Bitrix24 recreates it by the version', async () => {
+    const t = setup();
+    const w = await t.svc.rollback(t.user, 5942, 'h1');
+    expect(w).toEqual([]);
+    const add = t.calls.find((c) => c[0] === 'booking.v1.booking.add')![1] as { fields: { datePeriod: { from: { timestamp: number } } } };
+    expect(add.fields.datePeriod.from.timestamp).toBe(Date.parse('2026-10-23T15:00:00Z') / 1000);
+    expect(t.journal.recordRecreated).toHaveBeenCalled();
+    expect(t.journal.recordChanged).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), 'rolled_back', 'app');
   });
 });

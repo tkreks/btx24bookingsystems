@@ -6,7 +6,8 @@
 |---|---|---|
 | `GET /api/booking-alerts?status=` | `booking.details` | уведомления, счётчики по статусам, названия ресурсов |
 | `PUT /api/booking-alerts/:id` `{status}` | `booking.edit` | статус: `new`/`viewed` («В работе»)/`resolved`/`ignored` (+ кто и когда; сообщение в чате обновляется) |
-| `POST /api/booking-alerts/:id/resolve` `{resolution}` | `booking.edit` / `booking.cancel` / `booking.create` | `accept_bitrix` — принять как в Битрикс24 (бронь пропала — «Удалить бронирование в приложении»); `cancel_booking` — удалить в Битрикс24 и отменить; `recreate` — бронь пропала: «Создать бронирование в Битрикс24» по данным журнала |
+| `POST /api/booking-alerts/:id/resolve` `{resolution, versionId?}` | `booking.edit` / `booking.cancel` / `booking.create` (+ право в группе ресурса — в `BookingRestoreService`) | «Принять» `accept_bitrix` — данные Битрикс24 становятся данными приложения (удаление — отмена у нас; не снята — снова активна; новая — как есть); «Откатить» `rollback` — к версии `versionId` (изменение — `booking.v1.booking.update` + связь со сделкой + даты в сделке; удаление — создать заново по версии; новая/не снята — удалить в Битрикс24); `recreate`; `cancel_booking` |
+| `GET /api/bookings/:bookingId/versions?offset&limit` | `booking.details` | версии данных брони — снимки «после» из истории, новые сверху, по 3 (`hasMore`); прежний ID после «создать заново» тоже находит запись |
 | `POST /api/bookings/:bookingId/recreate`, `…/remove-in-app` | `booking.create` / `booking.cancel` в группе ресурса брони | те же решения из карточки брони в календаре (есть открытое уведомление — через него, статус «Решено») |
 | `GET /api/bookings/:bookingId/history` | `booking.details` | история брони (аудит) |
 | `POST /api/bookings` | `booking.create` в группе | создать бронь — сага `booking-create.service.ts` (журнал `BookingOperation`, ключ идемпотентности, компенсация) |

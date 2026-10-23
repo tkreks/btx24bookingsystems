@@ -229,10 +229,6 @@ export function CalendarPage({
         canCancel={session.canManageApp || permissions.has('booking.cancel')}
         canCreate={session.canManageApp || permissions.has('booking.create')}
         onBack={() => setScreen({ name: 'dashboard' })}
-        onOpenDay={(d) => {
-          setDate(d);
-          setScreen({ name: 'calendar' });
-        }}
       />
     );
 

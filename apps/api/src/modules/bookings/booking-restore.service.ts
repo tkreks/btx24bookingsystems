@@ -1,21 +1,25 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Permission, RecreateBookingResultDto } from '@btx24/shared';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { BookingVersionsDto, Permission, RecreateBookingResultDto } from '@btx24/shared';
 import type { BookingRecord } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService, type GroupAccess } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { getBooking } from './bitrix-bookings.js';
-import { BookingJournalService } from './booking-journal.service.js';
+import { dealLinks, getBooking } from './bitrix-bookings.js';
+import { dealDateFields } from './booking-create.service.js';
+import { BookingJournalService, stateOf, type BookingState } from './booking-journal.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 
 /** Код пересечения броней в Битрикс24. */
 const OVERLAP = '1018';
+const VERSIONS_MAX = 20;
 
 /**
- * Решение по брони приложения, которую удалили в Битрикс24 (до решения она видна в календаре):
- * - `recreate` — создать бронь в Битрикс24 заново по данным журнала (ресурсы, время, сделка, клиент);
+ * Решения по брони приложения, которая разошлась с Битрикс24 (до решения она видна в календаре):
+ * - `recreate` — пропала в Битрикс24: создать там заново по данным журнала или по выбранной версии;
  *   у брони новый ID — он переписывается в журнал, счета приложения и поле «ID бронирования» сделки;
+ * - `rollback` — изменили в Битрикс24: вернуть бронь к выбранной версии из истории (время, ресурсы,
+ *   сделка), даты в сделке — тоже;
  * - `removeInApp` — согласиться с удалением: бронь отменяется в журнале (статус и история остаются).
  * Права — в группе ресурса брони (ресурс состоит ровно в одной группе); токен сотрудника.
  */
@@ -28,22 +32,27 @@ export class BookingRestoreService {
     private readonly fieldMap: DealFieldMapService,
   ) {}
 
-  async recreate(user: B24UserContext, bookingId: number): Promise<RecreateBookingResultDto> {
+  /** Версии данных брони для «Откатить» и «Истории изменений» (по прежнему ID — тоже). */
+  async versions(user: B24UserContext, bookingId: number, offset: number, limit: number): Promise<BookingVersionsDto> {
+    const record = await this.journal.findAny(user.portal.id, bookingId);
+    if (!record) throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Бронь не найдена в журнале приложения' });
+    const { items, hasMore } = await this.journal.versions(record, Math.max(0, offset), Math.min(Math.max(1, limit), VERSIONS_MAX));
+    return { bookingId: record.bookingId, items, hasMore };
+  }
+
+  async recreate(user: B24UserContext, bookingId: number, versionId?: string): Promise<RecreateBookingResultDto> {
     const record = await this.missingRecord(user, bookingId, 'booking.create');
-    const resourceIds = (record.resourceIds as number[]).map(Number);
+    const state = versionId ? await this.versionOf(user, record, versionId) : stateOf(record);
     const warnings: string[] = [];
     const tz = user.portal.timezone;
     let newId: number;
     try {
       const res = await user.client.call<number | { id?: number }>('booking.v1.booking.add', {
         fields: {
-          resourceIds,
-          name: record.title || (record.dealId ? `Сделка #${record.dealId}` : 'Служебная: блокировка'),
+          resourceIds: state.resourceIds,
+          name: record.title || (state.dealId ? `Сделка #${state.dealId}` : 'Служебная: блокировка'),
           description: '',
-          datePeriod: {
-            from: { timestamp: Math.floor(record.startsAt.getTime() / 1000), timezone: tz },
-            to: { timestamp: Math.floor(record.endsAt.getTime() / 1000), timezone: tz },
-          },
+          datePeriod: period(state, tz),
         },
       });
       newId = typeof res.result === 'object' && res.result !== null ? Number(res.result.id) : Number(res.result);
@@ -53,37 +62,69 @@ export class BookingRestoreService {
       throw err;
     }
 
-    if (record.dealId) {
+    if (state.dealId) {
       try {
         await user.client.call('booking.v1.booking.externalData.set', {
           bookingId: newId,
-          externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(record.dealId) }],
+          externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(state.dealId) }],
         });
       } catch (err) {
         // Без связи со сделкой бронь «чужая» для приложения — откатываем, слот свободен.
         await user.client.call('booking.v1.booking.delete', { id: newId }).catch(() => undefined);
         throw err;
       }
-      const deal = (await user.client.call<{ CONTACT_ID?: string | null }>('crm.deal.get', { id: record.dealId }).catch(() => null))?.result;
+      const deal = (await user.client.call<{ CONTACT_ID?: string | null }>('crm.deal.get', { id: state.dealId }).catch(() => null))?.result;
       const contactId = Number(deal?.CONTACT_ID) || 0;
       if (contactId)
         await user.client
           .call('booking.v1.booking.client.set', { bookingId: newId, clients: [{ id: contactId, type: { module: 'crm', code: 'CONTACT' } }] })
           .catch(() => warnings.push('Клиент не привязан к брони в Битрикс24'));
       const map = await this.fieldMap.get(user.portal.id);
-      if (map.bookingId)
-        try {
-          await user.client.call('crm.deal.update', { id: record.dealId, fields: { [map.bookingId]: String(newId) } });
-        } catch (err) {
-          if (!(err instanceof Bitrix24Error) || err.code !== 'READ_ONLY_MODE') throw err;
-          warnings.push(`Поле «ID бронирования» сделки #${record.dealId} не обновлено: изменять существующие сделки не разрешено`);
-        }
+      await this.dealFields(user, state.dealId, { ...(map.bookingId ? { [map.bookingId]: String(newId) } : {}), ...dealDateFields(map, new Date(state.startsAt), new Date(state.endsAt), tz) }, warnings);
     }
 
-    await this.journal.recordRecreated(record, newId, { kind: 'user', userId: user.userId, name: user.userName });
+    const actor = { kind: 'user' as const, userId: user.userId, name: user.userName };
+    const recreated = await this.journal.recordRecreated(record, newId, actor);
+    // Создали по прежней версии — данные журнала следуют за ней.
+    if (versionId) await this.journal.recordChanged(recreated, state, actor, 'rolled_back', 'app');
     // Счета приложения по брони — на новый ID (оплата и снятие за неоплату находят бронь по нему).
     await this.prisma.paymentRequest.updateMany({ where: { portalId: user.portal.id, bookingId }, data: { bookingId: newId } });
     return { previousBookingId: bookingId, bookingId: newId, warnings };
+  }
+
+  /** «Откатить» изменение, сделанное в Битрикс24: бронь там возвращается к версии из истории. */
+  async rollback(user: B24UserContext, bookingId: number, versionId: string): Promise<string[]> {
+    const record = await this.journal.find(user.portal.id, bookingId);
+    if (!record || record.status !== 'active')
+      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Активной брони с таким номером в приложении нет — возможно, решение уже принято' });
+    const raw = await getBooking(user.client, bookingId);
+    if (!raw) return (await this.recreate(user, bookingId, versionId)).warnings;
+    await this.allowed(user, record, 'booking.edit');
+    const state = await this.versionOf(user, record, versionId);
+    const tz = user.portal.timezone;
+    const warnings: string[] = [];
+    try {
+      await user.client.call('booking.v1.booking.update', { id: bookingId, fields: { resourceIds: state.resourceIds, datePeriod: period(state, tz) } });
+    } catch (err) {
+      if (err instanceof Bitrix24Error)
+        throw new ConflictException({ code: 'ROLLBACK_FAILED', message: `Битрикс24 не принял прежнюю версию брони: ${err.message}` });
+      throw err;
+    }
+    const linked = (await dealLinks(user.client, [bookingId])).get(bookingId) ?? null;
+    if (linked !== state.dealId) {
+      if (state.dealId)
+        await user.client.call('booking.v1.booking.externalData.set', {
+          bookingId,
+          externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(state.dealId) }],
+        });
+      else await user.client.call('booking.v1.booking.externalData.unset', { bookingId });
+    }
+    if (state.dealId) {
+      const map = await this.fieldMap.get(user.portal.id);
+      await this.dealFields(user, state.dealId, dealDateFields(map, new Date(state.startsAt), new Date(state.endsAt), tz), warnings);
+    }
+    await this.journal.recordChanged(record, state, { kind: 'user', userId: user.userId, name: user.userName }, 'rolled_back', 'app');
+    return warnings;
   }
 
   /** Согласиться с удалением в Битрикс24: отменить бронь в приложении. */
@@ -100,16 +141,46 @@ export class BookingRestoreService {
     const record = await this.journal.find(user.portal.id, bookingId);
     if (!record || record.status !== 'active')
       throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Активной брони с таким номером в приложении нет — возможно, решение уже принято' });
-    const a = await this.access.resolve(user);
-    if (!a.isAppAdmin && !groupOf(a.groups, record, permission))
-      throw new ForbiddenException({ code: 'NO_BOOKING_ACCESS', message: 'Нет права на это действие в группе ресурса брони' });
+    await this.allowed(user, record, permission);
     if (await getBooking(user.client, bookingId))
       throw new ConflictException({ code: 'BOOKING_EXISTS', message: 'Бронь есть в Битрикс24 — решать по ней нечего' });
     return record;
   }
+
+  private async allowed(user: B24UserContext, record: BookingRecord, permission: Permission): Promise<void> {
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !groupOf(a.groups, (record.resourceIds as number[]).map(Number), permission))
+      throw new ForbiddenException({ code: 'NO_BOOKING_ACCESS', message: 'Нет права на это действие в группе ресурса брони' });
+  }
+
+  /** Выбранная версия; её ресурсы тоже должны быть в группе, где у сотрудника есть право. */
+  private async versionOf(user: B24UserContext, record: BookingRecord, versionId: string): Promise<BookingState> {
+    const state = await this.journal.version(record, versionId);
+    if (!state) throw new BadRequestException({ code: 'UNKNOWN_VERSION', message: 'Такой версии у брони нет' });
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !groupOf(a.groups, state.resourceIds, 'booking.edit'))
+      throw new ForbiddenException({ code: 'NO_BOOKING_ACCESS', message: 'Нет права менять брони ресурса этой версии' });
+    return state;
+  }
+
+  private async dealFields(user: B24UserContext, dealId: number, fields: Record<string, string>, warnings: string[]): Promise<void> {
+    if (!Object.keys(fields).length) return;
+    try {
+      await user.client.call('crm.deal.update', { id: dealId, fields });
+    } catch (err) {
+      if (!(err instanceof Bitrix24Error) || err.code !== 'READ_ONLY_MODE') throw err;
+      warnings.push(`Поля брони в сделке #${dealId} не обновлены: изменять существующие сделки не разрешено`);
+    }
+  }
 }
 
-function groupOf(groups: GroupAccess[], record: BookingRecord, permission: Permission): GroupAccess | null {
-  const ids = (record.resourceIds as number[]).map(Number);
-  return groups.find((g) => g.permissions.includes(permission) && ids.some((id) => g.group.resourceIds.includes(id))) ?? null;
+function period(s: BookingState, timezone: string) {
+  return {
+    from: { timestamp: Math.floor(Date.parse(s.startsAt) / 1000), timezone },
+    to: { timestamp: Math.floor(Date.parse(s.endsAt) / 1000), timezone },
+  };
+}
+
+function groupOf(groups: GroupAccess[], resourceIds: number[], permission: Permission): GroupAccess | null {
+  return groups.find((g) => g.permissions.includes(permission) && resourceIds.some((id) => g.group.resourceIds.includes(id))) ?? null;
 }

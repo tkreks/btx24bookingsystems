@@ -22,6 +22,21 @@ export const ALERT_PROBLEM_LABELS: Record<AlertProblem, string> = {
   not_cancelled: 'отменена в приложении, но осталась в Битрикс24',
 };
 
+/** Тип уведомления для показа: новая бронь, изменение (оранжевым), удаление (красным), не снята. */
+export type AlertType = 'new_booking' | 'change' | 'removal' | 'not_cancelled';
+export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
+  new_booking: 'Новое бронирование',
+  change: 'Изменение в Битрикс24',
+  removal: 'Удаление в Битрикс24',
+  not_cancelled: 'Не снята в Битрикс24',
+};
+export function alertType(a: { kind: AlertKind; problems: AlertProblem[] }): AlertType {
+  if (a.kind === 'new_booking') return 'new_booking';
+  if (a.problems.includes('missing')) return 'removal';
+  if (a.problems.includes('not_cancelled')) return 'not_cancelled';
+  return 'change';
+}
+
 /** Состояние брони для сравнения «как в приложении» / «как в Битрикс24». */
 export interface BookingStateDto {
   startsAt: string;
@@ -33,6 +48,8 @@ export interface BookingStateDto {
 export interface BookingAlertDto {
   id: string;
   kind: AlertKind;
+  /** Название брони (сделка или бронь в Битрикс24). */
+  title: string | null;
   problems: AlertProblem[];
   bookingId: number;
   dealId: number | null;
@@ -62,10 +79,34 @@ export interface SetAlertStatusDto {
 }
 
 /**
- * `POST /api/booking-alerts/:id/resolve` — решение по расхождению. Для брони, пропавшей в Битрикс24:
- * `recreate` — создать её в Битрикс24 заново по данным приложения, `accept_bitrix` — удалить в приложении.
+ * `POST /api/booking-alerts/:id/resolve` `{ resolution, versionId? }` — решение по уведомлению:
+ * - `accept_bitrix` — «Принять»: данные Битрикс24 становятся данными приложения (бронь пропала —
+ *   удалить в приложении; не снята — снова активна; новая — принять как есть);
+ * - `rollback` — «Откатить» к версии `versionId` из истории: бронь в Битрикс24 возвращается к ней
+ *   (пропала — создаётся заново по ней); новая или не снятая — удаляется в Битрикс24;
+ * - `recreate` — пропавшую бронь создать заново по текущим данным приложения;
+ * - `cancel_booking` — удалить в Битрикс24 и отменить у нас.
  */
-export type AlertResolution = 'accept_bitrix' | 'cancel_booking' | 'recreate';
+export type AlertResolution = 'accept_bitrix' | 'cancel_booking' | 'recreate' | 'rollback';
+
+/** Версия данных брони из истории приложения (снимок после действия) — для «Откатить». */
+export interface BookingVersionDto {
+  /** ID записи истории: по нему откат. */
+  id: string;
+  at: string;
+  action: string;
+  actorName: string | null;
+  state: BookingStateDto;
+  /** Совпадает с текущими данными приложения. */
+  current: boolean;
+}
+
+/** `GET /api/bookings/:bookingId/versions?offset&limit` — новые сверху, по 3. */
+export interface BookingVersionsDto {
+  bookingId: number;
+  items: BookingVersionDto[];
+  hasMore: boolean;
+}
 
 /** `POST /api/bookings/:bookingId/recreate` — бронь создана в Битрикс24 заново (новый ID). */
 export interface RecreateBookingResultDto {

@@ -4,6 +4,7 @@ import {
   type AlertProblem,
   type AlertResolution,
   type AlertStatus,
+  alertType,
   type BookingAlertDto,
   type BookingAlertListDto,
   type BookingStateDto,
@@ -85,8 +86,17 @@ export class BookingAlertsService {
     ]);
     const counts = Object.fromEntries(ALERT_STATUSES.map((s) => [s, 0])) as Record<AlertStatus, number>;
     for (const g of grouped) counts[g.status] = g._count;
+    // Название брони — из Битрикс24 (снимок в уведомлении), иначе из журнала приложения.
+    const titles = new Map(
+      (
+        await this.prisma.bookingRecord.findMany({
+          where: { portalId: portal.id, bookingId: { in: [...new Set(rows.map((r) => r.bookingId))] } },
+          select: { bookingId: true, title: true },
+        })
+      ).map((r) => [r.bookingId, r.title]),
+    );
     return {
-      items: rows.map(toDto),
+      items: rows.map((r) => toDto(r, titles.get(r.bookingId) ?? null)),
       counts,
       resources: Object.fromEntries(resources.map((r) => [String(r.resourceId), r.name])),
       chatConfigured: !!settings?.alertChatId,
@@ -136,38 +146,49 @@ export class BookingAlertsService {
    * После — статус «Решено».
    */
   async resolve(user: B24UserContext, id: string, body: unknown): Promise<BookingAlertDto> {
-    const resolution = (body as { resolution?: unknown } | null)?.resolution;
-    if (resolution !== 'accept_bitrix' && resolution !== 'cancel_booking' && resolution !== 'recreate')
-      throw new BadRequestException({ code: 'INVALID_RESOLUTION', message: 'resolution: accept_bitrix, cancel_booking или recreate' });
+    const b = (body ?? {}) as { resolution?: unknown; versionId?: unknown };
+    const resolution = b.resolution as AlertResolution;
+    if (!['accept_bitrix', 'cancel_booking', 'recreate', 'rollback'].includes(resolution))
+      throw new BadRequestException({ code: 'INVALID_RESOLUTION', message: 'resolution: accept_bitrix, rollback, recreate или cancel_booking' });
+    const versionId = typeof b.versionId === 'string' && b.versionId ? b.versionId : undefined;
     const alert = await this.get(user.portal.id, id);
     const dto = toDto(alert);
+    const type = alertType(dto);
     const actor = { kind: 'user' as const, userId: user.userId, name: user.userName };
     const record = await this.journal.find(user.portal.id, alert.bookingId);
-    if (resolution === 'recreate') {
-      if (!dto.problems.includes('missing'))
-        throw new BadRequestException({ code: 'CANNOT_RECREATE', message: 'Создать заново можно только бронь, которой нет в Битрикс24' });
+    const restore = () => {
       if (!this.restore) throw new Error('BookingRestoreService is not available');
-      await this.restore.recreate(user, alert.bookingId);
-    } else if (resolution === 'accept_bitrix') {
-      if (dto.problems.includes('not_cancelled'))
-        throw new BadRequestException({
-          code: 'CANNOT_ACCEPT',
-          message: 'Бронь отменена в приложении — её можно только снять в Битрикс24 («Отменить бронь»)',
-        });
-      if (record && record.status === 'active') {
-        // Пропала в Битрикс24 — «Удалить бронирование в приложении»: проверка, что её там правда нет,
-        // и право снимать брони в группе её ресурса.
-        if (!dto.actual && this.restore) await this.restore.removeInApp(user, alert.bookingId);
-        else if (dto.actual) await this.journal.recordChanged(record, dto.actual, actor, 'accepted_bitrix', 'app');
-        else await this.journal.recordCancelled(user.portal.id, alert.bookingId, { reason: 'removed_in_bitrix', actor });
-      }
-    } else {
+      return this.restore;
+    };
+    const deleteInBitrix = async () => {
       // Удаление в Битрикс24 — токеном сотрудника: действуют его права и режим «только чтение».
       if (dto.actual || alert.kind === 'new_booking') await user.client.call('booking.v1.booking.delete', { id: alert.bookingId });
-      if (record?.status === 'active')
-        await this.journal.recordCancelled(user.portal.id, alert.bookingId, { reason: 'manual', actor });
+      if (record?.status === 'active') await this.journal.recordCancelled(user.portal.id, alert.bookingId, { reason: 'manual', actor });
       else if (record) await this.journal.note(record, 'deleted_in_bitrix', actor, { alertId: id }, 'app');
-    }
+    };
+
+    if (resolution === 'recreate') {
+      if (type !== 'removal')
+        throw new BadRequestException({ code: 'CANNOT_RECREATE', message: 'Создать заново можно только бронь, которой нет в Битрикс24' });
+      await restore().recreate(user, alert.bookingId, versionId);
+    } else if (resolution === 'rollback') {
+      // «Откатить»: новая или не снятая бронь — её не было у нас, удаляем в Битрикс24; иначе — к версии.
+      if (type === 'new_booking' || type === 'not_cancelled') await deleteInBitrix();
+      else {
+        if (!versionId) throw new BadRequestException({ code: 'VERSION_REQUIRED', message: 'Выберите версию, к которой откатить бронь' });
+        if (type === 'removal') await restore().recreate(user, alert.bookingId, versionId);
+        else await restore().rollback(user, alert.bookingId, versionId);
+      }
+    } else if (resolution === 'accept_bitrix') {
+      // «Принять»: данные Битрикс24 становятся данными приложения.
+      if (type === 'removal') {
+        if (record?.status === 'active') await restore().removeInApp(user, alert.bookingId);
+      } else if (type === 'not_cancelled') {
+        if (record?.status === 'cancelled' && dto.actual) await this.journal.recordReactivated(record, dto.actual, actor);
+      } else if (type === 'change' && record?.status === 'active' && dto.actual)
+        await this.journal.recordChanged(record, dto.actual, actor, 'accepted_bitrix', 'app');
+      // Новая бронь уже в журнале (сверка записала её как есть) — принять значит согласиться.
+    } else await deleteInBitrix();
     return this.applyStatus(user, id, 'resolved');
   }
 
@@ -282,10 +303,11 @@ export class BookingAlertsService {
   }
 }
 
-export function toDto(a: BookingAlert): BookingAlertDto {
+export function toDto(a: BookingAlert, title: string | null = null): BookingAlertDto {
   return {
     id: a.id,
     kind: a.kind,
+    title: (a.actual as { title?: string | null } | null)?.title || title,
     problems: (a.problem ? a.problem.split(',') : []) as AlertProblem[],
     bookingId: a.bookingId,
     dealId: a.dealId,

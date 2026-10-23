@@ -27,6 +27,14 @@ export interface BookingState {
   dealId: number | null;
 }
 
+export interface BookingVersion {
+  id: string;
+  at: string;
+  action: string;
+  actorName: string | null;
+  state: BookingState;
+}
+
 export interface BookingCreatedInput {
   bookingId: number;
   kind: 'client' | 'service';
@@ -204,6 +212,67 @@ export class BookingJournalService {
     await this.history(record, action, actor, { details, via });
   }
 
+  /** Снятая у нас бронь жива в Битрикс24, сотрудник принял её: снова активна, данные — как в Битрикс24. */
+  async recordReactivated(record: BookingRecord, next: BookingState, actor: BookingActor): Promise<BookingRecord> {
+    const updated = await this.prisma.bookingRecord.update({
+      where: { id: record.id },
+      data: {
+        status: 'active',
+        cancelReason: null,
+        cancelledAt: null,
+        cancelledByUserId: null,
+        startsAt: new Date(next.startsAt),
+        endsAt: new Date(next.endsAt),
+        resourceIds: next.resourceIds,
+        dealId: next.dealId,
+        syncedAt: new Date(),
+      },
+    });
+    await this.history(updated, 'accepted_bitrix', actor, { before: stateOf(record), after: stateOf(updated), details: { reactivated: true }, via: 'app' });
+    return updated;
+  }
+
+  /**
+   * Запись по ID брони, в том числе прежнему: после «создать заново» у брони новый ID, а старые
+   * уведомления ссылаются на прежний (он — в истории `recreated_in_bitrix`).
+   */
+  async findAny(portalId: string, bookingId: number): Promise<BookingRecord | null> {
+    const direct = await this.find(portalId, bookingId);
+    if (direct) return direct;
+    const row = await this.prisma.bookingHistory.findFirst({
+      where: { action: 'recreated_in_bitrix', record: { portalId }, details: { path: '$.previousBookingId', equals: bookingId } },
+      orderBy: { at: 'desc' },
+      include: { record: true },
+    });
+    return row?.record ?? null;
+  }
+
+  /**
+   * Версии данных брони — снимки «после» из истории (создана, найдена, изменена, принята, откат,
+   * создана заново), новые сверху; подряд одинаковые — одна версия.
+   */
+  async versions(record: BookingRecord, offset: number, limit: number): Promise<{ items: (BookingVersion & { current: boolean })[]; hasMore: boolean }> {
+    const rows = await this.prisma.bookingHistory.findMany({ where: { recordId: record.id }, orderBy: { at: 'desc' } });
+    const key = (st: BookingState) => `${st.startsAt}|${st.endsAt}|${[...st.resourceIds].sort((a, b) => a - b).join('.')}|${st.dealId ?? ''}`;
+    const all: BookingVersion[] = [];
+    for (const r of rows) {
+      const st = r.after as BookingState | null;
+      if (!st?.startsAt) continue;
+      const v = { id: r.id, at: r.at.toISOString(), action: r.action, actorName: r.actorName, state: { ...st, resourceIds: st.resourceIds.map(Number) } };
+      if (all.length && key(all[all.length - 1].state) === key(v.state)) continue;
+      all.push(v);
+    }
+    const now = key(stateOf(record));
+    return { items: all.slice(offset, offset + limit).map((v) => ({ ...v, current: key(v.state) === now })), hasMore: all.length > offset + limit };
+  }
+
+  /** Версия по записи истории (для отката); чужая запись — null. */
+  async version(record: BookingRecord, historyId: string): Promise<BookingState | null> {
+    const row = await this.prisma.bookingHistory.findFirst({ where: { id: historyId, recordId: record.id } });
+    const st = row?.after as BookingState | null | undefined;
+    return st?.startsAt ? { ...st, resourceIds: st.resourceIds.map(Number) } : null;
+  }
+
   find(portalId: string, bookingId: number): Promise<BookingRecord | null> {
     return this.prisma.bookingRecord.findUnique({ where: { portalId_bookingId: { portalId, bookingId } } });
   }
@@ -342,6 +411,8 @@ const ACTION_TEXT: Record<string, string> = {
   discrepancy_found: 'не совпадает с Битрикс24 — уведомление',
   deleted_in_bitrix: 'удалена в Битрикс24 по решению сотрудника',
   recreated_in_bitrix: 'создана в Битрикс24 заново по данным приложения',
+  rolled_back: 'откат: в Битрикс24 возвращена прежняя версия',
+  accepted_bitrix: 'принята как в Битрикс24',
   paid: 'оплата получена',
   payment_cancelled: 'счёт переведён в «Не оплачен» в Битрикс24',
 };

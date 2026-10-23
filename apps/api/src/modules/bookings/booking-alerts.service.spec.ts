@@ -55,11 +55,14 @@ function setup(o: { alerts?: ReturnType<typeof alertRow>[]; chatId?: number | nu
     find: vi.fn(async () => (o.record === undefined ? { id: 'r1', status: 'active' } : o.record)),
     recordChanged: vi.fn(async () => ({})),
     recordCancelled: vi.fn(async () => ({})),
+    recordReactivated: vi.fn(async () => ({})),
     note: vi.fn(async () => undefined),
   };
   const userClient = { call: vi.fn(async () => ({ result: true })) };
   const user = { portal, userId: 7, userName: 'Анна', client: userClient } as unknown as B24UserContext;
-  const restore = o.restore ? { recreate: vi.fn(async () => ({ previousBookingId: 55, bookingId: 60, warnings: [] })), removeInApp: vi.fn(async () => undefined) } : undefined;
+  const restore = o.restore
+    ? { recreate: vi.fn(async () => ({ previousBookingId: 55, bookingId: 60, warnings: [] })), removeInApp: vi.fn(async () => undefined), rollback: vi.fn(async () => []) }
+    : undefined;
   return {
     svc: new BookingAlertsService(prisma, portals, journal as unknown as BookingJournalService, restore as unknown as BookingRestoreService),
     prisma,
@@ -89,7 +92,7 @@ describe('BookingAlertsService', () => {
     expect(await t.svc.deliverPending(portal, t.appClient)).toBe(1);
     expect(t.appClient.call).toHaveBeenCalledWith(
       'im.message.add',
-      expect.objectContaining({ DIALOG_ID: 'chat777', KEYBOARD: expect.arrayContaining([expect.objectContaining({ TEXT: 'Открыть сделку' })]) }),
+      expect.objectContaining({ DIALOG_ID: 'chat777', KEYBOARD: expect.arrayContaining([expect.objectContaining({ TEXT: 'Перейти в сделку' })]) }),
     );
     expect(t.rows[0]).toMatchObject({ chatId: 777, messageId: 9001, sendError: null });
   });
@@ -130,10 +133,7 @@ describe('BookingAlertsService', () => {
     expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 55, expect.objectContaining({ reason: 'manual' }));
   });
 
-  it('missing booking: accept → cancelled «removed in Bitrix24»; cancel does not call delete', async () => {
-    const t = setup({ alerts: [alertRow({ problem: 'missing', actual: null })] });
-    await t.svc.resolve(t.user, 'a1', { resolution: 'accept_bitrix' });
-    expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 55, expect.objectContaining({ reason: 'removed_in_bitrix' }));
+  it('missing booking: cancel does not call delete', async () => {
     const t2 = setup({ alerts: [alertRow({ problem: 'missing', actual: null })] });
     await t2.svc.resolve(t2.user, 'a1', { resolution: 'cancel_booking' });
     expect(t2.userClient.call).not.toHaveBeenCalled();
@@ -142,7 +142,7 @@ describe('BookingAlertsService', () => {
   it('missing booking: «create in Bitrix24» and «remove in the app» go through the restore service, then «resolved»', async () => {
     const t = setup({ alerts: [alertRow({ problem: 'missing', actual: null })], restore: true });
     const r = await t.svc.resolve(t.user, 'a1', { resolution: 'recreate' });
-    expect(t.restore!.recreate).toHaveBeenCalledWith(t.user, 55);
+    expect(t.restore!.recreate).toHaveBeenCalledWith(t.user, 55, undefined);
     expect(r.status).toBe('resolved');
     const t2 = setup({ alerts: [alertRow({ problem: 'missing', actual: null })], restore: true });
     await t2.svc.resolve(t2.user, 'a1', { resolution: 'accept_bitrix' });
@@ -157,5 +157,25 @@ describe('BookingAlertsService', () => {
     const t = setup({ alerts: [alertRow({ problem: 'missing', actual: null })] });
     await expect(t.svc.setStatus(t.user, 'a1', { status: 'resolved' })).rejects.toMatchObject({ response: { code: 'DECISION_REQUIRED' } });
     await expect(t.svc.setStatus(t.user, 'a1', { status: 'viewed' })).resolves.toMatchObject({ status: 'viewed' });
+  });
+
+  it('«Откатить»: изменение — к выбранной версии, удаление — создать по версии, новая бронь — удалить в Битрикс24', async () => {
+    const change = setup({ restore: true });
+    await expect(change.svc.resolve(change.user, 'a1', { resolution: 'rollback' })).rejects.toMatchObject({ response: { code: 'VERSION_REQUIRED' } });
+    await change.svc.resolve(change.user, 'a1', { resolution: 'rollback', versionId: 'h1' });
+    expect(change.restore!.rollback).toHaveBeenCalledWith(change.user, 55, 'h1');
+    const gone = setup({ alerts: [alertRow({ problem: 'missing', actual: null })], restore: true });
+    await gone.svc.resolve(gone.user, 'a1', { resolution: 'rollback', versionId: 'h2' });
+    expect(gone.restore!.recreate).toHaveBeenCalledWith(gone.user, 55, 'h2');
+    const fresh = setup({ alerts: [alertRow({ kind: 'new_booking', problem: null, expected: null })], restore: true });
+    await fresh.svc.resolve(fresh.user, 'a1', { resolution: 'rollback' });
+    expect(fresh.userClient.call).toHaveBeenCalledWith('booking.v1.booking.delete', { id: 55 });
+  });
+
+  it('«Принять» не снятую у нас бронь — она снова активна с данными Битрикс24', async () => {
+    const t = setup({ alerts: [alertRow({ problem: 'not_cancelled' })], record: { id: 'r1', status: 'cancelled' }, restore: true });
+    const r = await t.svc.resolve(t.user, 'a1', { resolution: 'accept_bitrix' });
+    expect(t.journal.recordReactivated).toHaveBeenCalledWith({ id: 'r1', status: 'cancelled' }, expect.objectContaining({ startsAt: '2026-10-23T12:00:00.000Z' }), expect.objectContaining({ userId: 7 }));
+    expect(r.status).toBe('resolved');
   });
 });

@@ -9,6 +9,7 @@ import {
   type CreateBookingDto,
   type BookingProductInput,
   type CreateBookingResultDto,
+  type DealFieldMapDto,
   type DealFormField,
   type GroupOptionsDto,
 } from '@btx24/shared';
@@ -364,15 +365,8 @@ export class BookingCreateService {
     const put = (code: string | undefined, v: unknown) => {
       if (code && v !== undefined && v !== null && v !== '') f[code] = v;
     };
-    const s = new Date(b.start);
-    const e = new Date(b.end);
     put(m.bookingId, String(bookingId));
-    put(m.bookingStart, zonedIso(s, tz));
-    put(m.bookingEnd, zonedIso(e, tz));
-    put(m.visitDateStart, dateRu(s, tz));
-    put(m.visitTimeStart, timeRu(s, tz));
-    put(m.visitDateEnd, dateRu(e, tz));
-    put(m.visitTimeEnd, timeRu(e, tz));
+    Object.assign(f, dealDateFields(m, new Date(b.start), new Date(b.end), tz));
     put(m.guests, b.guests);
     put(m.bookingType, typeValue);
     put(m.managerComment, b.comment);
@@ -381,6 +375,21 @@ export class BookingCreateService {
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Даты брони и визита в системных полях сделки (те, что настроены на портале). */
+export function dealDateFields(m: DealFieldMapDto, s: Date, e: Date, tz: string): Record<string, string> {
+  const f: Record<string, string> = {};
+  const put = (code: string | undefined, v: string) => {
+    if (code) f[code] = v;
+  };
+  put(m.bookingStart, zonedIso(s, tz));
+  put(m.bookingEnd, zonedIso(e, tz));
+  put(m.visitDateStart, dateRu(s, tz));
+  put(m.visitTimeStart, timeRu(s, tz));
+  put(m.visitDateEnd, dateRu(e, tz));
+  put(m.visitTimeEnd, timeRu(e, tz));
+  return f;
+}
 
 export function dateRu(d: Date, timeZone: string): string {
   return new Intl.DateTimeFormat('ru-RU', { timeZone, day: '2-digit', month: '2-digit', year: 'numeric' }).format(d);

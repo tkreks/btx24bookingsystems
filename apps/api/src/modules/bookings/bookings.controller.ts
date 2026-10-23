@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import type {
   BookingAlertDto,
+  BookingVersionsDto,
   BookingCatalogDto,
   CrmSearchDto,
   DealProductRowDto,
@@ -23,6 +24,7 @@ import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
+import { BookingRestoreService } from './booking-restore.service.js';
 import { BookingCancelService } from './booking-cancel.service.js';
 import { BookingDirectoryService } from './booking-directory.service.js';
 import { BookingCreateService } from './booking-create.service.js';
@@ -47,6 +49,7 @@ export class BookingsController {
     private readonly dealForm: DealFormService,
     private readonly canceller: BookingCancelService,
     private readonly directory: BookingDirectoryService,
+    private readonly restore: BookingRestoreService,
   ) {}
 
   /** Товары группы для формы брони (разделы каталога из настроек группы) и товары по умолчанию. */
@@ -90,7 +93,20 @@ export class BookingsController {
   async resolve(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<BookingAlertDto> {
     const resolution = (body as { resolution?: unknown } | null)?.resolution;
     await this.require(user, resolution === 'cancel_booking' ? 'booking.cancel' : resolution === 'recreate' ? 'booking.create' : 'booking.edit');
+    // Право в группе ресурса брони для «откатить», «создать заново», «удалить в приложении» — в сервисе.
     return this.alerts.resolve(user, id, body);
+  }
+
+  /** Версии данных брони (снимки из истории) — для «Откатить» и «Истории изменений», по 3. */
+  @Get('bookings/:bookingId/versions')
+  async versions(
+    @B24User() user: B24UserContext,
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+  ): Promise<BookingVersionsDto> {
+    await this.require(user, 'booking.details');
+    return this.restore.versions(user, bookingId, Number(offset) || 0, Number(limit) || 3);
   }
 
   /** Бронь приложения пропала в Битрикс24 — создать там заново по данным журнала (право в группе ресурса — в сервисе). */
