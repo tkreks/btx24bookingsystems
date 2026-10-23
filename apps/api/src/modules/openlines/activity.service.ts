@@ -39,7 +39,7 @@ export class ActivityService {
     if (!ids.length) return { date, timezone: tz, fromHour: FROM_HOUR, toHour: TO_HOUR, employees: [], unattributedPhone: 0, notes: ['В группах нет сотрудников.'] };
 
     const [shifts, calls, deals, chats, marks, bookings, actions] = await Promise.all([
-      this.shifts(user, ids, start.getTime(), end.getTime()).catch((e) => {
+      this.shifts(user, ids, start.getTime(), end.getTime(), notes).catch((e) => {
         notes.push(`Смены (учёт рабочего времени) недоступны: ${e instanceof Bitrix24Error ? e.code : 'ошибка'}`);
         return [] as Shift[];
       }),
@@ -146,8 +146,48 @@ export class ActivityService {
     return out;
   }
 
+  /**
+   * Рабочие дни, начатые в этот день, — история учёта времени (`timeman.record.list`, REST 3.0: по
+   * одному сотруднику за запрос). Несколько записей за день — от первого начала до последнего конца.
+   * REST 3.0 недоступен — как раньше, `timeman.status` (только последний день сотрудника).
+   */
+  private async shifts(user: B24UserContext, ids: number[], from: number, to: number, notes: string[] = []): Promise<Shift[]> {
+    type Rec = { startTime?: string | null; endTime?: string | null; state?: { status?: string | null } | null };
+    // REST 3.0 принимает дату со смещением и без миллисекунд («2026-10-14T21:00:00+00:00»).
+    const iso = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}+00:00`;
+    try {
+      const rows = await Promise.all(
+        ids.map(async (id) => {
+          const r = await user.client.callV3<{ items?: Rec[] }>('timeman.record.list', {
+            // Период — одним `between` (оба конца включительно): конец дня минус секунда.
+            filter: [
+              ['userId', id],
+              ['startTime', 'between', [iso(from), iso(to - 1000)]],
+            ],
+            select: ['id', 'startTime', 'endTime', 'state'],
+            order: { startTime: 'ASC' },
+            pagination: { page: 1, limit: 50 },
+          });
+          return { id, items: r?.items ?? [] };
+        }),
+      );
+      const out: Shift[] = [];
+      for (const { id, items } of rows) {
+        const starts = items.map((i) => Date.parse(String(i.startTime ?? ''))).filter(Number.isFinite);
+        if (!starts.length) continue;
+        const open = items.some((i) => !i.endTime || String(i.state?.status ?? '').toLowerCase() === 'opened');
+        const ends = items.map((i) => Date.parse(String(i.endTime ?? ''))).filter(Number.isFinite);
+        out.push({ userId: id, start: Math.min(...starts), end: open || !ends.length ? null : Math.max(...ends) });
+      }
+      return out;
+    } catch (e) {
+      notes.push(`История смен недоступна (${e instanceof Bitrix24Error ? e.code : 'ошибка'}) — видна только текущая смена.`);
+      return this.lastShifts(user, ids, from, to);
+    }
+  }
+
   /** Рабочий день (timeman.status — последний день сотрудника): учитываем, если он начался в этот день. */
-  private async shifts(user: B24UserContext, ids: number[], from: number, to: number): Promise<Shift[]> {
+  private async lastShifts(user: B24UserContext, ids: number[], from: number, to: number): Promise<Shift[]> {
     const res = await user.client.batch(Object.fromEntries(ids.map((id) => [`u${id}`, { method: 'timeman.status', params: { USER_ID: id } }])));
     const out: Shift[] = [];
     for (const id of ids) {

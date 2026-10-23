@@ -98,3 +98,8 @@
 `PortalService` пишет его в журнал действий (`bitrix.error`, от имени сотрудника или «Система»): перегрузка,
 сеть, сбой портала (`TRANSIENT_CODES`) и любые неудачные изменения; одинаковые за минуту — одной
 записью. Пользователю — 503 «Битрикс24 сейчас не ответил — действие не выполнено, повторите».
+
+**REST 3.0** (`client.callV3(method, params)`): `POST <endpoint>api/<method>`, JSON-тело, токен —
+в `auth`; ответ — `result` (`items` / `item`), ошибка — `{ error: { code, message, validation } }`
+(код `BITRIX_REST_V3_EXCEPTION_*`, подробности проверки — в тексте ошибки). Только чтение; повтор
+после `expired_token` и лимита — как у `call`. Используется для `timeman.record.list`.

@@ -166,3 +166,19 @@ describe('Bitrix24RestClient — окончательный сбой запро�
     expect(onFailure).not.toHaveBeenCalled();
   });
 });
+
+describe('Bitrix24RestClient.callV3 (REST 3.0)', () => {
+  it('posts JSON with auth to <endpoint>api/<method>, returns result; token refresh on expired_token', async () => {
+    const { client, calls } = setup([{ status: 401, body: { error: 'expired_token' } }, { body: { result: { items: [{ id: 1 }] } } }]);
+    expect(await client.callV3('timeman.record.list', { filter: [['userId', 7]] })).toEqual({ items: [{ id: 1 }] });
+    expect(calls[1]).toEqual({ url: 'https://portal.example/rest/api/timeman.record.list', body: { filter: [['userId', 7]], auth: 'tok-2' } });
+  });
+
+  it('REST 3.0 error object → Bitrix24Error with code and validation details; writes are refused', async () => {
+    const { client } = setup([
+      { status: 400, body: { error: { code: 'BITRIX_REST_V3_EXCEPTION_VALIDATION_REQUESTVALIDATIONEXCEPTION', message: 'Ошибка', validation: [{ field: 'filter', message: 'bad' }] } } },
+    ]);
+    await expect(client.callV3('timeman.record.list', {})).rejects.toMatchObject({ code: 'BITRIX_REST_V3_EXCEPTION_VALIDATION_REQUESTVALIDATIONEXCEPTION', message: 'Ошибка (filter: bad)' });
+    await expect(client.callV3('tasks.task.add', {})).rejects.toBeInstanceOf(Bitrix24Error);
+  });
+});

@@ -133,6 +133,45 @@ export class Bitrix24RestClient {
   }
 
   /**
+   * Метод REST 3.0 (`/rest/api/<method>`, JSON-тело, токен — в `auth`): ответ `{ result: { items | item } }`,
+   * ошибка — `{ error: { code, message } }`. Пока только чтение (история рабочего времени и т. п.).
+   */
+  async callV3<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
+    if (!isReadMethod(method)) throw new Bitrix24Error('READ_ONLY_MODE', `${method}: REST 3.0 is used for reads only`);
+    let token = await this.opts.access.getAccessToken();
+    let refreshed = false;
+    for (let attempt = 0; ; attempt++) {
+      await this.opts.limiter.acquire(this.opts.limiterKey);
+      const body = await this.post(`api/${method}`, { ...params, auth: token }, '');
+      const err = body.error as unknown;
+      if (!err) return body.result as T;
+      // Общие ошибки REST приходят строкой (`expired_token`), ошибки REST 3.0 — объектом.
+      const code = typeof err === 'object' && err !== null ? String((err as { code?: unknown }).code) : String(err);
+      const v3 = typeof err === 'object' && err !== null ? (err as { message?: unknown; validation?: { field?: string; message?: string }[] }) : null;
+      // Ошибка проверки запроса — с полями (что именно не так).
+      const details = v3?.validation?.map((x) => `${x.field ?? ''}: ${x.message ?? ''}`).join('; ');
+      const message = v3 ? `${String(v3.message ?? code)}${details ? ` (${details})` : ''}` : (body.error_description ?? code);
+      if (TOKEN_EXPIRED_CODES.has(code) && !refreshed) {
+        token = await this.opts.access.refresh(token);
+        refreshed = true;
+        continue;
+      }
+      if (RATE_LIMIT_CODES.has(code) && attempt < (this.opts.maxRateLimitRetries ?? 5)) {
+        await this.sleep((this.opts.retryDelayMs ?? 800) * (attempt + 1));
+        continue;
+      }
+      const e = new Bitrix24Error(code, message, body.httpStatus, { method });
+      try {
+        this.opts.onFailure?.({ method, code, message, write: false, actor: this.actor });
+      } catch {
+        /* журнал не должен ломать запрос */
+      }
+      throw e;
+    }
+  }
+
+  /**
    * Пакет команд. Больше 50 команд режется на части, но только если команды независимы:
    * ссылки `$result[...]` между частями не работают.
    */
@@ -225,10 +264,10 @@ export class Bitrix24RestClient {
     }
   }
 
-  private async post(method: string, payload: Record<string, unknown>) {
+  private async post(method: string, payload: Record<string, unknown>, suffix = '.json') {
     let res: Response;
     try {
-      res = await this.fetchImpl(`${this.opts.clientEndpoint.replace(/\/?$/, '/')}${method}.json`, {
+      res = await this.fetchImpl(`${this.opts.clientEndpoint.replace(/\/?$/, '/')}${method}${suffix}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),
@@ -239,6 +278,7 @@ export class Bitrix24RestClient {
     }
     const text = await res.text();
     let body: { result?: unknown; error?: string; error_description?: string; total?: number; next?: number };
+    // REST 3.0 отдаёт ошибку объектом { code, message } — тип шире, разбирает callV3.
     try {
       body = text ? JSON.parse(text) : {};
     } catch {
