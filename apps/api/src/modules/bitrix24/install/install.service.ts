@@ -38,8 +38,13 @@ export function normalizeInstallRequest(input: InstallRequest & InstallEvent): I
 
 /** События телефонии (scope `telephony`): карточка клиента сотруднику, ответившему на звонок. */
 export const TELEPHONY_EVENTS = ['ONVOXIMPLANTCALLINIT', 'ONVOXIMPLANTCALLSTART', 'ONVOXIMPLANTCALLEND'] as const;
+/** Брони и сделки (решение владельца 2026-10-24): сразу сверка / учёт оплат; сверка по расписанию — страховка. */
+export const BOOKING_EVENTS = ['ONBOOKINGADD', 'ONBOOKINGUPDATE', 'ONBOOKINGDELETE'] as const;
+export const DEAL_EVENTS = ['ONCRMDEALADD', 'ONCRMDEALUPDATE', 'ONCRMDEALDELETE'] as const;
+/** Подписки, которыми управляет ⚙ → «Встройки» (могут не встать без прав — установку не ломают). */
+export const OPTIONAL_EVENTS = [...TELEPHONY_EVENTS, ...BOOKING_EVENTS, ...DEAL_EVENTS] as const;
 /** События, на которые приложение подписывается при установке. */
-export const BOUND_EVENTS = ['ONAPPUNINSTALL', ...TELEPHONY_EVENTS] as const;
+export const BOUND_EVENTS = ['ONAPPUNINSTALL', ...OPTIONAL_EVENTS] as const;
 
 @Injectable()
 export class InstallService {
@@ -89,8 +94,8 @@ export class InstallService {
       } catch (err) {
         // Повторная установка: обработчик уже привязан — это нормально.
         if (err instanceof Bitrix24Error && /already|exist/i.test(err.message)) continue;
-        // Нет права «Телефония» — события звонков не нужны для установки (подключатся в ⚙ → «Встройки»).
-        if ((TELEPHONY_EVENTS as readonly string[]).includes(event)) {
+        // Нет права (например, «Телефония») — эти события не нужны для установки (подключатся в ⚙ → «Встройки»).
+        if ((OPTIONAL_EVENTS as readonly string[]).includes(event)) {
           this.logger.warn(`event ${event} not bound: ${err instanceof Error ? err.message : String(err)}`);
           continue;
         }

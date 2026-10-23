@@ -22,6 +22,7 @@ import { AutoMessagesService } from '../modules/payments/auto-messages.service.j
 import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
 import { MessageContextService } from '../modules/bookings/message-context.service.js';
 import { DealPaymentsService } from '../modules/bookings/deal-payments.service.js';
+import { EventSyncJob } from './event-sync.job.js';
 import { DealPaymentsJob } from './deal-payments.job.js';
 
 // Фоновые задачи (обновление кэша календаря, контроль оплат по таймауту, рассылки) живут здесь,
@@ -48,6 +49,7 @@ import { DealPaymentsJob } from './deal-payments.job.js';
     BookingTypeJob,
     DealPaymentsService,
     DealPaymentsJob,
+    EventSyncJob,
   ],
 })
 export class WorkerModule {}

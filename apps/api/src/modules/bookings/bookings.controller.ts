@@ -56,6 +56,12 @@ export class BookingsController {
     private readonly stops: ResourceStopsService,
   ) {}
 
+  /** Действующие и будущие стопы ресурсов моих групп (блок дашборда). */
+  @Get('resource-stops')
+  stopsUpcoming(@B24User() user: B24UserContext): Promise<(ResourceStopDto & { resourceName: string })[]> {
+    return this.stops.upcoming(user);
+  }
+
   /** Стоп ресурса: брони и стопы в периоде — перед установкой. */
   @Post('resource-stops/check')
   @HttpCode(200)

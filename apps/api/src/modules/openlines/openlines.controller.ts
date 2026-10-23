@@ -18,6 +18,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  DashboardLayoutDto,
+  NeedsCloseDto,
   ActivityDayDto,
   ChatChannelDto,
   ChatReplyStatusDto,
@@ -44,6 +46,7 @@ import { DashboardService } from './dashboard.service.js';
 import { FilesService, MAX_FILE_BYTES, type UploadedFile as Upload } from './files.service.js';
 import { TemplatesService } from './templates.service.js';
 import { HeadDashboardService } from './head-dashboard.service.js';
+import { DashboardLayoutService } from './dashboard-layout.service.js';
 
 /** Воронки групп пользователя (уникальные, в порядке групп). */
 function funnelsOf(a: UserAccess): number[] {
@@ -67,25 +70,27 @@ export class OpenlinesController {
     private readonly actions: ActionLogService,
     private readonly activity: ActivityService,
     private readonly head: HeadDashboardService,
+    private readonly layouts: DashboardLayoutService,
   ) {}
 
-  /** «Активность сотрудников» за день — дашборд руководителя (руководители и администраторы приложения). */
+  /** «Активность сотрудников» за день — блок дашборда только для администраторов приложения (решение владельца 2026-10-24). */
   @Get('dashboard/activity')
   async employeeActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<ActivityDayDto> {
-    await this.requireHead(user);
+    if (!(await this.access.resolve(user)).isAppAdmin)
+      throw new ForbiddenException({ code: 'ADMIN_ONLY', message: 'Активность сотрудников — только администраторам приложения' });
     return this.activity.day(user, query);
   }
 
-  /** Дашборд руководителя: новые сделки, брони по ним, повторные клиенты, звонки — по дням периода. */
+  /**
+   * Показатели по дням (бывший дашборд руководителя): новые сделки, брони по ним, повторные клиенты,
+   * звонки — блоки личного дашборда любого сотрудника групп; данные — его правами в CRM.
+   */
   @Get('head-dashboard')
   async headDashboard(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<HeadDashboardDto> {
-    await this.requireHead(user);
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
     return this.head.get(user, query);
-  }
-
-  private async requireHead(user: B24UserContext): Promise<void> {
-    if (!(await this.access.resolve(user)).isHead)
-      throw new ForbiddenException({ code: 'HEAD_ONLY', message: 'Только руководителям (⚙ → «Приложение» → «Руководители»)' });
   }
 
   @Get('dashboard')
@@ -108,6 +113,33 @@ export class OpenlinesController {
       // Брони — по ресурсам групп сотрудника; администратору приложения — все.
       a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))],
     );
+  }
+
+  /** Личный дашборд: блоки по порядку и ширина (у каждого сотрудника свои). */
+  @Get('dashboard/layout')
+  async layout(@B24User() user: B24UserContext): Promise<DashboardLayoutDto> {
+    return this.layouts.get(user, (await this.access.resolve(user)).isAppAdmin);
+  }
+
+  @Put('dashboard/layout')
+  async layoutSave(@B24User() user: B24UserContext, @Body() body: unknown): Promise<DashboardLayoutDto> {
+    const r = await this.layouts.save(user, (await this.access.resolve(user)).isAppAdmin, body);
+    await this.actions.user(user, { action: 'dashboard.layout', summary: `Настроил свой дашборд: ${r.blocks.length} блоков`, details: { blocks: r.blocks.map((b) => `${b.type}:${b.width}`) } });
+    return r;
+  }
+
+  @Delete('dashboard/layout')
+  async layoutReset(@B24User() user: B24UserContext): Promise<DashboardLayoutDto> {
+    return this.layouts.reset(user, (await this.access.resolve(user)).isAppAdmin);
+  }
+
+  /** «Сделки к закрытию»: бронь прошла, сделка в работе. */
+  @Get('dashboard/needs-close')
+  async needsClose(@B24User() user: B24UserContext): Promise<NeedsCloseDto> {
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
+    return this.dashboard.needsClose(user, a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))]);
   }
 
   /** Звонки выбранного вида за период (окно «сделки» на дашборде). */

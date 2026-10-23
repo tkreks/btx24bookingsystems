@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import type { Portal } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PortalService } from '../modules/bitrix24/portals/portal.service.js';
 import { DealPaymentsService } from '../modules/bookings/deal-payments.service.js';
@@ -25,6 +26,21 @@ export class DealPaymentsJob implements OnModuleInit, OnApplicationShutdown {
 
   onApplicationShutdown() {
     if (this.timer) clearInterval(this.timer);
+  }
+
+  /** Учёт оплат одного портала вне расписания — по событиям сделок; идёт плановый проход — false. */
+  async runPortal(portal: Portal): Promise<boolean> {
+    if (this.running) return false;
+    this.running = true;
+    try {
+      await this.payments.scan(portal, this.portals.clientFor(portal));
+      return true;
+    } catch (err) {
+      this.logger.warn(`portal ${portal.id}: deal payments scan (events) failed: ${err instanceof Error ? err.message : String(err)}`);
+      return true;
+    } finally {
+      this.running = false;
+    }
   }
 
   async tick(): Promise<void> {

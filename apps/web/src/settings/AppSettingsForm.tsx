@@ -83,19 +83,6 @@ export function AppSettingsForm({
           />
         </fieldset>
         <fieldset>
-          <legend>Руководители</legend>
-          <p className="muted">
-            Свой дашборд: новые сделки и брони по ним, повторные клиенты, звонки (пропущенные и упущенные), графики и активность
-            сотрудников. Входят в приложение всегда; администраторы видят дашборд руководителя тоже.
-          </p>
-          <MembersEditor
-            members={draft.heads ?? []}
-            users={users}
-            departments={departments}
-            onChange={(members) => update({ heads: members.map(({ kind, bitrixId }) => ({ kind, bitrixId })) })}
-          />
-        </fieldset>
-        <fieldset>
           <legend>Сбор данных открытых линий</legend>
           <label className="check">
             <input

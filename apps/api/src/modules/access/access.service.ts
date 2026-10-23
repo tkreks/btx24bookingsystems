@@ -18,7 +18,7 @@ export interface UserAccess {
   isAppAdmin: boolean;
   /** Доступ по временному паролю — до этого момента; null — постоянный админ или не админ. */
   tempAdminUntil: Date | null;
-  /** Руководитель (`AppHead`) или администратор приложения — дашборд руководителя. */
+  /** Устарело (роль «Руководитель» убрана 2026-10-24): равно `isAppAdmin`. */
   isHead: boolean;
   /** Назначен руководителем явно (не только как администратор). */
   headAssigned: boolean;
@@ -80,10 +80,9 @@ export class AccessService {
     const depts = await this.departmentsWithAncestors(user);
     const matches = (m: { kind: string; bitrixId: number }) => (m.kind === 'USER' ? m.bitrixId === user.userId : depts.has(m.bitrixId));
 
-    const [admins, appUsers, heads] = await Promise.all([
+    const [admins, appUsers] = await Promise.all([
       this.prisma.appAdmin.findMany({ where: { portalId: user.portal.id } }),
       this.prisma.appUser.findMany({ where: { portalId: user.portal.id } }),
-      this.prisma.appHead.findMany({ where: { portalId: user.portal.id } }),
     ]);
     const permanentAdmin = user.isAdmin || admins.some(matches);
     // Временный пароль к настройкам: активированный этим сотрудником, не отозван и не истёк.
@@ -94,10 +93,11 @@ export class AccessService {
           orderBy: { expiresAt: 'desc' },
         });
     const isAppAdmin = permanentAdmin || grant !== null;
-    // Руководитель — назначенный (сотрудник или отдел) или администратор приложения.
-    const headAssigned = heads.some(matches);
-    const isHead = isAppAdmin || headAssigned;
-    return { matches, isAppAdmin, isHead, headAssigned, grant, canEnter: isHead || appUsers.some(matches) };
+    // Роли «Руководитель» больше нет (решение владельца 2026-10-24): дашборд у каждого свой, «Активность
+    // сотрудников» — администраторам. Поля оставлены для совместимости ответа сессии.
+    const isHead = isAppAdmin;
+    const headAssigned = false;
+    return { matches, isAppAdmin, isHead, headAssigned, grant, canEnter: isAppAdmin || appUsers.some(matches) };
   }
 
   /** Группа, доступная пользователю, с нужным правом — иначе null. */

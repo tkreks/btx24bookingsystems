@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import type { Portal } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PortalService } from '../modules/bitrix24/portals/portal.service.js';
 import { BookingSyncService } from '../modules/bookings/booking-sync.service.js';
@@ -36,27 +37,44 @@ export class BookingSyncJob implements OnModuleInit, OnApplicationShutdown {
     this.running = true;
     try {
       const portals = await this.prisma.portal.findMany({ where: { status: 'ACTIVE' } });
-      for (const portal of portals) {
-        let error: string | null = null;
-        try {
-          const r = await this.sync.reconcile(portal, this.portals.clientFor(portal));
-          this.logger.log(
-            `portal ${portal.id}: resources ${r.resources.total} (archived ${r.resources.archived}), ` +
-              `bookings ${r.bookings.seen}, imported ${r.bookings.imported}, changed ${r.bookings.changed}, ` +
-              `removed ${r.bookings.removed}, alerts ${r.bookings.alerts}${r.baseline ? ' (baseline)' : ''}`,
-          );
-        } catch (err) {
-          error = (err instanceof Error ? err.message : String(err)).slice(0, 500);
-          this.logger.warn(`portal ${portal.id}: booking sync failed: ${error}`);
-        }
-        await this.prisma.portalSettings.upsert({
-          where: { portalId: portal.id },
-          create: { portalId: portal.id, bookingSyncAt: new Date(), bookingSyncError: error },
-          update: { bookingSyncAt: new Date(), bookingSyncError: error },
-        });
-      }
+      for (const portal of portals) await this.one(portal);
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Сверка одного портала вне расписания — по событиям броней Битрикс24. Идёт плановая сверка — false
+   * (события подождут следующего прохода, двух сверок одновременно не бывает).
+   */
+  async runPortal(portal: Portal): Promise<boolean> {
+    if (this.running) return false;
+    this.running = true;
+    try {
+      await this.one(portal);
+      return true;
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async one(portal: Portal): Promise<void> {
+    let error: string | null = null;
+    try {
+      const r = await this.sync.reconcile(portal, this.portals.clientFor(portal));
+      this.logger.log(
+        `portal ${portal.id}: resources ${r.resources.total} (archived ${r.resources.archived}), ` +
+          `bookings ${r.bookings.seen}, imported ${r.bookings.imported}, changed ${r.bookings.changed}, ` +
+          `removed ${r.bookings.removed}, alerts ${r.bookings.alerts}${r.baseline ? ' (baseline)' : ''}`,
+      );
+    } catch (err) {
+      error = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+      this.logger.warn(`portal ${portal.id}: booking sync failed: ${error}`);
+    }
+    await this.prisma.portalSettings.upsert({
+      where: { portalId: portal.id },
+      create: { portalId: portal.id, bookingSyncAt: new Date(), bookingSyncError: error },
+      update: { bookingSyncAt: new Date(), bookingSyncError: error },
+    });
   }
 }

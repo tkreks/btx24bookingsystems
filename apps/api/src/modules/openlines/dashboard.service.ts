@@ -18,6 +18,7 @@ import {
   type DashboardDto,
   type DashboardNewDeal,
   type DealStatusDto,
+  type NeedsCloseDto,
 } from '@btx24/shared';
 import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -119,6 +120,29 @@ export class DashboardService {
     if (want('calls')) Object.assign(out, { calls, callsTotal });
     if (want('deals')) Object.assign(out, { newDeals, paidDeals });
     return out;
+  }
+
+  /**
+   * «Сделки к закрытию»: брони ресурсов групп сотрудника, закончившиеся за последние 60 дней, чья сделка в
+   * канбане ещё в работе, а новой брони нет (`needsClose`). Сделки — правами сотрудника.
+   */
+  async needsClose(user: B24UserContext, resourceIds: number[] | null): Promise<NeedsCloseDto> {
+    if (!this.statuses) return { items: [] };
+    const now = new Date();
+    const ended = await this.journal.activeListBetween(user.portal.id, new Date(now.getTime() - 60 * DAY_MS), now, resourceIds);
+    const past = ended.filter((r) => r.dealId && r.endsAt <= now);
+    const ids = [...new Set(past.map((r) => r.dealId!))].slice(0, 200);
+    if (!ids.length) return { items: [] };
+    const [statuses, deals] = await Promise.all([this.statuses.forDeals(user.portal.id, user.client, ids), this.deals(user, ids)]);
+    return {
+      items: ids
+        .filter((id) => statuses.get(id)?.needsClose && deals.has(id))
+        .map((id) => {
+          const d = deals.get(id)!;
+          return { dealId: id, title: d.title || `Сделка #${id}`, client: d.client, opportunity: d.opportunity, currency: d.currency, bookingEnd: statuses.get(id)!.bookingEnd ?? '' };
+        })
+        .sort((a, b) => b.bookingEnd.localeCompare(a.bookingEnd)),
+    };
   }
 
   /** Активные брони на сегодня и на завтра (дни портала) — по ресурсам групп пользователя. */

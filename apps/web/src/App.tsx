@@ -5,6 +5,7 @@ import { initB24, placementContext, setStandalone, type PlacementContext } from 
 import { LoginPage } from './LoginPage.js';
 import { CalendarPage } from './calendar/CalendarPage.js';
 import { CallLayer } from './calls/CallLayer.js';
+import { ErrorBoundary } from './ErrorBoundary.js';
 import { SessionOverlay } from './SessionOverlay.js';
 import { startSessionWatch } from './session-guard.js';
 
@@ -60,7 +61,10 @@ export function App() {
   return (
     <>
       <CalendarPage session={boot.session} placement={boot.placement} />
-      <CallLayer timezone={boot.session.portal.timezone} mode="watch" />
+      {/* Сбой слоя звонков не должен ронять приложение. */}
+      <ErrorBoundary where="call-layer" onClose={() => undefined}>
+        <CallLayer timezone={boot.session.portal.timezone} mode="watch" />
+      </ErrorBoundary>
       <SessionOverlay />
     </>
   );

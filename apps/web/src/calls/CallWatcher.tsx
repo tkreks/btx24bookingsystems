@@ -21,7 +21,7 @@ export function CallWatcher({ timezone, canCreate, onCreate }: { timezone: strin
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
       apiGet<ActiveCallDto[]>('/calls/active').then(
-        (r) => active && setCalls(r),
+        (r) => active && setCalls(Array.isArray(r) ? r : []),
         () => undefined,
       );
     };

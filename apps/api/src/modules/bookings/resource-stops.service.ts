@@ -43,6 +43,19 @@ export class ResourceStopsService {
     return rows.map((r) => toDto(r, timezone));
   }
 
+  /** Действующие и будущие стопы ресурсов групп сотрудника (блок дашборда), с названиями ресурсов. */
+  async upcoming(user: B24UserContext): Promise<(ResourceStopDto & { resourceName: string })[]> {
+    const a = await this.access.resolve(user);
+    const ids = a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))];
+    if (ids && !ids.length) return [];
+    const now = new Date();
+    const stops = await this.between(user.portal.id, now, new Date(now.getTime() + 366 * 86_400_000), ids, user.portal.timezone);
+    const names = new Map(
+      (await this.prisma.resource.findMany({ where: { portalId: user.portal.id, resourceId: { in: stops.map((s) => s.resourceId) } } })).map((r) => [r.resourceId, r.name]),
+    );
+    return stops.map((s) => ({ ...s, resourceName: names.get(s.resourceId) ?? `Ресурс #${s.resourceId}` }));
+  }
+
   /** Брони и стопы ресурса в периоде — перед установкой стопа. */
   async check(user: B24UserContext, body: unknown): Promise<ResourceStopCheckDto> {
     const p = parse(periodSchema, body);

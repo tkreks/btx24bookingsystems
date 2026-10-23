@@ -123,12 +123,10 @@ describe('AccessService.canEnter — доступ к приложению', () =
     expect((await n.svc.resolve(n.user())).canEnter).toBe(false);
   });
 
-  it('руководитель — назначенный (сам или через отдел) или администратор; входит в приложение всегда', async () => {
+  it('роли «Руководитель» нет: старый список руководителей вход не даёт; isHead — только у администратора', async () => {
     const h = setup({ groups: [], heads: [{ kind: 'DEPARTMENT', bitrixId: 1 }], departments: [{ ID: '1', PARENT: null }, { ID: '5', PARENT: '1' }] });
     const a = await h.svc.resolve(h.user({ departmentIds: [5] }));
-    expect([a.isHead, a.canEnter, a.isAppAdmin]).toEqual([true, true, false]);
-    const n = setup({ groups: [], heads: [{ kind: 'USER', bitrixId: 11 }] });
-    expect((await n.svc.resolve(n.user())).isHead).toBe(false);
+    expect([a.isHead, a.canEnter, a.isAppAdmin, a.headAssigned]).toEqual([false, false, false, false]);
     const admin = setup({ groups: [] });
     expect((await admin.svc.resolve(admin.user({ isAdmin: true }))).isHead).toBe(true);
   });

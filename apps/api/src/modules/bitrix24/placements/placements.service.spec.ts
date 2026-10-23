@@ -47,7 +47,17 @@ describe('PlacementsService', () => {
     const { c, calls } = client([{ placement: 'CRM_DEAL_DETAIL_TAB', handler: 'https://app.example.ru/' }]);
     const st = await svc.sync(c);
     expect(calls.filter((x) => x.method === 'placement.bind').map((x) => x.params!.PLACEMENT)).toEqual(['CRM_DEAL_DETAIL_TOOLBAR', 'LEFT_MENU', 'CALL_CARD']);
-    expect(calls.filter((x) => x.method === 'event.bind').map((x) => x.params!.event)).toEqual(['ONVOXIMPLANTCALLINIT', 'ONVOXIMPLANTCALLSTART', 'ONVOXIMPLANTCALLEND']);
+    expect(calls.filter((x) => x.method === 'event.bind').map((x) => x.params!.event)).toEqual([
+      'ONVOXIMPLANTCALLINIT',
+      'ONVOXIMPLANTCALLSTART',
+      'ONVOXIMPLANTCALLEND',
+      'ONBOOKINGADD',
+      'ONBOOKINGUPDATE',
+      'ONBOOKINGDELETE',
+      'ONCRMDEALADD',
+      'ONCRMDEALUPDATE',
+      'ONCRMDEALDELETE',
+    ]);
     expect(st.placements.every((s) => s.bound) && st.events.every((e) => e.bound)).toBe(true);
     await svc.sync(c);
     expect(calls.filter((x) => x.method === 'placement.bind')).toHaveLength(3);

@@ -17,3 +17,4 @@ export * from './audit.js';
 export * from './certificates.js';
 export * from './deal-status.js';
 export * from './calls.js';
+export * from './dashboard-layout.js';

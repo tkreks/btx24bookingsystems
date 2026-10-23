@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   todayIn,
   CALL_KINDS,
@@ -13,8 +13,17 @@ import {
   type DashboardPart,
   type DashboardNewDeal,
   type SessionInfo,
+  allowedBlocks,
+  type DashboardBlock,
+  type DashboardBlockType,
+  type DashboardLayoutDto,
+  type HeadDashboardDto,
 } from '@btx24/shared';
-import { apiGet, apiPost, logout } from '../api.js';
+import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
+import { BlockGrid } from '../dashboard/BlockGrid.js';
+import { AlertsBlock, CertificatesBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
+import { HEAD_BLOCKS, HeadBlock, versus, type HeadBlockType } from '../dashboard/head-blocks.js';
+import { EmployeeActivity } from './EmployeeActivity.js';
 import { isStandalone, openCrm, openPortalPath } from '../b24.js';
 import { fmtAt, fmtDateTime, fmtMoney, fmtTime, fmtWhen } from '../format.js';
 import { Avatar } from './Avatar.js';
@@ -31,6 +40,10 @@ import { ListMore } from './ListMore.js';
 import { DealStatusBadge } from './DealStatusBadge.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 import { MinimizeButton } from '../Minimize.js';
+
+/** «23 октября 2026». */
+const fmtDay = (date: string, tz: string) =>
+  new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${date}T12:00:00Z`));
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
   payment_timeout: 'не оплачена — снята системой',
@@ -59,7 +72,6 @@ export function DashboardPage({
   onTemplates,
   onCertificates,
   onSession,
-  onHead,
 }: {
   session: SessionInfo;
   openlines: boolean;
@@ -75,8 +87,6 @@ export function DashboardPage({
   /** Сертификаты: список, выпуск, изменение срока, погашение. */
   onCertificates?: () => void;
   onSession?: (s: SessionInfo) => void;
-  /** Дашборд руководителя (руководителям и администраторам). */
-  onHead?: () => void;
 }) {
   const tz = session.portal.timezone;
   const [view, setView] = useState<'main' | 'calls'>('main');
@@ -97,6 +107,24 @@ export function DashboardPage({
   const [daysOpen, setDaysOpen] = useState(false);
   // Воронка для «повторных»: пусто — сервер берёт первую воронку групп пользователя.
   const [callsFunnel, setCallsFunnel] = useState<number | null>(null);
+  // Личный дашборд: раскладка (с сервера), режим настройки и черновик до «Готово».
+  const [layout, setLayout] = useState<DashboardLayoutDto | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft2, setDraft2] = useState<DashboardBlock[]>([]);
+  const [layoutError, setLayoutError] = useState('');
+  useEffect(() => {
+    apiGet<DashboardLayoutDto>('/dashboard/layout').then(setLayout, (e) => setLayoutError(e instanceof Error ? e.message : 'Не удалось загрузить раскладку'));
+  }, []);
+  const blocks = editing ? draft2 : (layout?.blocks ?? []);
+  const saveLayout = (next: DashboardBlock[] | null) =>
+    (next ? apiPut<DashboardLayoutDto>('/dashboard/layout', { blocks: next }) : apiDelete('/dashboard/layout').then(() => apiGet<DashboardLayoutDto>('/dashboard/layout'))).then(
+      (l) => {
+        setLayout(l);
+        setEditing(false);
+        setLayoutError('');
+      },
+      (e) => setLayoutError(e instanceof Error ? e.message : 'Не удалось сохранить дашборд'),
+    );
 
   useEffect(() => {
     if (!bookingAlerts) return;
@@ -143,9 +171,198 @@ export function DashboardPage({
   // null — недоступно (нет прав), undefined — ещё считается.
   const n = (v: number | null | undefined) => (v === undefined ? '…' : v === null ? '—' : String(v));
   const word = periodWord(preset);
+  // Блоки «по дням и сравнение» — одним запросом за период дашборда, только если они есть на дашборде.
+  const needHead = blocks.some((b) => (HEAD_BLOCKS as readonly string[]).includes(b.type));
+  const headKey = needHead ? `${range.from}|${range.to}` : '';
+  const [headResp, setHeadResp] = useState<{ key: string; dto: HeadDashboardDto } | null>(null);
+  useEffect(() => {
+    if (!headKey) return;
+    let active = true;
+    const [from, to] = headKey.split('|');
+    apiGet<HeadDashboardDto>(`/head-dashboard?from=${from}&to=${to}`).then(
+      (dto) => active && setHeadResp({ key: headKey, dto }),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [headKey]);
+  const head = headResp?.key === headKey ? headResp.dto : null;
+  const periodText = range.from === range.to ? fmtDay(range.from, tz) : `${fmtDay(range.from, tz)} — ${fmtDay(range.to, tz)}`;
   // Скрытые с дашборда (👁) — сразу, не дожидаясь нового ответа сервера.
   const attention = (d?.chats?.attention ?? []).filter((c) => !hidden.has(c.chatId));
   const waiting = Math.max(0, (d?.chats?.waitingReply ?? 0) - ((d?.chats?.attention ?? []).length - attention.length));
+
+  // Блоки личного дашборда: тип → содержимое (null — сотруднику блок недоступен).
+  const renderBlock = (type: DashboardBlockType): ReactNode => {
+    const loading = d ? '' : ' loading';
+    switch (type) {
+      case 'waiting':
+        return (
+          <div className={loading}>
+          <div className={`dash-tile${openlines && waiting ? ' warn' : ''}`}>
+            <DashBadge name="alert" />
+            <span className="dash-tile-label">Чатов ждут ответа</span>
+            <span className="dash-tile-value">{openlines ? n(d?.chats ? waiting : undefined) : '—'}</span>
+            {openlines ? (
+              // Чаты → «Все доступные» → «Все».
+              <button className="primary dash-tile-action" onClick={() => onChats({})}>
+                Открыть чаты
+              </button>
+            ) : (
+              <span className="dash-tile-hint">Открытые линии не включены в ваших группах</span>
+            )}
+          </div>
+          </div>
+        );
+      case 'bookingDays':
+        return (
+          <div className={loading}>
+          <div className="dash-tile" title="Активные брони на ресурсах ваших групп: на сегодня / на завтра">
+            <DashBadge name="calendar" />
+            <span className="dash-tile-label">Бронирований сегодня / завтра</span>
+            <span className="dash-tile-value">
+              {n(d?.bookingDays?.today)}
+              <small> / {n(d?.bookingDays?.tomorrow)}</small>
+            </span>
+            <button className="dash-tile-action" disabled={!d?.bookingDays} onClick={() => setDaysOpen(true)}>
+              Календарь
+            </button>
+          </div>
+          </div>
+        );
+      case 'callsTotal':
+        return (
+          <div className={loading}>
+          <div className="dash-tile">
+            <DashBadge name="phone" />
+            <span className="dash-tile-label">Все звонки {word}</span>
+            <span className="dash-tile-value">{n(d?.callsTotal)}</span>
+            <button className="dash-tile-action" onClick={() => setView('calls')}>
+              Показать звонки
+            </button>
+          </div>
+          </div>
+        );
+      case 'newDeals':
+        return (
+          <div className={loading}>
+          <div className="dash-tile">
+            <DashBadge name="person" />
+            <span className="dash-tile-label">Новых сделок {word}</span>
+            <span className="dash-tile-value">{n(d?.newDeals === null ? null : d?.newDeals?.total)}</span>
+            <button className="dash-tile-action" disabled={!d?.newDeals?.total} onClick={() => setDealsOpen('all')}>
+              Показать сделки
+            </button>
+          </div>
+          </div>
+        );
+      case 'repeatClients':
+        return (
+          <div className={loading}>
+          <div className="dash-tile">
+            <DashBadge name="people" />
+            <span className="dash-tile-label">Повторные клиенты</span>
+            <span className="dash-tile-value">
+              {n(d?.newDeals === null ? null : d?.newDeals?.repeat)}
+              {!!d?.newDeals?.total && <small> из {d.newDeals.total}</small>}
+            </span>
+            <button className="dash-tile-action" disabled={!d?.newDeals?.repeat} onClick={() => setDealsOpen('repeat')}>
+              Показать
+            </button>
+          </div>
+          </div>
+        );
+      case 'attention':
+        return openlines ? (
+          <section className="day-panel dash-block dash-attention">
+            <DashBadge name="chats" />
+            <p className="dash-attention-title muted">
+              Последние сообщения клиентов без ответа
+              {d?.chats && <span className={`pill${waiting ? ' waiting' : ''}`}>{waiting}</span>}
+            </p>
+            {!d && <p className="muted">Загрузка…</p>}
+            {d?.chats && !attention.length && <p className="muted">Все клиенты получили ответ.</p>}
+            <ul className="attention-rows">
+              {attention.slice(0, attentionShown).map((c) => {
+                const name = c.clientName || c.title;
+                return (
+                  <li key={c.chatId}>
+                    <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
+                      <span className="attention-title">
+                        <Channel connector={c.connector} />
+                        <Avatar src={c.clientAvatar} name={name} size={24} tone={avatarTone(c.chatId)} />
+                        <span className="attention-name" title={c.title}>
+                          {name}
+                        </span>
+                      </span>
+                      <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
+                      <span className="attention-time">{fmtWhen(c.lastMessageAt, tz)}</span>
+                    </button>
+                    <span className="attention-actions">
+                      <button
+                        className="dash-icon-btn"
+                        title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'}
+                        aria-label="Открыть сделку"
+                        disabled={!c.dealId}
+                        onClick={() => c.dealId && openCrm('deal', c.dealId)}
+                      >
+                        <Icon name="handshake" size={18} />
+                      </button>
+                      <button className="dash-icon-btn" title="Перейти в чат" aria-label="Перейти в чат" onClick={() => onChats({ chatId: c.chatId })}>
+                        <Icon name="chat" size={18} />
+                      </button>
+                      <button className="dash-icon-btn" title="Скрыть чат с дашборда" aria-label="Скрыть чат с дашборда" onClick={() => setHiding(c)}>
+                        <Icon name="eye" size={18} />
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {!!d?.chats && <ListMore total={attention.length} shown={attentionShown} step={ATTENTION_STEP} onShow={setAttentionShown} />}
+            {!!d?.chats && attentionShown >= attention.length && waiting > attention.length && (
+              <button className="list-more" onClick={() => onChats({ waiting: true })}>
+                Все ждущие ответа в чатах · {waiting}
+              </button>
+            )}
+          </section>
+        ) : null;
+      case 'recentCalls':
+        return <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} />;
+      case 'deals':
+        return <DealsCreated d={d} tz={tz} word={word} oneDay={range.from === range.to} />;
+      case 'todayBookings':
+        return <TodayBookings d={d} tz={tz} />;
+      case 'dealSources':
+        return d?.newDeals && d.newDeals.total > 0 ? (
+          <DealSources items={d.newDeals.items} word={word} onOpen={(source) => setDealsOpen({ source })} />
+        ) : (
+          <section className="day-panel dash-sources">
+            <p className="dash-attention-title muted">Источники новых сделок {word}</p>
+            <p className="muted">{d ? 'Новых сделок нет.' : 'Загрузка…'}</p>
+          </section>
+        );
+      case 'newBookings':
+        return <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings?.created} tz={tz} variant="created" />;
+      case 'removedBookings':
+        return <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings?.removed} tz={tz} variant="removed" />;
+      case 'activity':
+        return session.canManageApp ? <EmployeeActivity timezone={tz} startDate={range.from} /> : null;
+      case 'needsClose':
+        return <NeedsCloseBlock tz={tz} />;
+      case 'alerts':
+        return bookingAlerts ? <AlertsBlock onOpen={onAlerts} /> : null;
+      case 'certificates':
+        return <CertificatesBlock onOpen={onCertificates} />;
+      case 'stops':
+        return <StopsBlock />;
+      default:
+        return (HEAD_BLOCKS as readonly string[]).includes(type) ? (
+          <HeadBlock type={type as HeadBlockType} d={head} vs={versus(preset, head, (x) => fmtDay(x, tz))} word={word} periodText={periodText} tz={tz} />
+        ) : null;
+    }
+  };
 
   const periodBar = (
     <div className="period-bar">
@@ -278,9 +495,29 @@ export function DashboardPage({
               {!!alertCount && <span className="badge">{alertCount}</span>}
             </button>
           )}
-          {onHead && (
-            <button className="settings-button" onClick={onHead} title="Дашборд руководителя: графики, показатели, активность сотрудников">
-              <span aria-hidden="true">📊</span> Руководитель
+          {editing ? (
+            <>
+              <button className="settings-button primary" onClick={() => void saveLayout(draft2)} title="Сохранить свой дашборд">
+                ✓ Готово
+              </button>
+              <button className="settings-button" onClick={() => confirm('Вернуть дашборд по умолчанию?') && void saveLayout(null)} title="Раскладка по умолчанию">
+                Сбросить
+              </button>
+              <button className="settings-button" onClick={() => setEditing(false)}>
+                Отмена
+              </button>
+            </>
+          ) : (
+            <button
+              className="settings-button"
+              disabled={!layout}
+              onClick={() => {
+                setDraft2(layout?.blocks ?? []);
+                setEditing(true);
+              }}
+              title="Настроить дашборд: блоки, порядок, ширина"
+            >
+              <span aria-hidden="true">▦</span> Настроить
             </button>
           )}
           {onTemplates && (
@@ -334,137 +571,26 @@ export function DashboardPage({
 
       {periodBar}
       {errorBox}
-
-      <div className={`dash-row${d ? '' : ' loading'}`}>
-        <div className={`dash-tile${openlines && waiting ? ' warn' : ''}`}>
-          <DashBadge name="alert" />
-          <span className="dash-tile-label">Чатов ждут ответа</span>
-          <span className="dash-tile-value">{openlines ? n(d?.chats ? waiting : undefined) : '—'}</span>
-          {openlines ? (
-            // Чаты → «Все доступные» → «Все».
-            <button className="primary dash-tile-action" onClick={() => onChats({})}>
-              Открыть чаты
-            </button>
-          ) : (
-            <span className="dash-tile-hint">Открытые линии не включены в ваших группах</span>
-          )}
-        </div>
-        <div className="dash-tile" title="Активные брони на ресурсах ваших групп: на сегодня / на завтра">
-          <DashBadge name="calendar" />
-          <span className="dash-tile-label">Бронирований сегодня / завтра</span>
-          <span className="dash-tile-value">
-            {n(d?.bookingDays?.today)}
-            <small> / {n(d?.bookingDays?.tomorrow)}</small>
-          </span>
-          <button className="dash-tile-action" disabled={!d?.bookingDays} onClick={() => setDaysOpen(true)}>
-            Календарь
-          </button>
-        </div>
-        <div className="dash-tile">
-          <DashBadge name="phone" />
-          <span className="dash-tile-label">Все звонки {word}</span>
-          <span className="dash-tile-value">{n(d?.callsTotal)}</span>
-          <button className="dash-tile-action" onClick={() => setView('calls')}>
-            Показать звонки
-          </button>
-        </div>
-        <div className="dash-tile">
-          <DashBadge name="person" />
-          <span className="dash-tile-label">Новых сделок {word}</span>
-          <span className="dash-tile-value">{n(d?.newDeals === null ? null : d?.newDeals?.total)}</span>
-          <button className="dash-tile-action" disabled={!d?.newDeals?.total} onClick={() => setDealsOpen('all')}>
-            Показать сделки
-          </button>
-        </div>
-        <div className="dash-tile">
-          <DashBadge name="people" />
-          <span className="dash-tile-label">Повторные клиенты</span>
-          <span className="dash-tile-value">
-            {n(d?.newDeals === null ? null : d?.newDeals?.repeat)}
-            {!!d?.newDeals?.total && <small> из {d.newDeals.total}</small>}
-          </span>
-          <button className="dash-tile-action" disabled={!d?.newDeals?.repeat} onClick={() => setDealsOpen('repeat')}>
-            Показать
-          </button>
-        </div>
-      </div>
-      {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
-
-      <div className="dash-pair">
-      <div className="dash-col">
-      {openlines && (
-        <section className="day-panel dash-block dash-attention">
-          <DashBadge name="chats" />
-          <p className="dash-attention-title muted">
-            Последние сообщения клиентов без ответа
-            {d?.chats && <span className={`pill${waiting ? ' waiting' : ''}`}>{waiting}</span>}
-          </p>
-          {!d && <p className="muted">Загрузка…</p>}
-          {d?.chats && !attention.length && <p className="muted">Все клиенты получили ответ.</p>}
-          <ul className="attention-rows">
-            {attention.slice(0, attentionShown).map((c) => {
-              const name = c.clientName || c.title;
-              return (
-                <li key={c.chatId}>
-                  <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
-                    <span className="attention-title">
-                      <Channel connector={c.connector} />
-                      <Avatar src={c.clientAvatar} name={name} size={24} tone={avatarTone(c.chatId)} />
-                      <span className="attention-name" title={c.title}>
-                        {name}
-                      </span>
-                    </span>
-                    <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
-                    <span className="attention-time">{fmtWhen(c.lastMessageAt, tz)}</span>
-                  </button>
-                  <span className="attention-actions">
-                    <button
-                      className="dash-icon-btn"
-                      title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'}
-                      aria-label="Открыть сделку"
-                      disabled={!c.dealId}
-                      onClick={() => c.dealId && openCrm('deal', c.dealId)}
-                    >
-                      <Icon name="handshake" size={18} />
-                    </button>
-                    <button className="dash-icon-btn" title="Перейти в чат" aria-label="Перейти в чат" onClick={() => onChats({ chatId: c.chatId })}>
-                      <Icon name="chat" size={18} />
-                    </button>
-                    <button className="dash-icon-btn" title="Скрыть чат с дашборда" aria-label="Скрыть чат с дашборда" onClick={() => setHiding(c)}>
-                      <Icon name="eye" size={18} />
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          {!!d?.chats && <ListMore total={attention.length} shown={attentionShown} step={ATTENTION_STEP} onShow={setAttentionShown} />}
-          {!!d?.chats && attentionShown >= attention.length && waiting > attention.length && (
-            <button className="list-more" onClick={() => onChats({ waiting: true })}>
-              Все ждущие ответа в чатах · {waiting}
-            </button>
-          )}
-        </section>
+      {layoutError && <div className="notice error">{layoutError}</div>}
+      {editing && (
+        <p className="notice dash-edit-note">
+          Настройка дашборда: перетаскивайте блоки или двигайте стрелками, выбирайте ширину (¼ ⅓ ½ ▭), убирайте лишнее и добавляйте
+          новые. «Готово» — сохранить (дашборд только ваш).
+        </p>
       )}
-        <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} />
-      </div>
-      <div className="dash-col">
-        <DealsCreated d={d} tz={tz} word={word} oneDay={range.from === range.to} />
-        <TodayBookings d={d} tz={tz} />
-      </div>
-      </div>
 
-
-      {d?.newDeals && d.newDeals.total > 0 && <DealSources items={d.newDeals.items} word={word} onOpen={(source) => setDealsOpen({ source })} />}
-
-      <div className="dash-lists">
-        <BookingList title="Новые бронирования" empty="Новых броней за период нет." list={d?.bookings?.created} tz={tz} variant="created" />
-        <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings?.removed} tz={tz} variant="removed" />
-      </div>
+      <BlockGrid
+        blocks={blocks}
+        editing={editing}
+        available={allowedBlocks(session.canManageApp)}
+        onChange={setDraft2}
+        render={(b) => renderBlock(b.type)}
+      />
+      {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
       <p className="muted dash-note">
         Новые сделки — созданные {word} в воронках ваших групп; повторный клиент — у контакта уже была состоявшаяся сделка той же
-        воронки. Брони — все на ресурсах ваших групп: созданные в приложении и в самом Битрикс24 (их находит сверка раз в
-        10 минут); удалённые остаются в истории приложения.
+        воронки. Брони — все на ресурсах ваших групп: созданные в приложении и в самом Битрикс24; удалённые остаются в истории
+        приложения. Блоки «по дням и сравнение» — по воронкам всех групп, с прошлым периодом той же длины.
       </p>
       {daysOpen && d?.bookingDays && <DayBookingsModal days={d.bookingDays} tz={tz} onClose={() => setDaysOpen(false)} />}
       {dealsOpen && d?.newDeals && (

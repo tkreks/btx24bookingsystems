@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Bitrix24Error } from '../rest/errors.js';
 import type { Bitrix24RestClient } from '../rest/rest-client.js';
 import { B24_CONFIG, type Bitrix24Config } from '../bitrix24.tokens.js';
-import { TELEPHONY_EVENTS } from '../install/install.service.js';
+import { OPTIONAL_EVENTS } from '../install/install.service.js';
 import { APP_PLACEMENTS, type PlacementsStateDto } from './placements.js';
 
 /**
@@ -38,7 +38,7 @@ export class PlacementsService {
     );
     return {
       placements: APP_PLACEMENTS.map((p) => ({ ...p, bound: bound.has(p.placement) })),
-      events: TELEPHONY_EVENTS.map((event) => ({ event, bound: boundEvents.has(event) })),
+      events: OPTIONAL_EVENTS.map((event) => ({ event, bound: boundEvents.has(event) })),
     };
   }
 
@@ -61,7 +61,7 @@ export class PlacementsService {
   async rebind(client: Bitrix24RestClient): Promise<PlacementsStateDto> {
     const handler = this.handler();
     for (const p of APP_PLACEMENTS) await client.call('placement.unbind', { PLACEMENT: p.placement, HANDLER: handler }).catch(() => undefined);
-    for (const event of TELEPHONY_EVENTS) await client.call('event.unbind', { event, handler: this.eventHandler() }).catch(() => undefined);
+    for (const event of OPTIONAL_EVENTS) await client.call('event.unbind', { event, handler: this.eventHandler() }).catch(() => undefined);
     return this.sync(client);
   }
 }
