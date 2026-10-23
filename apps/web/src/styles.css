@@ -2673,9 +2673,6 @@ button.warn-outline {
   flex: none;
   font-size: 12px;
 }
-.cl-folder-note {
-  font-size: 12px;
-}
 .cl-star {
   display: inline-grid;
   place-items: center;
@@ -2703,7 +2700,58 @@ button.warn-outline {
 }
 
 .cl-folder-head .row-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
   margin-left: auto;
+}
+/* «← Все чаты» не сжимается; длинное название папки — с многоточием. */
+.cl-folder-back {
+  flex: none;
+  white-space: nowrap;
+}
+.cl-folder-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Кнопка-значок с подсказкой над ней (при наведении и фокусе). */
+.cl-icon-tip {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 15px;
+  line-height: 1;
+}
+.cl-icon-tip.on {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: var(--neutral-bg);
+}
+.cl-icon-tip[data-tip]:hover::after,
+.cl-icon-tip[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
+  pointer-events: none;
 }
 
 .cl-not-joined {

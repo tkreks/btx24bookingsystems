@@ -331,37 +331,56 @@ export function ChatsPage({
 
           {folderId ? (
             <div className="cl-folder-head">
-              <button className="link" onClick={() => setFolderId(null)}>
+              <button className="link cl-folder-back" onClick={() => setFolderId(null)}>
                 ← Все чаты
               </button>
-              <strong>
+              <strong className="cl-folder-title" title={currentFolder?.name}>
                 {currentFolder ? folderIcon(currentFolder) : '📁'} {currentFolder?.name ?? 'Папка'}
               </strong>
+              {/* Папка коллеги — только значки; пояснение — подсказкой над значком. */}
               {currentFolder && !currentFolder.mine && (
-                <span className="muted cl-folder-note">
-                  Глобальная папка коллеги{currentFolder.ignoreAttention ? ' · 🔕 не обращать внимания' : ''}
+                <span className="row-actions">
+                  <span className="cl-icon-tip" tabIndex={0} data-tip="Глобальная папка коллеги: менять её может только владелец" aria-label="Глобальная папка коллеги">
+                    🌐
+                  </span>
+                  {currentFolder.ignoreAttention && (
+                    <span className="cl-icon-tip" tabIndex={0} data-tip="Не обращать внимания: чаты папки не попадают на дашборд" aria-label="Не обращать внимания">
+                      🔕
+                    </span>
+                  )}
                 </span>
               )}
               {currentFolder?.mine && currentFolder.kind !== 'favorites' && (
               <span className="row-actions">
                 <button
-                  className={`cl-ignore${currentFolder.global ? ' on' : ''}`}
+                  className={`cl-icon-tip${currentFolder.global ? ' on' : ''}`}
                   aria-pressed={currentFolder.global}
-                  title="Глобальная: папку и доступные им чаты видят все сотрудники, «Не обращать внимания» действует у всех"
+                  aria-label={currentFolder.global ? 'Глобальная папка' : 'Личная папка'}
+                  data-tip={
+                    currentFolder.global
+                      ? 'Глобальная: папку и доступные им чаты видят все сотрудники, «Не обращать внимания» — у всех. Нажмите — сделать личной'
+                      : 'Личная: видите только вы. Нажмите — сделать глобальной'
+                  }
                   onClick={() => void folderAction(() => apiPut(`/openlines/folders/${folderId}`, { global: !currentFolder.global }))}
                 >
-                  {currentFolder.global ? '🌐 Глобальная' : '👤 Личная'}
+                  {currentFolder.global ? '🌐' : '👤'}
                 </button>
                 <button
-                  className={`cl-ignore${currentFolder?.ignoreAttention ? ' on' : ''}`}
-                  aria-pressed={!!currentFolder?.ignoreAttention}
-                  title="Чаты этой папки не попадают в «Требуют внимания» и «ждут ответа» на вашем дашборде"
-                  onClick={() => void folderAction(() => apiPut(`/openlines/folders/${folderId}`, { ignoreAttention: !currentFolder?.ignoreAttention }))}
+                  className={`cl-icon-tip${currentFolder.ignoreAttention ? ' on' : ''}`}
+                  aria-pressed={currentFolder.ignoreAttention}
+                  aria-label={currentFolder.ignoreAttention ? 'Не обращать внимания' : 'Обращать внимание'}
+                  data-tip={
+                    currentFolder.ignoreAttention
+                      ? 'Не обращать внимания: чаты папки не попадают в «Требуют внимания» и «ждут ответа» на дашборде. Нажмите — обращать внимание'
+                      : 'Обращать внимание: чаты папки — на дашборде. Нажмите — не обращать внимания'
+                  }
+                  onClick={() => void folderAction(() => apiPut(`/openlines/folders/${folderId}`, { ignoreAttention: !currentFolder.ignoreAttention }))}
                 >
-                  {currentFolder?.ignoreAttention ? '🔕 Не обращать внимания' : '🔔 Обращать внимание'}
+                  {currentFolder.ignoreAttention ? '🔕' : '🔔'}
                 </button>
                 <button
-                  title="Переименовать папку"
+                  className="cl-icon-tip"
+                  data-tip="Переименовать папку"
                   aria-label="Переименовать папку"
                   onClick={() => {
                     const name = prompt('Новое название папки', currentFolder?.name ?? '')?.trim();
@@ -371,7 +390,8 @@ export function ChatsPage({
                   ✎
                 </button>
                 <button
-                  title="Удалить папку (чаты вернутся в общий список)"
+                  className="cl-icon-tip"
+                  data-tip="Удалить папку (чаты вернутся в общий список)"
                   aria-label="Удалить папку"
                   onClick={() => {
                     if (!confirm(`Удалить папку «${currentFolder?.name ?? ''}»? Её чаты вернутся в общий список.`)) return;
