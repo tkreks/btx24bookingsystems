@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { todayIn, type HeadDashboardDto, type HeadDayDto, type SessionInfo } from '@btx24/shared';
+import { todayIn, type HeadDashboardDto, type HeadDayDto, type HeadTotalsDto, type SessionInfo } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { shiftDate } from '../format.js';
 
@@ -9,6 +9,7 @@ const fmtDay = (date: string, tz: string) =>
 import { EmployeeActivity } from './EmployeeActivity.js';
 import { DashBadge } from './RecentCalls.js';
 import { periodError } from './period.js';
+import { Avatar } from './Avatar.js';
 
 type Preset = 'today' | 'yesterday' | 'custom';
 
@@ -46,6 +47,12 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
   const n = (v: number | undefined, ok = true) => (!d ? '…' : ok ? String(v ?? 0) : '—');
   const word = preset === 'today' ? 'сегодня' : preset === 'yesterday' ? 'вчера' : 'за период';
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  // Прошлый период той же длины — для сравнения на плитках.
+  const p = d?.previous?.totals;
+  const vs = {
+    label: preset === 'today' ? 'ко вчера' : preset === 'yesterday' ? 'к позавчера' : 'к прошлому периоду',
+    title: d?.previous ? `Прошлый период: ${d.previous.from === d.previous.to ? fmtDay(d.previous.from, tz) : `${fmtDay(d.previous.from, tz)} — ${fmtDay(d.previous.to, tz)}`}` : '',
+  };
   const periodText = range.from === range.to ? fmtDay(range.from, tz) : `${fmtDay(range.from, tz)} — ${fmtDay(range.to, tz)}`;
   const pickError = picking ? periodError(picking.from, picking.to) : null;
   const choose = (p: Exclude<Preset, 'custom'>) => {
@@ -59,7 +66,10 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
       <header className="toolbar">
         <div className="toolbar-title">
           <h1>Дашборд руководителя</h1>
-          <span className="muted">{session.user.name}</span>
+          <span className="muted toolbar-user">
+            <Avatar src={session.user.photo} name={session.user.name} size={26} />
+            {session.user.name}
+          </span>
         </div>
         <button onClick={onManager}>Дашборд менеджера</button>
       </header>
@@ -132,28 +142,29 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
 
       <h2 className="head-section">Сделки и брони</h2>
       <div className={`dash-row${d ? '' : ' loading'}`}>
-        <div className="dash-tile">
+        <div className={`dash-tile${p && d?.deals ? toneClass(d.totals.newDeals, p.newDeals) : ''}`}>
           <DashBadge name="person" />
           <span className="dash-tile-label">Новых сделок {word}</span>
           <span className="dash-tile-value">{n(d?.totals.newDeals, d?.deals)}</span>
+          {p && d?.deals && <Trend cur={d.totals.newDeals} prev={p.newDeals} vs={vs} />}
           <span className="dash-tile-hint">в воронках всех групп</span>
         </div>
-        <div className="dash-tile">
+        <div className={`dash-tile${p && d?.deals ? toneClass(conv(d.totals), conv(p)) : ''}`}>
           <DashBadge name="calendar" />
           <span className="dash-tile-label">Бронирований по новым сделкам</span>
           <span className="dash-tile-value">
             {n(d?.totals.bookings, d?.deals)}
             {d?.deals && <small> · сделок с бронью {d.totals.bookedDeals}</small>}
           </span>
-          <span className="dash-tile-hint">конверсия в бронь: {d ? pct(d.totals.bookedDeals, d.totals.newDeals) : '…'}</span>
+          <span className="dash-tile-hint">
+            конверсия в бронь: {d ? pct(d.totals.bookedDeals, d.totals.newDeals) : '…'}
+            {p && d?.deals && <ConvTrend cur={conv(d.totals)} prev={conv(p)} vs={vs} />}
+          </span>
         </div>
         <div className="dash-tile">
           <DashBadge name="people" />
           <span className="dash-tile-label">Сделки повторных клиентов</span>
-          <span className="dash-tile-value">
-            {n(d?.totals.repeat, d?.deals)}
-            {d?.deals && !!d.totals.newDeals && <small> из {d.totals.newDeals}</small>}
-          </span>
+          <span className="dash-tile-value">{n(d?.totals.repeat, d?.deals)}</span>
           <span className="dash-tile-hint">у клиента раньше была бронь (состоялась)</span>
         </div>
       </div>
@@ -161,26 +172,30 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
 
       <h2 className="head-section">Телефония</h2>
       <div className={`dash-row head-phone${d ? '' : ' loading'}`}>
-        <div className="dash-tile">
+        <div className={`dash-tile${p && d?.calls ? toneClass(d.totals.calls, p.calls) : ''}`}>
           <DashBadge name="phone" />
           <span className="dash-tile-label">Звонков {word}</span>
           <span className="dash-tile-value">{n(d?.totals.calls, d?.calls)}</span>
+          {p && d?.calls && <Trend cur={d.totals.calls} prev={p.calls} vs={vs} />}
           {d?.calls && (
             <span className="dash-tile-hint">
               входящих {d.totals.incoming} · исходящих {d.totals.outgoing}
             </span>
           )}
         </div>
-        <div className={`dash-tile${d?.totals.missed ? ' warn' : ''}`}>
+        {/* Пропущенные и упущенные: лучше — меньше. */}
+        <div className={`dash-tile${p && d?.calls ? toneClass(d.totals.missed, p.missed, true) : ''}`}>
           <DashBadge name="phone" />
           <span className="dash-tile-label">Пропущенных</span>
           <span className="dash-tile-value">{n(d?.totals.missed, d?.calls)}</span>
+          {p && d?.calls && <Trend cur={d.totals.missed} prev={p.missed} vs={vs} lowerIsBetter />}
           <span className="dash-tile-hint">входящие без ответа</span>
         </div>
-        <div className={`dash-tile${d?.totals.lost ? ' warn' : ''}`}>
+        <div className={`dash-tile${p && d?.calls ? toneClass(d.totals.lost, p.lost, true) : ''}`}>
           <DashBadge name="alert" />
           <span className="dash-tile-label">Упущенных клиентов</span>
           <span className="dash-tile-value">{n(d?.totals.lost, d?.calls)}</span>
+          {p && d?.calls && <Trend cur={d.totals.lost} prev={p.lost} vs={vs} lowerIsBetter />}
           <span className="dash-tile-hint">не перезвонили и не написали в чат</span>
         </div>
       </div>
@@ -226,6 +241,44 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
         Упущенный клиент — последний его звонок пропущен, после него ему не перезванивали и не писали в чат открытой линии.
       </p>
     </div>
+  );
+}
+
+/** Конверсия новых сделок в бронь, целые %; сделок нет — null. */
+const conv = (t: HeadTotalsDto) => (t.newDeals ? Math.round((t.bookedDeals / t.newDeals) * 100) : null);
+
+/**
+ * Рамка плитки по сравнению с прошлым периодом: лучше — зелёная, хуже — красная, так же — без рамки.
+ * `lowerIsBetter` — для пропущенных и упущенных. Конверсия без сделок в одном из периодов — без рамки.
+ */
+function toneClass(cur: number | null, prev: number | null, lowerIsBetter = false): string {
+  if (cur === null || prev === null || cur === prev) return '';
+  return (cur > prev) !== lowerIsBetter ? ' trend-good' : ' trend-bad';
+}
+
+/** «▲ +12% ко вчера (25)»; прошлый период пуст — «▲ +4 ко вчера (0)». */
+function Trend({ cur, prev, vs, lowerIsBetter = false }: { cur: number; prev: number; vs: { label: string; title: string }; lowerIsBetter?: boolean }) {
+  const diff = cur - prev;
+  const tone = diff === 0 ? 'same' : (diff > 0) !== lowerIsBetter ? 'good' : 'bad';
+  const text = diff === 0 ? '0%' : prev ? `${diff > 0 ? '+' : '−'}${Math.round((Math.abs(diff) / prev) * 100)}%` : `${diff > 0 ? '+' : '−'}${Math.abs(diff)}`;
+  return (
+    <span className={`trend ${tone}`} title={vs.title}>
+      {diff > 0 ? '▲' : diff < 0 ? '▼' : '='} {text} {vs.label} <span className="muted">({prev})</span>
+    </span>
+  );
+}
+
+/** Конверсия: разница в процентных пунктах с прошлым периодом. */
+function ConvTrend({ cur, prev, vs }: { cur: number | null; prev: number | null; vs: { label: string; title: string } }) {
+  if (cur === null || prev === null) return <span className="trend same" title={vs.title}> · {vs.label}: {prev === null ? 'сделок не было' : `${prev}%`}</span>;
+  const diff = cur - prev;
+  const tone = diff === 0 ? 'same' : diff > 0 ? 'good' : 'bad';
+  return (
+    <span className={`trend ${tone}`} title={vs.title}>
+      {' '}
+      {diff > 0 ? '▲' : diff < 0 ? '▼' : '='} {diff > 0 ? '+' : diff < 0 ? '−' : ''}
+      {Math.abs(diff)} п.п. {vs.label} <span className="muted">({prev}%)</span>
+    </span>
   );
 }
 

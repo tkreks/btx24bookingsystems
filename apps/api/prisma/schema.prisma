@@ -61,6 +61,9 @@ model Portal {
   systemMessages       SystemMessage[]
   autoMessages         AutoMessageLog[]
   appHeads             AppHead[]
+  dashboardHiddenChats DashboardHiddenChat[]
+  dealPaidAmounts      DealPaidAmount[]
+  dealPayments         DealPayment[]
 }
 
 enum PortalStatus {
@@ -357,6 +360,8 @@ model OpenlineChat {
   title            String?   @db.VarChar(255)
   /// Имя клиента: контакт (или компания/лид) из привязок CRM; title чата — это название сделки/линии.
   clientName       String?   @db.VarChar(255)
+  /// Аватарка клиента в открытой линии (URL из im.dialog.messages.get), для дашборда.
+  clientAvatar     String?   @db.VarChar(1000)
   /// Привязки к CRM: { leadId, contactId, companyId, dealId }.
   crm              Json?
   phones           Json?
@@ -375,6 +380,45 @@ model OpenlineChat {
   @@unique([portalId, chatId])
   @@index([portalId, lastMessageAt])
   @@index([portalId, responsibleId, lastMessageAt])
+}
+
+/// Чат, скрытый сотрудником с его дашборда (решение владельца 2026-10-23): в списке чатов остаётся.
+model DashboardHiddenChat {
+  id       String   @id @default(cuid())
+  portalId String
+  portal   Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId   Int
+  chatId   Int
+  hiddenAt DateTime @db.DateTime(3)
+
+  @@unique([portalId, userId, chatId])
+}
+
+/// Последняя увиденная «Сумма внесённых оплат» сделки (worker): рост суммы — оплата (`DealPayment`).
+/// Битрикс24 не хранит, когда поле изменилось, а оплаты на портале — только в этом поле.
+model DealPaidAmount {
+  id        String   @id @default(cuid())
+  portalId  String
+  portal    Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dealId    Int
+  amount    Decimal  @db.Decimal(14, 2)
+  checkedAt DateTime @db.DateTime(3)
+
+  @@unique([portalId, dealId])
+}
+
+/// Поступление оплаты по сделке: на сколько выросла «Сумма внесённых оплат» и когда это заметили
+/// (время изменения сделки) — «сделки с оплатой сегодня» на дашборде.
+model DealPayment {
+  id       String   @id @default(cuid())
+  portalId String
+  portal   Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dealId   Int
+  amount   Decimal  @db.Decimal(14, 2)
+  total    Decimal  @db.Decimal(14, 2)
+  at       DateTime @db.DateTime(3)
+
+  @@index([portalId, at])
 }
 
 /// Доступ сотрудника к чату — как решил Битрикс24 (imopenlines.dialog.get его токеном): кэш, чтобы

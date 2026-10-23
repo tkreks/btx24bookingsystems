@@ -3,12 +3,16 @@ import { todayIn, zonedDayRange, type ActivityDayDto, type ActivityEventDto } fr
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { FROM_HOUR, TO_HOUR, isSystemMessage, shiftOwner, summarize, type Shift } from './activity.js';
+import { FROM_HOUR, TO_HOUR, isSystemMessage, shiftOwner, shiftSpan, summarize, type Shift } from './activity.js';
+import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import { authorKind, phoneOutgoing, preview, type ImMessage, type ImUser } from './chat-parsing.js';
 
 /** Чатов дня, переписку которых смотрим (последние 50 сообщений каждого). */
 const MAX_CHATS = 150;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Смены, начатые раньше дня, но захватившие его (не закрыли рабочий день): ищем на столько назад. */
+const SHIFT_LOOKBACK_MS = 7 * 86_400_000;
+const SHARED_NAME = 'Совместное использование';
 
 type Row = Record<string, unknown>;
 
@@ -88,6 +92,9 @@ export class ActivityService {
     for (const a of actions) push(a.userId, ev(a.at, 'app', a.summary.slice(0, 160), { dealId: a.entityType === 'deal' ? Number(a.entityId) || null : null }));
 
     let unattributedPhone = 0;
+    // Сообщения с телефона, когда смены нескольких сотрудников совпали, — отдельной строкой.
+    const shared: ActivityEventDto[] = [];
+    const sharedIds = new Set<number>();
     const markList = marks.map((m) => ({ chatId: m.chatId, messageId: m.messageId, userId: m.userId, sentAt: m.sentAt.getTime() }));
     const msgs = await this.messages(user, chats.map((c) => c.chatId)).catch(() => {
       notes.push('Переписка недоступна: нет доступа к чатам открытых линий.');
@@ -107,8 +114,12 @@ export class ActivityService {
           const phone = phoneOutgoing(m.text);
           if (!phone) continue;
           const owner = shiftOwner(shifts, at);
+          const text = `С телефона${phone.author ? ` (${phone.author})` : ''} → «${who}»: ${preview(phone.text, 60)}`;
           if (owner === null) unattributedPhone++;
-          else push(owner, ev(m.date, 'phone', `С телефона${phone.author ? ` (${phone.author})` : ''} → «${who}»: ${preview(phone.text, 60)}`, { chatId }));
+          else if (typeof owner === 'object') {
+            owner.shared.forEach((id) => sharedIds.add(id));
+            shared.push(ev(m.date, 'phone', `${text} · на смене: ${owner.shared.map((id) => people.get(id)?.name ?? `#${id}`).join(', ')}`, { chatId }));
+          } else push(owner, ev(m.date, 'phone', text, { chatId }));
         }
       }
     }
@@ -116,40 +127,47 @@ export class ActivityService {
     if (unattributedPhone) notes.push(`Сообщений с телефона без смены: ${unattributedPhone} — никто не начал рабочий день в Битрикс24.`);
 
     const shiftOf = (id: number) => {
-      const s = shifts.find((x) => x.userId === id);
+      const s = shiftSpan(shifts, id);
       return s ? { start: new Date(s.start).toISOString(), end: s.end === null ? null : new Date(s.end).toISOString() } : null;
     };
     const employees = ids
-      .map((id) => summarize({ userId: id, name: people.get(id) ?? `#${id}`, shift: shiftOf(id) }, events.get(id) ?? [], tz))
+      .map((id) => summarize({ userId: id, name: people.get(id)?.name ?? `#${id}`, photo: people.get(id)?.photo ?? null, shift: shiftOf(id) }, events.get(id) ?? [], tz))
       // Сначала на смене и самые активные.
       .sort((a, b) => Number(!!b.shift) - Number(!!a.shift) || b.events.length - a.events.length);
+    if (shared.length) {
+      const names = [...sharedIds].map((id) => people.get(id)?.name ?? `#${id}`);
+      employees.push(summarize({ userId: 0, name: SHARED_NAME, photo: null, shift: null, sharedBy: names }, shared, tz));
+      notes.push(`Сообщений с телефона при совпавших сменах: ${shared.length} — смены были открыты одновременно (${names.join(', ')}), приписать одному нельзя.`);
+    }
     return { date, timezone: tz, fromHour: FROM_HOUR, toHour: TO_HOUR, employees, unattributedPhone, notes };
   }
 
-  /** Участники групп портала: сотрудники и сотрудники отделов → имена. */
-  private async employees(user: B24UserContext): Promise<Map<number, string>> {
+  /** Участники групп портала: сотрудники и сотрудники отделов → имена и аватарки. */
+  private async employees(user: B24UserContext): Promise<Map<number, { name: string; photo: string | null }>> {
     const members = await this.prisma.workGroupMember.findMany({ where: { group: { portalId: user.portal.id } }, select: { kind: true, bitrixId: true } });
     const userIds = new Set(members.filter((m) => m.kind === 'USER').map((m) => m.bitrixId));
     const depts = [...new Set(members.filter((m) => m.kind === 'DEPARTMENT').map((m) => m.bitrixId))];
-    const out = new Map<number, string>();
-    const name = (r: { ID: string; NAME?: string; LAST_NAME?: string }) => [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `#${r.ID}`;
+    type U = { ID: string; NAME?: string; LAST_NAME?: string; PERSONAL_PHOTO?: string | null };
+    const out = new Map<number, { name: string; photo: string | null }>();
+    const put = (r: U) => out.set(Number(r.ID), { name: [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `#${r.ID}`, photo: photoUrl(r.PERSONAL_PHOTO, user.portal.domain) });
     for (const dept of depts.slice(0, 20)) {
-      const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string }>('user.get', { FILTER: { UF_DEPARTMENT: dept, ACTIVE: true } }).catch(() => []);
-      for (const r of rows) out.set(Number(r.ID), name(r));
+      const rows = await user.client.listAll<U>('user.get', { FILTER: { UF_DEPARTMENT: dept, ACTIVE: true } }).catch(() => []);
+      rows.forEach(put);
     }
     const missing = [...userIds].filter((id) => !out.has(id));
     if (missing.length) {
-      const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string }>('user.get', { FILTER: { ID: missing } }).catch(() => []);
-      for (const r of rows) out.set(Number(r.ID), name(r));
-      for (const id of missing) if (!out.has(id)) out.set(id, `#${id}`);
+      const rows = await user.client.listAll<U>('user.get', { FILTER: { ID: missing } }).catch(() => []);
+      rows.forEach(put);
+      for (const id of missing) if (!out.has(id)) out.set(id, { name: `#${id}`, photo: null });
     }
     return out;
   }
 
   /**
-   * Рабочие дни, начатые в этот день, — история учёта времени (`timeman.record.list`, REST 3.0: по
-   * одному сотруднику за запрос). Несколько записей за день — от первого начала до последнего конца.
-   * REST 3.0 недоступен — как раньше, `timeman.status` (только последний день сотрудника).
+   * Рабочие дни, захватившие этот день, — история учёта времени (`timeman.record.list`, REST 3.0: по
+   * одному сотруднику за запрос): начатые в этот день и раньше (до недели), если не закончились до
+   * его начала, — незакрытый рабочий день продолжается «до сейчас». Каждая запись — отдельно (между
+   * ними сотрудник не на смене). REST 3.0 недоступен — `timeman.status` (последний день сотрудника).
    */
   private async shifts(user: B24UserContext, ids: number[], from: number, to: number, notes: string[] = []): Promise<Shift[]> {
     type Rec = { startTime?: string | null; endTime?: string | null; state?: { status?: string | null } | null };
@@ -162,7 +180,7 @@ export class ActivityService {
             // Период — одним `between` (оба конца включительно): конец дня минус секунда.
             filter: [
               ['userId', id],
-              ['startTime', 'between', [iso(from), iso(to - 1000)]],
+              ['startTime', 'between', [iso(from - SHIFT_LOOKBACK_MS), iso(to - 1000)]],
             ],
             select: ['id', 'startTime', 'endTime', 'state'],
             order: { startTime: 'ASC' },
@@ -172,13 +190,16 @@ export class ActivityService {
         }),
       );
       const out: Shift[] = [];
-      for (const { id, items } of rows) {
-        const starts = items.map((i) => Date.parse(String(i.startTime ?? ''))).filter(Number.isFinite);
-        if (!starts.length) continue;
-        const open = items.some((i) => !i.endTime || String(i.state?.status ?? '').toLowerCase() === 'opened');
-        const ends = items.map((i) => Date.parse(String(i.endTime ?? ''))).filter(Number.isFinite);
-        out.push({ userId: id, start: Math.min(...starts), end: open || !ends.length ? null : Math.max(...ends) });
-      }
+      for (const { id, items } of rows)
+        for (const i of items) {
+          const start = Date.parse(String(i.startTime ?? ''));
+          if (!Number.isFinite(start)) continue;
+          const e = Date.parse(String(i.endTime ?? ''));
+          const end = !Number.isFinite(e) || String(i.state?.status ?? '').toLowerCase() === 'opened' ? null : e;
+          // Закончилась до начала дня — не его смена.
+          if (end !== null && end <= from) continue;
+          out.push({ userId: id, start, end });
+        }
       return out;
     } catch (e) {
       notes.push(`История смен недоступна (${e instanceof Bitrix24Error ? e.code : 'ошибка'}) — видна только текущая смена.`);
@@ -193,9 +214,11 @@ export class ActivityService {
     for (const id of ids) {
       const r = res.result[`u${id}`] as { TIME_START?: string | null; TIME_FINISH?: string | null; STATUS?: string } | undefined;
       const s = Date.parse(String(r?.TIME_START ?? ''));
-      if (!Number.isFinite(s) || s < from || s >= to) continue;
+      if (!Number.isFinite(s) || s >= to) continue;
       const e = Date.parse(String(r?.TIME_FINISH ?? ''));
-      out.push({ userId: id, start: s, end: r?.STATUS === 'OPENED' || !Number.isFinite(e) ? null : e });
+      const end = r?.STATUS === 'OPENED' || !Number.isFinite(e) ? null : e;
+      if (end !== null && end <= from) continue;
+      out.push({ userId: id, start: s, end });
     }
     return out;
   }

@@ -1,3 +1,4 @@
+import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import type { ChatCrmLinks, ChatMessageDto, MessageAuthorKind } from '@btx24/shared';
 
 /** Пользователь из ответа im.dialog.messages.get (нужные поля). */
@@ -6,6 +7,13 @@ export interface ImUser {
   name?: string;
   bot?: boolean;
   connector?: boolean;
+  avatar?: string;
+}
+
+/** Аватарка клиента открытой линии: пользователь-коннектор (не бот) с картинкой. */
+export function clientAvatarOf(users: ImUser[], domain: string): string | null {
+  for (const u of users) if (u.connector && !u.bot) return photoUrl(u.avatar, domain);
+  return null;
 }
 
 export interface ImMessage {

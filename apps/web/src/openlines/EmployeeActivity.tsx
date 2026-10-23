@@ -2,7 +2,9 @@ import { Fragment, useEffect, useState } from 'react';
 import { ACTIVITY_KINDS, ACTIVITY_KIND_LABELS, todayIn, type ActivityDayDto, type ActivityKind, type EmployeeActivityDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
-import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
+import { fmtDateTime, fmtDayTitle, fmtTime, shiftDate } from '../format.js';
+import { Avatar } from './Avatar.js';
+import { dayKey } from './chat-list.js';
 
 const ICON: Record<ActivityKind, string> = { call: '📞', chat: '💬', phone: '📱', deal: '🤝', booking: '📅', app: '🖥' };
 const sum = (h: Record<ActivityKind, number>) => ACTIVITY_KINDS.reduce((s, k) => s + h[k], 0);
@@ -10,7 +12,8 @@ const sum = (h: Record<ActivityKind, number>) => ACTIVITY_KINDS.reduce((s, k) =>
 /**
  * «Активность сотрудников» (только администраторам приложения): кто что делал по часам 9–22 —
  * звонки, сообщения (свои и с телефона на смене), сделки, брони, действия в приложении. Смена —
- * по учёту рабочего времени Битрикс24. Клик по сотруднику — лента его действий за день.
+ * по учёту рабочего времени Битрикс24 (незакрытый рабочий день тянется «до сейчас»); сообщения с телефона,
+ * когда смены совпали, — строка «Совместное использование». Клик по сотруднику — лента его действий за день.
  */
 export function EmployeeActivity({ timezone, startDate }: { timezone: string; /** Сменился — показать этот день (начало периода дашборда). */ startDate?: string }) {
   const [date, setDate] = useState(() => startDate ?? todayIn(timezone));
@@ -76,13 +79,26 @@ export function EmployeeActivity({ timezone, startDate }: { timezone: string; /*
             <tbody>
               {d.employees.map((e) => (
                 <Fragment key={e.userId}>
-                  <tr className={open === e.userId ? 'open' : ''}>
+                  <tr className={`${open === e.userId ? 'open' : ''}${e.sharedBy ? ' act-shared' : ''}`}>
                     <th className="act-who">
                       <button type="button" aria-expanded={open === e.userId} onClick={() => setOpen(open === e.userId ? null : e.userId)}>
-                        <b>{e.name}</b>
-                        <span className={`act-shift${e.shift ? ' on' : ''}`}>
-                          {e.shift ? `смена ${fmtTime(e.shift.start, timezone)}–${e.shift.end ? fmtTime(e.shift.end, timezone) : 'сейчас'}` : 'смены нет'}
+                        <span className="act-name">
+                          {e.sharedBy ? (
+                            <span className="avatar act-shared-icon" style={{ width: 22, height: 22, fontSize: 12 }} aria-hidden="true">
+                              📱
+                            </span>
+                          ) : (
+                            <Avatar src={e.photo} name={e.name} size={22} />
+                          )}
+                          <b>{e.name}</b>
                         </span>
+                        {e.sharedBy ? (
+                          <span className="act-shift on" title="Смены были открыты одновременно — сообщения с телефона не приписать одному сотруднику">
+                            смены совпали: {e.sharedBy.join(', ')}
+                          </span>
+                        ) : (
+                          <span className={`act-shift${e.shift ? ' on' : ''}`}>{e.shift ? shiftText(e.shift, date, timezone) : 'смены нет'}</span>
+                        )}
                         <span className="act-totals muted">{totalsText(e)}</span>
                       </button>
                     </th>
@@ -129,11 +145,19 @@ export function EmployeeActivity({ timezone, startDate }: { timezone: string; /*
         </p>
       ))}
       <p className="muted act-note">
-        Сообщения с телефона (Wazzup «Исходящее сообщение») — тому, чья смена; боты, системные сообщения и автосообщения приложения не
+        Сообщения с телефона (Wazzup «Исходящее сообщение») — тому, чья смена; смены нескольких сотрудников открыты одновременно —
+        «Совместное использование». Боты, системные сообщения и автосообщения приложения не
         учитываются. Минуты в чатах — оценка: сообщения с перерывом до 10 минут считаются одной сессией.
       </p>
     </section>
   );
+}
+
+/** «смена 08:49–сейчас»; началась раньше дня (не закрыли рабочий день) — «смена с 18.10 18:10–сейчас». */
+function shiftText(s: NonNullable<EmployeeActivityDto['shift']>, date: string, tz: string): string {
+  const start = dayKey(s.start, tz) === date ? fmtTime(s.start, tz) : `с ${fmtDateTime(s.start, tz).replace(',', '')}`;
+  const end = !s.end ? 'сейчас' : dayKey(s.end, tz) === date ? fmtTime(s.end, tz) : fmtDateTime(s.end, tz).replace(',', '');
+  return `смена ${start}–${end}`;
 }
 
 function totalsText(e: EmployeeActivityDto): string {

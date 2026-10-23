@@ -199,6 +199,11 @@ export interface DashboardDto {
    * ответственный), и сколько из них от повторных клиентов. null — нет доступа к сделкам CRM.
    */
   newDeals: { total: number; repeat: number; items: DashboardNewDeal[]; truncated: boolean } | null;
+  /**
+   * Сделки с оплатой за период — по которым за период выросла «Сумма внесённых оплат» (учёт worker'а,
+   * `DealPayment`), той же выборки по воронкам и «Мои»; у сделок есть `payment`. null — нет доступа к сделкам.
+   */
+  paidDeals?: { total: number; items: DashboardNewDeal[] } | null;
   callsScope: CallScope;
   /** Воронка для «повторных» и доступные воронки (из групп пользователя). */
   callsFunnel: number | null;
@@ -226,6 +231,12 @@ export interface DashboardNewDeal {
   certificate: boolean;
   /** Источник сделки (SOURCE_ID и название из справочника CRM); null — не указан. */
   source: { id: string; name: string } | null;
+  /** Оплачена: счёт приложения оплачен или в сделке есть «Сумма внесённых оплат». */
+  paid: boolean;
+  /** Оплата за период (только в `paidDeals`): когда последняя и сколько поступило. */
+  payment?: { at: string; amount: number };
+  /** Бронь сделки (ближайшая активная из журнала): ресурсы и время; null — брони нет. */
+  slot: { start: string; end: string; resources: string[] } | null;
 }
 
 /**
@@ -293,15 +304,17 @@ export interface CallLogRowDto {
   status: CallStatus;
   /** Номер клиента: кто звонил (входящий) или куда звонили (исходящий). */
   clientPhone: string | null;
-  /** Сотрудник: кто принял (входящий) или кто звонил (исходящий). */
-  employee: { id: number; name: string | null } | null;
+  /** Сотрудник: кто принял (входящий) или кто звонил (исходящий); фото — аватарка в Битрикс24. */
+  employee: { id: number; name: string | null; photo?: string | null } | null;
   contact: { id: number; name: string | null } | null;
   owner: { typeId: number; id: number; title: string | null };
 }
 
-/** `GET /api/dashboard/recent-calls?scope=` — последние звонки журнала (до 50), новые сверху. */
+/** `GET /api/dashboard/recent-calls?scope=&from=&to=` — последние звонки периода (до 50), новые сверху. */
 export interface RecentCallsDto {
   scope: CallScope;
+  from?: string;
+  to?: string;
   items: CallLogRowDto[];
 }
 
@@ -326,6 +339,8 @@ export interface AttentionChatDto {
   chatId: number;
   title: string;
   clientName: string | null;
+  /** Аватарка клиента в открытой линии (URL); null — нет. */
+  clientAvatar: string | null;
   connector: string;
   lastMessageAt: string;
   /** Текст — только при включённом «сборе текстов». */
@@ -379,9 +394,17 @@ export interface ActivityEventDto {
 }
 
 export interface EmployeeActivityDto {
+  /** 0 — строка «Совместное использование» (`sharedBy`). */
   userId: number;
   name: string;
-  /** Рабочий день по timeman в этот день; null — не начинал (или нет доступа к учёту времени). */
+  /** Аватарка сотрудника в Битрикс24 (URL); null — нет. */
+  photo: string | null;
+  /**
+   * Строка «Совместное использование»: сообщения с телефона, когда смена была открыта сразу у
+   * нескольких сотрудников, — приписать одному нельзя. Имена тех, чьи смены совпали.
+   */
+  sharedBy?: string[];
+  /** Рабочий день по timeman, захвативший этот день (мог начаться раньше); null — не было (или нет доступа к учёту времени). */
   shift: { start: string; end: string | null } | null;
   /** По часам с `fromHour` до `toHour` (не включая): число событий каждого вида. */
   hours: Record<ActivityKind, number>[];
@@ -423,6 +446,8 @@ export interface HeadDayDto {
   lost: number;
 }
 
+export type HeadTotalsDto = Omit<HeadDayDto, 'date'> & { incoming: number; outgoing: number };
+
 /**
  * `GET /api/head-dashboard?from&to` — дашборд руководителя (⚙ → «Приложение» → «Руководители»): по дням
  * и итого. null — нет доступа к сделкам / звонкам CRM у руководителя.
@@ -432,7 +457,9 @@ export interface HeadDashboardDto {
   to: string;
   timezone: string;
   days: HeadDayDto[];
-  totals: Omit<HeadDayDto, 'date'> & { incoming: number; outgoing: number };
+  totals: HeadTotalsDto;
+  /** Предыдущий период той же длины (сегодня — вчера; 31 день — 31 день перед ним) — для сравнения. */
+  previous: { from: string; to: string; totals: HeadTotalsDto };
   deals: boolean;
   calls: boolean;
   notes: string[];

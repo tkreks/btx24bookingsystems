@@ -51,3 +51,16 @@ export function isIsoDate(value: string): boolean {
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   return d.toISOString().slice(0, 10) === value;
 }
+
+/** Дата (YYYY-MM-DD) плюс `days` календарных дней. */
+export function addDays(date: string, days: number): string {
+  const m = DATE_RE.exec(date);
+  if (!m) throw new Error(`Invalid date: ${date}`);
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
+}
+
+/** Предыдущий период той же длины, вплотную перед `[from, to]`: день — вчера, 31 день — 31 день до него. */
+export function previousPeriod(from: string, to: string): { from: string; to: string } {
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
+  return { from: addDays(from, -days), to: addDays(from, -1) };
+}

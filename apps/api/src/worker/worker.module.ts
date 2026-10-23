@@ -21,6 +21,8 @@ import { AutoMessageJob } from './auto-message.job.js';
 import { AutoMessagesService } from '../modules/payments/auto-messages.service.js';
 import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
 import { MessageContextService } from '../modules/bookings/message-context.service.js';
+import { DealPaymentsService } from '../modules/bookings/deal-payments.service.js';
+import { DealPaymentsJob } from './deal-payments.job.js';
 
 // Фоновые задачи (обновление кэша календаря, контроль оплат по таймауту, рассылки) живут здесь,
 // а не в api: api отвечает на запросы, worker выполняет работу по расписанию.
@@ -44,6 +46,8 @@ import { MessageContextService } from '../modules/bookings/message-context.servi
     AutoMessageJob,
     BookingTypeFillService,
     BookingTypeJob,
+    DealPaymentsService,
+    DealPaymentsJob,
   ],
 })
 export class WorkerModule {}

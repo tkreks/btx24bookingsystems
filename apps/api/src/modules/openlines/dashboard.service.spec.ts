@@ -10,6 +10,7 @@ const emptyJournal = {
   activeListBetween: vi.fn(async () => []),
   pendingRemoval: vi.fn(async () => new Set<number>()),
   dealBookingState: vi.fn(async () => new Map()),
+  activeForDeals: vi.fn(async () => []),
 } as unknown as BookingJournalService;
 
 describe('DashboardService', () => {
@@ -149,6 +150,7 @@ describe('DashboardService', () => {
   activeListBetween: vi.fn(async () => []),
   pendingRemoval: vi.fn(async () => new Set<number>()),
   dealBookingState: vi.fn(async () => new Map()),
+  activeForDeals: vi.fn(async () => []),
     } as unknown as BookingJournalService;
     const listAll = vi.fn(async (method: string, params?: { filter?: Record<string, unknown> }) =>
       method === 'crm.deal.list' && params?.filter?.['@ID']

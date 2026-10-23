@@ -14,13 +14,24 @@ export interface Shift {
 }
 
 /**
- * Кому приписать сообщение с телефона в момент `at`: тому, чья смена его покрывает; несколько —
- * первому начавшему; никто — если смена в этот день была ровно у одного, ему; иначе никому.
+ * Кому приписать сообщение с телефона в момент `at` (`shifts` — записи учёта времени, у сотрудника
+ * может быть несколько): тому, чья смена его покрывает; покрывают смены **нескольких** сотрудников
+ * (оба включили рабочий день) — приписать одному нельзя, это совместное использование телефона;
+ * никто — если смена в этот день была ровно у одного, ему; иначе никому.
  */
-export function shiftOwner(shifts: Shift[], at: number, now = Date.now()): number | null {
-  const covering = shifts.filter((s) => s.start <= at && at <= (s.end ?? now)).sort((a, b) => a.start - b.start);
-  if (covering.length) return covering[0].userId;
-  return shifts.length === 1 ? shifts[0].userId : null;
+export function shiftOwner(shifts: Shift[], at: number, now = Date.now()): number | { shared: number[] } | null {
+  const covering = [...new Set(shifts.filter((s) => s.start <= at && at <= (s.end ?? now)).map((s) => s.userId))];
+  if (covering.length > 1) return { shared: covering.sort((a, b) => a - b) };
+  if (covering.length) return covering[0];
+  const users = new Set(shifts.map((s) => s.userId));
+  return users.size === 1 ? shifts[0].userId : null;
+}
+
+/** Смена сотрудника для показа: от первого начала до последнего конца (открытая запись — «сейчас»). */
+export function shiftSpan(shifts: Shift[], userId: number): { start: number; end: number | null } | null {
+  const mine = shifts.filter((s) => s.userId === userId);
+  if (!mine.length) return null;
+  return { start: Math.min(...mine.map((s) => s.start)), end: mine.some((s) => s.end === null) ? null : Math.max(...mine.map((s) => s.end!)) };
 }
 
 /** Автосообщение приложения: то же ID, либо тот же чат, отправитель и время (±90 с). */
@@ -56,7 +67,7 @@ const empty = (): Record<ActivityKind, number> => Object.fromEntries(ACTIVITY_KI
 
 /** Часы дня портала, сводка и события сотрудника. */
 export function summarize(
-  person: { userId: number; name: string; shift: EmployeeActivityDto['shift'] },
+  person: Pick<EmployeeActivityDto, 'userId' | 'name' | 'shift' | 'photo' | 'sharedBy'>,
   events: ActivityEventDto[],
   timeZone: string,
 ): EmployeeActivityDto {

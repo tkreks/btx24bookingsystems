@@ -1,4 +1,4 @@
-import { chatMinutes, isSystemMessage, shiftOwner, summarize } from './activity.js';
+import { chatMinutes, isSystemMessage, shiftOwner, shiftSpan, summarize } from './activity.js';
 
 const t = (hhmm: string) => Date.parse(`2026-10-23T${hhmm}:00+03:00`);
 
@@ -9,10 +9,24 @@ describe('activity', () => {
       { userId: 270, start: t('14:00'), end: null },
     ];
     expect(shiftOwner(shifts, t('10:00'))).toBe(236);
-    expect(shiftOwner(shifts, t('14:30'))).toBe(236);
+    // Смены двоих совпали — приписать одному нельзя.
+    expect(shiftOwner(shifts, t('14:30'))).toEqual({ shared: [236, 270] });
+    // Второй выключил рабочий день — только первый.
+    expect(shiftOwner([{ userId: 270, start: t('08:00') - 86_400_000 * 5, end: null }, { userId: 236, start: t('09:00'), end: t('12:00') }], t('13:00'), t('21:00'))).toBe(270);
     expect(shiftOwner(shifts, t('20:00'), t('21:00'))).toBe(270);
     expect(shiftOwner([{ userId: 236, start: t('09:00'), end: t('12:00') }], t('13:00'))).toBe(236);
     expect(shiftOwner([], t('13:00'))).toBeNull();
+  });
+
+  it('shiftSpan: from first start to last end; an open record — till now', () => {
+    const shifts = [
+      { userId: 1, start: t('09:00'), end: t('12:00') },
+      { userId: 1, start: t('14:00'), end: t('18:00') },
+      { userId: 2, start: t('10:00'), end: null },
+    ];
+    expect(shiftSpan(shifts, 1)).toEqual({ start: t('09:00'), end: t('18:00') });
+    expect(shiftSpan(shifts, 2)).toEqual({ start: t('10:00'), end: null });
+    expect(shiftSpan(shifts, 3)).toBeNull();
   });
 
   it('app auto-messages are not the employee’s work: by message id or by chat, sender and time', () => {
@@ -35,7 +49,7 @@ describe('activity', () => {
 
   it('summarize buckets events by portal hours 9–22 and totals everything', () => {
     const e = (hhmm: string, kind: 'call' | 'chat', durationSec: number | null = null) => ({ at: new Date(t(hhmm)).toISOString(), kind, text: '', durationSec, dealId: null, chatId: null });
-    const s = summarize({ userId: 1, name: 'Анна', shift: null }, [e('09:15', 'call', 125), e('09:40', 'chat'), e('21:59', 'chat'), e('23:10', 'chat')], 'Europe/Moscow');
+    const s = summarize({ userId: 1, name: 'Анна', shift: null, photo: null }, [e('09:15', 'call', 125), e('09:40', 'chat'), e('21:59', 'chat'), e('23:10', 'chat')], 'Europe/Moscow');
     expect(s.hours).toHaveLength(13);
     expect(s.hours[0]).toMatchObject({ call: 1, chat: 1 });
     expect(s.hours[12]).toMatchObject({ chat: 1 });

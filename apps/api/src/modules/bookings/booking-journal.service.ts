@@ -320,6 +320,14 @@ export class BookingJournalService {
   }
 
   /** Бронь по сделкам: есть активная — booked, и оплачен счёт приложения по сделке — paid. */
+  /** Активные брони сделок, которые есть в Битрикс24 (без ждущих решения). */
+  async activeForDeals(portalId: string, dealIds: number[]): Promise<BookingRecord[]> {
+    if (!dealIds.length) return [];
+    const rows = await this.prisma.bookingRecord.findMany({ where: { portalId, status: 'active', dealId: { in: dealIds } } });
+    const gone = await this.pendingRemoval(portalId, rows.map((r) => r.bookingId));
+    return rows.filter((r) => !gone.has(r.bookingId));
+  }
+
   async dealBookingState(portalId: string, dealIds: number[]): Promise<Map<number, 'booked' | 'paid'>> {
     const out = new Map<number, 'booked' | 'paid'>();
     if (!dealIds.length) return out;

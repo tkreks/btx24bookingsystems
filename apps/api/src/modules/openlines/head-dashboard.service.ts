@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { todayIn, zonedDayRange, type HeadDashboardDto, type HeadDayDto } from '@btx24/shared';
+import { previousPeriod, todayIn, zonedDayRange, type HeadDashboardDto, type HeadDayDto, type HeadTotalsDto } from '@btx24/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
@@ -12,7 +12,8 @@ const digits10 = (v: unknown) => String(v ?? '').replace(/\D/g, '').slice(-10);
 /**
  * Дашборд руководителя (решение владельца 2026-10-23): по дням периода и итого — новые сделки (воронки
  * всех групп), брони по ним, повторные клиенты; звонки — все, пропущенные, упущенные (не перезвонили и
- * не написали клиенту в чат после пропущенного). Данные CRM — правами руководителя.
+ * не написали клиенту в чат после пропущенного). Итоги — и за предыдущий период той же длины (сравнение
+ * на плитках). Данные CRM — правами руководителя.
  */
 @Injectable()
 export class HeadDashboardService {
@@ -38,14 +39,18 @@ export class HeadDashboardService {
   private async compute(user: B24UserContext, query: { from?: unknown; to?: unknown }): Promise<HeadDashboardDto> {
     const tz = user.portal.timezone;
     const { from, to, start, end } = parsePeriod(tz, query);
+    // Сравнение — с предыдущим периодом той же длины (сегодня — со вчера).
+    const prev = previousPeriod(from, to);
+    const prevStart = zonedDayRange(prev.from, tz).start;
     const notes: string[] = [];
     const groups = await this.prisma.workGroup.findMany({ where: { portalId: user.portal.id, archivedAt: null }, select: { dealCategoryId: true } });
     const funnels = [...new Set(groups.map((g) => g.dealCategoryId).filter((x): x is number => x !== null))];
 
-    const [deals, calls] = await Promise.all([
+    const [deals, prevDeals, calls] = await Promise.all([
       this.dashboard.newDeals(user, start, end, 'all', funnels),
-      // Звонки — с начала периода по сейчас: перезвон мог быть позже.
-      this.dashboard.fetchCalls(user, start).then(
+      this.dashboard.newDeals(user, prevStart, start, 'all', funnels),
+      // Звонки — с начала прошлого периода по сейчас: перезвон мог быть позже.
+      this.dashboard.fetchCalls(user, prevStart).then(
         (r) => r,
         (e: unknown) => {
           if (e instanceof Bitrix24Error) return null;
@@ -53,45 +58,45 @@ export class HeadDashboardService {
         },
       ),
     ]);
-    if (deals?.truncated) notes.push('Новых сделок очень много — посчитаны не все.');
+    if (deals?.truncated || prevDeals?.truncated) notes.push('Новых сделок очень много — посчитаны не все.');
     if (calls?.truncated) notes.push('Звонков очень много — посчитаны не все.');
 
-    const dealIds = (deals?.items ?? []).map((d) => d.id);
+    const allDeals = [...(deals?.items ?? []), ...(prevDeals?.items ?? [])];
+    const dealIds = allDeals.map((d) => d.id);
     const records = dealIds.length
       ? await this.prisma.bookingRecord.findMany({ where: { portalId: user.portal.id, dealId: { in: dealIds } }, select: { dealId: true } })
       : [];
     const perDeal = new Map<number, number>();
     for (const r of records) if (r.dealId) perDeal.set(r.dealId, (perDeal.get(r.dealId) ?? 0) + 1);
 
-    const contacted = calls ? await this.chatContacts(user.portal.id, start) : [];
-    const days: HeadDayDto[] = [];
-    for (let date = from; date <= to; date = todayIn(tz, new Date(zonedDayRange(date, tz).end.getTime() + 1))) {
-      const r = zonedDayRange(date, tz);
-      const inDay = (iso: string) => {
-        const t = Date.parse(iso);
-        return t >= r.start.getTime() && t < r.end.getTime();
-      };
-      const dayDeals = (deals?.items ?? []).filter((d) => inDay(d.createdAt));
-      const dayCalls = (calls?.rows ?? []).filter((c) => inDay(c.START_TIME));
-      days.push({
-        date,
-        newDeals: dayDeals.length,
-        bookedDeals: dayDeals.filter((d) => (perDeal.get(d.id) ?? 0) > 0).length,
-        bookings: dayDeals.reduce((n, d) => n + (perDeal.get(d.id) ?? 0), 0),
-        repeat: dayDeals.filter((d) => d.repeat).length,
-        calls: dayCalls.length,
-        missed: dayCalls.filter((c) => String(c.DIRECTION) === '1' && isMissed(c)).length,
-        lost: calls ? callClients(calls.rows, r.start, r.end, null).filter((cl) => cl.lost && !reachedInChat(cl, contacted)).length : 0,
-      });
-    }
-    const sum = (k: keyof Omit<HeadDayDto, 'date'>) => days.reduce((n, d) => n + d[k], 0);
-    const periodCalls = (calls?.rows ?? []).filter((c) => Date.parse(c.START_TIME) < end.getTime());
-    return {
-      from,
-      to,
-      timezone: tz,
-      days,
-      totals: {
+    const contacted = calls ? await this.chatContacts(user.portal.id, prevStart) : [];
+    const daysOf = (a: string, b: string): HeadDayDto[] => {
+      const out: HeadDayDto[] = [];
+      for (let date = a; date <= b; date = todayIn(tz, new Date(zonedDayRange(date, tz).end.getTime() + 1))) {
+        const r = zonedDayRange(date, tz);
+        const inDay = (iso: string) => {
+          const t = Date.parse(iso);
+          return t >= r.start.getTime() && t < r.end.getTime();
+        };
+        const dayDeals = allDeals.filter((d) => inDay(d.createdAt));
+        const dayCalls = (calls?.rows ?? []).filter((c) => inDay(c.START_TIME));
+        out.push({
+          date,
+          newDeals: dayDeals.length,
+          bookedDeals: dayDeals.filter((d) => (perDeal.get(d.id) ?? 0) > 0).length,
+          bookings: dayDeals.reduce((n, d) => n + (perDeal.get(d.id) ?? 0), 0),
+          repeat: dayDeals.filter((d) => d.repeat).length,
+          calls: dayCalls.length,
+          missed: dayCalls.filter((c) => String(c.DIRECTION) === '1' && isMissed(c)).length,
+          lost: calls ? callClients(calls.rows, r.start, r.end, null).filter((cl) => cl.lost && !reachedInChat(cl, contacted)).length : 0,
+        });
+      }
+      return out;
+    };
+    const totalsOf = (days: HeadDayDto[], s: Date, e: Date): HeadTotalsDto => {
+      const sum = (k: keyof Omit<HeadDayDto, 'date'>) => days.reduce((n, d) => n + d[k], 0);
+      const periodCalls = (calls?.rows ?? []).filter((c) => Date.parse(c.START_TIME) >= s.getTime() && Date.parse(c.START_TIME) < e.getTime());
+      return {
         newDeals: sum('newDeals'),
         bookedDeals: sum('bookedDeals'),
         bookings: sum('bookings'),
@@ -101,7 +106,16 @@ export class HeadDashboardService {
         lost: sum('lost'),
         incoming: periodCalls.filter((c) => String(c.DIRECTION) === '1').length,
         outgoing: periodCalls.filter((c) => String(c.DIRECTION) !== '1').length,
-      },
+      };
+    };
+    const days = daysOf(from, to);
+    return {
+      from,
+      to,
+      timezone: tz,
+      days,
+      totals: totalsOf(days, start, end),
+      previous: { ...prev, totals: totalsOf(daysOf(prev.from, prev.to), prevStart, start) },
       deals: deals !== null,
       calls: calls !== null,
       notes,

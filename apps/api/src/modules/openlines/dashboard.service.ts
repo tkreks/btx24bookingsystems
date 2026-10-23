@@ -22,7 +22,9 @@ import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingJournalService } from '../bookings/booking-journal.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
-import { happened, isCertificatePurchase, outcomeSelect } from '../bookings/deal-outcome.js';
+import { DealPaymentsService } from '../bookings/deal-payments.service.js';
+import { happened, isCertificatePurchase, outcomeSelect, paidSum } from '../bookings/deal-outcome.js';
+import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { callClients, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
@@ -45,6 +47,7 @@ export class DashboardService {
     private readonly chats: ChatsService,
     private readonly journal: BookingJournalService,
     private readonly fieldMap?: DealFieldMapService,
+    private readonly payments?: DealPaymentsService,
   ) {}
 
   /** Готовый дашборд сотрудника на 30 секунд: переключение периода и возврат — без новых запросов к порталу. */
@@ -93,7 +96,7 @@ export class DashboardService {
         throw err;
       },
     );
-    const [bookings, bookingDays, calls, callsTotal, newDeals, callFunnels, attention] = await Promise.all([
+    const [bookings, bookingDays, calls, callsTotal, newDeals, callFunnels, attention, paidDeals] = await Promise.all([
       want('base') ? this.bookings(user, start, end, callsScope, resourceIds) : undefined,
       want('base') ? this.bookingDays(user, resourceIds) : undefined,
       want('calls') ? callRows.then((rows) => (rows ? this.callCounts(user, rows, start, end, callsScope, callsFunnel) : null)) : undefined,
@@ -106,11 +109,12 @@ export class DashboardService {
       this.funnelNames(user, funnelIds),
       // Чаты — из кэша (без запросов к порталу).
       want('base') && openlines ? this.chats.attention(user) : null,
+      want('deals') ? this.paidDeals(user, start, end, callsScope, funnelIds) : undefined,
     ]);
     const out: Partial<DashboardDto> = { from, to, callsScope, callsFunnel, callFunnels };
     if (want('base')) Object.assign(out, { chats: attention ? { waitingReply: attention.waiting, attention: attention.items } : null, bookings, bookingDays });
     if (want('calls')) Object.assign(out, { calls, callsTotal });
-    if (want('deals')) Object.assign(out, { newDeals });
+    if (want('deals')) Object.assign(out, { newDeals, paidDeals });
     return out;
   }
 
@@ -197,16 +201,23 @@ export class DashboardService {
 
   /**
    * Последние звонки из журнала (блок «Звонки» на дашборде): новые сверху, до 50 — дашборд
-   * показывает по 5. Правами сотрудника: только звонки, которые он видит в CRM.
+   * показывает по 5; с `from`/`to` — только звонки периода. Правами сотрудника: только звонки,
+   * которые он видит в CRM.
    */
-  async recentCalls(user: B24UserContext, query: { scope?: unknown }): Promise<RecentCallsDto> {
+  async recentCalls(user: B24UserContext, query: { scope?: unknown; from?: unknown; to?: unknown }): Promise<RecentCallsDto> {
     const scope = parseScope(query.scope);
+    const period = query.from === undefined ? null : parsePeriod(user.portal.timezone, query);
     const res = await user.client.call<CallActivity[]>('crm.activity.list', {
-      filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', ...(scope === 'mine' ? { RESPONSIBLE_ID: user.userId } : {}) },
+      filter: {
+        TYPE_ID: 2,
+        PROVIDER_ID: 'VOXIMPLANT_CALL',
+        ...(scope === 'mine' ? { RESPONSIBLE_ID: user.userId } : {}),
+        ...(period ? { '>=START_TIME': period.start.toISOString(), '<START_TIME': period.end.toISOString() } : {}),
+      },
       order: { START_TIME: 'DESC' },
       select: ['ID', 'OWNER_ID', 'OWNER_TYPE_ID', 'DIRECTION', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'SETTINGS', 'COMMUNICATIONS'],
     });
-    return { scope, items: await this.logRows(user, res.result ?? []) };
+    return { scope, ...(period ? { from: period.from, to: period.to } : {}), items: await this.logRows(user, res.result ?? []) };
   }
 
   private async logRows(user: B24UserContext, mine: CallActivity[]): Promise<CallLogRowDto[]> {
@@ -214,7 +225,7 @@ export class DashboardService {
     const [titles, contacts, employees] = await Promise.all([
       this.ownerTitles(user, mine),
       this.contactNames(user, contactIds),
-      this.employeeNames(user, mine.map((c) => Number(c.RESPONSIBLE_ID) || 0)),
+      this.employees(user, mine.map((c) => Number(c.RESPONSIBLE_ID) || 0)),
     ]);
     return mine.map((c) => {
         const contactId = Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0;
@@ -226,7 +237,7 @@ export class DashboardService {
           direction: String(c.DIRECTION) === '1' ? 'incoming' : 'outgoing',
           status: callStatus(c),
           clientPhone: c.COMMUNICATIONS?.find((x) => x.VALUE)?.VALUE ?? null,
-          employee: emp ? { id: emp, name: employees.get(emp) ?? null } : null,
+          employee: emp ? { id: emp, name: employees.get(emp)?.name ?? null, photo: employees.get(emp)?.photo ?? null } : null,
           contact: contactId ? { id: contactId, name: contacts.get(contactId) ?? null } : null,
           owner: { typeId: Number(c.OWNER_TYPE_ID), id: Number(c.OWNER_ID), title: titles.get(`${c.OWNER_TYPE_ID}:${c.OWNER_ID}`) ?? null },
         };
@@ -234,12 +245,18 @@ export class DashboardService {
   }
 
   private async employeeNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
-    const out = new Map<number, string>();
+    return new Map([...(await this.employees(user, ids))].map(([id, e]) => [id, e.name]));
+  }
+
+  /** Имена и аватарки сотрудников (user.get). */
+  private async employees(user: B24UserContext, ids: number[]): Promise<Map<number, { name: string; photo: string | null }>> {
+    const out = new Map<number, { name: string; photo: string | null }>();
     const unique = [...new Set(ids.filter((x) => x > 0))].slice(0, 200);
     if (!unique.length) return out;
     try {
-      const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string }>('user.get', { FILTER: { ID: unique } });
-      for (const r of rows) out.set(Number(r.ID), [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `#${r.ID}`);
+      const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string; PERSONAL_PHOTO?: string | null }>('user.get', { FILTER: { ID: unique } });
+      for (const r of rows)
+        out.set(Number(r.ID), { name: [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `#${r.ID}`, photo: photoUrl(r.PERSONAL_PHOTO, user.portal.domain) });
     } catch {
       /* без имён — покажем номер сотрудника */
     }
@@ -273,7 +290,15 @@ export class DashboardService {
    * Повторный клиент — у контакта есть состоявшаяся сделка той же воронки, созданная раньше этой
    * (то же правило «состоялась», что у звонков: не проиграна и бронь прошла / выиграна).
    */
-  async newDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['newDeals']> {
+  async newDeals(
+    user: B24UserContext,
+    start: Date,
+    end: Date,
+    scope: CallScope,
+    funnelIds: number[],
+    /** Только эти сделки (любой даты создания) — для «сделок с оплатой». */
+    ids?: number[],
+  ): Promise<DashboardDto['newDeals']> {
     type Row = Record<string, string | null>;
     const outcome = (await this.fieldMap?.outcome(user.portal.id, user.client).catch(() => null)) ?? { certificateTypeId: null };
     try {
@@ -281,19 +306,28 @@ export class DashboardService {
         'crm.deal.list',
         {
           filter: {
-            '>=DATE_CREATE': start.toISOString(),
-            '<DATE_CREATE': end.toISOString(),
+            ...(ids ? { '@ID': ids } : { '>=DATE_CREATE': start.toISOString(), '<DATE_CREATE': end.toISOString() }),
             ...(funnelIds.length ? { '@CATEGORY_ID': funnelIds } : {}),
             ...(scope === 'mine' ? { ASSIGNED_BY_ID: user.userId } : {}),
           },
           order: { DATE_CREATE: 'DESC' },
-          select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID', 'SOURCE_ID', ...outcomeSelect(outcome)],
+          select: [
+            'ID',
+            'TITLE',
+            'CATEGORY_ID',
+            'CONTACT_ID',
+            'DATE_CREATE',
+            'OPPORTUNITY',
+            'CURRENCY_ID',
+            'SOURCE_ID',
+            ...new Set([...outcomeSelect(outcome), ...(outcome.paidAmount ? [outcome.paidAmount] : [])]),
+          ],
         },
         { max: MAX_NEW_DEALS },
       );
       const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
       // Сделки клиентов — пачками параллельно (темп держит ограничитель портала), имена — заодно.
-      const [earlierChunks, names, bookingState, sources] = await Promise.all([
+      const [earlierChunks, names, bookingState, sources, slots] = await Promise.all([
         Promise.all(
           chunks(contactIds, CONTACT_CHUNK).map((ids) =>
             user.client.listAll<Row>(
@@ -309,6 +343,7 @@ export class DashboardService {
         this.contactNames(user, contactIds),
         this.journal.dealBookingState(user.portal.id, rows.map((d) => Number(d.ID))),
         rows.some((d) => d.SOURCE_ID) ? this.sourceNames(user) : new Map<string, string>(),
+        this.dealSlots(user, rows.map((d) => Number(d.ID))),
       ]);
       const earlier = earlierChunks.flat();
       const items: DashboardNewDeal[] = rows.map((d) => {
@@ -335,6 +370,8 @@ export class DashboardService {
           booking: bookingState.get(Number(d.ID)) ?? 'none',
           certificate: isCertificatePurchase(d, outcome),
           source: d.SOURCE_ID ? { id: d.SOURCE_ID, name: sources.get(d.SOURCE_ID) ?? d.SOURCE_ID } : null,
+          paid: bookingState.get(Number(d.ID)) === 'paid' || (!!outcome.paidAmount && paidSum(d[outcome.paidAmount]) > 0),
+          slot: slots.get(Number(d.ID)) ?? null,
         };
       });
       return { total: items.length, repeat: items.filter((i) => i.repeat).length, items, truncated: rows.length >= MAX_NEW_DEALS };
@@ -342,6 +379,40 @@ export class DashboardService {
       if (err instanceof Bitrix24Error) return null;
       throw err;
     }
+  }
+
+  /** Сделки, по которым за период поступила оплата (учёт `DealPayment`), — в выборке «Новых сделок». */
+  private async paidDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['paidDeals']> {
+    if (!this.payments) return { total: 0, items: [] };
+    const paid = await this.payments.paidIn(user.portal.id, start, end);
+    if (!paid.size) return { total: 0, items: [] };
+    const ids = [...paid.keys()].slice(0, MAX_NEW_DEALS);
+    const deals = await this.newDeals(user, start, end, scope, funnelIds, ids);
+    if (!deals) return null;
+    const items = deals.items
+      .map((d) => ({ ...d, paid: true, payment: { at: paid.get(d.id)!.at.toISOString(), amount: paid.get(d.id)!.amount } }))
+      .sort((a, b) => Date.parse(b.payment.at) - Date.parse(a.payment.at));
+    return { total: items.length, items };
+  }
+
+  /** Ближайшая активная бронь каждой сделки (журнал) с названиями ресурсов. */
+  private async dealSlots(user: B24UserContext, dealIds: number[]): Promise<Map<number, NonNullable<DashboardNewDeal['slot']>>> {
+    const out = new Map<number, NonNullable<DashboardNewDeal['slot']>>();
+    const records = await this.journal.activeForDeals(user.portal.id, dealIds);
+    if (!records.length) return out;
+    const names = await this.resourceNames(user).catch(() => new Map<number, string>());
+    const now = Date.now();
+    // Идущая или ближайшая будущая; все прошли — последняя.
+    const rank = (r: BookingRecord) => (r.endsAt.getTime() > now ? r.startsAt.getTime() : Number.MAX_SAFE_INTEGER - r.endsAt.getTime() / 1000);
+    for (const r of [...records].sort((a, b) => rank(a) - rank(b))) {
+      if (!r.dealId || out.has(r.dealId)) continue;
+      out.set(r.dealId, {
+        start: r.startsAt.toISOString(),
+        end: r.endsAt.toISOString(),
+        resources: (r.resourceIds as number[]).map((id) => names.get(Number(id)) ?? `Ресурс ${id}`),
+      });
+    }
+    return out;
   }
 
   /**

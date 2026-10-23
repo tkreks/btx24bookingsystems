@@ -25,6 +25,7 @@ describe('«Не требует ответа» — общая отметка ч�
       },
       openlineChatAccess: { findMany: vi.fn(async () => rows.map((r) => ({ chatId: r.chatId }))) },
       chatFolderItem: { findMany: vi.fn(async () => ignored.map((chatId) => ({ chatId }))) },
+      dashboardHiddenChat: { findMany: vi.fn(async () => []) },
     } as unknown as PrismaService;
     const call = vi.fn(async () => ({
       result: { messages: [{ id: 100, author_id: 55, date: '2026-10-22T09:00:00Z', text: 'Здравствуйте' }], users: [{ id: 55, connector: true }] },

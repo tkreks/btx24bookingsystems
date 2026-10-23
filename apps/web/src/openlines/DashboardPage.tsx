@@ -3,6 +3,7 @@ import {
   todayIn,
   CALL_KINDS,
   CALL_KIND_LABELS,
+  type AttentionChatDto,
   type BookingAlertListDto,
   type CallKind,
   type CallScope,
@@ -13,10 +14,11 @@ import {
   type DashboardNewDeal,
   type SessionInfo,
 } from '@btx24/shared';
-import { apiGet, logout } from '../api.js';
+import { apiGet, apiPost, logout } from '../api.js';
 import { isStandalone, openCrm, openPortalPath } from '../b24.js';
-import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
-import { dayKey } from './chat-list.js';
+import { fmtAt, fmtDateTime, fmtMoney, fmtTime, fmtWhen } from '../format.js';
+import { Avatar } from './Avatar.js';
+import { avatarTone, dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
 import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
@@ -39,8 +41,8 @@ const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p ==
 
 /**
  * Дашборд менеджера: в одном ряду — плитки (чаты ждут ответа, брони, звонки, новые сделки, повторные
- * клиенты); ниже две колонки блоков: сообщения клиентов без ответа и последние звонки | брони сегодня
- * и сделки за сегодня (по 5, «Ещё»); дальше — новые и удалённые брони. У каждого блока — иконка.
+ * клиенты); ниже две колонки блоков: сообщения клиентов без ответа и звонки периода | сделки за сегодня
+ * и брони сегодня (по 5, «Ещё»); дальше — новые и удалённые брони. У каждого блока — иконка.
  */
 export function DashboardPage({
   session,
@@ -79,6 +81,8 @@ export function DashboardPage({
   const [error, setError] = useState('');
   const [alertCount, setAlertCount] = useState<number | null>(null);
   const [attentionShown, setAttentionShown] = useState(ATTENTION_STEP);
+  const [hidden, setHidden] = useState<Set<number>>(() => new Set());
+  const [hiding, setHiding] = useState<AttentionChatDto | null>(null);
   const [askCode, setAskCode] = useState(false);
   const [callsScope, setCallsScope] = useState<CallScope>('all');
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
@@ -132,6 +136,9 @@ export function DashboardPage({
   // null — недоступно (нет прав), undefined — ещё считается.
   const n = (v: number | null | undefined) => (v === undefined ? '…' : v === null ? '—' : String(v));
   const word = periodWord(preset);
+  // Скрытые с дашборда (👁) — сразу, не дожидаясь нового ответа сервера.
+  const attention = (d?.chats?.attention ?? []).filter((c) => !hidden.has(c.chatId));
+  const waiting = Math.max(0, (d?.chats?.waitingReply ?? 0) - ((d?.chats?.attention ?? []).length - attention.length));
 
   const periodBar = (
     <div className="period-bar">
@@ -250,7 +257,10 @@ export function DashboardPage({
             <Icon name="calendar" size={20} />
           </button>
           <h1>Мой дашборд</h1>
-          <span className="muted">{session.user.name}</span>
+          <span className="muted toolbar-user">
+            <Avatar src={session.user.photo} name={session.user.name} size={26} />
+            {session.user.name}
+          </span>
         </div>
         <div className="toolbar-controls">
           <WorkdayButton timezone={tz} />
@@ -298,14 +308,25 @@ export function DashboardPage({
         />
       )}
 
+      {hiding && (
+        <HideChatDialog
+          chat={hiding}
+          onClose={() => setHiding(null)}
+          onHidden={(id) => {
+            setHidden((h) => new Set(h).add(id));
+            setHiding(null);
+          }}
+        />
+      )}
+
       {periodBar}
       {errorBox}
 
       <div className={`dash-row${d ? '' : ' loading'}`}>
-        <div className={`dash-tile${openlines && d?.chats?.waitingReply ? ' warn' : ''}`}>
+        <div className={`dash-tile${openlines && waiting ? ' warn' : ''}`}>
           <DashBadge name="alert" />
           <span className="dash-tile-label">Чатов ждут ответа</span>
-          <span className="dash-tile-value">{openlines ? n(d?.chats?.waitingReply) : '—'}</span>
+          <span className="dash-tile-value">{openlines ? n(d?.chats ? waiting : undefined) : '—'}</span>
           {openlines ? (
             // Чаты → «Все доступные» → «Все».
             <button className="primary dash-tile-action" onClick={() => onChats({})}>
@@ -363,48 +384,66 @@ export function DashboardPage({
           <DashBadge name="chats" />
           <p className="dash-attention-title muted">
             Последние сообщения клиентов без ответа
-            {d?.chats && <span className={`pill${d.chats.waitingReply ? ' waiting' : ''}`}>{d.chats.waitingReply}</span>}
+            {d?.chats && <span className={`pill${waiting ? ' waiting' : ''}`}>{waiting}</span>}
           </p>
           {!d && <p className="muted">Загрузка…</p>}
-          {d?.chats && !d.chats.attention?.length && <p className="muted">Все клиенты получили ответ.</p>}
+          {d?.chats && !attention.length && <p className="muted">Все клиенты получили ответ.</p>}
           <ul className="attention-rows">
-            {d?.chats?.attention?.slice(0, attentionShown).map((c) => (
-              <li key={c.chatId}>
-                <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
-                  <span className="attention-title">
-                    <b title={c.title}>{c.clientName || c.title}</b>
-                    <Channel connector={c.connector} />
-                  </span>
-                  <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
-                  <span className="attention-time">{fmtDateTime(c.lastMessageAt, tz)}</span>
-                </button>
-                {c.dealId && (
-                  <button className="link attention-deal" onClick={() => openCrm('deal', c.dealId!)}>
-                    Сделка #{c.dealId}
+            {attention.slice(0, attentionShown).map((c) => {
+              const name = c.clientName || c.title;
+              return (
+                <li key={c.chatId}>
+                  <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
+                    <span className="attention-title">
+                      <Channel connector={c.connector} />
+                      <Avatar src={c.clientAvatar} name={name} size={24} tone={avatarTone(c.chatId)} />
+                      <span className="attention-name" title={c.title}>
+                        {name}
+                      </span>
+                    </span>
+                    <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
+                    <span className="attention-time">{fmtWhen(c.lastMessageAt, tz)}</span>
                   </button>
-                )}
-              </li>
-            ))}
+                  <span className="attention-actions">
+                    <button
+                      className="dash-icon-btn"
+                      title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'}
+                      aria-label="Открыть сделку"
+                      disabled={!c.dealId}
+                      onClick={() => c.dealId && openCrm('deal', c.dealId)}
+                    >
+                      <Icon name="handshake" size={18} />
+                    </button>
+                    <button className="dash-icon-btn" title="Перейти в чат" aria-label="Перейти в чат" onClick={() => onChats({ chatId: c.chatId })}>
+                      <Icon name="chat" size={18} />
+                    </button>
+                    <button className="dash-icon-btn" title="Скрыть чат с дашборда" aria-label="Скрыть чат с дашборда" onClick={() => setHiding(c)}>
+                      <Icon name="eye" size={18} />
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
           {!!d?.chats &&
-            ((d.chats.attention?.length ?? 0) > attentionShown ? (
+            (attention.length > attentionShown ? (
               <button className="dash-more" onClick={() => setAttentionShown((n) => n + ATTENTION_STEP)}>
-                Ещё {Math.min(ATTENTION_STEP, (d.chats.attention?.length ?? 0) - attentionShown)}
+                Ещё {Math.min(ATTENTION_STEP, attention.length - attentionShown)}
               </button>
             ) : (
-              d.chats.waitingReply > (d.chats.attention?.length ?? 0) && (
+              waiting > attention.length && (
                 <button className="dash-more" onClick={() => onChats({ waiting: true })}>
-                  Все ждущие ответа ({d.chats.waitingReply})
+                  Все ждущие ответа ({waiting})
                 </button>
               )
             ))}
         </section>
       )}
-        <RecentCalls scope={callsScope} timezone={tz} />
+        <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} />
       </div>
       <div className="dash-col">
+        <DealsCreated d={d} tz={tz} word={word} oneDay={range.from === range.to} />
         <TodayBookings d={d} tz={tz} />
-        <DealsCreated d={d} tz={tz} word={word} />
       </div>
       </div>
 
@@ -613,7 +652,23 @@ function MoreButton({ total, shown, onMore }: { total: number; shown: number; on
   );
 }
 
-/** «Брони сегодня»: сделки с бронью на сегодня (зелёным), по 5. */
+/** Бронь относительно «сейчас»: прошла (голубая), идёт (зелёная), ещё впереди (жёлтая). */
+function slotState(start: string, end: string, now = Date.now()): 'past' | 'now' | 'soon' {
+  if (Date.parse(end) <= now) return 'past';
+  return Date.parse(start) <= now ? 'now' : 'soon';
+}
+const SLOT_LABEL = { past: 'прошла', now: 'идёт сейчас', soon: 'впереди' } as const;
+
+/** Время брони: сегодняшняя — «14:00–16:00», иначе — с датами. */
+function slotText(start: string, end: string, tz: string): string {
+  const today = todayIn(tz);
+  return dayKey(start, tz) === today && dayKey(end, tz) === today ? `${fmtTime(start, tz)}–${fmtTime(end, tz)}` : bookingRange(start, end, tz);
+}
+
+/**
+ * «Брони сегодня»: сделки с бронью на сегодня, по 5. В строке — сумма сделки, сделка и клиент, ресурс,
+ * время; цвет — прошла (голубая), идёт (зелёная), впереди (жёлтая).
+ */
 function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string }) {
   const [shown, setShown] = useState(LIST_STEP);
   const booked = [...new Map((d?.bookingDays?.todayItems ?? []).filter((r) => r.dealId).map((r) => [r.dealId!, r])).values()];
@@ -626,23 +681,29 @@ function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string 
       </p>
       {!d?.bookingDays && <p className="muted">Загрузка…</p>}
       <ul className="dt-rows">
-        {booked.slice(0, shown).map((r) => (
-          <li key={`b${r.bookingId}`}>
-            <button className={`dt-row today${r.pendingRemoval ? ' missing' : ''}`} onClick={() => openCrm('deal', r.dealId!)}>
-              <span className="dt-main">
-                <b>{r.deal?.client || r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
-                <span className="muted">
-                  {r.resources.join(', ')}
-                  {r.pendingRemoval ? ' · удалена в Битрикс24 — ждёт решения' : ''}
+        {booked.slice(0, shown).map((r) => {
+          const state = slotState(r.start, r.end);
+          return (
+            <li key={`b${r.bookingId}`}>
+              <button
+                className={`dt-row dt-grid slot-${state}${r.pendingRemoval ? ' today missing' : ''}`}
+                title={r.pendingRemoval ? 'Удалена в Битрикс24 — ждёт решения' : `Бронь ${SLOT_LABEL[state]}`}
+                onClick={() => openCrm('deal', r.dealId!)}
+              >
+                <span className="dt-amount">{r.deal ? fmtMoney(r.deal.opportunity ?? 0, r.deal.currency) : '—'}</span>
+                <span className="dt-main">
+                  <b>{r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
+                  <span className="muted">
+                    {r.deal?.client || 'без клиента'}
+                    {r.pendingRemoval ? ' · удалена в Битрикс24 — ждёт решения' : ''}
+                  </span>
                 </span>
-              </span>
-              <span className="dt-side">
-                <span>{bookingRange(r.start, r.end, tz)}</span>
-                {r.deal?.opportunity ? <span className="muted">{fmtMoney(r.deal.opportunity, r.deal.currency)}</span> : null}
-              </span>
-            </button>
-          </li>
-        ))}
+                <span className="dt-res">{r.resources.join(', ')}</span>
+                <span className={`dt-time slot-chip ${state}`}>{slotText(r.start, r.end, tz)}</span>
+              </button>
+            </li>
+          );
+        })}
         {d?.bookingDays && !booked.length && <li className="muted dt-empty">Броней по сделкам на сегодня нет.</li>}
       </ul>
       <MoreButton total={booked.length} shown={shown} onMore={() => setShown((n) => n + LIST_STEP)} />
@@ -650,42 +711,130 @@ function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string 
   );
 }
 
-/** «Сделки за сегодня» (или за период): созданные сделки со значком брони (🪙 — оплачена), по 5. */
-function DealsCreated({ d, tz, word }: { d: Partial<DashboardDto> | null; tz: string; word: string }) {
+/**
+ * «Сделки за сегодня» (или за период): созданные сделки, по 5. В строке — сумма, сделка и клиент,
+ * ресурс и время брони (цвет брони — как в «Бронях сегодня»); оплаченные — зелёные, с 🪙.
+ */
+function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null; tz: string; word: string; oneDay: boolean }) {
   const [shown, setShown] = useState(LIST_STEP);
-  const created = d?.newDeals?.items ?? [];
+  // «Созданные за период» / «с оплатой за период» (поступила оплата — любая дата создания).
+  const [mode, setMode] = useState<'created' | 'paid'>('created');
+  const paidMode = mode === 'paid';
+  const created = (paidMode ? d?.paidDeals?.items : d?.newDeals?.items) ?? [];
+  const when = word === 'сегодня' ? 'за сегодня' : word;
+  const paidWhen = word === 'сегодня' ? 'с оплатой сегодня' : word === 'вчера' ? 'с оплатой вчера' : 'с оплатой за период';
+  const switchTo = (m: 'created' | 'paid') => {
+    setMode(m);
+    setShown(LIST_STEP);
+  };
   return (
     <section className="day-panel dash-block dash-deals-created">
       <DashBadge name="handshake" />
       <p className="dash-attention-title muted">
-        Сделки {word === 'сегодня' ? 'за сегодня' : word}
-        {d?.newDeals && <span className="pill">{d.newDeals.total}</span>}
+        Сделки
+        {d?.newDeals && (
+          <span className="pill" title={`Создано ${when} / ${paidWhen}`}>
+            {d.newDeals.total}/{d.paidDeals?.total ?? 0}
+          </span>
+        )}
       </p>
+      <div className="segmented dt-switch" role="group" aria-label="Какие сделки">
+        <button className={paidMode ? '' : 'active'} aria-pressed={!paidMode} onClick={() => switchTo('created')}>
+          {when[0].toUpperCase() + when.slice(1)} · {d?.newDeals?.total ?? '…'}
+        </button>
+        <button className={paidMode ? 'active' : ''} aria-pressed={paidMode} onClick={() => switchTo('paid')}>
+          🪙 {paidWhen[0].toUpperCase() + paidWhen.slice(1)} · {d?.paidDeals === undefined ? '…' : (d.paidDeals?.total ?? '—')}
+        </button>
+      </div>
       {(!d || d.newDeals === undefined) && <p className="muted">Загрузка…</p>}
       {d?.newDeals === null && <p className="muted">Нет доступа к сделкам CRM.</p>}
       <ul className="dt-rows">
-        {created.slice(0, shown).map((i) => (
-          <li key={`n${i.id}`}>
-            <button className="dt-row" onClick={() => openCrm('deal', i.id)}>
-              <span className="dt-main">
-                <b>{i.contact?.name || i.title}</b>
-                <span className="muted">
-                  {fmtTime(i.createdAt, tz)}
-                  {i.source ? ` · ${i.source.name}` : ''}
-                  {i.repeat ? ' · повторный' : ''}
+        {created.slice(0, shown).map((i) => {
+          const state = i.slot ? slotState(i.slot.start, i.slot.end) : null;
+          return (
+            <li key={`n${i.id}`}>
+              <button className={`dt-row dt-grid${i.paid ? ' paid' : ''}`} title={i.paid ? 'Сделка оплачена' : undefined} onClick={() => openCrm('deal', i.id)}>
+                <span className="dt-amount">
+                  {i.paid && (
+                    <span className="deal-coins" aria-label="Оплачена">
+                      🪙
+                    </span>
+                  )}
+                  {fmtMoney(i.opportunity ?? 0, i.currency)}
                 </span>
-              </span>
-              <span className="dt-side">
-                <BookingMark state={i.booking} certificate={i.certificate} />
-                {i.opportunity ? <span className="muted">{fmtMoney(i.opportunity, i.currency)}</span> : null}
-              </span>
-            </button>
-          </li>
-        ))}
-        {d?.newDeals && !created.length && <li className="muted dt-empty">Новых сделок нет.</li>}
+                <span className="dt-main">
+                  <b>{i.title}</b>
+                  <span className="muted">
+                    {i.contact?.name || 'без контакта'} ·{' '}
+                    {i.payment
+                      ? `оплата ${fmtMoney(i.payment.amount, i.currency)} в ${fmtAt(i.payment.at, tz, oneDay)}`
+                      : fmtAt(i.createdAt, tz, oneDay)}
+                    {i.source ? ` · ${i.source.name}` : ''}
+                    {i.repeat ? ' · повторный' : ''}
+                  </span>
+                </span>
+                <span className="dt-res">{i.slot?.resources.join(', ') ?? ''}</span>
+                {i.slot && state ? (
+                  <span className={`dt-time slot-chip ${state}`} title={`Бронь ${SLOT_LABEL[state]}`}>
+                    {slotText(i.slot.start, i.slot.end, tz)}
+                  </span>
+                ) : (
+                  <span className="dt-time">
+                    <BookingMark state={i.booking} certificate={i.certificate} />
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+        {d?.newDeals && !created.length && <li className="muted dt-empty">{paidMode ? 'Оплат за период нет.' : 'Новых сделок нет.'}</li>}
       </ul>
       <MoreButton total={created.length} shown={shown} onMore={() => setShown((n) => n + LIST_STEP)} />
     </section>
+  );
+}
+
+/** 👁: скрыть чат с дашборда этого сотрудника — после подтверждения. */
+function HideChatDialog({ chat, onClose, onHidden }: { chat: AttentionChatDto; onClose: () => void; onHidden: (chatId: number) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+  const hide = () => {
+    setBusy(true);
+    apiPost(`/dashboard/hidden-chats/${chat.chatId}`).then(
+      () => onHidden(chat.chatId),
+      (e) => {
+        setBusy(false);
+        setError(e instanceof Error ? e.message : 'Не удалось скрыть чат');
+      },
+    );
+  };
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet hide-chat-modal" role="dialog" aria-modal="true" aria-label="Скрыть чат с дашборда" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>Скрыть чат с дашборда?</h3>
+          <button aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <p>
+          Подтвердите, что хотите скрыть чат <b>{chat.clientName || chat.title}</b> с дашборда. Чат останется в списке чатов и при
+          новых сообщениях будет подниматься выше, но на вашем дашборде показываться больше не будет.
+        </p>
+        {error && <p className="notice error">{error}</p>}
+        <div className="form-actions">
+          <button className="primary" disabled={busy} onClick={hide}>
+            Скрыть
+          </button>
+          <button onClick={onClose}>Отмена</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -3,7 +3,7 @@ import type { OpenlineChat, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import type { Prisma } from '../../generated/prisma/client.js';
-import { connectorOf, crmLinksOf, lastMeaningful, messageText, preview, type ImMessage, type ImUser } from './chat-parsing.js';
+import { clientAvatarOf, connectorOf, crmLinksOf, lastMeaningful, messageText, preview, type ImMessage, type ImUser } from './chat-parsing.js';
 
 /** Индекс считается живым, если обновлялся не позже этого (иначе — запасной способ без индекса). */
 const FRESH_MS = 15 * 60_000;
@@ -162,6 +162,7 @@ export class OpenlineIndexService {
           ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
           ...(c.title !== null ? { title: c.title.slice(0, 255) } : {}),
           crm: crmLinksOf(c.entityData2) as unknown as Prisma.InputJsonValue,
+          ...(m.users?.length ? { clientAvatar: clientAvatarOf(m.users, portal.domain) } : {}),
           ...(last
             ? {
                 lastMessageId: Number(last.message.id),

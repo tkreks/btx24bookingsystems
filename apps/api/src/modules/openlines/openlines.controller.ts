@@ -249,6 +249,15 @@ export class OpenlinesController {
     return r;
   }
 
+  /** 👁 на дашборде: чат больше не показывается в «сообщениях без ответа» у этого сотрудника. */
+  @Post('dashboard/hidden-chats/:chatId')
+  @HttpCode(204)
+  async hideChat(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.chats.hideFromDashboard(user, chatId);
+    await this.actions.user(user, { action: 'chat.dashboard_hidden', summary: `Скрыл чат #${chatId} с дашборда`, entityType: 'chat', entityId: chatId });
+  }
+
   @Post('openlines/chats/:chatId/join')
   @HttpCode(204)
   async join(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {

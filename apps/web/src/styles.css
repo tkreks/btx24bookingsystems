@@ -6049,3 +6049,305 @@ button.cv-contact-name.link:hover {
   gap: 4px;
   font-size: 13px;
 }
+
+/* ---------- аватарки сотрудников и клиентов (дашборды) ---------- */
+.avatar-img {
+  display: block;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #eef2f6;
+}
+.toolbar-title .toolbar-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+}
+.toolbar-title .toolbar-user .avatar {
+  box-shadow: none;
+  font-size: 11px;
+}
+
+/* «Последние сообщения клиентов без ответа»: канал → аватарка → имя; справа время и три кнопки. */
+.attention-row {
+  grid-template-columns: minmax(170px, 280px) minmax(0, 1fr) auto;
+}
+.attention-title .avatar {
+  box-shadow: none;
+}
+.attention-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.attention-title .cl-channel {
+  flex: none;
+}
+.attention-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+.dash-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: #475467;
+}
+.dash-icon-btn:hover:not(:disabled) {
+  border-color: #b2ccff;
+  background: #eef4ff;
+  color: #1d4ed8;
+}
+.dash-icon-btn:disabled {
+  opacity: 0.4;
+}
+.dash-icon-btn .icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hide-chat-modal {
+  max-width: 440px;
+}
+.hide-chat-modal p {
+  margin: 8px 0 14px;
+  line-height: 1.45;
+}
+@media (max-width: 760px) {
+  .attention-rows li {
+    flex-wrap: wrap;
+    gap: 0 10px;
+    padding-bottom: 8px;
+  }
+  .attention-actions {
+    margin-left: auto;
+  }
+}
+
+/* «Сделки за сегодня» и «Брони сегодня»: сумма → сделка и клиент → ресурс → время. */
+.dt-row.dt-grid {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr) minmax(0, max-content) auto;
+  gap: 4px 12px;
+}
+.dt-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dt-res {
+  overflow: hidden;
+  max-width: 160px;
+  color: #475467;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dt-time {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.slot-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 650;
+}
+.slot-chip.past {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+.slot-chip.now {
+  background: #dcfae6;
+  color: #067647;
+}
+.slot-chip.soon {
+  background: #fef0c7;
+  color: #93370d;
+}
+/* Строка брони — цветом её состояния (прошла / идёт / впереди). */
+.dt-row.slot-past {
+  border-color: #b9e6fe;
+  background: #f0f9ff;
+}
+.dt-row.slot-now {
+  border-color: #a6e9c3;
+  background: #ecfdf3;
+}
+.dt-row.slot-soon {
+  border-color: #fedf89;
+  background: #fffaeb;
+}
+.dt-row.slot-past:hover {
+  background: #e0f2fe;
+}
+.dt-row.slot-now:hover {
+  background: #dcfae6;
+}
+.dt-row.slot-soon:hover {
+  background: #fef0c7;
+}
+/* Оплаченная сделка — зелёная, с монетами. */
+.dt-row.paid {
+  border-color: #a6e9c3;
+  background: #ecfdf3;
+}
+.dt-row.paid:hover {
+  background: #dcfae6;
+}
+.dt-row.paid .dt-amount {
+  color: #067647;
+}
+.deal-coins {
+  font-size: 15px;
+  line-height: 1;
+}
+@media (max-width: 760px) {
+  .dt-row.dt-grid {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .dt-row.dt-grid .dt-res {
+    max-width: none;
+  }
+  .dt-row.dt-grid .dt-time {
+    justify-self: end;
+  }
+}
+
+/* «Звонки»: входящий — зелёный, исходящий — голубой, исходящий без ответа — жёлтый, пропущенный — красный. */
+.dt-row.call-tone-in {
+  border-color: #a6e9c3;
+  background: #f6fef9;
+}
+.dt-row.call-tone-out {
+  border-color: #b9e6fe;
+  background: #f5fbff;
+}
+.dt-row.call-tone-noanswer {
+  border-color: #fedf89;
+  background: #fffcf0;
+}
+.dt-row.call-tone-missed {
+  border-color: #fda29b;
+  background: #fff6f5;
+}
+.dt-row.call-tone-in .call-dir {
+  color: #079455;
+}
+.dt-row.call-tone-out .call-dir {
+  color: #0086c9;
+}
+.dt-row.call-tone-noanswer .call-dir {
+  color: #dc6803;
+}
+.dt-row.call-tone-missed .call-dir {
+  color: #d92d20;
+}
+.dt-row.call-tone-noanswer .pill.call-status {
+  background: #fef0c7;
+  color: #93370d;
+}
+.dt-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dt-who .avatar {
+  display: inline-grid;
+  box-shadow: none;
+  font-size: 8px;
+}
+
+/* Дашборд руководителя: сравнение с прошлым периодом. */
+.dash-tile.trend-good {
+  border-color: #75e0a7;
+  box-shadow: inset 0 3px 0 #17b26a;
+}
+.dash-tile.trend-bad {
+  border-color: rgba(217, 45, 32, 0.45);
+  box-shadow: inset 0 3px 0 #f04438;
+}
+.dash-tile.trend-good .dash-badge {
+  background: #ecfdf3;
+  color: #079455;
+}
+.dash-tile.trend-bad .dash-badge {
+  background: #fef3f2;
+  color: #d92d20;
+}
+.trend {
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.trend.good {
+  color: #067647;
+}
+.trend.bad {
+  color: #b42318;
+}
+.trend.same {
+  color: var(--muted);
+}
+.trend .muted {
+  font-weight: 500;
+}
+
+/* «Активность сотрудников»: аватарка у имени, строка «Совместное использование». */
+.act-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.act-name .avatar {
+  box-shadow: none;
+}
+.act-shared-icon {
+  background: #fef0c7;
+}
+.act-table tr.act-shared .act-shift.on {
+  background: #fef0c7;
+  color: #93370d;
+}
+
+/* Мастер брони: на любой шаг — кликом (на телефоне — по номеру шага). */
+.wz-steps li {
+  position: relative;
+}
+.wz-steps li.ahead .wz-step-back {
+  color: var(--muted);
+}
+.wz-steps li.ahead .wz-step-back:hover {
+  color: var(--primary);
+}
+@media (max-width: 560px) {
+  .wz-steps li:not(.active) .wz-step-back {
+    position: absolute;
+    inset: 0;
+  }
+}
+
+/* «Сделки»: переключатель «за сегодня / с оплатой сегодня». */
+.dt-switch {
+  align-self: center;
+  margin: 0 0 8px;
+}
+.dt-switch button {
+  font-size: 12.5px;
+}

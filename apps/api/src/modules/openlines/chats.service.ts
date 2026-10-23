@@ -19,6 +19,7 @@ import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import {
   connectorOf,
   crmLinksOf,
+  clientAvatarOf,
   lastMeaningful,
   messageText,
   preview,
@@ -346,7 +347,7 @@ export class ChatsService {
         unread: unread.get(Number(d.id)) ?? 0,
         folderId: folders.get(Number(d.id)) ?? null,
       };
-      return { summary, sortKey, last, s, d };
+      return { summary, sortKey, last, s, d, avatar: m.users?.length ? clientAvatarOf(m.users, user.portal.domain) : undefined };
     });
     await this.persist(
       user,
@@ -363,7 +364,7 @@ export class ChatsService {
    */
   private async persist(
     user: B24UserContext,
-    rows: { summary: ChatSummary; last: ReturnType<typeof lastMeaningful>; s: SessionRef }[],
+    rows: { summary: ChatSummary; last: ReturnType<typeof lastMeaningful>; s: SessionRef; avatar?: string | null }[],
     denied: number[],
   ): Promise<void> {
     if (!this.prisma) return;
@@ -371,10 +372,11 @@ export class ChatsService {
     const portalId = user.portal.id;
     const texts = (await prisma.portalSettings.findUnique({ where: { portalId }, select: { dialogTextsEnabled: true } }))?.dialogTextsEnabled === true;
     const now = new Date();
-    const ops = rows.flatMap(({ summary: c, last, s }) => {
+    const ops = rows.flatMap(({ summary: c, last, s, avatar }) => {
       const summary = {
         title: c.title.slice(0, 255),
         clientName: c.clientName?.slice(0, 255) ?? null,
+        ...(avatar !== undefined ? { clientAvatar: avatar } : {}),
         crm: c.crm as unknown as Prisma.InputJsonValue,
         phones: c.phones as unknown as Prisma.InputJsonValue,
         lastMessageId: c.lastMessage?.id ?? null,
@@ -490,6 +492,7 @@ export class ChatsService {
       data: {
         title: (dialog.name ?? row.title ?? '').slice(0, 255) || null,
         crm: crmLinksOf(dialog.entity_data_2) as unknown as Prisma.InputJsonValue,
+        ...(users.length ? { clientAvatar: clientAvatarOf(users, user.portal.domain) } : {}),
         ...(last
           ? {
               lastMessageId: Number(last.message.id),
@@ -619,12 +622,14 @@ export class ChatsService {
   async attention(user: B24UserContext, limit = 50): Promise<{ waiting: number; items: AttentionChatDto[] }> {
     if (!this.prisma) return { waiting: 0, items: [] };
     const portalId = user.portal.id;
-    const [allowed, ignored] = await Promise.all([
+    const [allowed, ignored, hidden] = await Promise.all([
       this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: true }, select: { chatId: true } }),
       // Чаты моих папок «Не обращать внимания» — не требуют внимания на моём дашборде.
       this.prisma.chatFolderItem.findMany({ where: { portalId, ownerUserId: user.userId, folder: { ignoreAttention: true } }, select: { chatId: true } }),
+      // Скрытые мной с дашборда (👁) — в списке чатов остаются.
+      this.prisma.dashboardHiddenChat.findMany({ where: { portalId, userId: user.userId }, select: { chatId: true } }),
     ]);
-    const skip = new Set(ignored.map((i) => i.chatId));
+    const skip = new Set([...ignored, ...hidden].map((i) => i.chatId));
     if (!allowed.length) return { waiting: 0, items: [] };
     const rows = await this.prisma.openlineChat.findMany({
       where: { portalId, completed: false, lastAuthor: 'client', chatId: { in: allowed.map((a) => a.chatId).filter((id) => !skip.has(id)) } },
@@ -639,6 +644,7 @@ export class ChatsService {
           chatId: r.chatId,
           title: r.title ?? `Чат #${r.chatId}`,
           clientName: r.clientName ?? clientFromTitle(r.title),
+          clientAvatar: r.clientAvatar,
           connector: r.connector,
           lastMessageAt: (r.lastMessageAt ?? r.checkedAt).toISOString(),
           preview: r.lastPreview ?? '',
@@ -649,6 +655,17 @@ export class ChatsService {
         };
       }),
     };
+  }
+
+  /** Скрыть чат с моего дашборда (решение владельца 2026-10-23): в списке чатов он остаётся. */
+  async hideFromDashboard(user: B24UserContext, chatId: number): Promise<void> {
+    if (!this.prisma) return;
+    const portalId = user.portal.id;
+    await this.prisma.dashboardHiddenChat.upsert({
+      where: { portalId_userId_chatId: { portalId, userId: user.userId, chatId } },
+      create: { portalId, userId: user.userId, chatId, hiddenAt: new Date() },
+      update: {},
+    });
   }
 
   /**

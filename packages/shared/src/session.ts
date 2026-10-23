@@ -1,7 +1,8 @@
 /** Контракт `GET /api/session` — кто открыл приложение и откуда. */
 export interface SessionInfo {
   portal: { domain: string; timezone: string };
-  user: { id: number; name: string; isAdmin: boolean };
+  /** photo — аватарка сотрудника в Битрикс24 (URL); null — нет. */
+  user: { id: number; name: string; isAdmin: boolean; photo?: string | null };
   /** Может управлять группами и настройками приложения (админ портала или из списка AppAdmin). */
   canManageApp: boolean;
   /**

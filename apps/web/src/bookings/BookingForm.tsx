@@ -312,20 +312,43 @@ export function BookingForm({
   const dealLabel =
     deal.mode === 'none' ? null : deal.mode === 'service' ? 'служебная' : deal.mode === 'new' ? `новая «${deal.title || '…'}»` : chosenDeal ? `${chosenDeal.title} #${chosenDeal.id}` : `#${deal.dealId}`;
 
-  const goNext = () => {
-    setError('');
-    if (step === 'deal') {
-      if (deal.mode === 'none') return setError('Выберите сделку, найдите клиента или создайте новую сделку');
-      if (deal.mode === 'new' && !deal.title.trim()) return setError('Укажите название новой сделки');
-      // Группа по воронке сделки — подсказка; выбор остаётся за сотрудником.
-      const preferred = groupChoices.find((g) => dealCategory !== null && g.dealCategoryId === dealCategory) ?? groupChoices.find((g) => g.id === groupId) ?? groupChoices[0];
-      if (preferred && preferred.id !== groupId) chooseGroup(preferred.id);
+  /** Почему с шага `s` нельзя идти дальше; null — можно. */
+  const blocker = (s: Step): string | null => {
+    if (s === 'deal') {
+      if (deal.mode === 'none') return 'Выберите сделку, найдите клиента или создайте новую сделку';
+      if (deal.mode === 'new' && !deal.title.trim()) return 'Укажите название новой сделки';
     }
-    if (step === 'group' && !groupChoices.some((g) => g.id === groupId)) return setError('Выберите группу');
-    if (step === 'slot' && !resourceIds.length) return setError('Выберите время и ресурс в календаре');
-    if (step === 'slot' && pastStart) return setError(PAST_START_ERROR);
+    if (s === 'group' && !groupChoices.some((g) => g.id === groupId)) return 'Выберите группу';
+    if (s === 'slot' && !resourceIds.length) return 'Выберите время и ресурс в календаре';
+    if (s === 'slot' && pastStart) return PAST_START_ERROR;
+    return null;
+  };
+  /**
+   * Переход на любой шаг: назад — сразу; вперёд — если пройденные по пути шаги заполнены, иначе
+   * остаёмся на первом незаполненном с подсказкой.
+   */
+  const goTo = (target: Step) => {
+    setError('');
+    const to = steps.indexOf(target);
+    if (to <= stepIndex) return setStep(target);
+    for (let i = stepIndex; i < to; i++) {
+      const err = blocker(steps[i]);
+      if (err) {
+        setStep(steps[i]);
+        return setError(err);
+      }
+      if (steps[i] === 'deal') {
+        // Группа по воронке сделки — подсказка; выбор остаётся за сотрудником.
+        const preferred = groupChoices.find((g) => dealCategory !== null && g.dealCategoryId === dealCategory) ?? groupChoices.find((g) => g.id === groupId) ?? groupChoices[0];
+        if (preferred && preferred.id !== groupId) chooseGroup(preferred.id);
+      }
+    }
+    setStep(target);
+  };
+  const goNext = () => {
     const nextStep = steps[stepIndex + 1];
-    if (nextStep) setStep(nextStep);
+    if (nextStep) goTo(nextStep);
+    else setError(blocker(step) ?? '');
   };
   const goBack = () => {
     setError('');
@@ -734,13 +757,14 @@ export function BookingForm({
         {steps.length > 1 && (
           <ol className="bk-steps wz-steps">
             {steps.map((s, i) => (
-              <li key={s} className={s === step ? 'active' : stepIndex > i ? 'done' : ''}>
-                {stepIndex > i ? (
-                  <button type="button" className="wz-step-back" onClick={() => setStep(s)}>
+              <li key={s} className={s === step ? 'active' : stepIndex > i ? 'done' : 'ahead'}>
+                {s === step ? (
+                  STEP_TITLES[s]
+                ) : (
+                  // Пройденные и следующие шаги — кнопками: посмотреть или поменять заполненное.
+                  <button type="button" className="wz-step-back" disabled={busy} onClick={() => goTo(s)}>
                     {STEP_TITLES[s]}
                   </button>
-                ) : (
-                  STEP_TITLES[s]
                 )}
               </li>
             ))}
