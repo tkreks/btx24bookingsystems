@@ -3,6 +3,7 @@ import { CALL_STATUS_LABELS, todayIn, type CallLogDto, type CallLogRowDto, type 
 import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
+import { DealStatusBadge } from './DealStatusBadge.js';
 
 const OWNER: Record<number, { label: string; type: 'lead' | 'deal' | 'contact' | 'company' } | undefined> = {
   1: { label: 'Лид', type: 'lead' },
@@ -144,7 +145,8 @@ export function CallLog({ scope, timezone }: { scope: CallScope; timezone: strin
                       </button>
                     ) : (
                       <span className="muted">#{c.owner.id}</span>
-                    )}
+                    )}{' '}
+                    <DealStatusBadge s={c.dealStatus} />
                   </span>
                 </div>
               );

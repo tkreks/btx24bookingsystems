@@ -28,6 +28,7 @@ import { CallsModal } from './CallsModal.js';
 import { DashBadge, RecentCalls } from './RecentCalls.js';
 import { Icon } from './icons.js';
 import { ListMore } from './ListMore.js';
+import { DealStatusBadge } from './DealStatusBadge.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
@@ -532,6 +533,7 @@ function NewDealsModal({
               )}
               <span className={`pill${i.repeat ? '' : ' muted-pill'}`}>{i.repeat ? 'повторный' : 'новый'}</span>
               <BookingMark state={i.booking} certificate={i.certificate} />
+              <DealStatusBadge s={i.status} />
               <span className="muted">
                 создана {fmtDateTime(i.createdAt, tz)}
                 {i.opportunity ? ` · ${fmtMoney(i.opportunity, i.currency)}` : ''}
@@ -586,6 +588,7 @@ function BookingList({
                 <span>{r.title || 'Служебная бронь'}</span>
               )}
               {r.deal && <span className="muted">{fmtMoney(r.deal.opportunity, r.deal.currency)}</span>}
+              <DealStatusBadge s={r.deal?.status} />
             </div>
             <div className="booking-row-meta">
               <span>{bookingRange(r.start, r.end, tz)}</span>
@@ -689,7 +692,10 @@ function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string 
               >
                 <span className="dt-amount">{r.deal ? fmtMoney(r.deal.opportunity ?? 0, r.deal.currency) : '—'}</span>
                 <span className="dt-main">
-                  <b>{r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
+                  <span className="dt-title">
+                    <b>{r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
+                    <DealStatusBadge s={r.deal?.status} />
+                  </span>
                   <span className="muted">
                     {r.deal?.client || 'без клиента'}
                     {r.pendingRemoval ? ' · удалена в Битрикс24 — ждёт решения' : ''}
@@ -767,7 +773,10 @@ function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null
                   {fmtMoney(i.opportunity ?? 0, i.currency)}
                 </span>
                 <span className="dt-main">
-                  <b>{i.title}</b>
+                  <span className="dt-title">
+                    <b>{i.title}</b>
+                    <DealStatusBadge s={i.status} />
+                  </span>
                   <span className="muted">
                     {i.contact?.name || 'без контакта'} · {paidMode && i.slot ? `бронь ${slotText(i.slot.start, i.slot.end, tz)}` : fmtAt(i.createdAt, tz, oneDay)}
                     {i.source ? ` · ${i.source.name}` : ''}
@@ -876,7 +885,10 @@ function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDa
             <li key={r.bookingId}>
               <button className={`dt-row${r.pendingRemoval ? ' today missing' : ''}`} disabled={!r.dealId} onClick={() => r.dealId && openCrm('deal', r.dealId)}>
                 <span className="dt-main">
-                  <b>{r.dealId ? r.deal?.title || r.title || `Сделка #${r.dealId}` : r.title || 'Служебная бронь'}</b>
+                  <span className="dt-title">
+                    <b>{r.dealId ? r.deal?.title || r.title || `Сделка #${r.dealId}` : r.title || 'Служебная бронь'}</b>
+                    <DealStatusBadge s={r.deal?.status} />
+                  </span>
                   <span className="muted">
                     {[r.deal?.client, r.resources.join(', '), r.pendingRemoval ? 'удалена в Битрикс24 — ждёт решения' : ''].filter(Boolean).join(' · ')}
                   </span>

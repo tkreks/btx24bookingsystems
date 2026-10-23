@@ -6578,3 +6578,79 @@ button.cert-row:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Статус сделки (канбан + брони) ---------- */
+.deal-status-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  vertical-align: middle;
+}
+.deal-status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.deal-status.in_work {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+.deal-status.waiting {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.deal-status.done {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+.deal-status.failed {
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+.deal-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.deal-close b {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--surface);
+  font-size: 11px;
+  line-height: 1;
+}
+.dt-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.dt-main .dt-title,
+.dt-main .deal-status-wrap,
+.dt-main .deal-status-wrap span {
+  overflow: visible;
+}
+.dt-main .deal-status,
+.dt-main .deal-close {
+  font-size: 11.5px;
+}
+.dt-main .dt-title {
+  font-size: inherit;
+}
+.dt-main .dt-title b {
+  min-width: 0;
+}

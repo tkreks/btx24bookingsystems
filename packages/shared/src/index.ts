@@ -15,3 +15,4 @@ export * from './template-engine.js';
 export * from './deal-formula.js';
 export * from './audit.js';
 export * from './certificates.js';
+export * from './deal-status.js';

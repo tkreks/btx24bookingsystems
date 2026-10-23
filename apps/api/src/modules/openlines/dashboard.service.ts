@@ -17,12 +17,14 @@ import {
   type DashboardBookingRow,
   type DashboardDto,
   type DashboardNewDeal,
+  type DealStatusDto,
 } from '@btx24/shared';
 import type { BookingRecord } from '../../generated/prisma/client.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { BookingJournalService } from '../bookings/booking-journal.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { DealPaymentsService } from '../bookings/deal-payments.service.js';
+import { DealStatusService, type DealStageRow } from '../bookings/deal-status.service.js';
 import { happened, isCertificatePurchase, outcomeSelect, paidSum } from '../bookings/deal-outcome.js';
 import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
@@ -48,6 +50,7 @@ export class DashboardService {
     private readonly journal: BookingJournalService,
     private readonly fieldMap?: DealFieldMapService,
     private readonly payments?: DealPaymentsService,
+    private readonly statuses?: DealStatusService,
   ) {}
 
   /** Готовый дашборд сотрудника на 30 секунд: переключение периода и возврат — без новых запросов к порталу. */
@@ -159,9 +162,10 @@ export class DashboardService {
             ? c.incoming.find((x) => !isMissed(x))
             : undefined) ?? c.incoming[0],
     }));
-    const [titles, contacts] = await Promise.all([
+    const [titles, contacts, statuses] = await Promise.all([
       this.ownerTitles(user, shown.map((x) => x.call)),
       this.contactNames(user, chosen.map((c) => c.contactId).filter((x): x is number => x !== null)),
+      this.callDealStatuses(user, shown.map((x) => x.call)),
     ]);
     return {
       kind,
@@ -181,6 +185,7 @@ export class DashboardService {
           title: titles.get(`${call.OWNER_TYPE_ID}:${call.OWNER_ID}`) ?? null,
         },
         dealId: Number(call.OWNER_TYPE_ID) === 2 ? Number(call.OWNER_ID) : null,
+        dealStatus: Number(call.OWNER_TYPE_ID) === 2 ? (statuses.get(Number(call.OWNER_ID)) ?? null) : null,
         responsibleId: Number(call.RESPONSIBLE_ID) || null,
       })),
     };
@@ -222,10 +227,11 @@ export class DashboardService {
 
   private async logRows(user: B24UserContext, mine: CallActivity[]): Promise<CallLogRowDto[]> {
     const contactIds = mine.map((c) => Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0).filter((x) => x > 0);
-    const [titles, contacts, employees] = await Promise.all([
+    const [titles, contacts, employees, statuses] = await Promise.all([
       this.ownerTitles(user, mine),
       this.contactNames(user, contactIds),
       this.employees(user, mine.map((c) => Number(c.RESPONSIBLE_ID) || 0)),
+      this.callDealStatuses(user, mine),
     ]);
     return mine.map((c) => {
         const contactId = Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0;
@@ -240,8 +246,16 @@ export class DashboardService {
           employee: emp ? { id: emp, name: employees.get(emp)?.name ?? null, photo: employees.get(emp)?.photo ?? null } : null,
           contact: contactId ? { id: contactId, name: contacts.get(contactId) ?? null } : null,
           owner: { typeId: Number(c.OWNER_TYPE_ID), id: Number(c.OWNER_ID), title: titles.get(`${c.OWNER_TYPE_ID}:${c.OWNER_ID}`) ?? null },
+          dealStatus: Number(c.OWNER_TYPE_ID) === 2 ? (statuses.get(Number(c.OWNER_ID)) ?? null) : null,
         };
       });
+  }
+
+  /** Статусы сделок, к которым привязаны звонки; сбой — без статусов (звонки важнее). */
+  private async callDealStatuses(user: B24UserContext, calls: CallActivity[]): Promise<Map<number, DealStatusDto>> {
+    if (!this.statuses) return new Map();
+    const ids = calls.filter((c) => Number(c.OWNER_TYPE_ID) === 2).map((c) => Number(c.OWNER_ID));
+    return this.statuses.forDeals(user.portal.id, user.client, ids).catch(() => new Map<number, DealStatusDto>());
   }
 
   private async employeeNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
@@ -320,14 +334,18 @@ export class DashboardService {
             'OPPORTUNITY',
             'CURRENCY_ID',
             'SOURCE_ID',
-            ...new Set([...outcomeSelect(outcome), ...(outcome.paidAmount ? [outcome.paidAmount] : [])]),
+            ...new Set([
+              ...outcomeSelect(outcome),
+              ...(outcome.paidAmount ? [outcome.paidAmount] : []),
+              ...((await this.statuses?.selectFields(user.portal.id)) ?? []),
+            ]),
           ],
         },
         { max: MAX_NEW_DEALS },
       );
       const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
       // Сделки клиентов — пачками параллельно (темп держит ограничитель портала), имена — заодно.
-      const [earlierChunks, names, bookingState, sources, slots] = await Promise.all([
+      const [earlierChunks, names, bookingState, sources, slots, statuses] = await Promise.all([
         Promise.all(
           chunks(contactIds, CONTACT_CHUNK).map((ids) =>
             user.client.listAll<Row>(
@@ -344,6 +362,7 @@ export class DashboardService {
         this.journal.dealBookingState(user.portal.id, rows.map((d) => Number(d.ID))),
         rows.some((d) => d.SOURCE_ID) ? this.sourceNames(user) : new Map<string, string>(),
         this.dealSlots(user, rows.map((d) => Number(d.ID))),
+        this.statuses?.fromRows(user.portal.id, rows as DealStageRow[]) ?? new Map<number, DealStatusDto>(),
       ]);
       const earlier = earlierChunks.flat();
       const items: DashboardNewDeal[] = rows.map((d) => {
@@ -372,6 +391,7 @@ export class DashboardService {
           source: d.SOURCE_ID ? { id: d.SOURCE_ID, name: sources.get(d.SOURCE_ID) ?? d.SOURCE_ID } : null,
           paid: bookingState.get(Number(d.ID)) === 'paid' || (!!outcome.paidAmount && paidSum(d[outcome.paidAmount]) > 0),
           slot: slots.get(Number(d.ID)) ?? null,
+          status: statuses.get(Number(d.ID)) ?? null,
         };
       });
       return { total: items.length, repeat: items.filter((i) => i.repeat).length, items, truncated: rows.length >= MAX_NEW_DEALS };
@@ -591,15 +611,19 @@ export class DashboardService {
     if (!ids.length) return out;
     const rows = await user.client.listAll<Record<string, string | null>>('crm.deal.list', {
       filter: { '@ID': ids },
-      select: ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID'],
+      select: ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', ...((await this.statuses?.selectFields(user.portal.id)) ?? [])],
     });
-    const names = await this.contactNames(user, rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0)).catch(() => new Map<number, string>());
+    const [names, statuses] = await Promise.all([
+      this.contactNames(user, rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0)).catch(() => new Map<number, string>()),
+      this.statuses?.fromRows(user.portal.id, rows as DealStageRow[]) ?? new Map<number, DealStatusDto>(),
+    ]);
     for (const d of rows)
       out.set(Number(d.ID), {
         title: d.TITLE ?? '',
         opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
         currency: d.CURRENCY_ID ?? null,
         client: names.get(Number(d.CONTACT_ID)) ?? null,
+        status: statuses.get(Number(d.ID)) ?? null,
       });
     return out;
   }

@@ -3,6 +3,7 @@ import { CALL_KIND_LABELS, type CallKind, type CallListDto, type CallScope } fro
 import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime } from '../format.js';
+import { DealStatusBadge } from './DealStatusBadge.js';
 
 const OWNER: Record<number, { label: string; type: 'lead' | 'deal' | 'contact' | 'company' } | undefined> = {
   1: { label: 'Лид', type: 'lead' },
@@ -103,6 +104,7 @@ export function CallsModal({
                 ) : (
                   <span className="muted">элемент CRM #{c.owner.id}</span>
                 )}
+                <DealStatusBadge s={c.dealStatus} />
               </li>
             );
           })}

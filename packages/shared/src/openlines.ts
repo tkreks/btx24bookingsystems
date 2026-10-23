@@ -1,3 +1,4 @@
+import type { DealStatusDto } from './deal-status.js';
 /** Контракты открытых линий и дашборда менеджера (`/api/openlines/*`, `/api/dashboard`). */
 
 /** Чьи диалоги показывать: свои, отдела (с вложенными) или все, что разрешает CRM. */
@@ -158,7 +159,14 @@ export interface DashboardBookingRow {
   bookingId: number;
   dealId: number | null;
   /** null — сделка недоступна пользователю в CRM (или служебная бронь). */
-  deal: { title: string; opportunity: number | null; currency: string | null; client: string | null } | null;
+  deal: {
+    title: string;
+    opportunity: number | null;
+    currency: string | null;
+    client: string | null;
+    /** Статус сделки (канбан + брони); null — не посчитан. */
+    status?: DealStatusDto | null;
+  } | null;
   resources: string[];
   /** Начало и конец брони (UTC, ISO). */
   start: string;
@@ -237,6 +245,8 @@ export interface DashboardNewDeal {
   payment?: { at: string; amount: number };
   /** Бронь сделки (ближайшая активная из журнала): ресурсы и время; null — брони нет. */
   slot: { start: string; end: string; resources: string[] } | null;
+  /** Статус сделки: В работе / Ожидание клиента / Завершена / Провалена (канбан + брони). */
+  status?: DealStatusDto | null;
 }
 
 /**
@@ -279,6 +289,8 @@ export interface CallRowDto {
   /** Элемент CRM, к которому привязан звонок. */
   owner: { typeId: number; id: number; title: string | null };
   dealId: number | null;
+  /** Статус сделки звонка (если звонок привязан к сделке). */
+  dealStatus?: DealStatusDto | null;
   responsibleId: number | null;
 }
 
@@ -308,6 +320,8 @@ export interface CallLogRowDto {
   employee: { id: number; name: string | null; photo?: string | null } | null;
   contact: { id: number; name: string | null } | null;
   owner: { typeId: number; id: number; title: string | null };
+  /** Звонок привязан к сделке — её статус (канбан + брони). */
+  dealStatus?: DealStatusDto | null;
 }
 
 /** `GET /api/dashboard/recent-calls?scope=&from=&to=` — последние звонки периода (до 50), новые сверху. */

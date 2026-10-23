@@ -6,6 +6,7 @@ import { fmtAt, fmtDuration } from '../format.js';
 import { Avatar } from './Avatar.js';
 import { Icon } from './icons.js';
 import { ListMore } from './ListMore.js';
+import { DealStatusBadge } from './DealStatusBadge.js';
 
 const OWNER: Record<number, 'lead' | 'deal' | 'contact' | 'company' | undefined> = { 1: 'lead', 2: 'deal', 3: 'contact', 4: 'company' };
 /** Сколько звонков показывать сразу и сколько добавляет «Показать ещё». */
@@ -71,6 +72,11 @@ export function RecentCalls({ scope, timezone, from, to }: { scope: CallScope; t
                     </span>{' '}
                     {who}
                   </b>
+                  {c.dealStatus && (
+                    <span className="dt-title">
+                      <DealStatusBadge s={c.dealStatus} />
+                    </span>
+                  )}
                   <span className="muted dt-who">
                     {c.clientPhone && who !== c.clientPhone ? `${c.clientPhone}` : ''}
                     {c.clientPhone && who !== c.clientPhone && employee ? ' · ' : ''}
