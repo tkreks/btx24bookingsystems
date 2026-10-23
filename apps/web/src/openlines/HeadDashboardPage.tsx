@@ -2,30 +2,31 @@ import { useEffect, useState } from 'react';
 import { todayIn, type HeadDashboardDto, type HeadDayDto, type SessionInfo } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { shiftDate } from '../format.js';
+
+/** «23 октября 2026». */
+const fmtDay = (date: string, tz: string) =>
+  new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${date}T12:00:00Z`));
 import { EmployeeActivity } from './EmployeeActivity.js';
 import { DashBadge } from './RecentCalls.js';
-import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
+import { periodError } from './period.js';
 
-/** Динамика — за столько дней, заканчивая концом выбранного периода. */
-const TREND_DAYS = 14;
+type Preset = 'today' | 'yesterday' | 'custom';
 
 /**
- * Дашборд руководителя (⚙ → «Приложение» → «Руководители»): показатели периода — новые сделки, брони
- * по ним, повторные клиенты; телефония — все звонки, пропущенные, упущенные; графики по дням за 14
- * дней и «Активность сотрудников» по часам.
+ * Дашборд руководителя (⚙ → «Приложение» → «Руководители»): все показатели и графики — за выбранный
+ * период (по умолчанию сегодня; «Вчера»; «Период…» — окно с началом и концом), «Активность
+ * сотрудников» — на первый день периода (дальше листается по дням).
  */
 export function HeadDashboardPage({ session, onManager }: { session: SessionInfo; onManager: () => void }) {
   const tz = session.portal.timezone;
-  const [preset, setPreset] = useState<PeriodPreset>('today');
-  const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
-  const [draft, setDraft] = useState(range);
+  const today = todayIn(tz);
+  const [preset, setPreset] = useState<Preset>('today');
+  const [range, setRange] = useState({ from: today, to: today });
+  const [picking, setPicking] = useState<{ from: string; to: string } | null>(null);
   const [data, setData] = useState<{ key: string; dto: HeadDashboardDto } | null>(null);
-  const [trend, setTrend] = useState<{ key: string; dto: HeadDashboardDto } | null>(null);
   const [error, setError] = useState('');
 
   const key = `${range.from}|${range.to}`;
-  const trendFrom = shiftDate(range.to, -(TREND_DAYS - 1));
-  const trendKey = `${trendFrom}|${range.to}`;
   useEffect(() => {
     let active = true;
     apiGet<HeadDashboardDto>(`/head-dashboard?from=${range.from}&to=${range.to}`).then(
@@ -36,21 +37,22 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
       },
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить дашборд'),
     );
-    apiGet<HeadDashboardDto>(`/head-dashboard?from=${trendFrom}&to=${range.to}`).then(
-      (dto) => active && setTrend({ key: trendKey, dto }),
-      () => undefined,
-    );
     return () => {
       active = false;
     };
-  }, [key, trendKey, range.from, range.to, trendFrom]);
+  }, [key, range.from, range.to]);
 
   const d = data?.key === key ? data.dto : null;
-  const tr = trend?.key === trendKey ? trend.dto : null;
   const n = (v: number | undefined, ok = true) => (!d ? '…' : ok ? String(v ?? 0) : '—');
   const word = preset === 'today' ? 'сегодня' : preset === 'yesterday' ? 'вчера' : 'за период';
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
-  const draftError = periodError(draft.from, draft.to);
+  const periodText = range.from === range.to ? fmtDay(range.from, tz) : `${fmtDay(range.from, tz)} — ${fmtDay(range.to, tz)}`;
+  const pickError = picking ? periodError(picking.from, picking.to) : null;
+  const choose = (p: Exclude<Preset, 'custom'>) => {
+    setPreset(p);
+    const day = p === 'today' ? today : shiftDate(today, -1);
+    setRange({ from: day, to: day });
+  };
 
   return (
     <div className="page dashboard head-dashboard">
@@ -62,43 +64,66 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
         <button onClick={onManager}>Дашборд менеджера</button>
       </header>
 
-      <div className="period-bar">
+      <div className="period-bar head-period">
+        <span className="head-period-text" aria-live="polite">
+          {periodText}
+        </span>
         <div className="segmented period-presets" role="group" aria-label="Период">
-          {PERIOD_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              className={preset === p.key ? 'active' : ''}
-              onClick={() => {
-                setPreset(p.key);
-                if (p.key !== 'custom') setRange(presetRange(p.key, todayIn(tz)));
-                else setDraft(range);
-              }}
-            >
-              {p.label}
-            </button>
-          ))}
+          <button className={preset === 'today' ? 'active' : ''} onClick={() => choose('today')}>
+            Сегодня
+          </button>
+          <button className={preset === 'yesterday' ? 'active' : ''} onClick={() => choose('yesterday')}>
+            Вчера
+          </button>
+          <button className={preset === 'custom' ? 'active' : ''} aria-haspopup="dialog" onClick={() => setPicking(range)}>
+            Период…
+          </button>
         </div>
-        {preset === 'custom' && (
+      </div>
+      {picking && (
+        <div className="sheet-backdrop" onClick={() => setPicking(null)}>
           <form
-            className="period-custom"
+            className="sheet head-period-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Период"
+            onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
-              if (!draftError) setRange(draft);
+              if (pickError) return;
+              setRange(picking);
+              setPreset(picking.from === today && picking.to === today ? 'today' : 'custom');
+              setPicking(null);
             }}
           >
-            <label>
-              с <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
-            </label>
-            <label>
-              по <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
-            </label>
-            <button className="primary" type="submit" disabled={!!draftError}>
-              Показать
-            </button>
-            {draftError && <span className="muted">{draftError}</span>}
+            <header>
+              <h3>Период</h3>
+              <button type="button" aria-label="Закрыть" onClick={() => setPicking(null)}>
+                ×
+              </button>
+            </header>
+            <div className="head-period-fields">
+              <label>
+                Начало
+                <input type="date" value={picking.from} max={today} onChange={(e) => setPicking({ ...picking, from: e.target.value })} />
+              </label>
+              <label>
+                Конец
+                <input type="date" value={picking.to} max={today} onChange={(e) => setPicking({ ...picking, to: e.target.value })} />
+              </label>
+            </div>
+            {pickError && <p className="notice error">{pickError}</p>}
+            <div className="form-actions">
+              <button type="submit" className="primary" disabled={!!pickError}>
+                Показать
+              </button>
+              <button type="button" onClick={() => setPicking(null)}>
+                Отмена
+              </button>
+            </div>
           </form>
-        )}
-      </div>
+        </div>
+      )}
       {error && (
         <div className="notice error" role="alert">
           {error}
@@ -169,9 +194,9 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
       <div className="head-charts">
         <section className="day-panel dash-block">
           <DashBadge name="person" />
-          <p className="dash-attention-title muted">Сделки за {TREND_DAYS} дней</p>
+          <p className="dash-attention-title muted">Сделки · {periodText}</p>
           <BarChart
-            days={tr?.days ?? null}
+            days={d?.days ?? null}
             tz={tz}
             series={[
               { key: 'newDeals', label: 'Новые сделки', color: '#3269f6' },
@@ -182,9 +207,9 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
         </section>
         <section className="day-panel dash-block">
           <DashBadge name="phone" />
-          <p className="dash-attention-title muted">Звонки за {TREND_DAYS} дней</p>
+          <p className="dash-attention-title muted">Звонки · {periodText}</p>
           <BarChart
-            days={tr?.days ?? null}
+            days={d?.days ?? null}
             tz={tz}
             series={[
               { key: 'calls', label: 'Все звонки', color: '#3269f6' },
@@ -195,7 +220,7 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
         </section>
       </div>
 
-      <EmployeeActivity timezone={tz} />
+      <EmployeeActivity timezone={tz} startDate={range.from} />
       <p className="muted dash-note">
         Новые сделки — созданные в воронках всех групп приложения; брони — из журнала приложения (созданные в приложении и найденные сверкой).
         Упущенный клиент — последний его звонок пропущен, после него ему не перезванивали и не писали в чат открытой линии.
@@ -217,6 +242,8 @@ function BarChart({ days, series, tz }: { days: HeadDayDto[] | null; series: { k
   const bar = Math.max(3, Math.min(14, (slot - 6) / series.length));
   const y = (v: number) => pad.t + (H - pad.t - pad.b) * (1 - v / max);
   const label = (date: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: '2-digit', month: '2-digit' }).format(new Date(`${date}T12:00:00Z`));
+  // Подписи дней — не чаще ~14 на график (длинный период).
+  const every = Math.ceil(days.length / 14);
   const ticks = [0, Math.round(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
   return (
     <figure className="bar-chart">
@@ -238,7 +265,7 @@ function BarChart({ days, series, tz }: { days: HeadDayDto[] | null; series: { k
                   <title>{`${label(d.date)} · ${s.label}: ${d[s.key]}`}</title>
                 </rect>
               ))}
-              {(days.length <= 14 || i % 2 === 0) && (
+              {i % every === 0 && (
                 <text x={pad.l + i * slot + slot / 2} y={H - 8} textAnchor="middle" className="bc-axis">
                   {label(d.date)}
                 </text>

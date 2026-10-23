@@ -12,8 +12,14 @@ const sum = (h: Record<ActivityKind, number>) => ACTIVITY_KINDS.reduce((s, k) =>
  * звонки, сообщения (свои и с телефона на смене), сделки, брони, действия в приложении. Смена —
  * по учёту рабочего времени Битрикс24. Клик по сотруднику — лента его действий за день.
  */
-export function EmployeeActivity({ timezone }: { timezone: string }) {
-  const [date, setDate] = useState(() => todayIn(timezone));
+export function EmployeeActivity({ timezone, startDate }: { timezone: string; /** Сменился — показать этот день (начало периода дашборда). */ startDate?: string }) {
+  const [date, setDate] = useState(() => startDate ?? todayIn(timezone));
+  // Дашборд сменил период — переходим на его первый день; листать по дням можно и дальше.
+  const [appliedStart, setAppliedStart] = useState(startDate);
+  if (startDate !== appliedStart) {
+    setAppliedStart(startDate);
+    if (startDate) setDate(startDate);
+  }
   const [res, setRes] = useState<{ date: string; data: ActivityDayDto | null; error: string } | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   useEffect(() => {
