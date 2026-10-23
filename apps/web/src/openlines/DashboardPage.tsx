@@ -558,6 +558,7 @@ function BookingList({
               ) : (
                 <>
                   {r.status === 'cancelled' && <span className="pill muted-pill">уже удалена</span>}
+                  {r.status === 'active' && r.pendingRemoval && <span className="pill waiting">удалена в Битрикс24 — ждёт решения</span>}
                   <span className="muted">
                     {r.source === 'bitrix' ? 'найдена' : 'создана'} {fmtDateTime(r.createdAt, tz)}
                     {r.createdBy && ` · ${r.createdBy}`}
@@ -706,11 +707,11 @@ function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDa
         <ul className="dt-rows">
           {rows.map((r) => (
             <li key={r.bookingId}>
-              <button className="dt-row" disabled={!r.dealId} onClick={() => r.dealId && openCrm('deal', r.dealId)}>
+              <button className={`dt-row${r.pendingRemoval ? ' today missing' : ''}`} disabled={!r.dealId} onClick={() => r.dealId && openCrm('deal', r.dealId)}>
                 <span className="dt-main">
                   <b>{r.dealId ? r.deal?.title || r.title || `Сделка #${r.dealId}` : r.title || 'Служебная бронь'}</b>
                   <span className="muted">
-                    {[r.deal?.client, r.resources.join(', ')].filter(Boolean).join(' · ')}
+                    {[r.deal?.client, r.resources.join(', '), r.pendingRemoval ? 'удалена в Битрикс24 — ждёт решения' : ''].filter(Boolean).join(' · ')}
                   </span>
                 </span>
                 <span className="dt-side">

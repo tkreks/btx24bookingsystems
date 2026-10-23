@@ -236,11 +236,15 @@ export class BookingJournalService {
     return rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id))));
   }
 
-  /** Брони из списка, пропавшие в Битрикс24 и ждущие решения (открытое уведомление «брони нет»). */
+  /**
+   * Брони из списка, пропавшие в Битрикс24 и ждущие решения: по ним есть уведомление «брони нет» —
+   * в любом статусе (его могли отметить «Решено» вручную). Решение само снимает признак: «удалить в
+   * приложении» отменяет запись, «создать заново» меняет её ID. Вызывать для активных записей.
+   */
   async pendingRemoval(portalId: string, bookingIds: number[]): Promise<Set<number>> {
     if (!bookingIds.length) return new Set();
     const rows = await this.prisma.bookingAlert.findMany({
-      where: { portalId, bookingId: { in: bookingIds }, kind: 'discrepancy', problem: { contains: 'missing' }, status: { not: 'resolved' } },
+      where: { portalId, bookingId: { in: bookingIds }, kind: 'discrepancy', problem: { contains: 'missing' } },
       select: { bookingId: true },
     });
     return new Set(rows.map((r) => r.bookingId));
@@ -251,11 +255,13 @@ export class BookingJournalService {
     const out = new Map<number, 'booked' | 'paid'>();
     if (!dealIds.length) return out;
     const [booked, paid] = await Promise.all([
-      this.prisma.bookingRecord.findMany({ where: { portalId, status: 'active', dealId: { in: dealIds } }, select: { dealId: true } }),
+      this.prisma.bookingRecord.findMany({ where: { portalId, status: 'active', dealId: { in: dealIds } }, select: { dealId: true, bookingId: true } }),
       this.prisma.paymentRequest.findMany({ where: { portalId, status: 'paid', dealId: { in: dealIds } }, select: { dealId: true } }),
     ]);
+    // Пропавшая в Битрикс24 бронь — уже не бронь сделки (ждёт решения в календаре).
+    const gone = await this.pendingRemoval(portalId, booked.map((b) => b.bookingId));
     const paidIds = new Set(paid.map((p) => p.dealId));
-    for (const b of booked) if (b.dealId) out.set(b.dealId, paidIds.has(b.dealId) ? 'paid' : 'booked');
+    for (const b of booked) if (b.dealId && !gone.has(b.bookingId)) out.set(b.dealId, paidIds.has(b.dealId) ? 'paid' : 'booked');
     return out;
   }
 
@@ -280,7 +286,7 @@ export class BookingJournalService {
         take: PERIOD_LIMIT,
       }),
       this.prisma.bookingAlert.findMany({
-        where: { portalId, kind: 'discrepancy', problem: { contains: 'missing' }, status: { in: ['new', 'viewed'] }, createdAt: { gte: from, lt: to } },
+        where: { portalId, kind: 'discrepancy', problem: { contains: 'missing' }, createdAt: { gte: from, lt: to } },
         select: { bookingId: true },
       }),
     ]);

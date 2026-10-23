@@ -108,3 +108,23 @@ describe('BookingJournalService.forPeriod — новые и удалённые �
     expect(findMany.mock.calls[1][0].where).toMatchObject({ OR: [{ createdByUserId: 7 }, { cancelledByUserId: 7 }] });
   });
 });
+
+describe('BookingJournalService — bookings gone in Bitrix24', () => {
+  it('a deal whose only booking vanished in Bitrix24 is not «booked», whatever the alert status', async () => {
+    const alertWhere: unknown[] = [];
+    const prisma = {
+      bookingRecord: { findMany: vi.fn(async () => [{ dealId: 18784, bookingId: 5942 }, { dealId: 700, bookingId: 5950 }]) },
+      paymentRequest: { findMany: vi.fn(async () => [{ dealId: 700 }]) },
+      bookingAlert: {
+        findMany: vi.fn(async ({ where }: { where: unknown }) => {
+          alertWhere.push(where);
+          return [{ bookingId: 5942 }];
+        }),
+      },
+    } as unknown as PrismaService;
+    const state = await new BookingJournalService(prisma).dealBookingState('p1', [18784, 700]);
+    expect([...state]).toEqual([[700, 'paid']]);
+    // Отметка «Решено» вручную признак не снимает: статус уведомления не фильтруется.
+    expect(alertWhere[0]).not.toHaveProperty('status');
+  });
+});

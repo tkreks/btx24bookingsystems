@@ -126,7 +126,9 @@ export class DashboardService {
     ]);
     const pending = await this.journal.pendingRemoval(user.portal.id, [...a, ...b].map((r) => r.bookingId));
     const rows = await this.toRows(user, [...a, ...b], pending);
-    return { today: a.length, tomorrow: b.length, todayItems: rows.slice(0, a.length), tomorrowItems: rows.slice(a.length) };
+    // В счётчиках — только брони, которые есть в Битрикс24; пропавшие видны в списках с пометкой.
+    const live = (list: BookingRecord[]) => list.filter((r) => !pending.has(r.bookingId)).length;
+    return { today: live(a), tomorrow: live(b), todayItems: rows.slice(0, a.length), tomorrowItems: rows.slice(a.length) };
   }
 
   /** Клиенты выбранного вида звонков за период — для окна со сделками. */
