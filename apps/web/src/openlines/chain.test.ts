@@ -7,6 +7,7 @@ const template = {
   name: 'Прайс',
   updatedAt: '',
   shared: false,
+  purpose: 'chat' as const,
   mine: true,
   canEdit: true,
   steps: [

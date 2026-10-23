@@ -30,11 +30,16 @@ export function ProductsEditor({
   rows,
   onChange,
   loading = false,
+  error,
+  onRetry,
 }: {
   catalog: BookingCatalogDto | null;
   rows: ProductRow[];
   onChange: (rows: ProductRow[]) => void;
   loading?: boolean;
+  /** Товары сделки не загрузились: править нельзя (сохранение заменило бы их целиком). */
+  error?: string;
+  onRetry?: () => void;
 }) {
   const [q, setQ] = useState('');
   const words = q.trim().toLocaleLowerCase('ru').split(/\s+/).filter(Boolean);
@@ -56,7 +61,7 @@ export function ProductsEditor({
           type="search"
           aria-label="Добавить товар"
           placeholder={catalog ? `Найти и добавить товар${catalog.restricted ? ' группы' : ''}…` : 'Загрузка товаров…'}
-          disabled={!catalog}
+          disabled={!catalog || loading || !!error}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -86,7 +91,17 @@ export function ProductsEditor({
         {words.length > 0 && catalog && !matches.length && <p className="cp-hint">Товар не найден в разделах группы</p>}
       </div>
       {loading && <p className="cp-hint">Загрузка товаров сделки…</p>}
-      {!loading && !rows.length && <p className="cp-hint">Товаров пока нет — найдите товар выше.</p>}
+      {error && (
+        <p className="notice error" role="alert">
+          Не удалось загрузить товары сделки: {error}.{' '}
+          {onRetry && (
+            <button type="button" className="link" onClick={onRetry}>
+              Повторить
+            </button>
+          )}
+        </p>
+      )}
+      {!loading && !error && !rows.length && <p className="cp-hint">Товаров пока нет — найдите товар выше.</p>}
       {rows.length > 0 && (
         <div className="pe-table" role="table" aria-label="Товары">
           <div className="pe-row pe-head" role="row">

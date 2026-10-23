@@ -15,28 +15,28 @@ datasource db {
 
 /// Установка приложения на портал Битрикс24 (тенант). Токены — только в зашифрованном виде.
 model Portal {
-  id                   String       @id @default(cuid())
+  id                   String               @id @default(cuid())
   /// Неизменный идентификатор портала (не зависит от смены домена).
-  memberId             String       @unique @db.VarChar(64)
-  domain               String       @db.VarChar(255)
+  memberId             String               @unique @db.VarChar(64)
+  domain               String               @db.VarChar(255)
   /// База REST портала, например https://portal.bitrix24.ru/rest/ (из ответа сервера авторизации).
-  clientEndpoint       String       @db.VarChar(255)
+  clientEndpoint       String               @db.VarChar(255)
   /// REST сервера авторизации (облако — https://oauth.bitrix.info/rest/, «коробка» — сам портал).
-  serverEndpoint       String       @db.VarChar(255)
+  serverEndpoint       String               @db.VarChar(255)
   /// sha256(application_token) — проверка подлинности входящих событий.
-  applicationTokenHash String?      @db.Char(64)
-  accessTokenEnc       String?      @db.Text
-  refreshTokenEnc      String?      @db.Text
-  accessExpiresAt      DateTime?    @db.DateTime(3)
-  scope                String       @default("") @db.VarChar(1000)
+  applicationTokenHash String?              @db.Char(64)
+  accessTokenEnc       String?              @db.Text
+  refreshTokenEnc      String?              @db.Text
+  accessExpiresAt      DateTime?            @db.DateTime(3)
+  scope                String               @default("") @db.VarChar(1000)
   /// Часовой пояс портала для расчёта периодов и отображения.
-  timezone             String       @default("Europe/Moscow") @db.VarChar(64)
-  status               PortalStatus @default(ACTIVE)
+  timezone             String               @default("Europe/Moscow") @db.VarChar(64)
+  status               PortalStatus         @default(ACTIVE)
   installedByUserId    Int?
-  installedAt          DateTime     @default(now()) @db.DateTime(3)
-  uninstalledAt        DateTime?    @db.DateTime(3)
-  createdAt            DateTime     @default(now()) @db.DateTime(3)
-  updatedAt            DateTime     @updatedAt @db.DateTime(3)
+  installedAt          DateTime             @default(now()) @db.DateTime(3)
+  uninstalledAt        DateTime?            @db.DateTime(3)
+  createdAt            DateTime             @default(now()) @db.DateTime(3)
+  updatedAt            DateTime             @updatedAt @db.DateTime(3)
   events               Bitrix24Event[]
   groups               WorkGroup[]
   admins               AppAdmin[]
@@ -136,8 +136,8 @@ model WorkGroup {
   members           WorkGroupMember[]
   externalUsers     ExternalUserGroup[]
 
-  @@index([portalId, archivedAt])
   @@unique([portalId, legacyId])
+  @@index([portalId, archivedAt])
 }
 
 /// Ресурс модуля бронирования Битрикс24 в группе. Один ресурс может входить в несколько групп.
@@ -186,16 +186,16 @@ model AppUser {
 
 /// Настройки приложения на портале. Сбор данных диалогов — по умолчанию выключен.
 model PortalSettings {
-  portalId              String   @id
-  portal                Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
-  dialogMetadataEnabled Boolean  @default(false)
-  dialogTextsEnabled    Boolean  @default(false)
+  portalId              String    @id
+  portal                Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dialogMetadataEnabled Boolean   @default(false)
+  dialogTextsEnabled    Boolean   @default(false)
   /// Перед запуском оплаты удалять у контакта e-mail с «wazzup» (платёжный сервис отклоняет).
-  removeWazzupEmail     Boolean  @default(false)
+  removeWazzupEmail     Boolean   @default(false)
   /// Чат Битрикс24 для уведомлений о бронях (новая бронь мимо приложения, расхождения).
   alertChatId           Int?
   /// Сверка броней с Битрикс24: на сколько дней вперёд от сегодня.
-  syncHorizonDays       Int      @default(180)
+  syncHorizonDays       Int       @default(180)
   /// Первая полная сверка прошла: существующие брони приняты без уведомлений.
   bookingSyncBaselineAt DateTime? @db.DateTime(3)
   /// Последняя сверка броней и её ошибка (для экрана настроек).
@@ -204,13 +204,13 @@ model PortalSettings {
   /// Системные поля сделки портала: роль → код поля (`DealFieldMapDto` в @btx24/shared).
   dealFieldMap          Json?
   /// Разрешение владельца создавать в Битрикс24 новые брони и сделки при B24_READ_ONLY (2026-10-22).
-  createInBitrix        Boolean  @default(false)
+  createInBitrix        Boolean   @default(false)
   createGrantedByUserId Int?
   createGrantedAt       DateTime? @db.DateTime(3)
   /// Разрешение владельца менять поля существующих сделок (2026-10-22); удалять — нельзя.
-  updateDealFields      Boolean  @default(false)
+  updateDealFields      Boolean   @default(false)
   updatedByUserId       Int?
-  updatedAt             DateTime @updatedAt @db.DateTime(3)
+  updatedAt             DateTime  @updatedAt @db.DateTime(3)
 }
 
 enum ExternalRole {
@@ -220,20 +220,20 @@ enum ExternalRole {
 
 /// Пользователь прямой ссылки (вне Битрикс24): только просмотр. Пароль — только хеш (scrypt).
 model ExternalUser {
-  id           String              @id @default(cuid())
-  portalId     String
-  portal       Portal              @relation(fields: [portalId], references: [id], onDelete: Cascade)
-  login        String              @db.VarChar(100)
-  passwordHash String              @db.VarChar(255)
-  role         ExternalRole
+  id            String              @id @default(cuid())
+  portalId      String
+  portal        Portal              @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  login         String              @db.VarChar(100)
+  passwordHash  String              @db.VarChar(255)
+  role          ExternalRole
   /// true — доступ ко всем группам портала (как в прототипе при пустом списке групп).
-  allGroups    Boolean             @default(false)
+  allGroups     Boolean             @default(false)
   /// null — видны все поля сделки; иначе список кодов полей.
   visibleFields Json?
-  disabledAt   DateTime?           @db.DateTime(3)
-  createdAt    DateTime            @default(now()) @db.DateTime(3)
-  updatedAt    DateTime            @updatedAt @db.DateTime(3)
-  groups       ExternalUserGroup[]
+  disabledAt    DateTime?           @db.DateTime(3)
+  createdAt     DateTime            @default(now()) @db.DateTime(3)
+  updatedAt     DateTime            @updatedAt @db.DateTime(3)
+  groups        ExternalUserGroup[]
 
   @@unique([portalId, login])
 }
@@ -278,18 +278,25 @@ model AppCreatedEntity {
 
 /// Личный шаблон сообщений менеджера: цепочка шагов (текст + вложения), отправляется по порядку.
 /// Видит и меняет только автор (`ownerUserId` — ID сотрудника Битрикс24).
+enum MessageTemplatePurpose {
+  chat
+  payment
+}
+
 model MessageTemplate {
-  id          String   @id @default(cuid())
+  id          String                 @id @default(cuid())
   portalId    String
-  portal      Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  portal      Portal                 @relation(fields: [portalId], references: [id], onDelete: Cascade)
   ownerUserId Int
-  name        String   @db.VarChar(100)
+  name        String                 @db.VarChar(100)
   /// Общий (системный) шаблон: видят все сотрудники портала, меняют администраторы приложения.
-  shared      Boolean  @default(false)
+  shared      Boolean                @default(false)
+  /// Назначение: шаблон чата или системный шаблон сообщения об оплате (выбирается в настройках группы).
+  purpose     MessageTemplatePurpose @default(chat)
   /// `[{ text, fileIds }]` в порядке отправки (`TemplateStepDto` в @btx24/shared).
   steps       Json
-  createdAt   DateTime @default(now()) @db.DateTime(3)
-  updatedAt   DateTime @updatedAt @db.DateTime(3)
+  createdAt   DateTime               @default(now()) @db.DateTime(3)
+  updatedAt   DateTime               @updatedAt @db.DateTime(3)
 
   @@index([portalId, ownerUserId])
   @@index([portalId, shared])
@@ -316,32 +323,32 @@ model StoredFile {
 /// метаданных диалогов» (`PortalSettings.dialogMetadataEnabled`). Видимость каждому пользователю
 /// проверяется его токеном при показе — индекс прав не даёт.
 model OpenlineChat {
-  id            String    @id @default(cuid())
-  portalId      String
-  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
-  chatId        Int
+  id               String    @id @default(cuid())
+  portalId         String
+  portal           Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  chatId           Int
   /// Последняя сессия чата (ID в списке диалогов Битрикс24).
-  sessionId     Int
-  responsibleId Int?
-  completed     Boolean
-  connector     String    @db.VarChar(64)
+  sessionId        Int
+  responsibleId    Int?
+  completed        Boolean
+  connector        String    @db.VarChar(64)
   /// Последнее сообщение клиента или оператора (без системных и ботов).
-  lastMessageAt DateTime? @db.DateTime(3)
-  lastAuthor    String?   @db.VarChar(10)
-  checkedAt     DateTime  @db.DateTime(3)
+  lastMessageAt    DateTime? @db.DateTime(3)
+  lastAuthor       String?   @db.VarChar(10)
+  checkedAt        DateTime  @db.DateTime(3)
   /// Сводка для списка чатов (кэш, одна строка на чат — общая для всех сотрудников; кто её видит,
   /// решает OpenlineChatAccess). Текст превью — только при включённом «сборе текстов».
-  title         String?   @db.VarChar(255)
+  title            String?   @db.VarChar(255)
   /// Имя клиента: контакт (или компания/лид) из привязок CRM; title чата — это название сделки/линии.
-  clientName    String?   @db.VarChar(255)
+  clientName       String?   @db.VarChar(255)
   /// Привязки к CRM: { leadId, contactId, companyId, dealId }.
-  crm           Json?
-  phones        Json?
-  lastMessageId Int?
-  lastPreview   String?   @db.VarChar(500)
-  lastHasFiles  Boolean   @default(false)
+  crm              Json?
+  phones           Json?
+  lastMessageId    Int?
+  lastPreview      String?   @db.VarChar(500)
+  lastHasFiles     Boolean   @default(false)
   /// Когда сводку обновили (worker или живой запрос сотрудника).
-  summaryAt     DateTime? @db.DateTime(3)
+  summaryAt        DateTime? @db.DateTime(3)
   /// «Не требует ответа» — общая отметка для всех сотрудников (решение владельца 2026-10-22): действует,
   /// пока последнее сообщение клиента — это `noReplyMessageId`; новое сообщение клиента снова «ждёт ответа».
   noReplyMessageId Int?
@@ -591,16 +598,16 @@ model BookingOperation {
 
 /// Личная папка чатов сотрудника (охрана, ресепшн, АХО…): чаты папки уходят из общего списка.
 model ChatFolder {
-  id          String           @id @default(cuid())
-  portalId    String
-  portal      Portal           @relation(fields: [portalId], references: [id], onDelete: Cascade)
-  ownerUserId Int
-  name        String           @db.VarChar(60)
-  sort        Int              @default(0)
+  id              String           @id @default(cuid())
+  portalId        String
+  portal          Portal           @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ownerUserId     Int
+  name            String           @db.VarChar(60)
+  sort            Int              @default(0)
   /// «Не обращать внимания»: чаты папки не попадают в «Требуют внимания» и «ждут ответа» на дашборде владельца.
-  ignoreAttention Boolean      @default(false)
-  createdAt   DateTime         @default(now()) @db.DateTime(3)
-  items       ChatFolderItem[]
+  ignoreAttention Boolean          @default(false)
+  createdAt       DateTime         @default(now()) @db.DateTime(3)
+  items           ChatFolderItem[]
 
   @@index([portalId, ownerUserId])
 }
@@ -716,7 +723,6 @@ model ActionLog {
   @@index([portalId, entityType, entityId, at])
   @@index([portalId, userId, at])
 }
-
 
 // ---------- Вход через Битрикс24 вне портала ----------
 

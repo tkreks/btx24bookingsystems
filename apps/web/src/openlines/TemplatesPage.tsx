@@ -40,7 +40,7 @@ export function TemplatesPage({ admin, onBack, onSettings }: { admin: boolean; o
       <div className="segmented tabs-row" role="group" aria-label="Раздел">
         {(
           [
-            ['chat', 'Шаблоны чатов'],
+            ['chat', 'Шаблоны'],
             ['auto', 'Автоматические'],
             ['vars', 'Переменные и проверка'],
           ] as const
@@ -63,14 +63,14 @@ export function TemplatesPage({ admin, onBack, onSettings }: { admin: boolean; o
           {templates ? <TemplatesManager embedded admin={admin} templates={templates} onChanged={setTemplates} onClose={onBack} /> : <p className="muted">Загрузка…</p>}
         </section>
       )}
-      {tab === 'auto' && <AutoMessages admin={admin} onSettings={onSettings} />}
+      {tab === 'auto' && <AutoMessages admin={admin} onSettings={onSettings} templates={templates ?? []} />}
       {tab === 'vars' && <VariablesAndPreview templates={templates ?? []} />}
     </div>
   );
 }
 
 /** Автоматические сообщения групп — что уходит клиенту без участия сотрудника. */
-function AutoMessages({ admin, onSettings }: { admin: boolean; onSettings?: () => void }) {
+function AutoMessages({ admin, onSettings, templates }: { admin: boolean; onSettings?: () => void; templates: MessageTemplateDto[] }) {
   const [groups, setGroups] = useState<GroupDto[] | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -87,7 +87,8 @@ function AutoMessages({ admin, onSettings }: { admin: boolean; onSettings?: () =
   return (
     <div className="auto-messages">
       <p className="muted">
-        Тексты правятся в ⚙ → группа → «Оплаты» и «Типы брони и сообщения клиенту». Переменные — во вкладке «Переменные и проверка».
+        Сообщения об оплате — системные шаблоны (вкладка «Шаблоны», назначение «Сообщение об оплате»); какой шаблон у группы — в ⚙ → группа →
+        «Оплаты». Подтверждение — в «Типы брони и сообщения клиенту». Переменные — во вкладке «Переменные и проверка».
         {onSettings && (
           <>
             {' '}
@@ -103,8 +104,8 @@ function AutoMessages({ admin, onSettings }: { admin: boolean; onSettings?: () =
         return (
           <section key={g.id} className="day-panel auto-group">
             <h3>{g.name}</h3>
-            <Auto title="Ссылка на предоплату" when="после выставления счёта" text={p?.clientMessage || DEFAULT_CLIENT_MESSAGE} />
-            <Auto title="Ссылка на доплату" when="после выставления счёта на доплату" text={p?.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE} />
+            <Auto title="Ссылка на предоплату" when="после выставления счёта" {...paymentText(templates, p?.prepaymentTemplateId, p?.clientMessage || DEFAULT_CLIENT_MESSAGE)} />
+            <Auto title="Ссылка на доплату" when="после выставления счёта на доплату" {...paymentText(templates, p?.surchargeTemplateId, p?.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE)} />
             <Auto title="Бронь снята — оплата не поступила" when={`через ${p?.timeoutMinutes ?? 90} минут без оплаты`} text={p?.failMessage ?? DEFAULT_FAIL_MESSAGE} />
             <h4>
               Подтверждение после оплаты —{' '}
@@ -131,10 +132,17 @@ function AutoMessages({ admin, onSettings }: { admin: boolean; onSettings?: () =
   );
 }
 
-function Auto({ title, when, text }: { title: string; when: string; text: string }) {
+/** Текст сообщения об оплате группы: выбранный системный шаблон или стандартный текст. */
+function paymentText(templates: MessageTemplateDto[], id: string | undefined, fallback: string): { text: string; source: string } {
+  const t = id ? templates.find((x) => x.id === id) : undefined;
+  if (!t) return { text: fallback, source: id ? 'шаблон удалён — стандартный текст' : 'стандартный текст' };
+  return { text: t.steps.map((st) => [st.text, ...st.files.map((f) => `📎 ${f.name}`)].filter(Boolean).join('\n')).join('\n\n'), source: `шаблон «${t.name}»` };
+}
+
+function Auto({ title, when, text, source }: { title: string; when: string; text: string; source?: string }) {
   return (
     <div className="auto-step">
-      <b>{title}</b> <span className="muted">· {when}</span>
+      <b>{title}</b> <span className="muted">· {when}{source ? ` · ${source}` : ''}</span>
       {text.trim() ? <pre>{text}</pre> : <p className="muted">Не отправляется (текст пуст).</p>}
     </div>
   );

@@ -63,6 +63,7 @@ export function PaymentDialog({
   }, [initialDealId, initialBookingId]);
   const chooseDeal = (id: number) => {
     setDealId(id);
+    setGroupId(null);
     setBookingId(null);
     setBookingChosen(false);
     setPreview(null);
@@ -70,6 +71,9 @@ export function PaymentDialog({
     setError('');
   };
   const [kind, setKind] = useState<PaymentKind>('prepayment');
+  // Группа счёта: null — решает сервер (группа брони, иначе группа воронки сделки); в одной воронке
+  // бывает несколько групп (домики, домики на воде, беседки) — тогда сотрудник выбирает.
+  const [groupId, setGroupId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PaymentPreviewDto | null>(null);
   const [amount, setAmount] = useState('');
   const [invoices, setInvoices] = useState<DealInvoiceDto[] | null>(null);
@@ -99,7 +103,7 @@ export function PaymentDialog({
   };
   useEffect(() => {
     apiGet<PaymentPreviewDto>(
-      `/payments/preview?dealId=${dealId}&kind=${kind}${bookingId ? `&bookingId=${bookingId}` : ''}`,
+      `/payments/preview?dealId=${dealId}&kind=${kind}${bookingId ? `&bookingId=${bookingId}` : ''}${groupId ? `&groupId=${encodeURIComponent(groupId)}` : ''}`,
     ).then(
       (p) => {
         setPreview(p);
@@ -108,7 +112,7 @@ export function PaymentDialog({
       },
       (e) => setError(e instanceof Error ? e.message : 'Не удалось рассчитать счёт'),
     );
-  }, [dealId, kind, bookingId, bookingChosen]);
+  }, [dealId, kind, bookingId, bookingChosen, groupId]);
   useEffect(() => void loadHistory(), [loadHistory]);
   const inWork = (invoices ?? []).filter(invoiceInWork);
   // Пока ссылка формируется или ждём оплату — обновляем статус.
@@ -238,10 +242,33 @@ export function PaymentDialog({
         {!preview && !error && <p className="muted">Расчёт…</p>}
         {preview && (
           <>
-            {preview.groupName && (
-              <p className="muted">
-                Группа «{preview.groupName}»{preview.timeoutMinutes ? ` · на оплату ${preview.timeoutMinutes} мин` : ''}
-              </p>
+            {preview.groupOptions.length > 1 ? (
+              <label>
+                Группа
+                <select
+                  value={preview.groupId ?? ''}
+                  onChange={(e) => {
+                    setGroupId(e.target.value || null);
+                    setPreview(null);
+                  }}
+                >
+                  {!preview.groupId && <option value="">Выберите группу…</option>}
+                  {preview.groupOptions.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted">
+                  От группы зависят сумма, стадия и сообщение клиенту{preview.timeoutMinutes ? ` · на оплату ${preview.timeoutMinutes} мин` : ''}
+                </span>
+              </label>
+            ) : (
+              preview.groupName && (
+                <p className="muted">
+                  Группа «{preview.groupName}»{preview.timeoutMinutes ? ` · на оплату ${preview.timeoutMinutes} мин` : ''}
+                </p>
+              )
             )}
             {preview.bookingMissing ? (
               <div className="notice booking-required" role="alert">
@@ -267,6 +294,7 @@ export function PaymentDialog({
                     onChange={(e) => {
                       setBookingChosen(true);
                       setBookingId(e.target.value ? Number(e.target.value) : null);
+                      setGroupId(null);
                     }}
                   >
                     {!preview.requireBooking && <option value="">Без привязки к брони</option>}
@@ -292,7 +320,7 @@ export function PaymentDialog({
                   )}
                 </label>
                 <label className="settings-block">
-                  Сообщение клиенту
+                  Сообщение клиенту{preview.templateName ? ` · шаблон «${preview.templateName}»` : ' · стандартный текст'}
                   <textarea rows={4} readOnly value={preview.message} />
                   <span className="muted">
                     {'{link}'} заменится ссылкой, когда портал её выдаст; срок оплаты считается с момента отправки.

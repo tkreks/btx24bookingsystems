@@ -4,11 +4,15 @@ import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 
 type Where = { id?: string; ownerUserId?: number; OR?: ({ ownerUserId: number } | { shared: boolean })[] };
-function setup(existing: { id: string; name: string; steps: unknown; ownerUserId?: number; shared?: boolean }[] = []) {
+function setup(
+  existing: { id: string; name: string; steps: unknown; ownerUserId?: number; shared?: boolean; purpose?: 'chat' | 'payment' }[] = [],
+  groups: { name: string; options: unknown }[] = [],
+) {
   const rows = existing.map((r) => ({
     portalId: 'p1',
     ownerUserId: 7,
     shared: false,
+    purpose: 'chat' as 'chat' | 'payment',
     updatedAt: new Date('2026-10-21T00:00:00Z'),
     ...r,
   }));
@@ -23,13 +27,14 @@ function setup(existing: { id: string; name: string; steps: unknown; ownerUserId
       delete: vi.fn(async () => ({})),
       count: vi.fn(async () => rows.length),
       create: vi.fn(async ({ data }: { data: { name: string; steps: unknown; shared: boolean } }) => {
-        const row = { id: 'new', portalId: 'p1', ownerUserId: 7, updatedAt: new Date(), ...data };
+        const row = { id: 'new', portalId: 'p1', ownerUserId: 7, updatedAt: new Date(), purpose: 'chat' as 'chat' | 'payment', ...data };
         rows.push(row);
         return row;
       }),
       updateMany: vi.fn(async () => ({ count: 1 })),
       deleteMany: vi.fn(async () => ({ count: 1 })),
     },
+    workGroup: { findMany: vi.fn(async () => groups) },
   } as unknown as PrismaService;
   const files = {
     meta: vi.fn(
@@ -96,5 +101,17 @@ describe('TemplatesService', () => {
     await expect(t.svc.create(t.user, { name: 'Общий', shared: true, steps: [{ text: 'y', fileIds: [] }] })).rejects.toMatchObject({ status: 403 });
     expect(await t.svc.update(t.user, 's1', { name: 'Приветствие 2', steps: [{ text: 'y', fileIds: [] }] }, true)).toMatchObject({ name: 'Приветствие 2', shared: true });
     expect(await t.svc.create(t.user, { name: 'Общий', shared: true, steps: [{ text: 'y', fileIds: [] }] }, true)).toMatchObject({ shared: true, mine: true });
+  });
+
+  it('payment templates are shared, admin-only and cannot be removed while a group uses them', async () => {
+    const t = setup([{ id: 'p1', name: 'Предоплата бани', steps: [{ text: '{link}', fileIds: [] }], ownerUserId: 1, shared: true, purpose: 'payment' }], [
+      { name: 'Бани', options: { payments: { prepaymentTemplateId: 'p1' } } },
+    ]);
+    const body = { name: 'Оплата', purpose: 'payment', steps: [{ text: 'Ссылка: {link}', fileIds: [] }] };
+    await expect(t.svc.create(t.user, body)).rejects.toMatchObject({ status: 403 });
+    expect(await t.svc.create(t.user, { ...body, shared: false }, true)).toMatchObject({ purpose: 'payment', shared: true });
+    await expect(t.svc.remove(t.user, 'p1', true)).rejects.toMatchObject({ status: 409, response: { message: expect.stringContaining('Бани (предоплата)') } });
+    await expect(t.svc.update(t.user, 'p1', { ...body, purpose: 'chat' }, true)).rejects.toMatchObject({ status: 409 });
+    expect(await t.svc.update(t.user, 'p1', { name: 'Предоплата', shared: false, steps: body.steps }, true)).toMatchObject({ shared: true, purpose: 'payment' });
   });
 });

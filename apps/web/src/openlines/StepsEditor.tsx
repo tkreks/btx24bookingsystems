@@ -15,12 +15,15 @@ export function StepsEditor({
   disabled = false,
   onSubmitShortcut,
   variables = false,
+  paymentVariables = false,
 }: {
   steps: ChainStep[];
   onChange: (steps: ChainStep[]) => void;
   disabled?: boolean;
   /** Меню «＋ Переменная» (редактор шаблонов; при вставке в чат значения подставит сделка). */
   variables?: boolean;
+  /** В меню — и переменные оплаты ({link}, {prepayment}…): шаблон сообщения об оплате. */
+  paymentVariables?: boolean;
   /** Ctrl/⌘+Enter в тексте. */
   onSubmitShortcut?: () => void;
 }) {
@@ -95,6 +98,7 @@ export function StepsEditor({
             />
             {variables && (
               <VariableMenu
+                payment={paymentVariables}
                 disabled={disabled}
                 onPick={(token) => {
                   const r = insertAt(areas.current.get(s.key) ?? null, s.text, token);

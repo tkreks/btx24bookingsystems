@@ -22,14 +22,29 @@ const options = {
   },
 };
 
-function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<PaymentRequest>; link?: string; bookings?: number[]; pastBooking?: number } = {}) {
+type Grp = { group: { id: string; name: string; dealCategoryId: number; options: unknown }; permissions: string[] };
+function setup(
+  o: {
+    permissions?: string[];
+    active?: boolean;
+    prev?: Partial<PaymentRequest>;
+    link?: string;
+    bookings?: number[];
+    pastBooking?: number;
+    category?: string;
+    groups?: Grp[];
+    bookingGroup?: string;
+    template?: { id: string; name: string; steps: { text: string; fileIds: string[] }[] };
+  } = {},
+) {
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
-    if (method === 'crm.deal.get') return { result: { ID: '678', CATEGORY_ID: '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P' } };
+    if (method === 'crm.deal.get') return { result: { ID: '678', CATEGORY_ID: o.category ?? '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P' } };
     if (method === 'crm.item.add') return { result: { item: { id: 6001 } } };
     if (method === 'crm.item.get') return { result: { item: { id: 6001, ufCrmLink: o.link ?? '' } } };
     if (method === 'imopenlines.crm.chat.get') return { result: [{ CHAT_ID: '3301' }] };
+    if (method === 'imopenlines.dialog.get') return { result: { entity_data_2: 'LEAD|0|COMPANY|0|CONTACT|140|DEAL|678' } };
     if (method === 'crm.status.list')
       return { result: [{ STATUS_ID: 'DT31_2:N', NAME: 'Внесение предоплаты', SEMANTICS: null }, { STATUS_ID: 'DT31_2:P', NAME: 'Оплачен', SEMANTICS: 'S' }, { STATUS_ID: 'DT31_2:D', NAME: 'Не оплачен', SEMANTICS: 'F' }] };
     return { result: {} };
@@ -53,7 +68,7 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
     },
     workGroup: { findUnique: vi.fn(async () => ({ options })) },
     bookingRecord: {
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async () => (o.bookingGroup ? { groupId: o.bookingGroup } : null)),
       // Прошедшая бронь сделки (для подсказки «уже прошла»).
       findFirst: vi.fn(async () => (o.pastBooking ? { bookingId: o.pastBooking, startsAt: new Date(Date.now() - 86_400_000), endsAt: new Date(Date.now() - 82_800_000), resourceIds: [2] } : null)),
       findMany: vi.fn(async () =>
@@ -62,11 +77,14 @@ function setup(o: { permissions?: string[]; active?: boolean; prev?: Partial<Pay
     },
     resource: { findMany: vi.fn(async () => [{ resourceId: 2, name: 'Баня 2' }]) },
     appCreatedEntity: { findUnique: vi.fn(async () => ({})), upsert: vi.fn() },
+    messageTemplate: { findFirst: vi.fn(async ({ where }: { where: { id: string } }) => (o.template?.id === where.id ? o.template : null)) },
+    storedFile: { findMany: vi.fn(async () => [{ id: 'f1', name: 'прайс.pdf', data: Buffer.from('x') }]) },
   } as unknown as PrismaService;
   const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options }, permissions: o.permissions ?? ['payment.send'] };
-  const access = { resolve: vi.fn(async () => ({ groups: [group] })) } as unknown as AccessService;
+  const access = { resolve: vi.fn(async () => ({ groups: [group, ...(o.groups ?? [])] })) } as unknown as AccessService;
   const fieldMap = { get: vi.fn(async () => ({ prepayment: 'UF_PRE', prepaymentInvoiceId: 'UF_INV', prepaymentLink: 'UF_LINK' })) } as unknown as DealFieldMapService;
   const flow = new PaymentFlow(prisma, { find: vi.fn() } as unknown as BookingJournalService, fieldMap, new MessageContextService(prisma, fieldMap));
+  flow.sendGapMs = 0;
   const svc = new PaymentsService(prisma, access, fieldMap, flow);
   svc.sleep = async () => {};
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 242, userName: 'Тест', client: { call, listAll } } as unknown as B24UserContext;
@@ -156,5 +174,49 @@ describe('PaymentsService', () => {
     const r = await t.svc.dealOptions(t.user, 678);
     expect(r.defaultDealId).toBe(700);
     expect(r.deals.map((d) => d.id)).toEqual([700, 600]);
+  });
+
+  const houses = (id: string, name: string, extra: Record<string, unknown> = {}): Grp => ({
+    group: {
+      id,
+      name,
+      dealCategoryId: 14,
+      options: { payments: { ...options.payments, prepaymentPercent: 100, prepayment: { stageId: 'C14:PREPAYMENT_INVOIC', moveStage: true, templateId: '' }, ...extra } },
+    },
+    permissions: ['payment.send'],
+  });
+
+  it('group of the booking wins over the deal funnel; the foreign-funnel stage is not applied', async () => {
+    // Сделка в воронке домиков (14), бронь создана в группе «Бани» (воронка 0).
+    const t = setup({ category: '14', bookingGroup: 'g1', groups: [houses('h1', 'Домики'), houses('h2', 'Беседки')], link: 'https://pay.example/x' });
+    const p = await t.svc.preview(t.user, 678, 'prepayment');
+    expect(p).toMatchObject({ groupId: 'g1', groupName: 'Бани', amount: 45000 });
+    expect(p.groupOptions.map((g) => g.name)).toEqual(['Бани', 'Домики', 'Беседки']);
+    const r = await t.svc.create(t.user, body({ groupId: 'g1' }));
+    expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 678, fields: { UF_INV: 6001 } });
+    expect(r.warnings.join(' ')).toContain('из другой воронки');
+  });
+
+  it('several groups on one funnel: the chosen one is used', async () => {
+    const t = setup({ category: '14', groups: [houses('h1', 'Домики'), houses('h2', 'Беседки')] });
+    expect((await t.svc.preview(t.user, 678, 'prepayment')).groupName).toBe('Домики');
+    expect((await t.svc.preview(t.user, 678, 'prepayment', 'h2')).groupName).toBe('Беседки');
+    expect((await t.svc.preview(t.user, 678, 'prepayment', 'g1')).groupId).toBeNull(); // «Бани» — не воронка сделки и не группа брони
+  });
+
+  it('sends the system payment template of the group: texts and template files', async () => {
+    const template = { id: 'tp1', name: 'Предоплата бани', steps: [{ text: 'Ссылка: {link}', fileIds: [] }, { text: 'Правила', fileIds: ['f1'] }] };
+    const t = setup({ link: 'https://pay.example/x', template, groups: [] });
+    (options.payments as Record<string, unknown>).prepaymentTemplateId = 'tp1';
+    try {
+      const p = await t.svc.preview(t.user, 678, 'prepayment');
+      expect(p.templateName).toBe('Предоплата бани');
+      await t.svc.create(t.user, body());
+      const sent = t.calls.filter((c) => c[0] === 'imopenlines.crm.message.add').map((c) => c[1].MESSAGE);
+      expect(sent).toEqual(['Ссылка: https://pay.example/x', 'Правила']);
+      expect(t.calls.find((c) => c[0] === 'im.v2.File.upload')![1]).toMatchObject({ dialogId: 'chat3301', fields: { name: 'прайс.pdf' } });
+    } finally {
+      delete (options.payments as Record<string, unknown>).prepaymentTemplateId;
+    }
   });
 });

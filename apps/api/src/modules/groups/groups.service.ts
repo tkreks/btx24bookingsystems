@@ -37,6 +37,7 @@ export class GroupsService {
 
   async create(portalId: string, body: unknown): Promise<GroupDto> {
     const s = this.parse(groupSettingsSchema, body);
+    await this.checkTemplates(portalId, s);
     const sort = (await this.prisma.workGroup.count({ where: { portalId, archivedAt: null } })) * 10;
     const g = await this.prisma.workGroup.create({
       data: { portalId, sort, ...this.columns(s), resources: { create: unique(s.resourceIds).map((resourceId) => ({ resourceId })) }, members: { create: dedupeMembers(s.members) } },
@@ -48,6 +49,7 @@ export class GroupsService {
   async update(portalId: string, id: string, body: unknown): Promise<GroupDto> {
     const s = this.parse(groupSettingsSchema, body);
     await this.ensure(portalId, id);
+    await this.checkTemplates(portalId, s);
     await this.prisma.$transaction([
       this.prisma.workGroup.update({ where: { id }, data: this.columns(s) }),
       this.prisma.workGroupResource.deleteMany({ where: { groupId: id } }),
@@ -111,6 +113,15 @@ export class GroupsService {
         : []),
     ]);
     return this.settings(portalId);
+  }
+  /** Шаблоны предоплаты и доплаты — системные шаблоны оплаты этого портала. */
+  private async checkTemplates(portalId: string, s: Settings): Promise<void> {
+    const p = s.options?.payments;
+    const ids = [...new Set([p?.prepaymentTemplateId, p?.surchargeTemplateId].filter((x): x is string => !!x))];
+    if (!ids.length) return;
+    const found = await this.prisma.messageTemplate.count({ where: { portalId, id: { in: ids }, purpose: 'payment', shared: true } });
+    if (found !== ids.length)
+      throw new BadRequestException({ code: 'INVALID_PAYMENT_TEMPLATE', message: 'Шаблон сообщения об оплате не найден — выберите системный шаблон оплаты' });
   }
 
   private columns(s: Settings): Omit<Prisma.WorkGroupUncheckedCreateInput, 'portalId'> {

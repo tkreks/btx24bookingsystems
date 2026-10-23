@@ -117,6 +117,8 @@ export interface MessageTemplateDto {
   name: string;
   /** Общий (системный) шаблон — виден всем сотрудникам портала. */
   shared: boolean;
+  /** `chat` — для чатов; `payment` — системный шаблон сообщения со ссылкой на оплату (выбирает группа). */
+  purpose: MessageTemplatePurpose;
   /** Мой шаблон (я автор). */
   mine: boolean;
   /** Можно менять: свой личный или общий для администратора приложения. */
@@ -125,10 +127,14 @@ export interface MessageTemplateDto {
   updatedAt: string;
 }
 
+export type MessageTemplatePurpose = 'chat' | 'payment';
+
 export interface SaveTemplateDto {
   name: string;
   /** Общий шаблон — только администратор приложения. */
   shared?: boolean;
+  /** Шаблон оплаты — только администратор, всегда общий. */
+  purpose?: MessageTemplatePurpose;
   steps: TemplateStepDto[];
 }
 

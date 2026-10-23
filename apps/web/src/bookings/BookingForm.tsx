@@ -219,21 +219,32 @@ export function BookingForm({
     };
   }, [groupId]);
   const cat = catalog?.groupId === groupId ? catalog.data : null;
-  const [products, setProducts] = useState<{ key: string; rows: ProductRow[]; dirty: boolean } | null>(null);
+  const [products, setProducts] = useState<{ key: string; rows: ProductRow[]; dirty: boolean; error?: string } | null>(null);
   const existingDealId = deal.mode === 'existing' ? deal.dealId : null;
   const productsKey = existingDealId ? `deal:${existingDealId}` : deal.mode;
+  // Товары сделки — заново при каждом входе на шаг «Товары и поля» (могли поменяться в портале или
+  // прошлой бронью), пока сотрудник их не правил. Сбой — ошибка с повтором, а не «товаров нет»:
+  // иначе добавленный товар заменил бы товары сделки.
+  const [productsTry, setProductsTry] = useState(0);
+  const onDetails = step === 'details';
   useEffect(() => {
     if (!existingDealId) return;
     let active = true;
     const key = `deal:${existingDealId}`;
     apiGet<DealProductRowDto[]>(`/deals/${existingDealId}/products`).then(
       (r) => active && setProducts((prev) => (prev?.key === key && prev.dirty ? prev : { key, rows: Array.isArray(r) ? r : [], dirty: false })),
-      () => active && setProducts((prev) => (prev?.key === key ? prev : { key, rows: [], dirty: false })),
+      (e) =>
+        active &&
+        setProducts((prev) =>
+          prev?.key === key && (prev.dirty || !prev.error) && prev.rows.length
+            ? prev
+            : { key, rows: [], dirty: false, error: e instanceof Error ? e.message : 'Не удалось загрузить товары сделки' },
+        ),
     );
     return () => {
       active = false;
     };
-  }, [existingDealId]);
+  }, [existingDealId, onDetails, productsTry]);
   const nights =
     group?.bookingMode === 'interval' ? Math.max(1, Math.round((Date.parse(period.endDate) - Date.parse(period.startDate)) / 86_400_000) || 1) : 1;
   const defaultRows: ProductRow[] = cat
@@ -591,7 +602,17 @@ export function BookingForm({
             Товары
             {deal.mode === 'existing' && <span className="bk-title-hint"> · изменения заменят товары сделки</span>}
           </h4>
-          <ProductsEditor catalog={cat} rows={productRows} onChange={setProductRows} loading={productsLoading} />
+          <ProductsEditor
+            catalog={cat}
+            rows={productRows}
+            onChange={setProductRows}
+            loading={productsLoading}
+            error={deal.mode === 'existing' && !loadedProducts?.dirty ? loadedProducts?.error : undefined}
+            onRetry={() => {
+              setProducts(null);
+              setProductsTry((n) => n + 1);
+            }}
+          />
         </section>
       )}
 

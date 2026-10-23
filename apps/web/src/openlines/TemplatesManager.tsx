@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import type { MessageTemplateDto, SaveTemplateDto } from '@btx24/shared';
+import { DEFAULT_CLIENT_MESSAGE, type MessageTemplateDto, type MessageTemplatePurpose, type SaveTemplateDto } from '@btx24/shared';
 import { apiDelete, apiPost, apiPut } from '../api.js';
 import { isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { StepsEditor } from './StepsEditor.js';
 
-type Editing = { id: string | null; name: string; steps: ChainStep[]; shared: boolean };
+type Editing = { id: string | null; name: string; steps: ChainStep[]; shared: boolean; purpose: MessageTemplatePurpose };
 
 /**
  * Шаблоны сообщений: свои и общие (общие меняют администраторы приложения). Окно в чате или
- * встроенный блок страницы «Шаблоны» (`embedded`).
+ * встроенный блок страницы «Шаблоны» (`embedded`). Шаблоны оплаты (системные, выбираются в группе
+ * для ссылки на предоплату/доплату) создают и видят здесь только администраторы.
  */
 export function TemplatesManager({
   templates,
@@ -27,13 +28,19 @@ export function TemplatesManager({
   admin?: boolean;
   embedded?: boolean;
 }) {
-  const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial, shared: false } : null);
+  const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial, shared: false, purpose: 'chat' } : null);
+  // В чате шаблоны оплаты не нужны (ссылку подставляет автоматизация); на странице «Шаблоны» — администраторам.
+  const shown = templates.filter((t) => t.purpose !== 'payment' || (admin && embedded));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
     if (!editing) return;
-    const body: SaveTemplateDto = { name: editing.name, steps: toSteps(editing.steps), ...(admin ? { shared: editing.shared } : {}) };
+    const body: SaveTemplateDto = {
+      name: editing.name,
+      steps: toSteps(editing.steps),
+      ...(admin ? { shared: editing.purpose === 'payment' || editing.shared, purpose: editing.purpose } : {}),
+    };
     setBusy(true);
     setError('');
     try {
@@ -96,18 +103,45 @@ export function TemplatesManager({
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               />
             </label>
-            {admin && (
+            {admin && embedded && (
+              <label>
+                Назначение
+                <select
+                  value={editing.purpose}
+                  onChange={(e) => {
+                    const purpose = e.target.value as MessageTemplatePurpose;
+                    const blank = editing.steps.every(isEmpty);
+                    setEditing({ ...editing, purpose, shared: purpose === 'payment' || editing.shared, steps: purpose === 'payment' && blank ? [newStep(DEFAULT_CLIENT_MESSAGE)] : editing.steps });
+                  }}
+                >
+                  <option value="chat">Шаблон для чатов</option>
+                  <option value="payment">Сообщение об оплате (системный — выбирается в настройках группы)</option>
+                </select>
+              </label>
+            )}
+            {admin && editing.purpose === 'chat' && (
               <label className="check">
                 <input type="checkbox" checked={editing.shared} onChange={(e) => setEditing({ ...editing, shared: e.target.checked })} />
                 Общий шаблон — видят все сотрудники
               </label>
             )}
-            <p className="muted">
-              Сообщения уйдут по порядку, файлы — отдельными сообщениями после текста. Переменные ({'{{Дата начала визита}}'}, {'{{Контакт: Имя}}'},{' '}
-              {'{=Variable:programm}'} и др.) подставятся по сделке чата при вставке шаблона.
-            </p>
+            {editing.purpose === 'payment' ? (
+              <p className="muted">
+                Уйдёт клиенту автоматически, когда портал выдаст ссылку на оплату. {'{link}'} — ссылка (обязательно), {'{prepayment}'} — сумма к оплате,{' '}
+                {'{minutes}'} — минут на оплату, {'{deadline}'} — оплатить до; остальные переменные — по сделке. Сообщения — по порядку, файлы — после текста.
+              </p>
+            ) : (
+              <p className="muted">
+                Сообщения уйдут по порядку, файлы — отдельными сообщениями после текста. Переменные ({'{{Дата начала визита}}'}, {'{{Контакт: Имя}}'},{' '}
+                {'{=Variable:programm}'} и др.) подставятся по сделке чата при вставке шаблона.
+              </p>
+            )}
+            {editing.purpose === 'payment' && !editing.steps.some((st) => st.text.includes('{link}')) && (
+              <p className="notice error">В шаблоне нет {'{link}'} — клиент не получит ссылку на оплату.</p>
+            )}
             <StepsEditor
               variables
+              paymentVariables={editing.purpose === 'payment'}
               steps={editing.steps}
               disabled={busy}
               onChange={(steps) => setEditing({ ...editing, steps })}
@@ -128,25 +162,25 @@ export function TemplatesManager({
         ) : (
           <>
             <div className="form-actions">
-              <button className="primary" onClick={() => setEditing({ id: null, name: '', steps: [newStep()], shared: false })}>
+              <button className="primary" onClick={() => setEditing({ id: null, name: '', steps: [newStep()], shared: false, purpose: 'chat' })}>
                 Создать шаблон
               </button>
             </div>
-            {!templates.length && (
+            {!shown.length && (
               <p className="muted">Шаблонов пока нет. Создайте цепочку сообщений, которую часто отправляете.</p>
             )}
             <ul className="settings-groups">
-              {templates.map((t) => (
+              {shown.map((t) => (
                 <li key={t.id}>
                   <div>
-                    <strong>{t.name}</strong> {t.shared && <span className="pill">общий</span>}
+                    <strong>{t.name}</strong> {t.purpose === 'payment' ? <span className="pill paid">оплата · системный</span> : t.shared && <span className="pill">общий</span>}
                     <p className="muted">
                       Сообщений: {t.steps.length} · Вложений: {t.steps.reduce((n, s) => n + s.files.length, 0)}
                     </p>
                   </div>
                   {t.canEdit ? (
                     <span className="form-actions">
-                      <button onClick={() => setEditing({ id: t.id, name: t.name, steps: t.steps.map((s) => newStep(s.text, s.files)), shared: t.shared })}>
+                      <button onClick={() => setEditing({ id: t.id, name: t.name, steps: t.steps.map((s) => newStep(s.text, s.files)), shared: t.shared, purpose: t.purpose })}>
                         Изменить
                       </button>
                       <button className="danger" disabled={busy} onClick={() => void remove(t)}>

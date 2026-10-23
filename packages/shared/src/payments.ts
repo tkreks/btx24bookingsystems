@@ -76,6 +76,10 @@ export interface PaymentPreviewDto {
   kind: PaymentKind;
   groupId: string | null;
   groupName: string | null;
+  /** Группы, по которым можно выставить счёт (одна воронка — несколько групп); выбор — в окне. */
+  groupOptions: { id: string; name: string }[];
+  /** Шаблон сообщения: название системного шаблона; null — стандартный текст. */
+  templateName: string | null;
   amount: number | null;
   source: PaymentAmountSource;
   /** Минут на оплату (только предоплата); null — без срока. */

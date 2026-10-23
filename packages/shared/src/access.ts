@@ -147,6 +147,12 @@ export interface GroupOptionsDto {
     requireBooking?: boolean;
     /** Сообщение клиенту со ссылкой на доплату ({prepayment} — сумма доплаты). */
     surchargeMessage?: string;
+    /**
+     * Системный шаблон (`MessageTemplate`, назначение `payment`) сообщения со ссылкой на предоплату /
+     * доплату. Не выбран — старый текст группы (`clientMessage` / `surchargeMessage`) или стандартный.
+     */
+    prepaymentTemplateId?: string;
+    surchargeTemplateId?: string;
     /** Предоплата в процентах от суммы сделки, если нет фиксированной и ручной (по умолчанию 100). */
     prepaymentPercent?: number;
     /** Смарт-счёт направления; не задан — выставить счёт из приложения нельзя. */

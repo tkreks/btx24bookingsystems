@@ -1,7 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import {
-  DEFAULT_CLIENT_MESSAGE,
-  DEFAULT_SURCHARGE_MESSAGE,
   PAYMENT_KINDS,
   moneyValue,
   paymentAmount,
@@ -57,7 +55,10 @@ export class PaymentsService {
   async preview(user: B24UserContext, dealId: number, kind: PaymentKind, groupId?: string, bookingId?: number): Promise<PaymentPreviewDto> {
     const deal = await this.flow.deal(user, dealId);
     if (!deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена или нет доступа` });
-    const g = await this.group(user, Number(deal.CATEGORY_ID ?? 0), groupId, bookingId);
+    // Бронь сделки: к ней привязывается счёт (неоплата в срок снимает именно её), её группа — группа счёта.
+    const bookings = await this.dealBookings(user, dealId);
+    const chosenBooking = bookings.find((x) => x.bookingId === bookingId)?.bookingId ?? bookings[0]?.bookingId ?? null;
+    const { group: g, options: groupOptions } = await this.group(user, Number(deal.CATEGORY_ID ?? 0), groupId, chosenBooking ?? undefined);
     const problems: string[] = [];
     if (!g) problems.push('Нет права «Отправка ссылок на оплату» в группе с воронкой этой сделки');
     const opts = (g?.group.options ?? null) as GroupOptionsDto | null;
@@ -72,27 +73,27 @@ export class PaymentsService {
     if (a.amount === null)
       problems.push(kind === 'surcharge' ? 'Заполните «Ручную сумму доплаты» в сделке или укажите сумму' : 'Нет суммы: заполните сделку или укажите сумму');
     if (deal.STAGE_SEMANTIC_ID && deal.STAGE_SEMANTIC_ID !== 'P') problems.push(`Сделка #${dealId} закрыта — выберите сделку в работе`);
-    // Бронь сделки: к ней привязывается счёт (неоплата в срок снимает именно её).
-    const bookings = await this.dealBookings(user, dealId);
     const requireBooking = opts?.payments.requireBooking !== false;
     const bookingMissing = requireBooking && !bookings.length;
     // Бронь у сделки есть, но уже прошла: счёт к ней не привязать (неоплата снимает будущую бронь).
     const pastBooking = bookingMissing ? await this.lastPastBooking(user, dealId) : null;
     if (bookingMissing) problems.push(BOOKING_REQUIRED_MESSAGE);
-    const chosenBooking = bookings.find((x) => x.bookingId === bookingId)?.bookingId ?? bookings[0]?.bookingId ?? null;
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
-    const template = kind === 'prepayment' ? opts?.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts?.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
+    const tpl = await this.flow.paymentTemplate(user.portal.id, kind, opts);
     const mc = await this.flow.messages(ctx, dealId);
-    const message = renderMessage(template, {
-      ...mc,
-      vars: { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' },
-    });
+    const vars = { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' };
+    const message = tpl.steps
+      .map((st) => [renderMessage(st.text, { ...mc, vars }), ...st.files.map(() => '📎 файл из шаблона')].filter((x) => x.trim()).join('\n'))
+      .filter(Boolean)
+      .join('\n\n');
     return {
       dealId,
       kind,
       groupId: g?.group.id ?? null,
       groupName: g?.group.name ?? null,
+      groupOptions,
+      templateName: tpl.name,
       amount: a.amount,
       source: a.source,
       timeoutMinutes: minutes,
@@ -225,7 +226,11 @@ export class PaymentsService {
     const map = await this.fieldMap.get(user.portal.id);
     const idField = b.kind === 'prepayment' ? map.prepaymentInvoiceId : map.surchargeInvoiceId;
     const step = opts.payments[b.kind];
-    const fields: Record<string, unknown> = { ...(idField ? { [idField]: req.invoiceId } : {}), ...(step.moveStage && step.stageId ? { STAGE_ID: step.stageId } : {}) };
+    // Стадия группы из другой воронки (бронь «Бань» по сделке воронки домиков) — сделку не переносим.
+    const moveStage = step.moveStage && !!step.stageId;
+    const sameFunnel = moveStage && stageCategory(step.stageId) === Number(deal?.CATEGORY_ID ?? 0);
+    if (moveStage && !sameFunnel) warnings.push(`Стадия оплаты группы «${g.group.name}» — из другой воронки, стадия сделки не изменена`);
+    const fields: Record<string, unknown> = { ...(idField ? { [idField]: req.invoiceId } : {}), ...(sameFunnel ? { STAGE_ID: step.stageId } : {}) };
     if (Object.keys(fields).length) await this.flow.dealUpdate(ctx, b.dealId, fields, warnings, 'ID счёта и стадия');
     if (warnings.length) req = await this.prisma.paymentRequest.update({ where: { id: req.id }, data: { warnings } });
 
@@ -302,18 +307,30 @@ export class PaymentsService {
   }
 
   /** Группа сотрудника с правом `payment.send`: указанная, группа брони или по воронке сделки. */
-  private async group(user: B24UserContext, categoryId: number, groupId?: string, bookingId?: number): Promise<GroupAccess | null> {
+  /**
+   * Группа счёта: выбранная сотрудником → группа брони (её выбрали в мастере, воронка сделки может
+   * быть другой) → группа с воронкой сделки (их бывает несколько — тогда выбор в окне). Право —
+   * `payment.send` в этой группе.
+   */
+  private async group(
+    user: B24UserContext,
+    categoryId: number,
+    groupId?: string,
+    bookingId?: number,
+  ): Promise<{ group: GroupAccess | null; options: { id: string; name: string }[] }> {
     const a = await this.access.resolve(user);
-    const can = a.groups.filter((g) => g.permissions.includes('payment.send') && (g.group.dealCategoryId ?? 0) === categoryId);
-    if (groupId) return can.find((g) => g.group.id === groupId) ?? null;
-    if (bookingId) {
-      const rec = await this.prisma.bookingRecord.findUnique({ where: { portalId_bookingId: { portalId: user.portal.id, bookingId } } });
-      const hit = can.find((g) => g.group.id === rec?.groupId);
-      if (hit) return hit;
-    }
-    return can.find((g) => (g.group.options as GroupOptionsDto | null)?.payments.invoice) ?? can[0] ?? null;
+    const pay = a.groups.filter((g) => g.permissions.includes('payment.send'));
+    const rec = bookingId ? await this.prisma.bookingRecord.findUnique({ where: { portalId_bookingId: { portalId: user.portal.id, bookingId } } }) : null;
+    const own = pay.find((g) => g.group.id === rec?.groupId);
+    const can = [...(own ? [own] : []), ...pay.filter((g) => g !== own && (g.group.dealCategoryId ?? 0) === categoryId)];
+    const options = can.map((g) => ({ id: g.group.id, name: g.group.name }));
+    if (groupId) return { group: can.find((g) => g.group.id === groupId) ?? null, options };
+    return { group: own ?? can.find((g) => (g.group.options as GroupOptionsDto | null)?.payments.invoice) ?? can[0] ?? null, options };
   }
 }
+
+/** Воронка стадии сделки: `C14:NEW` → 14, стадии общей воронки без префикса → 0. */
+export const stageCategory = (stageId: string) => Number(/^C(\d+):/.exec(stageId)?.[1] ?? 0);
 
 export function toDto(r: PaymentRequest): PaymentRequestDto {
   return {

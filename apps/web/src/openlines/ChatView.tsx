@@ -86,6 +86,8 @@ export function ChatView({
   };
   const [chain, setChain] = useState<ChainStep[]>(() => [newStep()]);
   const [templatesOpen, setTemplatesOpen] = useState<'list' | 'save' | null>(null);
+  // Шаблоны оплаты отправляет автоматизация (со ссылкой) — в чат их не вставляем.
+  const chatTemplates = templates?.filter((t) => t.purpose !== 'payment');
   const [templatePick, setTemplatePick] = useState('');
   const list = useRef<HTMLDivElement>(null);
 
@@ -316,15 +318,15 @@ export function ChatView({
             <select
               aria-label="Шаблон"
               value={templatePick}
-              disabled={busy || !templates?.length}
+              disabled={busy || !chatTemplates?.length}
               onChange={(e) => {
-                const t = templates?.find((x) => x.id === e.target.value);
+                const t = chatTemplates?.find((x) => x.id === e.target.value);
                 setTemplatePick('');
                 if (t) void insertTemplate(t);
               }}
             >
-              <option value="">{templates?.length ? 'Вставить шаблон…' : 'Шаблонов нет'}</option>
-              {templates?.map((t) => (
+              <option value="">{chatTemplates?.length ? 'Вставить шаблон…' : 'Шаблонов нет'}</option>
+              {chatTemplates?.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name} ({t.steps.length})
                 </option>

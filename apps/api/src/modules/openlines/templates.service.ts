@@ -1,5 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import type { MessageTemplateDto, TemplateStepDto } from '@btx24/shared';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { GroupOptionsDto, MessageTemplateDto, TemplateStepDto } from '@btx24/shared';
 import { z } from 'zod';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -16,12 +16,16 @@ export const stepsSchema = z
   .min(1)
   .max(20);
 
-const templateSchema = z.object({ name: z.string().trim().min(1).max(100), steps: stepsSchema, shared: z.boolean().optional() }).strict();
+const templateSchema = z
+  .object({ name: z.string().trim().min(1).max(100), steps: stepsSchema, shared: z.boolean().optional(), purpose: z.enum(['chat', 'payment']).optional() })
+  .strict();
 const MAX_TEMPLATES = 100;
 
 /**
  * Шаблоны сообщений: личные (видит и меняет автор) и общие (видят все сотрудники портала, меняют
  * администраторы приложения). `admin` — администратор приложения (решает контроллер через AccessService).
+ * Шаблон оплаты (`purpose: payment`) — системный: всегда общий, его выбирает группа для сообщения
+ * со ссылкой на предоплату/доплату; пока он выбран в группе, удалить его нельзя.
  */
 @Injectable()
 export class TemplatesService {
@@ -41,6 +45,7 @@ export class TemplatesService {
       id: r.id,
       name: r.name,
       shared: r.shared,
+      purpose: r.purpose,
       mine: r.ownerUserId === user.userId,
       canEdit: r.shared ? admin : r.ownerUserId === user.userId,
       updatedAt: r.updatedAt.toISOString(),
@@ -56,7 +61,7 @@ export class TemplatesService {
     if (count >= MAX_TEMPLATES)
       throw new BadRequestException({ code: 'TOO_MANY_TEMPLATES', message: `Не больше ${MAX_TEMPLATES} шаблонов` });
     const row = await this.prisma.messageTemplate.create({
-      data: { portalId: user.portal.id, ownerUserId: user.userId, name: data.name, steps: data.steps, shared: data.shared ?? false },
+      data: { portalId: user.portal.id, ownerUserId: user.userId, name: data.name, steps: data.steps, shared: data.shared ?? false, purpose: data.purpose ?? 'chat' },
     });
     return this.one(user, row.id, admin);
   }
@@ -64,9 +69,15 @@ export class TemplatesService {
   async update(user: B24UserContext, id: string, body: unknown, admin = false): Promise<MessageTemplateDto> {
     const before = await this.editable(user, id, admin);
     const data = await this.validate(user, body, admin, fileIds(before.steps));
+    if (before.purpose === 'payment' && data.purpose === 'chat') await this.assertUnused(user, before.id, before.name);
     await this.prisma.messageTemplate.update({
       where: { id: before.id },
-      data: { name: data.name, steps: data.steps, ...(data.shared === undefined ? {} : { shared: data.shared }) },
+      data: {
+        name: data.name,
+        steps: data.steps,
+        ...((data.purpose ?? before.purpose) === 'payment' ? { shared: true } : data.shared === undefined ? {} : { shared: data.shared }),
+        ...(data.purpose === undefined ? {} : { purpose: data.purpose }),
+      },
     });
     await this.files.dropUnused(user, fileIds(before.steps));
     return this.one(user, id, admin);
@@ -74,6 +85,7 @@ export class TemplatesService {
 
   async remove(user: B24UserContext, id: string, admin = false): Promise<void> {
     const before = await this.editable(user, id, admin);
+    if (before.purpose === 'payment') await this.assertUnused(user, before.id, before.name);
     await this.prisma.messageTemplate.delete({ where: { id: before.id } });
     await this.files.dropUnused(user, fileIds(before.steps));
   }
@@ -85,11 +97,27 @@ export class TemplatesService {
         code: 'INVALID_TEMPLATE',
         message: 'Нужно название (до 100 символов) и от 1 до 20 сообщений с текстом или вложением',
       });
-    if (parsed.data.shared && !admin)
+    if ((parsed.data.shared || parsed.data.purpose === 'payment') && !admin)
       throw new ForbiddenException({ code: 'SHARED_TEMPLATES_ADMIN_ONLY', message: 'Общие шаблоны меняют только администраторы приложения' });
+    // Шаблон оплаты — системный: всегда общий (его отправляет автоматизация от имени любого сотрудника).
+    if (parsed.data.purpose === 'payment') parsed.data.shared = true;
     // Файлы — свои или уже бывшие в этом шаблоне (общий шаблон мог собрать другой администратор).
     await this.files.assertOwned(user, [...new Set(parsed.data.steps.flatMap((s) => s.fileIds))].filter((id) => !keep.includes(id)));
     return parsed.data;
+  }
+
+  /** Шаблон оплаты, выбранный в группе, не удаляем: сообщение со ссылкой молча сменилось бы на стандартное. */
+  private async assertUnused(user: B24UserContext, id: string, name: string): Promise<void> {
+    const groups = await this.prisma.workGroup.findMany({ where: { portalId: user.portal.id, archivedAt: null }, select: { name: true, options: true } });
+    const used = groups.flatMap((g) => {
+      const p = (g.options as GroupOptionsDto | null)?.payments;
+      return [p?.prepaymentTemplateId === id ? `${g.name} (предоплата)` : null, p?.surchargeTemplateId === id ? `${g.name} (доплата)` : null].filter((x): x is string => !!x);
+    });
+    if (used.length)
+      throw new ConflictException({
+        code: 'TEMPLATE_IN_USE',
+        message: `Шаблон «${name}» выбран в группах: ${used.join(', ')} — сначала выберите там другой шаблон`,
+      });
   }
 
   /** Свой личный шаблон или общий (администратору); иначе 404 / 403. */

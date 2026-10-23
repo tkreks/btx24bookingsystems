@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
-import { checkFormula, DEFAULT_SURCHARGE_MESSAGE, type CatalogDto, type DealFieldConfig, type DealFieldInfo, type DealStageItem, type GroupOptionsDto, type NamedBitrixItem } from '@btx24/shared';
+import { useEffect, useState, type ReactNode } from 'react';
+import { apiGet } from '../api.js';
+import { checkFormula, DEFAULT_SURCHARGE_MESSAGE, type CatalogDto, type MessageTemplateDto, type DealFieldConfig, type DealFieldInfo, type DealStageItem, type GroupOptionsDto, type NamedBitrixItem } from '@btx24/shared';
 import { DEFAULT_CLIENT_MESSAGE, DEFAULT_FAIL_MESSAGE, move, newDealField, setResourceDefaults } from './group-form.js';
 import { CatalogSections, sectionSummary } from './CatalogSections.js';
 import { InvoiceSettings } from './InvoiceSettings.js';
@@ -29,6 +30,46 @@ export function Section({
       </summary>
       <div className="settings-card-body">{children}</div>
     </details>
+  );
+}
+
+/** Системные шаблоны оплаты портала — один запрос на страницу настроек. */
+let paymentTemplatesLoad: Promise<MessageTemplateDto[]> | null = null;
+const loadPaymentTemplates = () =>
+  (paymentTemplatesLoad ??= apiGet<MessageTemplateDto[]>('/openlines/templates').then(
+    (all) => all.filter((t) => t.purpose === 'payment'),
+    (e) => {
+      paymentTemplatesLoad = null;
+      throw e;
+    },
+  ));
+
+/** Выбор системного шаблона сообщения об оплате; не выбран — стандартный текст (показываем его). */
+function PaymentTemplatePick({ label, value, fallback, onChange }: { label: string; value?: string; fallback: string; onChange: (id: string | undefined) => void }) {
+  const [list, setList] = useState<MessageTemplateDto[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    loadPaymentTemplates().then(setList, (e) => setError(e instanceof Error ? e.message : 'Не удалось загрузить шаблоны'));
+  }, []);
+  const chosen = list?.find((t) => t.id === value);
+  const text = chosen ? chosen.steps.map((st) => [st.text, ...st.files.map((f) => `📎 ${f.name}`)].filter(Boolean).join('\n')).join('\n\n') : fallback;
+  return (
+    <label className="settings-block">
+      {label}
+      <select value={value ?? ''} disabled={!list} onChange={(e) => onChange(e.target.value || undefined)}>
+        <option value="">Стандартный текст приложения</option>
+        {value && list && !chosen && <option value={value}>Шаблон удалён — выберите другой</option>}
+        {list?.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      {error && <span className="notice error">{error}</span>}
+      {list && !list.length && <span className="muted">Системных шаблонов оплаты пока нет — уйдёт стандартный текст.</span>}
+      {chosen && !chosen.steps.some((st) => st.text.includes('{link}')) && <span className="notice error">В шаблоне нет {'{link}'} — клиент не получит ссылку</span>}
+      <textarea rows={3} readOnly value={text} aria-label={`${label}: текст`} />
+    </label>
   );
 }
 
@@ -146,31 +187,23 @@ export function PaymentsSection({
           <span className="muted">Бани в прототипе — 50%, домики — 100%</span>
         </label>
       </div>
-      <label className="settings-block">
-        Сообщение клиенту со ссылкой на оплату
-        <VarTextarea
-          payment
-          rows={4}
-          maxLength={4000}
-          value={payments.clientMessage ?? DEFAULT_CLIENT_MESSAGE}
-          onChange={(clientMessage) => onChange({ ...payments, clientMessage })}
-        />
-        <span className="muted">
-          Переменные: {'{link}'} — ссылка на оплату, {'{prepayment}'} — сумма предоплаты, {'{client_name}'}, {'{house}'}, {'{date_start}'}, {'{minutes}'} — минут на оплату,{' '}
-          {'{deadline}'} — оплатить до. Подтверждение после оплаты — в блоке «Типы брони и сообщения клиенту».
-        </span>
-      </label>
-      <label className="settings-block">
-        Сообщение клиенту со ссылкой на доплату
-        <VarTextarea
-          payment
-          rows={3}
-          maxLength={4000}
-          value={payments.surchargeMessage ?? DEFAULT_SURCHARGE_MESSAGE}
-          onChange={(surchargeMessage) => onChange({ ...payments, surchargeMessage })}
-        />
-        <span className="muted">{'{prepayment}'} — сумма доплаты (из «ручной суммы доплаты» сделки или указанная сотрудником).</span>
-      </label>
+      <PaymentTemplatePick
+        label="Сообщение клиенту со ссылкой на предоплату"
+        value={payments.prepaymentTemplateId}
+        fallback={payments.clientMessage || DEFAULT_CLIENT_MESSAGE}
+        onChange={(prepaymentTemplateId) => onChange({ ...payments, prepaymentTemplateId })}
+      />
+      <PaymentTemplatePick
+        label="Сообщение клиенту со ссылкой на доплату"
+        value={payments.surchargeTemplateId}
+        fallback={payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE}
+        onChange={(surchargeTemplateId) => onChange({ ...payments, surchargeTemplateId })}
+      />
+      <p className="muted">
+        Шаблоны оплаты — системные: их составляют администраторы в «Шаблоны» → «Создать шаблон» → назначение «Сообщение об оплате». Переменные:{' '}
+        {'{link}'} — ссылка, {'{prepayment}'} — сумма к оплате, {'{minutes}'}, {'{deadline}'}. Подтверждение после оплаты — в блоке «Типы брони и
+        сообщения клиенту».
+      </p>
       <label className="settings-block">
         Сообщение клиенту, если бронь снята из-за неоплаты (пусто — не отправлять)
         <VarTextarea

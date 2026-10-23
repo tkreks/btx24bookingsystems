@@ -8,6 +8,7 @@ import {
   type MessageContext,
   type GroupOptionsDto,
   type PaymentKind,
+  type TemplateStepDto,
 } from '@btx24/shared';
 import type { PaymentRequest, Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -34,6 +35,14 @@ const money = (v: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDig
 /** Стадия счёта «оплачен»: семантика успеха у смарт-счёта — суффикс `:P`. */
 export const invoicePaid = (stageId: unknown) => String(stageId ?? '').endsWith(':P');
 const invoiceFailed = (stageId: unknown) => String(stageId ?? '').endsWith(':D');
+
+/** Шаг сообщения об оплате до загрузки файлов: текст и ID файлов шаблона (`StoredFile`). */
+export interface PaymentMessageStep {
+  text: string;
+  files: { fileId: string; name: string }[];
+}
+/** Шаг цепочки к отправке: файл — с Диска Битрикс24 (`id`) или уже загруженный (`data`). */
+type ChainStep = { text: string; files: (ClientMessageStep['files'][number] | { name: string; data: Buffer })[] };
 
 export interface FlowContext {
   portal: Portal;
@@ -137,17 +146,21 @@ export class PaymentFlow {
     const deal = mc.deal;
     const minutes = req.kind === 'prepayment' ? opts.payments.timeoutMinutes : null;
     const deadline = minutes ? new Date(Date.now() + minutes * 60_000) : null;
-    const text = renderMessage(this.template(req.kind, opts), {
-      ...mc,
-      vars: {
-        ...mc.vars,
-        prepayment: money(Number(req.amount)),
-        link: req.link,
-        minutes: minutes ?? '',
-        deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
-      },
-    });
-    const sent = await this.sendToClient(ctx, req, deal, text, warnings);
+    const vars = {
+      ...mc.vars,
+      prepayment: money(Number(req.amount)),
+      link: req.link,
+      minutes: minutes ?? '',
+      deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
+    };
+    const tpl = await this.paymentTemplate(ctx.portal.id, req.kind, opts, warnings);
+    const steps = await this.withFileData(
+      ctx.portal.id,
+      tpl.steps.map((st) => ({ ...st, text: renderMessage(st.text, { ...mc, vars }) })),
+      warnings,
+    );
+    const text = steps.map((x) => x.text).filter((x) => x.trim()).join('\n\n');
+    const sent = await this.sendChain(ctx, req, deal, steps, warnings);
     await this.audit(req, sent ? 'link_sent' : 'link_not_sent', sent ? 'Ссылка на оплату отправлена клиенту' : 'Ссылка на оплату НЕ отправлена клиенту', {
       deadline: sent ? deadline?.toISOString() : null,
       warnings,
@@ -358,8 +371,8 @@ export class PaymentFlow {
     );
   }
 
-  /** Цепочка по порядку: у шага — текст, затем файлы Диска отдельными сообщениями; пауза между ними. */
-  private async sendChain(ctx: FlowContext, req: PaymentRequest, deal: Deal | null, steps: ClientMessageStep[], warnings: string[]): Promise<boolean> {
+  /** Цепочка по порядку: у шага — текст, затем файлы (Диска или шаблона) отдельными сообщениями; пауза между ними. */
+  private async sendChain(ctx: FlowContext, req: PaymentRequest, deal: Deal | null, steps: ChainStep[], warnings: string[]): Promise<boolean> {
     let first = true;
     const gap = async () => {
       if (!first && this.sendGapMs > 0) await this.sleep(this.sendGapMs);
@@ -374,14 +387,20 @@ export class PaymentFlow {
       for (const f of st.files) {
         chatId ??= await this.boundChat(ctx, req.dealId);
         if (!chatId) {
-          warnings.push('Файлы подтверждения не отправлены: у сделки нет чата открытой линии');
+          warnings.push('Файлы не отправлены: у сделки нет чата открытой линии');
           return false;
         }
         await gap();
         const ok = await this.safe(warnings, `файл «${f.name}»`, async () => {
-          const file = (await ctx.client.call<{ DOWNLOAD_URL?: string; NAME?: string }>('disk.file.get', { id: f.id })).result;
-          const { data } = await ctx.client.download(String(file?.DOWNLOAD_URL ?? ''));
-          const r = await ctx.client.call<{ messageId?: number }>('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name: file?.NAME ?? f.name, content: data.toString('base64') } });
+          let name = f.name;
+          let data: Buffer;
+          if ('data' in f) data = f.data;
+          else {
+            const file = (await ctx.client.call<{ DOWNLOAD_URL?: string; NAME?: string }>('disk.file.get', { id: f.id })).result;
+            data = (await ctx.client.download(String(file?.DOWNLOAD_URL ?? ''))).data;
+            name = file?.NAME ?? f.name;
+          }
+          const r = await ctx.client.call<{ messageId?: number }>('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name, content: data.toString('base64') } });
           await this.markSystem(ctx, chatId!, null, r.result?.messageId);
         });
         if (!ok) return false;
@@ -420,8 +439,43 @@ export class PaymentFlow {
     return null;
   }
 
-  private template(kind: PaymentKind, opts: GroupOptionsDto): string {
-    return kind === 'prepayment' ? opts.payments.clientMessage || DEFAULT_CLIENT_MESSAGE : opts.payments.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
+  /**
+   * Сообщение со ссылкой на оплату: системный шаблон оплаты, выбранный в группе; не выбран —
+   * старый текст группы или стандартный. Шаблон пропал — стандартный текст и предупреждение.
+   */
+  async paymentTemplate(
+    portalId: string,
+    kind: PaymentKind,
+    opts: GroupOptionsDto | null,
+    warnings: string[] = [],
+  ): Promise<{ name: string | null; steps: PaymentMessageStep[] }> {
+    const p = opts?.payments;
+    const id = kind === 'prepayment' ? p?.prepaymentTemplateId : p?.surchargeTemplateId;
+    if (id) {
+      const row = await this.prisma.messageTemplate.findFirst({ where: { id, portalId, purpose: 'payment', shared: true } });
+      if (row) {
+        const steps = (row.steps as unknown as TemplateStepDto[]).map((st) => ({ text: st.text, files: st.fileIds.map((fileId) => ({ fileId, name: '' })) }));
+        return { name: row.name, steps };
+      }
+      warnings.push('Шаблон сообщения об оплате не найден — отправлен стандартный текст');
+    }
+    const text = kind === 'prepayment' ? p?.clientMessage || DEFAULT_CLIENT_MESSAGE : p?.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
+    return { name: null, steps: [{ text, files: [] }] };
+  }
+
+  /** Файлы шаблона оплаты (`StoredFile`) — содержимое для отправки; пропавший файл — предупреждение. */
+  private async withFileData(portalId: string, steps: PaymentMessageStep[], warnings: string[]): Promise<ChainStep[]> {
+    const ids = [...new Set(steps.flatMap((st) => st.files.map((f) => f.fileId)))];
+    const rows = ids.length ? await this.prisma.storedFile.findMany({ where: { portalId, id: { in: ids } }, select: { id: true, name: true, data: true } }) : [];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return steps.map((st) => ({
+      text: st.text,
+      files: st.files.flatMap((f) => {
+        const r = byId.get(f.fileId);
+        if (!r) warnings.push('Файл шаблона оплаты удалён — отправлено без него');
+        return r ? [{ name: r.name, data: Buffer.from(r.data) }] : [];
+      }),
+    }));
   }
 
   async deal(ctx: Pick<FlowContext, 'client'>, dealId: number): Promise<Deal | null> {
