@@ -37,6 +37,6 @@ import { MessageContextService } from './message-context.service.js';
     MessageContextService,
     ResourceStopsService,
   ],
-  exports: [BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService, DealPaymentsService, DealStatusService, MessageContextService, ResourceStopsService],
+  exports: [ClientBookingsService, BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService, DealPaymentsService, DealStatusService, MessageContextService, ResourceStopsService],
 })
 export class BookingsModule {}

@@ -47,7 +47,40 @@ export class EventsService {
       this.logger.log(`uninstalled from ${portal.domain} (${portal.memberId})`);
       return 'processed';
     }
+    if (event.startsWith('ONVOXIMPLANTCALL')) {
+      await this.telephony(portal.id, event, (body.data ?? {}) as Record<string, unknown>);
+      await this.prisma.bitrix24Event.update({ where: { id: stored.id }, data: { status: 'PROCESSED', processedAt: new Date() } });
+      return 'processed';
+    }
     // Остальные события обрабатывает worker (появятся вместе с синхронизацией броней).
     return 'stored';
+  }
+
+  /**
+   * Звонок по событиям телефонии (решение владельца 2026-10-23): начало — номер клиента и тип,
+   * ответ — сотрудник (ему приложение показывает карточку клиента), конец — итог. Порядок и повторы
+   * событий не важны: строка одна на звонок (`portalId + callId`), каждое событие дописывает своё.
+   */
+  private async telephony(portalId: string, event: string, d: Record<string, unknown>): Promise<void> {
+    const callId = String(d.CALL_ID ?? '').slice(0, 100);
+    if (!callId) return;
+    const num = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 40) : null);
+    const callType = num(d.CALL_TYPE);
+    const now = new Date();
+    let data: Record<string, unknown> = {};
+    if (event === 'ONVOXIMPLANTCALLINIT')
+      // Входящий — номер клиента в CALLER_ID; исходящий — набираемый номер в PHONE_NUMBER.
+      data = { callType, phone: callType === 1 ? str(d.PHONE_NUMBER) : (str(d.CALLER_ID) ?? str(d.PHONE_NUMBER)) };
+    else if (event === 'ONVOXIMPLANTCALLSTART') data = { userId: num(d.USER_ID), answeredAt: now };
+    else if (event === 'ONVOXIMPLANTCALLEND')
+      data = { callType, phone: str(d.PHONE_NUMBER), userId: num(d.PORTAL_USER_ID), endedAt: now, crmActivityId: num(d.CRM_ACTIVITY_ID) };
+    // Пустые значения не затирают известные (конец без номера после начала с номером).
+    const patch = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null && v !== undefined));
+    await this.prisma.telephonyCall.upsert({
+      where: { portalId_callId: { portalId, callId } },
+      create: { portalId, callId, startedAt: now, ...patch },
+      update: patch,
+    });
   }
 }

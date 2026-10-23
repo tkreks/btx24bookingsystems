@@ -13,6 +13,7 @@ const LABELS: Record<string, string> = {
   'PUT /api/admin/external-users/:id/password': 'Сменил пароль прямой ссылки',
   'POST /api/workday/:action': 'Рабочий день: :action',
   'POST /api/admin/placements/sync': 'Зарегистрировал встройки в Битрикс24',
+  'POST /api/admin/placements/rebind': 'Перевстроил встройки и подписки на звонки',
   'PUT /api/booking-alerts/:id': 'Изменил статус уведомления о брони',
   'POST /api/booking-alerts/:id/resolve': 'Принял решение по уведомлению о брони',
   'PUT /api/admin/booking-sync/deal-fields': 'Изменил системные поля сделки',

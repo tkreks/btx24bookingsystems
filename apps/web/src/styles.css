@@ -4733,12 +4733,27 @@ input[role='switch']:checked::after {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.wz-deal.booked {
+/* Цвет сделки для новой брони: 🔴 есть бронь, 🟠 брони нет, но поля брони заполнены, 🟢 пустая. */
+.wz-deal.tone-booked {
   border-color: #f04438;
   background: #fef3f2;
 }
-.wz-deal.booked.selected {
+.wz-deal.tone-booked.selected {
   box-shadow: 0 0 0 2px #f04438;
+}
+.wz-deal.tone-filled {
+  border-color: #f79009;
+  background: #fffaeb;
+}
+.wz-deal.tone-filled.selected {
+  box-shadow: 0 0 0 2px #f79009;
+}
+.wz-deal.tone-empty {
+  border-color: #47cd89;
+  background: #f6fef9;
+}
+.wz-deal.tone-empty.selected {
+  box-shadow: 0 0 0 2px #17b26a;
 }
 .wz-deal-booking {
   overflow: hidden;
@@ -7035,4 +7050,133 @@ button.cert-row:hover {
 .wz-res-pick:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* Карточка звонка: клиент, сделки цветом, брони, последние сообщения. */
+.call-card {
+  display: grid;
+  gap: 12px;
+}
+.call-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.call-head > div {
+  display: grid;
+}
+.call-client {
+  font-size: 17px;
+}
+.call-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.call-deals,
+.call-bookings,
+.call-messages {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.call-deal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.call-deal-main {
+  display: grid;
+  min-width: 0;
+  font-size: 13px;
+}
+.call-deal-main .link {
+  justify-self: start;
+  font-weight: 650;
+}
+.call-deal-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.call-deal.tone-booked {
+  border-color: #f04438;
+  background: #fef3f2;
+}
+.call-deal.tone-booked .call-deal-dot {
+  background: #f04438;
+}
+.call-deal.tone-filled {
+  border-color: #f79009;
+  background: #fffaeb;
+}
+.call-deal.tone-filled .call-deal-dot {
+  background: #f79009;
+}
+.call-deal.tone-empty {
+  border-color: #47cd89;
+  background: #f6fef9;
+}
+.call-deal.tone-empty .call-deal-dot {
+  background: #17b26a;
+}
+.call-bookings li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.call-messages li {
+  display: grid;
+  gap: 2px;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.call-messages li.out {
+  justify-self: end;
+  background: var(--info-bg);
+}
+.call-messages li span:first-child {
+  font-size: 11.5px;
+}
+.call-page {
+  padding: 12px 14px;
+}
+.call-sheet {
+  max-width: 640px;
+}
+.call-chip {
+  position: fixed;
+  left: 16px;
+  bottom: calc(12px + var(--safe-b));
+  z-index: 61;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #17b26a;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.3);
+  animation: call-pulse 1.6s ease-in-out infinite;
+}
+@keyframes call-pulse {
+  50% {
+    box-shadow: 0 0 0 8px rgba(23, 178, 106, 0.2), 0 10px 28px rgba(15, 23, 42, 0.3);
+  }
 }

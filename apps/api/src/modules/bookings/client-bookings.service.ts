@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { ClientBookingDto, ClientBookingsDto } from '@btx24/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { dealLinks, type RawBooking } from './bitrix-bookings.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { happened, outcomeSelect } from './deal-outcome.js';
+import { DealStatusService, type DealStageRow } from './deal-status.service.js';
 
 type Deal = Record<string, string | null>;
 const RECENT = 5;
@@ -20,12 +21,15 @@ export class ClientBookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fieldMap: DealFieldMapService,
+    @Optional() private readonly statuses?: DealStatusService,
   ) {}
 
   async forContact(user: B24UserContext, contactId: number | null, extraDealIds: number[] = [], now = new Date()): Promise<ClientBookingsDto> {
     const map = await this.fieldMap.get(user.portal.id);
     const outcome = await this.fieldMap.outcome(user.portal.id, user.client);
-    const ufSelect = [...new Set([map.bookingId, map.bookingStart, map.bookingEnd, ...outcomeSelect(outcome)].filter((x): x is string => !!x))];
+    const toneFields = (await this.statuses?.toneFields(user.portal.id)) ?? [];
+    const statusFields = (await this.statuses?.selectFields(user.portal.id)) ?? [];
+    const ufSelect = [...new Set([map.bookingId, map.bookingStart, map.bookingEnd, ...outcomeSelect(outcome), ...toneFields, ...statusFields].filter((x): x is string => !!x))];
     const select = ['ID', 'TITLE', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CURRENCY_ID', 'CLOSEDATE', 'DATE_CREATE', ...ufSelect];
     const [byClient, contactDeals, extraDeals, contact] = await Promise.all([
       contactId
@@ -125,6 +129,12 @@ export class ClientBookingsService {
     // Состоявшиеся сделки клиента (не проиграны, бронь прошла; без брони — выигранные; оплаченные
     // сертификаты): сколько и средний чек.
     const won = contactDeals.filter((d) => happened(d, outcome, now.getTime()));
+    // Открытые сделки — с цветом для новой брони и статусом (канбан + брони).
+    const open = [...deals.values()].filter((d) => d.STAGE_SEMANTIC_ID === 'P') as unknown as DealStageRow[];
+    const [tones, statuses] = await Promise.all([
+      this.statuses?.tones(user.portal.id, open, now.getTime()).catch(() => null) ?? null,
+      this.statuses?.fromRows(user.portal.id, open, now.getTime()).catch(() => null) ?? null,
+    ]);
     const sums = won.map((d) => Number(d.OPPORTUNITY)).filter((x) => Number.isFinite(x) && x > 0);
     return {
       contactId,
@@ -149,6 +159,8 @@ export class ClientBookingsService {
             opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
             createdAt: d.DATE_CREATE ? new Date(d.DATE_CREATE).toISOString() : null,
             booking: b ? { start: b.start, end: b.end, resources: b.resources } : null,
+            tone: tones?.get(Number(d.ID)),
+            status: statuses?.get(Number(d.ID)) ?? null,
           };
         }),
     };

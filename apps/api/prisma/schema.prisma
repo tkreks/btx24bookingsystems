@@ -68,6 +68,8 @@ model Portal {
   certificateEvents    CertificateEvent[]
   chatFavorites        ChatFavorite[]
   resourceStops        ResourceStop[]
+  telephonyCalls       TelephonyCall[]
+  dashboardLayouts     DashboardLayout[]
 }
 
 enum PortalStatus {
@@ -926,4 +928,41 @@ model ResourceStop {
   liftedByName    String?   @db.VarChar(255)
 
   @@index([portalId, resourceId, startsAt])
+}
+
+// ---------- Звонки телефонии и личный дашборд (решение владельца 2026-10-23) ----------
+
+/// Звонок по событиям телефонии Битрикс24 (OnVoximplantCallInit/Start/End): номер клиента — из начала,
+/// сотрудник — кто ответил; приложение показывает ему карточку клиента. Повтор события — тот же звонок.
+model TelephonyCall {
+  id            String    @id @default(cuid())
+  portalId      String
+  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  callId        String    @db.VarChar(100)
+  /// CALL_TYPE: 1 исходящий, 2 входящий, 3 входящий с переадресацией, 4 обратный, 5 инфозвонок.
+  callType      Int?
+  /// Номер клиента.
+  phone         String?   @db.VarChar(40)
+  /// Сотрудник, ответивший на звонок (или оператор звонка из завершения).
+  userId        Int?
+  startedAt     DateTime  @db.DateTime(3)
+  answeredAt    DateTime? @db.DateTime(3)
+  endedAt       DateTime? @db.DateTime(3)
+  crmActivityId Int?
+
+  @@unique([portalId, callId])
+  @@index([portalId, userId, answeredAt])
+}
+
+/// Личный дашборд сотрудника: блоки по порядку и ширина каждого (четверть, треть, половина, ряд).
+model DashboardLayout {
+  id        String   @id @default(cuid())
+  portalId  String
+  portal    Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId    Int
+  /// [{ id, type, width }] — схема `DashboardLayoutDto`.
+  blocks    Json
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  @@unique([portalId, userId])
 }

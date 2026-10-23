@@ -28,6 +28,8 @@ export interface PlacementContext {
   placement: string;
   /** ID сделки, если приложение открыто во встройке карточки сделки. */
   dealId: number | null;
+  /** Окно звонка Битрикс24 (`CALL_CARD`): звонок, номер клиента, привязка CRM. */
+  call?: { callId: string | null; phone: string | null; entityType: string | null; entityId: string | null; direction: string | null };
 }
 
 const SDK_URL = 'https://api.bitrix24.com/api/v1/';
@@ -140,6 +142,15 @@ export function placementContext(): PlacementContext {
     const raw = info?.options?.ID ?? info?.options?.ENTITY_ID;
     const dealId =
       placement.startsWith('CRM_DEAL') && raw !== undefined && /^\d+$/.test(String(raw)) ? Number(raw) : null;
+    if (placement === 'CALL_CARD') {
+      const o = info?.options ?? {};
+      const s = (k: string) => (o[k] === undefined || o[k] === null || o[k] === '' || o[k] === 'undefined' ? null : String(o[k]));
+      return {
+        placement,
+        dealId: null,
+        call: { callId: s('CALL_ID'), phone: s('PHONE_NUMBER'), entityType: s('CRM_ENTITY_TYPE'), entityId: s('CRM_ENTITY_ID') === '0' ? null : s('CRM_ENTITY_ID'), direction: s('CALL_DIRECTION') },
+      };
+    }
     return { placement, dealId };
   } catch {
     return { placement: 'DEFAULT', dealId: null };

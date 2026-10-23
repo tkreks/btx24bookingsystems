@@ -1,3 +1,4 @@
+import type { DealBookingTone, DealStatusDto } from './deal-status.js';
 /** Контракты броней приложения: уведомления (новая бронь мимо приложения, расхождения) и история. */
 
 export const ALERT_STATUSES = ['new', 'viewed', 'resolved', 'ignored'] as const;
@@ -251,6 +252,8 @@ export interface ClientBookingsDto {
     opportunity?: number | null;
     createdAt?: string | null;
     booking?: { start: string; end: string; resources: string[] } | null;
+    tone?: DealBookingTone;
+    status?: DealStatusDto | null;
   }[];
 }
 
@@ -427,6 +430,8 @@ export interface CrmDealHit {
   createdAt: string | null;
   /** Последняя активность по сделке (чаты, звонки, дела — `LAST_ACTIVITY_TIME`). */
   lastActivityAt: string | null;
+  /** Цвет для выбора сделки новой брони (бронь есть / поля заполнены / пустая). */
+  tone?: DealBookingTone;
 }
 
 export interface CrmSearchDto {

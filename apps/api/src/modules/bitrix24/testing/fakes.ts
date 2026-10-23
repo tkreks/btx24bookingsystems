@@ -14,6 +14,7 @@ export const CLIENT_ENDPOINT = 'https://portal.example.ru/rest/';
 export function fakePrisma() {
   const portals: Portal[] = [];
   const events: Record<string, unknown>[] = [];
+  const calls: Record<string, unknown>[] = [];
   let seq = 0;
   const prisma = {
     portal: {
@@ -39,8 +40,18 @@ export function fakePrisma() {
       },
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => Object.assign(events.find((e) => e.id === where.id)!, data),
     },
+    telephonyCall: {
+      upsert: async ({ where, create, update }: { where: { portalId_callId: { portalId: string; callId: string } }; create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        const k = where.portalId_callId;
+        const existing = calls.find((c) => c.portalId === k.portalId && c.callId === k.callId);
+        if (existing) return Object.assign(existing, update);
+        const c = { id: `c${++seq}`, ...create };
+        calls.push(c);
+        return c;
+      },
+    },
   };
-  return { prisma: prisma as unknown as PrismaService, portals, events };
+  return { prisma: prisma as unknown as PrismaService, portals, events, calls };
 }
 
 export interface FakeBitrix {

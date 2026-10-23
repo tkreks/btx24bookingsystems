@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { dealStatus, type DealStatusDto } from '@btx24/shared';
+import { dealStatus, type DealBookingTone, type DealFieldRole, type DealStatusDto } from '@btx24/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { BookingJournalService } from './booking-journal.service.js';
@@ -9,6 +9,10 @@ import { DealFieldMapService } from './deal-field-map.service.js';
 export type DealStageRow = Record<string, string | null | undefined> & { ID: string; STAGE_SEMANTIC_ID?: string | null };
 
 const CHUNK = 200;
+/** Поля брони, которые приложение пишет в сделку при брони (не поля формы менеджера). */
+const TONE_ROLES: DealFieldRole[] = ['bookingId', 'bookingStart', 'bookingEnd', 'visitDateStart', 'visitTimeStart', 'visitDateEnd', 'visitTimeEnd', 'bookingType'];
+/** Значение поля заполнено: не пусто, не «0», не пустой список. */
+const filledValue = (v: unknown) => (Array.isArray(v) ? v.some(filledValue) : v !== null && v !== undefined && String(v).trim() !== '' && String(v) !== '0');
 
 /**
  * Статус сделки «В работе / Ожидание клиента / Завершена / Провалена» (`dealStatus` из shared): канбан
@@ -27,6 +31,30 @@ export class DealStatusService {
   async selectFields(portalId: string): Promise<string[]> {
     const end = (await this.fieldMap.get(portalId)).bookingEnd;
     return ['STAGE_SEMANTIC_ID', ...(end ? [end] : [])];
+  }
+
+  /** Служебные поля брони в сделке (по ним «оранжевая»: брони нет, поля остались) — добавить в `select`. */
+  async toneFields(portalId: string): Promise<string[]> {
+    const m = await this.fieldMap.get(portalId);
+    return TONE_ROLES.map((r) => m[r]).filter((x): x is string => !!x);
+  }
+
+  /** Цвет сделок для выбора в новую бронь: бронь есть (идёт или впереди) / поля брони заполнены / пустая. */
+  async tones(portalId: string, rows: DealStageRow[], now = Date.now()): Promise<Map<number, DealBookingTone>> {
+    const out = new Map<number, DealBookingTone>();
+    const ids = [...new Set(rows.map((r) => Number(r.ID)).filter((x) => x > 0))];
+    if (!ids.length) return out;
+    const [fields, records] = await Promise.all([
+      this.toneFields(portalId),
+      this.prisma.bookingRecord.findMany({ where: { portalId, dealId: { in: ids }, status: 'active', endsAt: { gt: new Date(now) } }, select: { bookingId: true, dealId: true } }),
+    ]);
+    const gone = await this.journal.pendingRemoval(portalId, records.map((r) => r.bookingId));
+    const booked = new Set(records.filter((r) => !gone.has(r.bookingId)).map((r) => r.dealId));
+    for (const r of rows) {
+      const id = Number(r.ID);
+      out.set(id, booked.has(id) ? 'booked' : fields.some((f) => filledValue(r[f])) ? 'filled' : 'empty');
+    }
+    return out;
   }
 
   /** Статусы по уже загруженным сделкам (в `select` были `selectFields`). */

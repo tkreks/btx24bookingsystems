@@ -4,6 +4,7 @@ import { apiGet, apiPost, ApiRequestError } from './api.js';
 import { initB24, placementContext, setStandalone, type PlacementContext } from './b24.js';
 import { LoginPage } from './LoginPage.js';
 import { CalendarPage } from './calendar/CalendarPage.js';
+import { CallLayer } from './calls/CallLayer.js';
 import { SessionOverlay } from './SessionOverlay.js';
 import { startSessionWatch } from './session-guard.js';
 
@@ -48,9 +49,18 @@ export function App() {
         </div>
       </div>
     );
+  // Окно звонка Битрикс24: только карточка клиента (и мастер брони из неё).
+  if (boot.placement.placement === 'CALL_CARD')
+    return (
+      <>
+        <CallLayer timezone={boot.session.portal.timezone} mode="page" call={boot.placement.call} />
+        <SessionOverlay />
+      </>
+    );
   return (
     <>
       <CalendarPage session={boot.session} placement={boot.placement} />
+      <CallLayer timezone={boot.session.portal.timezone} mode="watch" />
       <SessionOverlay />
     </>
   );

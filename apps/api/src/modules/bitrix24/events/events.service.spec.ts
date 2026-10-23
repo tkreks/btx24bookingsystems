@@ -37,4 +37,19 @@ describe('EventsService', () => {
     expect(raw).not.toContain('secret-refresh');
     expect(raw).not.toContain('app-token');
   });
+
+  it('звонок: начало — номер клиента, ответ — сотрудник, конец — итог; порядок событий не важен', async () => {
+    const { svc, calls, events } = await setup();
+    await expect(svc.receive({ event: 'ONVOXIMPLANTCALLSTART', data: { CALL_ID: 'c-1', USER_ID: '236' }, auth })).resolves.toBe('processed');
+    await svc.receive({ event: 'ONVOXIMPLANTCALLINIT', data: { CALL_ID: 'c-1', CALL_TYPE: '2', CALLER_ID: '+79001234567', PHONE_NUMBER: '74950000000' }, auth });
+    await svc.receive({ event: 'ONVOXIMPLANTCALLEND', data: { CALL_ID: 'c-1', CALL_TYPE: '2', PHONE_NUMBER: '', PORTAL_USER_ID: '236', CRM_ACTIVITY_ID: '777' }, auth });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ callId: 'c-1', callType: 2, phone: '+79001234567', userId: 236, crmActivityId: 777 });
+    expect(calls[0].answeredAt).toBeInstanceOf(Date);
+    expect(calls[0].endedAt).toBeInstanceOf(Date);
+    expect(events.every((e) => e.status === 'PROCESSED')).toBe(true);
+    // Исходящий: номер клиента — набираемый.
+    await svc.receive({ event: 'ONVOXIMPLANTCALLINIT', data: { CALL_ID: 'c-2', CALL_TYPE: '1', CALLER_ID: 'reg1', PHONE_NUMBER: '+79005550000' }, auth });
+    expect(calls[1]).toMatchObject({ callId: 'c-2', callType: 1, phone: '+79005550000' });
+  });
 });

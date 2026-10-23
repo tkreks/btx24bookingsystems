@@ -36,8 +36,10 @@ export function normalizeInstallRequest(input: InstallRequest & InstallEvent): I
   return { ...input, SERVER_ENDPOINT: input.SERVER_ENDPOINT || DEFAULT_SERVER_ENDPOINT };
 }
 
+/** События телефонии (scope `telephony`): карточка клиента сотруднику, ответившему на звонок. */
+export const TELEPHONY_EVENTS = ['ONVOXIMPLANTCALLINIT', 'ONVOXIMPLANTCALLSTART', 'ONVOXIMPLANTCALLEND'] as const;
 /** События, на которые приложение подписывается при установке. */
-export const BOUND_EVENTS = ['ONAPPUNINSTALL'] as const;
+export const BOUND_EVENTS = ['ONAPPUNINSTALL', ...TELEPHONY_EVENTS] as const;
 
 @Injectable()
 export class InstallService {
@@ -87,6 +89,11 @@ export class InstallService {
       } catch (err) {
         // Повторная установка: обработчик уже привязан — это нормально.
         if (err instanceof Bitrix24Error && /already|exist/i.test(err.message)) continue;
+        // Нет права «Телефония» — события звонков не нужны для установки (подключатся в ⚙ → «Встройки»).
+        if ((TELEPHONY_EVENTS as readonly string[]).includes(event)) {
+          this.logger.warn(`event ${event} not bound: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
         throw err;
       }
     }

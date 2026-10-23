@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Optional } from '@nestjs/common';
 import type { BookingCatalogDto, CrmContactHit, CrmDealHit, CrmSearchDto, DealProductRowDto, GroupOptionsDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { phoneVariants } from '../openlines/chats.service.js';
+import { DealStatusService, type DealStageRow } from './deal-status.service.js';
 
 const CATALOG_TTL_MS = 10 * 60_000;
 const HITS = 20;
@@ -41,7 +42,15 @@ export class BookingDirectoryService {
   /** portalId → разделы и товары каталога (меняются редко). */
   private readonly catalogCache = new Map<string, { sections: Section[]; products: Product[]; expiresAt: number }>();
 
-  constructor(private readonly access: AccessService) {}
+  constructor(
+    private readonly access: AccessService,
+    @Optional() private readonly statuses?: DealStatusService,
+  ) {}
+
+  /** Поля сделки для списка: базовые и служебные поля брони (цвет сделки). */
+  private async dealSelect(portalId: string): Promise<string[]> {
+    return [...DEAL_SELECT, ...((await this.statuses?.toneFields(portalId)) ?? [])];
+  }
 
   private async canCreate(user: B24UserContext, groupId?: string) {
     const a = await this.access.resolve(user);
@@ -123,7 +132,7 @@ export class BookingDirectoryService {
     const res = await user.client.call<Deal[]>('crm.deal.list', {
       filter: { CLOSED: 'N', ...(funnels.length ? { '@CATEGORY_ID': funnels } : {}) },
       order: { LAST_ACTIVITY_TIME: 'DESC' },
-      select: DEAL_SELECT,
+      select: await this.dealSelect(user.portal.id),
     });
     const hits = await this.toHits(user, (res.result ?? []).slice(0, HITS));
     // toHits сортирует по номеру — здесь важен порядок активности.
@@ -175,7 +184,8 @@ export class BookingDirectoryService {
   }
 
   private async findDeals(user: B24UserContext, q: string): Promise<CrmDealHit[]> {
-    const list = (filter: Record<string, unknown>) => user.client.listAll<Deal>('crm.deal.list', { filter, select: DEAL_SELECT, order: { ID: 'DESC' } }, { max: HITS });
+    const select = await this.dealSelect(user.portal.id);
+    const list = (filter: Record<string, unknown>) => user.client.listAll<Deal>('crm.deal.list', { filter, select, order: { ID: 'DESC' } }, { max: HITS });
     const byId = /^\d{1,9}$/.test(q) ? await list({ ID: Number(q) }) : [];
     const [byTitle, contacts] = await Promise.all([list({ '%TITLE': q }), /^\d+$/.test(q) ? Promise.resolve([]) : this.findContacts(user, q)]);
     const byClient = contacts.length ? await this.rawDealsOf(user, contacts.map((c) => c.id)) : [];
@@ -186,7 +196,7 @@ export class BookingDirectoryService {
   }
 
   private async rawDealsOf(user: B24UserContext, contactIds: number[]): Promise<Deal[]> {
-    return user.client.listAll<Deal>('crm.deal.list', { filter: { '@CONTACT_ID': contactIds.slice(0, 50) }, select: DEAL_SELECT, order: { ID: 'DESC' } }, { max: 50 });
+    return user.client.listAll<Deal>('crm.deal.list', { filter: { '@CONTACT_ID': contactIds.slice(0, 50) }, select: await this.dealSelect(user.portal.id), order: { ID: 'DESC' } }, { max: 50 });
   }
 
   /** Сделки контакта — после выбора клиента: последняя открытая — первой. */
@@ -198,6 +208,7 @@ export class BookingDirectoryService {
     const ids = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
     const contacts = ids.length ? await user.client.listAll<Contact>('crm.contact.list', { filter: { '@ID': ids }, select: ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME'] }) : [];
     const names = new Map(contacts.map((c) => [Number(c.ID), fullName(c) || null]));
+    const tones = (await this.statuses?.tones(user.portal.id, rows as unknown as DealStageRow[]).catch(() => null)) ?? new Map();
     return rows
       .map((d) => ({
         id: Number(d.ID),
@@ -209,6 +220,7 @@ export class BookingDirectoryService {
         contact: Number(d.CONTACT_ID) > 0 ? { id: Number(d.CONTACT_ID), name: names.get(Number(d.CONTACT_ID)) ?? null } : null,
         createdAt: d.DATE_CREATE ? new Date(d.DATE_CREATE).toISOString() : null,
         lastActivityAt: d.LAST_ACTIVITY_TIME ? new Date(d.LAST_ACTIVITY_TIME).toISOString() : null,
+        tone: tones.get(Number(d.ID)),
       }))
       .sort((a, b) => Number(a.closed) - Number(b.closed) || b.id - a.id)
       .slice(0, HITS);

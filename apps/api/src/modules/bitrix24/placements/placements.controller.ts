@@ -21,6 +21,13 @@ export class PlacementsController {
     return this.placements.sync(user.client);
   }
 
+  /** Снять и поставить заново встройки и подписки на звонки. */
+  @Post('rebind')
+  rebind(@B24User() user: B24UserContext) {
+    this.requireAdmin(user);
+    return this.placements.rebind(user.client);
+  }
+
   private requireAdmin(user: B24UserContext) {
     if (!user.isAdmin) throw new ForbiddenException({ code: 'NOT_ADMIN', message: 'Только для администратора Битрикс24' });
   }

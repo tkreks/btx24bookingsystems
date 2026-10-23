@@ -18,6 +18,7 @@ import {
   type CrmDealHit,
   type CertificateKind,
   type CrmSearchDto,
+  type DealBookingTone,
   type DealKind,
   type DealFormDto,
   type DealFormField,
@@ -53,7 +54,10 @@ export interface BookingFormContext {
     opportunity?: number | null;
     createdAt?: string | null;
     booking?: { start: string; end: string; resources: string[] } | null;
+    tone?: DealBookingTone;
   }[];
+  /** Какую сделку выбрать сразу (карточка звонка: сделка звонка или самая новая). */
+  selectDealId?: number | null;
 }
 
 /** Итог мастера: бронь (или проданный сертификат) и нужно ли сразу окно оплаты (с суммой). */
@@ -83,6 +87,8 @@ type DealCard = {
   createdAt?: string | null;
   /** Бронь по сделке (текущая или будущая) — карточка красная: вторую бронь, скорее всего, не сюда. */
   booking?: { start: string; end: string; resources: string[] } | null;
+  /** 🔴 есть бронь, 🟠 брони нет, но поля брони заполнены, 🟢 пустая. */
+  tone?: DealBookingTone;
 };
 /** Сделок клиента на шаге сразу и сколько добавляет «Показать ещё» (по 2 в строке). */
 const DEALS_STEP = 4;
@@ -185,7 +191,9 @@ export function BookingForm({
   const [deal, setDeal] = useState<DealChoice>(() =>
     context.dealId
       ? { mode: 'existing', dealId: context.dealId }
-      : deals[0]
+      : context.selectDealId && deals.some((d) => d.id === context.selectDealId)
+        ? { mode: 'existing', dealId: context.selectDealId }
+        : deals[0]
         ? { mode: 'existing', dealId: deals[0].id }
         : context.contactId
           ? { mode: 'new' }
@@ -587,8 +595,8 @@ export function BookingForm({
       type="button"
       role="radio"
       aria-checked={selectedId === d.id}
-      className={`bk-choice wz-deal${selectedId === d.id ? ' selected' : ''}${d.booking ? ' booked' : ''}`}
-      title={d.booking ? 'По сделке уже есть бронь' : undefined}
+      className={`bk-choice wz-deal tone-${toneOf(d)}${selectedId === d.id ? ' selected' : ''}`}
+      title={DEAL_TONE_TITLES[toneOf(d)]}
       onClick={() => {
         pick({ mode: 'existing', dealId: d.id });
         if (d.client !== undefined) setClient((c) => (c.contactId ? c : { contactId: null, name: d.client ?? null }));
@@ -654,7 +662,8 @@ export function BookingForm({
                 type="button"
                 role="radio"
                 aria-checked={selectedId === d.id}
-                className={`bk-choice wz-deal${selectedId === d.id ? ' selected' : ''}`}
+                className={`bk-choice wz-deal tone-${d.tone ?? 'empty'}${selectedId === d.id ? ' selected' : ''}`}
+                title={DEAL_TONE_TITLES[d.tone ?? 'empty']}
                 onClick={() => chooseDeal(d)}
               >
                 <span className="bk-dot" aria-hidden="true" />
@@ -1070,7 +1079,16 @@ const toCard = (d: CrmDealHit): DealCard => ({
   client: d.contact?.name ?? null,
   opportunity: d.opportunity,
   lastActivityAt: d.lastActivityAt,
+  tone: d.tone,
 });
+
+/** Цвет сделки: с сервера; без него — по брони сделки. */
+const toneOf = (d: DealCard): DealBookingTone => d.tone ?? (d.booking ? 'booked' : 'empty');
+const DEAL_TONE_TITLES: Record<DealBookingTone, string> = {
+  booked: 'По сделке уже есть бронь',
+  filled: 'Брони нет, но в сделке остались заполнены поля брони',
+  empty: 'Пустая сделка — подходит для новой брони',
+};
 
 /**
  * В сделке уже заполнены поля формы — что с ними делать: оставить (по умолчанию) или очистить.

@@ -51,3 +51,15 @@ export function dealStatus(input: DealStatusInput, now: number = Date.now()): De
   if (ends.length) return { status: 'done', needsClose: true, bookingEnd: new Date(Math.max(...ends)).toISOString() };
   return { status: 'in_work', needsClose: false, bookingEnd: null };
 }
+
+/**
+ * Цвет сделки при выборе для новой брони (решение владельца 2026-10-23): `booked` — у сделки есть бронь
+ * (идёт или впереди) — красный; `filled` — брони нет, но служебные поля брони в сделке ещё заполнены —
+ * оранжевый; `empty` — пустая сделка — зелёный.
+ */
+export type DealBookingTone = 'booked' | 'filled' | 'empty';
+export const DEAL_TONE_LABELS: Record<DealBookingTone, string> = {
+  booked: 'есть бронь',
+  filled: 'брони нет, но заполнены поля брони',
+  empty: 'пустая сделка',
+};
