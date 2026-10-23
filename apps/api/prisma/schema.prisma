@@ -60,6 +60,7 @@ model Portal {
   webSessions          WebSession[]
   systemMessages       SystemMessage[]
   autoMessages         AutoMessageLog[]
+  appHeads             AppHead[]
 }
 
 enum PortalStatus {
@@ -176,6 +177,18 @@ model AppAdmin {
 /// Кто может открыть приложение (решение владельца 2026-10-22): сотрудники и отделы (с вложенными).
 /// Администраторы портала и приложения входят всегда; остальные видят «Доступ ограничен».
 model AppUser {
+  id       String     @id @default(cuid())
+  portalId String
+  portal   Portal     @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  kind     MemberKind
+  bitrixId Int
+
+  @@unique([portalId, kind, bitrixId])
+}
+
+/// Руководители (решение владельца 2026-10-23): свой дашборд — графики, показатели и активность
+/// сотрудников. Сотрудники и отделы (с вложенными); входят в приложение всегда.
+model AppHead {
   id       String     @id @default(cuid())
   portalId String
   portal   Portal     @relation(fields: [portalId], references: [id], onDelete: Cascade)

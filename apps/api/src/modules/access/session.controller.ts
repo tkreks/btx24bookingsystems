@@ -25,6 +25,8 @@ export class SessionController {
       appAccess: access.canEnter,
       settingsAccessUntil: access.tempAdminUntil?.toISOString() ?? null,
       readOnly: this.config.readOnly,
+      isHead: access.isHead,
+      headAssigned: access.headAssigned,
     };
   }
 }

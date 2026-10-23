@@ -18,7 +18,11 @@ export interface UserAccess {
   isAppAdmin: boolean;
   /** Доступ по временному паролю — до этого момента; null — постоянный админ или не админ. */
   tempAdminUntil: Date | null;
-  /** Может открыть приложение: администратор или есть в списке доступа (`AppUser`). */
+  /** Руководитель (`AppHead`) или администратор приложения — дашборд руководителя. */
+  isHead: boolean;
+  /** Назначен руководителем явно (не только как администратор). */
+  headAssigned: boolean;
+  /** Может открыть приложение: администратор, руководитель или есть в списке доступа (`AppUser`). */
   canEnter: boolean;
   groups: GroupAccess[];
 }
@@ -36,7 +40,7 @@ export class AccessService {
   constructor(private readonly prisma: PrismaService) {}
 
   async resolve(user: B24UserContext): Promise<UserAccess> {
-    const { matches, isAppAdmin, grant, canEnter } = await this.entry(user);
+    const { matches, isAppAdmin, isHead, headAssigned, grant, canEnter } = await this.entry(user);
 
     const groups = await this.prisma.workGroup.findMany({
       where: { portalId: user.portal.id, archivedAt: null },
@@ -61,7 +65,7 @@ export class AccessService {
         for (const m of members) if (m.kind === 'DEPARTMENT' && matches(m)) role = higherRole(role, m.role as GroupRole);
       if (role) out.push({ group, role, permissions: effectivePermissions(role, features) });
     }
-    return { isAppAdmin, tempAdminUntil: grant?.expiresAt ?? null, canEnter, groups: out };
+    return { isAppAdmin, isHead, headAssigned, tempAdminUntil: grant?.expiresAt ?? null, canEnter, groups: out };
   }
 
   /**
@@ -76,9 +80,10 @@ export class AccessService {
     const depts = await this.departmentsWithAncestors(user);
     const matches = (m: { kind: string; bitrixId: number }) => (m.kind === 'USER' ? m.bitrixId === user.userId : depts.has(m.bitrixId));
 
-    const [admins, appUsers] = await Promise.all([
+    const [admins, appUsers, heads] = await Promise.all([
       this.prisma.appAdmin.findMany({ where: { portalId: user.portal.id } }),
       this.prisma.appUser.findMany({ where: { portalId: user.portal.id } }),
+      this.prisma.appHead.findMany({ where: { portalId: user.portal.id } }),
     ]);
     const permanentAdmin = user.isAdmin || admins.some(matches);
     // Временный пароль к настройкам: активированный этим сотрудником, не отозван и не истёк.
@@ -89,7 +94,10 @@ export class AccessService {
           orderBy: { expiresAt: 'desc' },
         });
     const isAppAdmin = permanentAdmin || grant !== null;
-    return { matches, isAppAdmin, grant, canEnter: isAppAdmin || appUsers.some(matches) };
+    // Руководитель — назначенный (сотрудник или отдел) или администратор приложения.
+    const headAssigned = heads.some(matches);
+    const isHead = isAppAdmin || headAssigned;
+    return { matches, isAppAdmin, isHead, headAssigned, grant, canEnter: isHead || appUsers.some(matches) };
   }
 
   /** Группа, доступная пользователю, с нужным правом — иначе null. */

@@ -16,6 +16,10 @@ export interface SessionInfo {
   settingsAccessUntil: string | null;
   /** Интеграция работает только на чтение (B24_READ_ONLY). */
   readOnly: boolean;
+  /** Дашборд руководителя: назначен руководителем (⚙ → «Приложение») или администратор приложения. */
+  isHead: boolean;
+  /** Назначен руководителем явно — приложение открывается сразу на его дашборде. */
+  headAssigned: boolean;
 }
 
 /** Ошибки API в едином формате: `{ code, message }`. */

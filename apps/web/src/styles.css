@@ -5977,3 +5977,55 @@ button.cv-contact-name.link:hover {
     font-size: 12px;
   }
 }
+
+/* ---------- дашборд руководителя ---------- */
+.head-section {
+  margin: 18px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #344054;
+}
+.head-dashboard .dash-row {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.head-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 12px;
+  margin: 16px 0 12px;
+}
+.head-charts > .day-panel {
+  margin: 0;
+}
+.bar-chart {
+  margin: 0;
+}
+.bar-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.bc-grid {
+  stroke: #eaecf0;
+  stroke-width: 1;
+}
+.bc-axis {
+  fill: #667085;
+  font-size: 10px;
+}
+.bc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: #475467;
+}
+.bc-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}

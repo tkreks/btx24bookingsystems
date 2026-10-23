@@ -228,4 +228,6 @@ export interface AppSettingsDto {
   admins: { kind: MemberKind; bitrixId: number }[];
   /** Кто ещё может открыть приложение (сотрудники, отделы с вложенными); админы — всегда. */
   appUsers: { kind: MemberKind; bitrixId: number }[];
+  /** Руководители: свой дашборд (графики, показатели, активность сотрудников); входят всегда. */
+  heads: { kind: MemberKind; bitrixId: number }[];
 }

@@ -273,7 +273,7 @@ export class DashboardService {
    * Повторный клиент — у контакта есть состоявшаяся сделка той же воронки, созданная раньше этой
    * (то же правило «состоялась», что у звонков: не проиграна и бронь прошла / выиграна).
    */
-  private async newDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['newDeals']> {
+  async newDeals(user: B24UserContext, start: Date, end: Date, scope: CallScope, funnelIds: number[]): Promise<DashboardDto['newDeals']> {
     type Row = Record<string, string | null>;
     const outcome = (await this.fieldMap?.outcome(user.portal.id, user.client).catch(() => null)) ?? { certificateTypeId: null };
     try {
@@ -421,7 +421,7 @@ export class DashboardService {
   }
 
   /** Звонки телефонии с начала периода по сейчас — токеном пользователя (его права в CRM). */
-  private async fetchCalls(user: B24UserContext, start: Date, end?: Date): Promise<{ rows: CallActivity[]; truncated: boolean }> {
+  async fetchCalls(user: B24UserContext, start: Date, end?: Date): Promise<{ rows: CallActivity[]; truncated: boolean }> {
     const rows = await user.client.listAll<CallActivity>(
       'crm.activity.list',
       {

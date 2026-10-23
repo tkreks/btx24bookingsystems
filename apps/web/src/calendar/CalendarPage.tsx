@@ -18,6 +18,7 @@ import { BookingForm } from '../bookings/BookingForm.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { dayKey } from '../openlines/chat-list.js';
+import { HeadDashboardPage } from '../openlines/HeadDashboardPage.js';
 import { DashboardPage } from '../openlines/DashboardPage.js';
 import { TemplatesPage } from '../openlines/TemplatesPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
@@ -82,14 +83,15 @@ export function CalendarPage({
   const [screen, setScreen] = useState<
     | { name: 'calendar' }
     | { name: 'dashboard' }
+    | { name: 'head' }
     | { name: 'chats'; chatId?: number; waiting?: boolean }
     | { name: 'alerts'; alertId?: string | null }
     | { name: 'templates' }
   >(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
     if (alertId) return { name: 'alerts', alertId };
-    // Открыли не из сделки — сначала дашборд; из карточки сделки — календарь (решение владельца).
-    return placement.dealId ? { name: 'calendar' } : { name: 'dashboard' };
+    // Открыли не из сделки — сначала дашборд (руководителю — свой); из карточки сделки — календарь.
+    return placement.dealId ? { name: 'calendar' } : initialSession.headAssigned ? { name: 'head' } : { name: 'dashboard' };
   });
 
   useEffect(() => {
@@ -252,6 +254,7 @@ export function CalendarPage({
     );
 
   // Настройки открываются только с дашборда (решение владельца): админам и по временному паролю.
+  if (screen.name === 'head') return <HeadDashboardPage session={session} onManager={() => setScreen({ name: 'dashboard' })} />;
   if (screen.name === 'dashboard')
     return (
       <>
@@ -264,6 +267,7 @@ export function CalendarPage({
           onAlerts={() => setScreen({ name: 'alerts' })}
           onSettings={() => setAdminOpen(true)}
           onTemplates={openlinesSend ? () => setScreen({ name: 'templates' }) : undefined}
+          onHead={session.isHead ? () => setScreen({ name: 'head' }) : undefined}
           onSession={(s) => {
             setSession(s);
             setSettingsRevision((n) => n + 1);

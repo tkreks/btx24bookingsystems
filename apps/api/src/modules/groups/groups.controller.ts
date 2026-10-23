@@ -168,4 +168,5 @@ const SETTINGS_LABELS: Record<string, string> = {
   updateDealFields: 'изменение полей сделок',
   admins: 'администраторы',
   appUsers: 'доступ к приложению',
+  heads: 'руководители',
 };

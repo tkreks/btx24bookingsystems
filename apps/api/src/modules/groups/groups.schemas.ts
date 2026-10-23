@@ -138,6 +138,7 @@ export const appSettingsSchema = z
     createGrantedAt: z.string().nullable().optional(), // только для показа, при сохранении игнорируется
     admins: z.array(member).max(200),
     appUsers: z.array(member).max(1000).optional(), // нет в запросе — список не меняется
+    heads: z.array(member).max(200).optional(), // нет в запросе — список не меняется
   })
   .strict()
   .refine((s) => !s.dialogTextsEnabled || s.dialogMetadataEnabled, { message: 'Сбор текстов требует включённого сбора метаданных', path: ['dialogTextsEnabled'] });

@@ -403,3 +403,37 @@ export interface ActivityDayDto {
   unattributedPhone: number;
   notes: string[];
 }
+
+/** День дашборда руководителя (по времени портала). */
+export interface HeadDayDto {
+  date: string;
+  /** Новые сделки (созданы в этот день, воронки всех групп). */
+  newDeals: number;
+  /** Сколько из них уже с бронью (журнал приложения). */
+  bookedDeals: number;
+  /** Брони по новым сделкам (все сделанные, в т.ч. потом снятые). */
+  bookings: number;
+  /** Новые сделки повторных клиентов (у контакта раньше была состоявшаяся сделка — бронь прошла). */
+  repeat: number;
+  /** Все звонки дня (входящие и исходящие). */
+  calls: number;
+  /** Пропущенные входящие. */
+  missed: number;
+  /** Упущенные клиенты: не перезвонили и не написали в чат после пропущенного. */
+  lost: number;
+}
+
+/**
+ * `GET /api/head-dashboard?from&to` — дашборд руководителя (⚙ → «Приложение» → «Руководители»): по дням
+ * и итого. null — нет доступа к сделкам / звонкам CRM у руководителя.
+ */
+export interface HeadDashboardDto {
+  from: string;
+  to: string;
+  timezone: string;
+  days: HeadDayDto[];
+  totals: Omit<HeadDayDto, 'date'> & { incoming: number; outgoing: number };
+  deals: boolean;
+  calls: boolean;
+  notes: string[];
+}

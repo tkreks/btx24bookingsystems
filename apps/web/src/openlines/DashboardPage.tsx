@@ -22,7 +22,6 @@ import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
 import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
-import { EmployeeActivity } from './EmployeeActivity.js';
 import { DashBadge, RecentCalls } from './RecentCalls.js';
 import { Icon } from './icons.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
@@ -53,6 +52,7 @@ export function DashboardPage({
   onSettings,
   onTemplates,
   onSession,
+  onHead,
 }: {
   session: SessionInfo;
   openlines: boolean;
@@ -66,6 +66,8 @@ export function DashboardPage({
   /** Шаблоны сообщений: свои, общие и автоматические. */
   onTemplates?: () => void;
   onSession?: (s: SessionInfo) => void;
+  /** Дашборд руководителя (руководителям и администраторам). */
+  onHead?: () => void;
 }) {
   const tz = session.portal.timezone;
   const [view, setView] = useState<'main' | 'calls'>('main');
@@ -258,6 +260,11 @@ export function DashboardPage({
               {!!alertCount && <span className="badge">{alertCount}</span>}
             </button>
           )}
+          {onHead && (
+            <button className="settings-button" onClick={onHead} title="Дашборд руководителя: графики, показатели, активность сотрудников">
+              <span aria-hidden="true">📊</span> Руководитель
+            </button>
+          )}
           {onTemplates && (
             <button className="settings-button" onClick={onTemplates} title="Шаблоны сообщений: свои, общие и автоматические">
               <span aria-hidden="true">✉</span> Шаблоны
@@ -401,7 +408,6 @@ export function DashboardPage({
       </div>
       </div>
 
-      {session.canManageApp && <EmployeeActivity timezone={tz} />}
 
       {d?.newDeals && d.newDeals.total > 0 && <DealSources items={d.newDeals.items} word={word} onOpen={(source) => setDealsOpen({ source })} />}
 

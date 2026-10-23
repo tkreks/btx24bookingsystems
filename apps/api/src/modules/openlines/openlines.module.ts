@@ -10,10 +10,11 @@ import { FilesService } from './files.service.js';
 import { OpenlineIndexService } from './openline-index.service.js';
 import { OpenlinesController } from './openlines.controller.js';
 import { TemplatesService } from './templates.service.js';
+import { HeadDashboardService } from './head-dashboard.service.js';
 
 @Module({
   imports: [AccessModule, BookingsModule, Bitrix24Module],
   controllers: [OpenlinesController],
-  providers: [ActivityService, ChatFoldersService, ChatsService, DashboardService, FilesService, OpenlineIndexService, TemplatesService],
+  providers: [ActivityService, ChatFoldersService, ChatsService, DashboardService, FilesService, HeadDashboardService, OpenlineIndexService, TemplatesService],
 })
 export class OpenlinesModule {}

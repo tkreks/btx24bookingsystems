@@ -23,6 +23,7 @@ import type {
   ChatReplyStatusDto,
   CallListDto,
   CallLogDto,
+  HeadDashboardDto,
   RecentCallsDto,
   ChatFolderDto,
   ChatHistoryDto,
@@ -33,7 +34,6 @@ import type {
   StoredFileDto,
 } from '@btx24/shared';
 import { AccessService, type UserAccess } from '../access/access.service.js';
-import { AppAdminGuard } from '../access/app-admin.guard.js';
 import { ActionLogService } from '../audit/action-log.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -43,6 +43,7 @@ import { ChatsService } from './chats.service.js';
 import { DashboardService } from './dashboard.service.js';
 import { FilesService, MAX_FILE_BYTES, type UploadedFile as Upload } from './files.service.js';
 import { TemplatesService } from './templates.service.js';
+import { HeadDashboardService } from './head-dashboard.service.js';
 
 /** Воронки групп пользователя (уникальные, в порядке групп). */
 function funnelsOf(a: UserAccess): number[] {
@@ -65,13 +66,26 @@ export class OpenlinesController {
     private readonly folderService: ChatFoldersService,
     private readonly actions: ActionLogService,
     private readonly activity: ActivityService,
+    private readonly head: HeadDashboardService,
   ) {}
 
-  /** «Активность сотрудников» за день — только администраторам приложения. */
+  /** «Активность сотрудников» за день — дашборд руководителя (руководители и администраторы приложения). */
   @Get('dashboard/activity')
-  @UseGuards(AppAdminGuard)
-  employeeActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<ActivityDayDto> {
+  async employeeActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<ActivityDayDto> {
+    await this.requireHead(user);
     return this.activity.day(user, query);
+  }
+
+  /** Дашборд руководителя: новые сделки, брони по ним, повторные клиенты, звонки — по дням периода. */
+  @Get('head-dashboard')
+  async headDashboard(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<HeadDashboardDto> {
+    await this.requireHead(user);
+    return this.head.get(user, query);
+  }
+
+  private async requireHead(user: B24UserContext): Promise<void> {
+    if (!(await this.access.resolve(user)).isHead)
+      throw new ForbiddenException({ code: 'HEAD_ONLY', message: 'Только руководителям (⚙ → «Приложение» → «Руководители»)' });
   }
 
   @Get('dashboard')

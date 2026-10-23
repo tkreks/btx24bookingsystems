@@ -10,10 +10,11 @@ const group = (id: string, members: Member[], features: string[] = ['booking.det
   resources: resources.map((resourceId) => ({ groupId: id, resourceId })), members,
 });
 
-function setup(opts: { groups: ReturnType<typeof group>[]; admins?: { kind: string; bitrixId: number }[]; departments?: { ID: string; PARENT: string | null }[] | 'denied'; grantUntil?: Date; appUsers?: { kind: string; bitrixId: number }[] }) {
+function setup(opts: { groups: ReturnType<typeof group>[]; admins?: { kind: string; bitrixId: number }[]; departments?: { ID: string; PARENT: string | null }[] | 'denied'; grantUntil?: Date; appUsers?: { kind: string; bitrixId: number }[]; heads?: { kind: string; bitrixId: number }[] }) {
   const prisma = {
     appAdmin: { findMany: vi.fn(async () => opts.admins ?? []) },
     appUser: { findMany: vi.fn(async () => opts.appUsers ?? []) },
+    appHead: { findMany: vi.fn(async () => opts.heads ?? []) },
     settingsAccessCode: { findFirst: vi.fn(async () => (opts.grantUntil ? { expiresAt: opts.grantUntil } : null)) },
     workGroup: { findMany: vi.fn(async () => opts.groups) },
   } as unknown as PrismaService;
@@ -120,5 +121,15 @@ describe('AccessService.canEnter — доступ к приложению', () =
     const n = setup({ groups: [group('g1', [{ kind: 'USER', bitrixId: 10, role: 'MANAGER' }])], appUsers: [{ kind: 'USER', bitrixId: 11 }] });
     expect(await n.svc.canEnter(n.user())).toBe(false);
     expect((await n.svc.resolve(n.user())).canEnter).toBe(false);
+  });
+
+  it('руководитель — назначенный (сам или через отдел) или администратор; входит в приложение всегда', async () => {
+    const h = setup({ groups: [], heads: [{ kind: 'DEPARTMENT', bitrixId: 1 }], departments: [{ ID: '1', PARENT: null }, { ID: '5', PARENT: '1' }] });
+    const a = await h.svc.resolve(h.user({ departmentIds: [5] }));
+    expect([a.isHead, a.canEnter, a.isAppAdmin]).toEqual([true, true, false]);
+    const n = setup({ groups: [], heads: [{ kind: 'USER', bitrixId: 11 }] });
+    expect((await n.svc.resolve(n.user())).isHead).toBe(false);
+    const admin = setup({ groups: [] });
+    expect((await admin.svc.resolve(admin.user({ isAdmin: true }))).isHead).toBe(true);
   });
 });
