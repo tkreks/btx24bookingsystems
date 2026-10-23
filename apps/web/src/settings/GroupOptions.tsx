@@ -363,10 +363,14 @@ export function CatalogSection({
   selected,
   catalog,
   onChange,
+  hidden,
+  onHidden,
 }: {
   selected: string[];
   catalog: Ref<CatalogDto>;
   onChange: (ids: string[]) => void;
+  hidden?: string[];
+  onHidden?: (ids: string[]) => void;
 }) {
   const [picking, setPicking] = useState(false);
   return (
@@ -382,7 +386,7 @@ export function CatalogSection({
       {picking && (
         <>
           <RefNotice r={catalog} loading="Загрузка разделов…" />
-          {catalog.data && <CatalogSections sections={catalog.data.sections} selected={selected} onChange={onChange} />}
+          {catalog.data && <CatalogSections sections={catalog.data.sections} selected={selected} onChange={onChange} hidden={hidden} onHidden={onHidden} />}
         </>
       )}
     </Section>

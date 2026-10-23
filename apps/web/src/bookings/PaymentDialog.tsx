@@ -14,11 +14,13 @@ import {
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
 import { Countdown } from './Countdown.js';
+import { MinimizeButton } from '../Minimize.js';
 
 const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   fixed: 'фиксированная сумма группы',
   manual: 'ручная сумма из сделки',
   percent: 'процент от суммы сделки',
+  certificate: 'номинал сертификата (сумма сделки)',
   none: '',
 };
 const rub = (v: number) => `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v)} ₽`;
@@ -35,12 +37,18 @@ const STATE_LABELS: Record<DealInvoiceDto['state'], string> = {
 export function PaymentDialog({
   dealId: initialDealId,
   bookingId: initialBookingId,
+  initialAmount,
+  fixedDeal = false,
   timezone,
   onClose,
   onCreateBooking,
 }: {
   dealId: number;
   bookingId?: number | null;
+  /** Сумма из мастера (бронирование сертификатом — «Сумма предоплаты»): вместо расчёта. */
+  initialAmount?: number | null;
+  /** Сделку не подменять «самой новой в работе» (сертификат из мастера: брони нет, сделка — эта). */
+  fixedDeal?: boolean;
   timezone: string;
   onClose: () => void;
   /** «Создать бронь» по выбранной сделке (группа требует бронь перед оплатой). */
@@ -56,11 +64,11 @@ export function PaymentDialog({
     apiGet<PaymentDealOptionsDto>(`/payments/deal-options?dealId=${initialDealId}`).then(
       (o) => {
         setDealOptions(o);
-        if (!initialBookingId && o.defaultDealId && o.defaultDealId !== initialDealId) setDealId(o.defaultDealId);
+        if (!fixedDeal && !initialBookingId && o.defaultDealId && o.defaultDealId !== initialDealId) setDealId(o.defaultDealId);
       },
       () => undefined,
     );
-  }, [initialDealId, initialBookingId]);
+  }, [initialDealId, initialBookingId, fixedDeal]);
   const chooseDeal = (id: number) => {
     setDealId(id);
     setGroupId(null);
@@ -107,12 +115,14 @@ export function PaymentDialog({
     ).then(
       (p) => {
         setPreview(p);
-        setAmount(p.amount !== null ? String(p.amount) : '');
+        // Сумма из мастера — для предоплаты по сделке мастера; иначе расчёт сервера.
+        const given = kind === 'prepayment' && p.dealId === initialDealId && initialAmount ? initialAmount : null;
+        setAmount(given !== null ? String(given) : p.amount !== null ? String(p.amount) : '');
         if (!bookingChosen && p.bookingId !== bookingId) setBookingId(p.bookingId);
       },
       (e) => setError(e instanceof Error ? e.message : 'Не удалось рассчитать счёт'),
     );
-  }, [dealId, kind, bookingId, bookingChosen, groupId]);
+  }, [dealId, kind, bookingId, bookingChosen, groupId, initialDealId, initialAmount]);
   useEffect(() => void loadHistory(), [loadHistory]);
   const inWork = (invoices ?? []).filter(invoiceInWork);
   // Пока ссылка формируется или ждём оплату — обновляем статус.
@@ -172,6 +182,7 @@ export function PaymentDialog({
       >
         <header>
           <h3>Счета сделки #{dealId}</h3>
+          <MinimizeButton label="Оплата" />
           <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>

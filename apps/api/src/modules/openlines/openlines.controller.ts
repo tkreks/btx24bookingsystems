@@ -160,7 +160,14 @@ export class OpenlinesController {
   @HttpCode(204)
   async folderRename(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<void> {
     await this.require(user, 'openlines.read');
-    await this.folderService.rename(user, id, body);
+    const changed = await this.folderService.rename(user, id, body);
+    if (changed.global !== undefined)
+      await this.actions.user(user, {
+        action: 'chat_folder.global',
+        summary: changed.global ? 'Сделал папку чатов глобальной (видят все с доступом к её чатам)' : 'Сделал папку чатов личной',
+        entityType: 'chat_folder',
+        entityId: id,
+      });
   }
 
   @Delete('openlines/folders/:id')
@@ -180,6 +187,21 @@ export class OpenlinesController {
   ): Promise<void> {
     await this.require(user, 'openlines.read');
     await this.folderService.put(user, id, chatId);
+  }
+
+  /** ★ Избранное: добавить (PUT) или убрать (DELETE) чат — личное. */
+  @Put('openlines/favorites/:chatId')
+  @HttpCode(204)
+  async favoriteOn(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.folderService.favorite(user, chatId, true);
+  }
+
+  @Delete('openlines/favorites/:chatId')
+  @HttpCode(204)
+  async favoriteOff(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {
+    await this.require(user, 'openlines.read');
+    await this.folderService.favorite(user, chatId, false);
   }
 
   /** Вернуть чат в общий список. */

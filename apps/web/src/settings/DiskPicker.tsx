@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { DiskFileRef, DiskItemDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { fileSize } from '../openlines/format.js';
+import { MinimizeButton } from '../Minimize.js';
 
 type Place = { label: string; query: string };
 
@@ -38,6 +39,7 @@ export function DiskPicker({ onPick, onClose }: { onPick: (f: DiskFileRef) => vo
       <div className="sheet disk-picker" role="dialog" aria-modal="true" aria-label="Файл с Диска" onClick={(e) => e.stopPropagation()}>
         <header>
           <h3>Файл с Диска</h3>
+          <MinimizeButton label="Файлы Диска" />
           <button aria-label="Закрыть" onClick={onClose}>
             ×
           </button>

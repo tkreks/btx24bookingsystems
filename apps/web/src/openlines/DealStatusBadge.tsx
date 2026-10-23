@@ -3,6 +3,7 @@ import { DEAL_STATUS_LABELS, NEEDS_CLOSE_TEXT, type DealStatusDto } from '@btx24
 const HINT: Record<DealStatusDto['status'], string> = {
   in_work: 'Сделка в работе, активной брони нет',
   waiting: 'У сделки есть активная бронь — ждём клиента',
+  arrived: 'Бронь идёт сейчас — клиент на месте',
   done: 'Сделка завершена',
   failed: 'Сделка провалена',
 };

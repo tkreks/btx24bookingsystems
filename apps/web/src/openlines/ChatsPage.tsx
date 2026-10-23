@@ -6,7 +6,6 @@ import {
   type ChatScope,
   type ChatSummary,
   type ClientBookingsDto,
-  type CreateBookingResultDto,
   type MessageTemplateDto,
   type MyGroupDto,
 } from '@btx24/shared';
@@ -87,11 +86,11 @@ export function ChatsPage({
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState<{ chatId: number; data: ClientBookingsDto | null; dealId?: number } | null>(null);
-  const [created, setCreated] = useState<CreateBookingResultDto | null>(null);
+  const [created, setCreated] = useState<string | null>(null);
   const [bookingsRev, setBookingsRev] = useState(0);
   const canCreate = groups.some((g) => g.permissions.includes('booking.create'));
   const canPay = groups.some((g) => g.permissions.includes('payment.send'));
-  const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null } | null>(null);
+  const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null; amount?: number | null; fixedDeal?: boolean } | null>(null);
   const [paymentRev, setPaymentRev] = useState(0);
   // Полный номер телефона — поиск по всему порталу (CRM → чаты клиента), а не только в загруженных.
   const [phoneHits, setPhoneHits] = useState<{ q: string; items: ChatSummary[] | null; error: string } | null>(null);
@@ -335,8 +334,24 @@ export function ChatsPage({
               <button className="link" onClick={() => setFolderId(null)}>
                 ← Все чаты
               </button>
-              <strong>📁 {currentFolder?.name ?? 'Папка'}</strong>
+              <strong>
+                {currentFolder ? folderIcon(currentFolder) : '📁'} {currentFolder?.name ?? 'Папка'}
+              </strong>
+              {currentFolder && !currentFolder.mine && (
+                <span className="muted cl-folder-note">
+                  Глобальная папка коллеги{currentFolder.ignoreAttention ? ' · 🔕 не обращать внимания' : ''}
+                </span>
+              )}
+              {currentFolder?.mine && currentFolder.kind !== 'favorites' && (
               <span className="row-actions">
+                <button
+                  className={`cl-ignore${currentFolder.global ? ' on' : ''}`}
+                  aria-pressed={currentFolder.global}
+                  title="Глобальная: папку и доступные им чаты видят все сотрудники, «Не обращать внимания» действует у всех"
+                  onClick={() => void folderAction(() => apiPut(`/openlines/folders/${folderId}`, { global: !currentFolder.global }))}
+                >
+                  {currentFolder.global ? '🌐 Глобальная' : '👤 Личная'}
+                </button>
                 <button
                   className={`cl-ignore${currentFolder?.ignoreAttention ? ' on' : ''}`}
                   aria-pressed={!!currentFolder?.ignoreAttention}
@@ -369,6 +384,7 @@ export function ChatsPage({
                   ×
                 </button>
               </span>
+              )}
             </div>
           ) : (
           <div className="cl-scope" role="group" aria-label="Чьи чаты">
@@ -428,9 +444,14 @@ export function ChatsPage({
           {!folderId && !query && tab === 'all' && !!folders?.length && (
             <div className="cl-folders" aria-label="Папки">
               {folders.map((f) => (
-                <button key={f.id} className="cl-folder" onClick={() => setFolderId(f.id)}>
-                  <span className="cl-folder-icon" aria-hidden="true">
-                    📁
+                <button key={f.id} className={`cl-folder${f.kind === 'favorites' ? ' fav' : ''}`} onClick={() => setFolderId(f.id)}>
+                  <span className="cl-folder-icon" title={f.kind === 'favorites' ? 'Избранное' : f.global ? (f.mine ? 'Глобальная папка (ваша)' : 'Глобальная папка коллеги') : 'Папка'}>
+                    <span aria-hidden="true">{folderIcon(f)}</span>
+                    {f.unread > 0 && (
+                      <span className="cl-unread cl-badge" title="Непрочитанных во всех чатах папки">
+                        {f.unread > 99 ? '99+' : f.unread}
+                      </span>
+                    )}
                   </span>
                   <span className="cl-card-body">
                     <span className="cl-card-heading">
@@ -443,7 +464,7 @@ export function ChatsPage({
                       <span className="cl-preview">
                         {f.last ? `${f.last.title}: ${AUTHOR_PREFIX[f.last.author]}${f.last.preview}` : 'Чатов пока нет'}
                       </span>
-                      {f.unread > 0 && <span className="cl-unread">{f.unread}</span>}
+                      {f.ignoreAttention && <span className="cl-folder-flag" title="Не обращать внимания: чаты не на дашборде">🔕</span>}
                     </span>
                   </span>
                 </button>
@@ -463,6 +484,15 @@ export function ChatsPage({
               />
               {/* Под аватаркой: папка (меню), входящее/исходящее, участник ли я. */}
               <span className="cl-card-tools">
+                <button
+                  className={`cl-star${c.favorite ? ' on' : ''}`}
+                  aria-pressed={c.favorite}
+                  aria-label={c.favorite ? 'Убрать из избранного' : 'В избранное'}
+                  title={c.favorite ? 'Убрать из избранного' : 'В избранное (только у вас)'}
+                  onClick={() => void folderAction(() => (c.favorite ? apiDelete(`/openlines/favorites/${c.chatId}`) : apiPut(`/openlines/favorites/${c.chatId}`, {})))}
+                >
+                  {c.favorite ? '★' : '☆'}
+                </button>
                 <button
                   className="cl-card-more"
                   aria-label={`Папка для чата ${c.clientName || c.title}`}
@@ -488,7 +518,7 @@ export function ChatsPage({
                 <div className="cl-menu cl-card-menu" role="menu">
                   <div className="cl-menu-label">{c.folderId ? 'Перенести в папку' : 'В папку'}</div>
                   {folders
-                    ?.filter((f) => f.id !== c.folderId)
+                    ?.filter((f) => f.id !== c.folderId && f.mine && f.kind !== 'favorites')
                     .map((f) => (
                       <button
                         key={f.id}
@@ -502,7 +532,7 @@ export function ChatsPage({
                   <button role="menuitem" className="cl-menu-item" onClick={() => void newFolder(c.chatId)}>
                     + Новая папка…
                   </button>
-                  {c.folderId && (
+                  {c.folderId && folders?.find((f) => f.id === c.folderId)?.mine && (
                     <button
                       role="menuitem"
                       className="cl-menu-item"
@@ -555,10 +585,7 @@ export function ChatsPage({
                 onCreate={(data) => setForm({ chatId: openId, data })}
               />
               {created && (
-                <p className="notice cb-created">
-                  Бронь #{created.bookingId} создана{created.dealId ? ` в сделке #${created.dealId}` : ''}.
-                  {created.warnings.length > 0 && ` ${created.warnings.join(' ')}`}
-                </p>
+                <p className="notice cb-created">{created}</p>
               )}
             </>
           }
@@ -579,11 +606,12 @@ export function ChatsPage({
               openDeals: form.data?.openDeals ?? [],
             }}
             onClose={() => setForm(null)}
-            onDone={(r, mode) => {
+            onDone={(r) => {
               setForm(null);
-              setCreated(r);
+              setCreated(r.note);
               setBookingsRev((n) => n + 1);
-              if (mode === 'prepayment' && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
+              if (r.payment && r.dealId && canPay)
+                setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal });
             }}
           />
         </ErrorBoundary>
@@ -592,6 +620,8 @@ export function ChatsPage({
         <PaymentDialog
           dealId={payment.dealId}
           bookingId={payment.bookingId}
+          initialAmount={payment.amount}
+          fixedDeal={payment.fixedDeal}
           timezone={timezone}
           onClose={() => {
             setPayment(null);
@@ -620,7 +650,15 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
   const name = c.clientName || c.title;
   return (
     <button className={`cl-card${active ? ' selected' : ''}`} role="listitem" aria-current={active} onClick={onOpen}>
-      <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(name)}</span>
+      {/* Непрочитанные — в правом верхнем углу аватарки («Не требует ответа» обнуляет). */}
+      <span className="cl-avatar-wrap">
+        <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(name)}</span>
+        {c.unread > 0 && (
+          <span className="cl-unread cl-badge" title="Непрочитанных сообщений">
+            {c.unread > 99 ? '99+' : c.unread}
+          </span>
+        )}
+      </span>
       <span className="cl-card-body">
         <span className="cl-card-heading">
           <span className="cl-card-name" title={name}>
@@ -643,12 +681,12 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
             </span>
           )}
         </span>
-        {c.unread > 0 && (
-          <span className="cl-unread cl-card-unread" title="Непрочитанных сообщений">
-            {c.unread}
-          </span>
-        )}
       </span>
     </button>
   );
+}
+
+/** Значок папки: ★ — избранное, 🌐 — глобальная, 📁 — личная. */
+function folderIcon(f: Pick<ChatFolderDto, 'kind' | 'global'>): string {
+  return f.kind === 'favorites' ? '★' : f.global ? '🌐' : '📁';
 }

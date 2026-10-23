@@ -12,6 +12,7 @@ describe('DealStatusService', () => {
       bookingRecord: {
         findMany: vi.fn(async () => [
           rec(1, 10, '2026-10-24T10:00:00Z', '2026-10-24T12:00:00Z'), // впереди
+          rec(5, 16, '2026-10-23T11:00:00Z', '2026-10-23T14:00:00Z'), // идёт сейчас
           rec(2, 11, '2026-10-22T10:00:00Z', '2026-10-22T12:00:00Z'), // прошла
           rec(3, 12, '2026-10-25T10:00:00Z', '2026-10-25T12:00:00Z'), // удалена в Битрикс24
           rec(4, 13, '2026-10-25T10:00:00Z', '2026-10-25T12:00:00Z', 'cancelled'),
@@ -30,6 +31,7 @@ describe('DealStatusService', () => {
         { ID: '13', STAGE_SEMANTIC_ID: 'P', UF_E: '2026-12-01T10:00:00+03:00' },
         { ID: '14', STAGE_SEMANTIC_ID: 'P', UF_E: '2026-10-01T10:00:00+03:00' },
         { ID: '15', STAGE_SEMANTIC_ID: 'F' },
+        { ID: '16', STAGE_SEMANTIC_ID: 'P' },
       ],
       now,
     );
@@ -40,6 +42,7 @@ describe('DealStatusService', () => {
       13: 'in_work',
       14: 'done!',
       15: 'failed',
+      16: 'arrived',
     });
     expect(await svc.selectFields('p1')).toEqual(['STAGE_SEMANTIC_ID', 'UF_E']);
   });

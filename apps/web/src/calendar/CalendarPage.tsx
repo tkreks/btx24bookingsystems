@@ -28,6 +28,7 @@ import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { BookingDetails } from './BookingDetails.js';
 import { DayAvailability } from './DayAvailability.js';
 import { DayGrid } from './DayGrid.js';
+import { ResourceStopDialog } from './ResourceStopDialog.js';
 import { DayList } from './DayList.js';
 import { isNarrow, nextView, parseView, VIEW_ICONS, VIEW_TITLES, viewForGroup } from './views.js';
 
@@ -75,10 +76,13 @@ export function CalendarPage({
   const [adminOpen, setAdminOpen] = useState(false);
   // Открытая форма брони: из «+ Бронь» — на текущий день; кликом в календаре — ресурс и время.
   const [bookingForm, setBookingForm] = useState<{ date: string; time?: string; resourceId?: number } | null>(null);
-  const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null } | null>(null);
+  const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null; amount?: number | null; fixedDeal?: boolean } | null>(null);
   const [createdNote, setCreatedNote] = useState('');
   const [dealBookingsInfo, setDealBookings] = useState<ClientBookingsDto | null>(null);
   const [settingsRevision, setSettingsRevision] = useState(0);
+  // Стоп ресурса: окно и перезагрузка дня после изменений.
+  const [stopFor, setStopFor] = useState<number | null>(null);
+  const [dayRev, setDayRev] = useState(0);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   // Экран приложения. Состояние календаря (дата, вид) живёт здесь и не теряется при переходах.
   // Ссылка из чата уведомлений (`?alert=<id>`) открывает сразу «Уведомления о бронях».
@@ -149,7 +153,7 @@ export function CalendarPage({
     return () => {
       cancelled = true;
     };
-  }, [query, groups]);
+  }, [query, groups, dayRev]);
 
   const chooseGroup = (id: string) => {
     setGroupId(id);
@@ -216,6 +220,8 @@ export function CalendarPage({
   const openlinesRead = session.canManageApp || permissions.has('openlines.read');
   const openlinesSend = session.canManageApp || permissions.has('openlines.send');
   const bookingsView = session.canManageApp || permissions.has('booking.details');
+  // Стоп ресурса — право менять брони в группе (сервер проверит по группе ресурса).
+  const canStop = session.canManageApp || !!activeGroup?.permissions.includes('booking.edit');
   // Бронь кликом в календаре — только в группе, где у сотрудника есть право создавать.
   const createAt =
     activeGroup?.permissions.includes('booking.create')
@@ -417,7 +423,7 @@ export function CalendarPage({
 
       <main className={loading ? 'loading' : ''}>
         {day && view === 'calendar' && (
-          <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} onCreate={createAt} />
+          <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} onCreate={createAt} onStop={canStop ? setStopFor : undefined} />
         )}
         {day && view === 'list' && (
           <DayList
@@ -463,6 +469,15 @@ export function CalendarPage({
           }}
         />
       )}
+      {stopFor !== null && day && (
+        <ResourceStopDialog
+          resource={{ id: stopFor, name: day.resources.find((r) => r.id === stopFor)?.name ?? `Ресурс #${stopFor}` }}
+          timezone={tz}
+          date={date}
+          onClose={() => setStopFor(null)}
+          onChanged={() => setDayRev((n) => n + 1)}
+        />
+      )}
       {bookingForm && (
         <ErrorBoundary where="booking-form" onClose={() => setBookingForm(null)}>
           <BookingForm
@@ -476,12 +491,11 @@ export function CalendarPage({
               openDeals: dealBookingsInfo?.openDeals ?? [],
             }}
             onClose={() => setBookingForm(null)}
-            onDone={(r, mode) => {
+            onDone={(r) => {
               setBookingForm(null);
-              if (mode === 'prepayment' && r.dealId && groups?.some((g) => g.permissions.includes('payment.send'))) setPayment({ dealId: r.dealId, bookingId: r.bookingId });
-              setCreatedNote(
-                `Бронь #${r.bookingId} создана${r.dealId ? ` в сделке #${r.dealId}` : ''}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
-              );
+              if (r.payment && r.dealId && groups?.some((g) => g.permissions.includes('payment.send')))
+                setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal });
+              setCreatedNote(r.note);
               setSettingsRevision((n) => n + 1);
             }}
           />
@@ -491,6 +505,8 @@ export function CalendarPage({
         <PaymentDialog
           dealId={payment.dealId}
           bookingId={payment.bookingId}
+          initialAmount={payment.amount}
+          fixedDeal={payment.fixedDeal}
           timezone={tz}
           onClose={() => setPayment(null)}
           onCreateBooking={() => {

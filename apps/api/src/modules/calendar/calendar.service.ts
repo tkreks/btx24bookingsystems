@@ -1,5 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import {
+  type ResourceStopDto,
   techWindowsFor,
   zonedDayRange,
   type CalendarBooking,
@@ -13,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { dealLinks, listBookings, listResources, type RawBooking } from '../bookings/bitrix-bookings.js';
+import { toDto as stopDto } from '../bookings/resource-stops.service.js';
 import { bookingFields, type DealFieldMeta } from './deal-fields.js';
 
 
@@ -66,7 +68,7 @@ export class CalendarService {
     const inDay = new Set(mapped.filter((b) => overlaps(b, start, end)).map((b) => b.id));
     const dayRaw = raw.filter((b) => inDay.has(Number(b.id)));
     // Брони приложения и по сделкам, удалённые в Битрикс24, — на месте до решения (тех. окна у них нет: слот свободен).
-    const gone = await this.missing(user, start, end, allowed, new Set(allBookings.map((b) => Number(b.id))));
+    const [gone, stops] = await Promise.all([this.missing(user, start, end, allowed, new Set(allBookings.map((b) => Number(b.id)))), this.stops(user, start, end, resources)]);
     if (!withDetails)
       return {
         date,
@@ -76,6 +78,7 @@ export class CalendarService {
           .map(occupancyOnly)
           .sort(byStart),
         techWindows,
+        stops,
       };
 
     const shown = dealFields.filter((f) => f.showList || f.showView);
@@ -110,7 +113,17 @@ export class CalendarService {
       )
       .sort(byStart);
 
-    return { date, timezone, resources, bookings, techWindows };
+    return { date, timezone, resources, bookings, techWindows, stops };
+  }
+
+  /** Стопы ресурсов дня (ресурс закрыт для бронирования). */
+  private async stops(user: B24UserContext, start: Date, end: Date, resources: CalendarResource[]): Promise<ResourceStopDto[]> {
+    if (!this.prisma || !resources.length) return [];
+    const rows = await this.prisma.resourceStop.findMany({
+      where: { portalId: user.portal.id, liftedAt: null, startsAt: { lt: end }, endsAt: { gt: start }, resourceId: { in: resources.map((r) => r.id) } },
+      orderBy: { startsAt: 'asc' },
+    });
+    return rows.map((r) => stopDto(r, user.portal.timezone));
   }
 
   private async dealFieldMeta(user: B24UserContext): Promise<Record<string, DealFieldMeta>> {

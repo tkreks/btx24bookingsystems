@@ -67,6 +67,7 @@ export class BookingDirectoryService {
       ? sectionsWithChildren(chosen, cached.sections.map((s) => ({ id: String(s.ID), parentId: s.SECTION_ID ? String(s.SECTION_ID) : null })))
       : null;
     const names = new Map(cached.sections.map((s) => [String(s.ID), s.NAME]));
+    const tree = cached.sections.map((s) => ({ id: String(s.ID), parentId: s.SECTION_ID ? String(s.SECTION_ID) : null }));
     return {
       products: cached.products
         .filter((p) => !allowed || (p.SECTION_ID && allowed.has(String(p.SECTION_ID))))
@@ -76,9 +77,14 @@ export class BookingDirectoryService {
           price: p.PRICE === null || p.PRICE === undefined || p.PRICE === '' ? null : Number(p.PRICE),
           currency: p.CURRENCY_ID ?? null,
           section: p.SECTION_ID ? (names.get(String(p.SECTION_ID)) ?? null) : null,
+          sectionId: p.SECTION_ID ? String(p.SECTION_ID) : null,
         })),
       defaults: options?.resourceDefaults ?? {},
       restricted: !!allowed,
+      // Быстрые теги — выбранные разделы, кроме скрытых (👁); «root» (без раздела) тегом не бывает.
+      sections: chosen
+        .filter((id) => id !== 'root' && names.has(id) && !(options?.productSectionsHidden ?? []).includes(id))
+        .map((id) => ({ id, name: names.get(id)!, sectionIds: [...sectionsWithChildren([id], tree)] })),
     };
   }
 

@@ -163,6 +163,8 @@ export const DEAL_FIELD_ROLES = {
   bookingType: 'Тип бронирования',
   managerComment: 'Комментарий менеджера',
   prepayment: 'Ручная сумма предоплаты',
+  /** «Бронирование сертификатом»: сумма ссылки на оплату, если менеджер решил её отправить. */
+  prepaymentAmount: 'Сумма предоплаты',
   surcharge: 'Ручная сумма доплаты',
   prepaymentInvoiceId: 'ID Счёта на предоплату',
   prepaymentLink: 'Ссылка на предоплату',
@@ -179,6 +181,38 @@ export type DealFieldRole = keyof typeof DEAL_FIELD_ROLES;
  * потом оплачивают бронь. Оплаченная (и не проигранная) — успешная сделка, хотя брони у неё нет.
  */
 export const CERTIFICATE_DEAL_TYPE = 'Покупка сертификата';
+
+/**
+ * Тип сделки в мастере брони (решение владельца 2026-10-23, группа «Бани» — опция `dealKinds`): от него
+ * зависят шаги, поля и оплата. Значение поля «Тип сделки» ищется по началу названия варианта.
+ */
+export const DEAL_KINDS = ['certificate', 'visit', 'by_certificate', 'no_payment'] as const;
+export type DealKind = (typeof DEAL_KINDS)[number];
+export const DEAL_KIND_LABELS: Record<DealKind, string> = {
+  certificate: 'Покупка сертификата',
+  visit: 'Бронирование посещения',
+  by_certificate: 'Бронирование сертификатом',
+  no_payment: 'Бронирование без оплаты',
+};
+export const DEAL_KIND_HINTS: Record<DealKind, string> = {
+  certificate: 'сумма, бумажный или электронный, на чьё имя — и ссылка на оплату',
+  visit: 'дата, ресурс и время, тип бронирования, поля — и ссылка на предоплату с таймером',
+  by_certificate: 'как посещение; ссылку на оплату — по решению на последнем шаге',
+  no_payment: 'дата, ресурс и время, остальные поля группы',
+};
+/** Вариант поля «Тип сделки» (начало названия). «Без оплаты» в списке нет — это бронь посещения. */
+export const DEAL_KIND_TYPE_VALUE: Record<DealKind, string> = {
+  certificate: CERTIFICATE_DEAL_TYPE,
+  visit: 'Бронирование посещения',
+  by_certificate: 'Бронирование сертификатом',
+  no_payment: 'Бронирование посещения',
+};
+/** Оплата брони по типу сделки; для «сертификатом» — `certificate`, со ссылкой — `prepayment`. */
+export const DEAL_KIND_PAYMENT: Record<Exclude<DealKind, 'certificate'>, PaymentMode> = {
+  visit: 'prepayment',
+  by_certificate: 'certificate',
+  no_payment: 'postpay',
+};
 export type DealFieldMapDto = Partial<Record<DealFieldRole, string>>;
 
 /** Бронь клиента (в чате) или сделки (встройка): прошлая, текущая или будущая. */
@@ -261,6 +295,10 @@ export interface CreateBookingDto {
   bookingTypeId?: string | null;
   /** Поля сделки группы (флаг «С»): код → значение формы (`DealFormField.value`). */
   dealFields?: Record<string, string>;
+  /** Тип сделки из мастера (группы с `dealKinds`): заполняет поле «Тип сделки». */
+  dealKind?: DealKind | null;
+  /** «Бронирование сертификатом» со ссылкой на оплату: сумма — в поле «Сумма предоплаты». */
+  prepaymentAmount?: number | null;
 }
 
 export interface CreateBookingResultDto {
@@ -308,6 +346,8 @@ export interface DealFormDto {
   dealId: number | null;
   currency: string;
   fields: DealFormField[];
+  /** «Сумма предоплаты» сделки (бронирование сертификатом — сумма ссылки); null — пусто или нет поля. */
+  prepaymentAmount?: number | null;
 }
 
 /** `PUT /api/deals/:dealId/fields` — правка полей сделки из карточки брони (только изменённые). */
@@ -324,7 +364,9 @@ export interface CancelBookingResultDto {
 
 /** `GET /api/booking-catalog?groupId=` — товары группы (разделы каталога из настроек) для формы брони. */
 export interface BookingCatalogDto {
-  products: { id: number; name: string; price: number | null; currency: string | null; section: string | null }[];
+  products: { id: number; name: string; price: number | null; currency: string | null; section: string | null; sectionId?: string | null }[];
+  /** Быстрые теги мастера: выбранные разделы группы с открытым 👁 (по порядку настройки). */
+  sections?: { id: string; name: string; /** Раздел и вложенные. */ sectionIds: string[] }[];
   /** resourceId → товары по умолчанию (⚙ → группа → ресурсы). */
   defaults: Record<string, { productId: number; quantity: number }[]>;
   /** false — разделы в группе не выбраны: показаны все активные товары. */

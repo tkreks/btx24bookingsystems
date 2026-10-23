@@ -48,12 +48,17 @@ export function BookingTypesSection({
   onChange,
   required = false,
   onRequired,
+  dealKinds = false,
+  onDealKinds,
 }: {
   rules: BookingTypeRule[];
   onChange: (rules: BookingTypeRule[]) => void;
   /** Тип брони обязателен при создании брони. */
   required?: boolean;
   onRequired?: (v: boolean) => void;
+  /** Шаг «Тип сделки» в мастере брони (сертификат / посещение / сертификатом / без оплаты). */
+  dealKinds?: boolean;
+  onDealKinds?: (v: boolean) => void;
 }) {
   const [templateId, setTemplateId] = useState('270');
   const [importing, setImporting] = useState(false);
@@ -96,6 +101,17 @@ export function BookingTypesSection({
           <input type="checkbox" role="switch" checked={required} onChange={(e) => onRequired(e.target.checked)} />
           <b>Тип брони обязателен</b>
           <span className="muted"> — не выбран и не определился по товарам: бронь не создаётся</span>
+        </label>
+      )}
+      {onDealKinds && (
+        <label className="check switch-row">
+          <input type="checkbox" role="switch" checked={dealKinds} onChange={(e) => onDealKinds(e.target.checked)} />
+          <b>Шаг «Тип сделки» в мастере брони</b>
+          <span className="muted">
+            {' '}
+            — покупка сертификата, бронирование посещения (ссылка на предоплату), бронирование сертификатом (ссылка — по решению
+            менеджера), без оплаты; тип бронирования при посещении обязателен
+          </span>
         </label>
       )}
       <div className="bp-import">
@@ -156,6 +172,10 @@ export function BookingTypesSection({
                 }
                 onBlur={() => patch(i, { keywords: r.keywords.map((k) => k.trim()).filter(Boolean) })}
               />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={!!r.unavailable} onChange={(e) => patch(i, { unavailable: e.target.checked || undefined })} />
+              Сейчас недоступен для бронирования
             </label>
             <label>
               Поле сделки «Тип бронирования» (ID варианта)

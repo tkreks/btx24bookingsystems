@@ -1,13 +1,14 @@
 // Статус сделки для дашбордов и звонков (решение владельца 2026-10-23): по канбану (семантика стадии)
-// и броням сделки. «В работе» делится на «В работе» и «Ожидание клиента» — у сделки есть активная бронь,
-// которая идёт или ещё впереди.
+// и броням сделки. «В работе» делится на «В работе», «Ожидание клиента» (активная бронь впереди) и
+// «Клиент приехал» (бронь идёт прямо сейчас).
 
-export const DEAL_STATUSES = ['in_work', 'waiting', 'done', 'failed'] as const;
+export const DEAL_STATUSES = ['in_work', 'waiting', 'arrived', 'done', 'failed'] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
 
 export const DEAL_STATUS_LABELS: Record<DealStatus, string> = {
   in_work: 'В работе',
   waiting: 'Ожидание клиента',
+  arrived: 'Клиент приехал',
   done: 'Завершена',
   failed: 'Провалена',
 };
@@ -37,6 +38,9 @@ export interface DealStatusInput {
 export function dealStatus(input: DealStatusInput, now: number = Date.now()): DealStatusDto {
   if (input.stageSemantic === 'F') return { status: 'failed', needsClose: false, bookingEnd: null };
   if (input.stageSemantic === 'S') return { status: 'done', needsClose: false, bookingEnd: null };
+  // Бронь идёт сейчас — клиент на месте.
+  const current = (input.bookings ?? []).find((b) => Date.parse(b.start) <= now && Date.parse(b.end) > now);
+  if (current) return { status: 'arrived', needsClose: false, bookingEnd: new Date(Date.parse(current.end)).toISOString() };
   const ends = (input.bookings ?? []).map((b) => Date.parse(b.end)).filter(Number.isFinite);
   if (input.bookings === null) {
     const f = Date.parse(String(input.fieldEnd ?? ''));

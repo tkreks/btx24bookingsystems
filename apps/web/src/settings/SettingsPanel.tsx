@@ -1,7 +1,7 @@
 import { ActionLogPanel } from './ActionLogPanel.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettingsDto, GroupDirectoryDto, GroupDto } from '@btx24/shared';
-import { apiGet } from '../api.js';
+import { apiGet, apiPut } from '../api.js';
 import { fitFrame } from '../b24.js';
 import { PlacementSettings } from '../calendar/AdminPanel.js';
 import { BookingSyncSettings } from '../bookings/BookingSyncSettings.js';
@@ -12,6 +12,7 @@ import { SettingsCodes } from './SettingsCodes.js';
 import { fmtDateTime } from '../format.js';
 import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
+import { MinimizeButton } from '../Minimize.js';
 
 type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements' | 'log';
 const TABS: { key: Tab; label: string }[] = [
@@ -139,6 +140,7 @@ export function SettingsPanel({
       >
         <header>
           <h2 id="settings-title">Настройки</h2>
+          <MinimizeButton label="Настройки" />
           <button aria-label="Закрыть настройки" disabled={busy} onClick={close}>
             ×
           </button>
@@ -229,8 +231,27 @@ export function SettingsPanel({
                 </p>
               )}
               <ul className="settings-groups">
-                {groups.map((g) => (
+                {groups.map((g, i) => (
                   <li key={g.id}>
+                    {/* Порядок групп — в мастере брони и календаре такой же. */}
+                    <span className="group-order" role="group" aria-label={`Порядок группы «${g.name}»`}>
+                      {([-1, 1] as const).map((dir) => (
+                        <button
+                          key={dir}
+                          type="button"
+                          aria-label={dir < 0 ? 'Выше' : 'Ниже'}
+                          title={dir < 0 ? 'Выше' : 'Ниже'}
+                          disabled={i + dir < 0 || i + dir >= groups.length}
+                          onClick={() => {
+                            const ids = groups.map((x) => x.id);
+                            [ids[i], ids[i + dir]] = [ids[i + dir], ids[i]];
+                            apiPut<GroupDto[]>('/admin/groups-order', { ids }).then(setGroups, (e) => setError(e instanceof Error ? e.message : 'Не удалось изменить порядок'));
+                          }}
+                        >
+                          {dir < 0 ? '↑' : '↓'}
+                        </button>
+                      ))}
+                    </span>
                     <div>
                       <strong>{g.name}</strong>
                       <p className="muted">

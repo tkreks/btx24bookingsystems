@@ -6,6 +6,7 @@ import {
   renderMessage,
   type GroupOptionsDto,
   type PaymentKind,
+  type PaymentAmountSource,
   BOOKING_REQUIRED_MESSAGE,
   type DealInvoicesDto,
   type PaymentBookingOption,
@@ -19,6 +20,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService, type GroupAccess } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
+import { isCertificatePurchase } from '../bookings/deal-outcome.js';
 import { msg, PaymentFlow, type FlowContext } from './payment-flow.js';
 
 const createSchema = z
@@ -64,16 +66,22 @@ export class PaymentsService {
     const opts = (g?.group.options ?? null) as GroupOptionsDto | null;
     if (g && !opts?.payments.invoice) problems.push(`Счёт не настроен в группе «${g.group.name}» (⚙ → группа → «Оплаты»)`);
     const map = await this.fieldMap.get(user.portal.id);
-    const a = paymentAmount(kind, {
-      fixed: opts?.payments.prepaymentAmount ?? null,
-      manual: moneyValue(deal[(kind === 'prepayment' ? map.prepayment : map.surcharge) ?? '']),
-      opportunity: Number(deal.OPPORTUNITY) || null,
-      percent: opts?.payments.prepaymentPercent ?? null,
-    });
+    // Покупка сертификата: платят весь номинал (сумма сделки), брони у такой сделки не бывает.
+    const certificate = isCertificatePurchase(deal, await this.fieldMap.outcome(user.portal.id, user.client).catch(() => ({ certificateTypeId: null })));
+    const opportunity = Number(deal.OPPORTUNITY) || null;
+    const a: { amount: number | null; source: PaymentAmountSource } =
+      certificate && kind === 'prepayment'
+        ? { amount: opportunity, source: opportunity ? 'certificate' : 'none' }
+        : paymentAmount(kind, {
+            fixed: opts?.payments.prepaymentAmount ?? null,
+            manual: moneyValue(deal[(kind === 'prepayment' ? map.prepayment : map.surcharge) ?? '']),
+            opportunity,
+            percent: opts?.payments.prepaymentPercent ?? null,
+          });
     if (a.amount === null)
       problems.push(kind === 'surcharge' ? 'Заполните «Ручную сумму доплаты» в сделке или укажите сумму' : 'Нет суммы: заполните сделку или укажите сумму');
     if (deal.STAGE_SEMANTIC_ID && deal.STAGE_SEMANTIC_ID !== 'P') problems.push(`Сделка #${dealId} закрыта — выберите сделку в работе`);
-    const requireBooking = opts?.payments.requireBooking !== false;
+    const requireBooking = opts?.payments.requireBooking !== false && !certificate;
     const bookingMissing = requireBooking && !bookings.length;
     // Бронь у сделки есть, но уже прошла: счёт к ней не привязать (неоплата снимает будущую бронь).
     const pastBooking = bookingMissing ? await this.lastPastBooking(user, dealId) : null;
@@ -208,7 +216,7 @@ export class PaymentsService {
           currencyId: 'RUB',
           isManualOpportunity: 'Y',
           opportunity: amount,
-          comments: `Выставлен из приложения бронирования (${p.source === 'fixed' ? 'фиксированная сумма группы' : p.source === 'manual' ? 'ручная сумма из сделки' : p.source === 'percent' ? 'процент от суммы сделки' : 'сумма указана сотрудником'})`,
+          comments: `Выставлен из приложения бронирования (${p.source === 'fixed' ? 'фиксированная сумма группы' : p.source === 'manual' ? 'ручная сумма из сделки' : p.source === 'percent' ? 'процент от суммы сделки' : p.source === 'certificate' ? 'номинал сертификата' : 'сумма указана сотрудником'})`,
           parentId2: b.dealId,
           ...inv.fields,
         },

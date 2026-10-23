@@ -74,7 +74,13 @@ function setup(
   const access = opts.cache?.access ?? new Map<string, Record<string, unknown>>();
   type W = { portalId_chatId?: { chatId: number }; portalId_userId_chatId?: { userId: number; chatId: number } };
   const prisma = {
-    chatFolderItem: { findMany: vi.fn(async () => (opts.foldered ?? []).map((chatId) => ({ chatId, folderId: 'f1' }))) },
+    // Мои папки — `foldered`; глобальных папок коллег в этих тестах нет.
+    chatFolderItem: {
+      findMany: vi.fn(async ({ where }: { where: { ownerUserId: unknown } }) =>
+        typeof where.ownerUserId === 'number' ? (opts.foldered ?? []).map((chatId) => ({ chatId, folderId: 'f1' })) : [],
+      ),
+    },
+    chatFavorite: { findMany: vi.fn(async () => []) },
     portalSettings: { findUnique: vi.fn(async () => ({ dialogTextsEnabled: true })) },
     openlineChat: {
       findMany: vi.fn(async ({ where }: { where: { chatId: { in: number[] } } }) => where.chatId.in.flatMap((id) => (chats.has(id) ? [chats.get(id)] : []))),

@@ -1,5 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  CERTIFICATE_DEAL_TYPE,
+  CERTIFICATE_KIND_LABELS,
+  CERTIFICATE_KINDS,
   CERTIFICATE_NUMBER,
   CERTIFICATE_STATUS_LABELS,
   CERTIFICATE_STATUSES,
@@ -11,6 +14,7 @@ import {
   type CertificateEventDto,
   type CertificateListDto,
   type CertificateStatus,
+  type SellCertificateResultDto,
 } from '@btx24/shared';
 import { z } from 'zod';
 import { Prisma, type Certificate, type CertificateEvent } from '../../generated/prisma/client.js';
@@ -18,6 +22,8 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
 import { ActionLogService } from '../audit/action-log.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { Bitrix24Error } from '../bitrix24/rest/errors.js';
+import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 
 /** В списке — не больше (поиск сужает). */
 const LIST_LIMIT = 500;
@@ -34,8 +40,23 @@ const issueSchema = z
     validUntil: day,
     dealId: z.number().int().positive().nullish(),
     comment,
+    kind: z.enum(CERTIFICATE_KINDS).nullish(),
   })
   .strict();
+const sellSchema = z
+  .object({
+    idempotencyKey: z.string().min(8).max(64),
+    groupId: z.string().min(1).max(40),
+    dealId: z.number().int().positive().nullish(),
+    newDeal: z.object({ title: z.string().trim().min(1).max(255), contactId: z.number().int().positive().nullish() }).strict().nullish(),
+    nominal: z.number().positive().max(MAX_NOMINAL),
+    kind: z.enum(CERTIFICATE_KINDS),
+    holderName: z.string().trim().min(1, 'Укажите, на чьё имя сертификат').max(255),
+    validUntil: day,
+    comment,
+  })
+  .strict()
+  .refine((b) => !!b.dealId !== !!b.newDeal, { message: 'Нужна сделка: выбранная или новая' });
 const changeSchema = z.object({ validUntil: day, comment }).strict();
 const redeemSchema = z.object({ reason: z.enum(['used', 'expired']), comment }).strict();
 
@@ -51,6 +72,7 @@ export class CertificatesService {
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
     private readonly log: ActionLogService,
+    private readonly fieldMap: DealFieldMapService,
   ) {}
 
   async list(user: B24UserContext, query: { q?: unknown; status?: unknown }): Promise<CertificateListDto> {
@@ -95,6 +117,68 @@ export class CertificatesService {
       throw new BadRequestException({ code: 'INVALID_NUMBER', message: 'Номер — буквы, цифры и дефис, до 32 знаков' });
     if (input.paidOn && input.paidOn > input.validUntil)
       throw new BadRequestException({ code: 'INVALID_PERIOD', message: 'Срок действия раньше даты оплаты' });
+    return this.get(user, (await this.create(user, input)).id);
+  }
+
+  /**
+   * «Покупка сертификата» из мастера: сделка (новая в воронке группы или выбранная) получает тип
+   * «Покупка сертификата» и сумму = номиналу, по ней выпускается сертификат (оплата — ссылкой потом).
+   * Повтор с тем же ключом возвращает выпущенный сертификат, не создаёт второй.
+   */
+  async sell(user: B24UserContext, body: unknown): Promise<SellCertificateResultDto> {
+    await this.mustManage(user);
+    const input = parse(sellSchema, body);
+    const prev = await this.prisma.certificate.findFirst({ where: { portalId: user.portal.id, saleKey: input.idempotencyKey } });
+    if (prev?.dealId) return { certificate: await this.get(user, prev.id), dealId: prev.dealId, warnings: ['Повтор заявки: сертификат уже выпущен'] };
+    const a = await this.access.resolve(user);
+    const g = this.access.pick(a, input.groupId, 'booking.create');
+    if (!g) throw new ForbiddenException({ code: 'NO_BOOKING_CREATE', message: 'Нет права оформлять сделки в этой группе' });
+    if (input.newDeal && !g.permissions.includes('deal.create'))
+      throw new ForbiddenException({ code: 'NO_DEAL_CREATE', message: 'Нет права создавать сделки в этой группе' });
+    const warnings: string[] = [];
+    const map = await this.fieldMap.resolved(user.portal.id, user.client);
+    const typeValue = map.dealType ? await this.fieldMap.enumId(user.portal.id, user.client, map.dealType, CERTIFICATE_DEAL_TYPE, true).catch(() => null) : null;
+    if (!typeValue) warnings.push('Поле «Тип сделки» не заполнено: нет поля или варианта «Покупка сертификата»');
+    const fields = { OPPORTUNITY: input.nominal, CURRENCY_ID: 'RUB', ...(map.dealType && typeValue ? { [map.dealType]: typeValue } : {}) };
+    let dealId = input.dealId ?? 0;
+    if (input.newDeal) {
+      const res = await user.client.call<number>('crm.deal.add', {
+        fields: {
+          TITLE: input.newDeal.title,
+          CATEGORY_ID: g.group.dealCategoryId ?? 0,
+          ASSIGNED_BY_ID: user.userId,
+          ...(input.newDeal.contactId ? { CONTACT_ID: input.newDeal.contactId } : {}),
+          ...fields,
+        },
+      });
+      dealId = Number(res.result);
+    } else {
+      try {
+        await user.client.call('crm.deal.update', { id: dealId, fields });
+      } catch (err) {
+        // Существующие сделки приложению менять может быть не разрешено — сертификат всё равно выпускаем.
+        if (!(err instanceof Bitrix24Error) || err.code !== 'READ_ONLY_MODE') throw err;
+        warnings.push(`Сумма и тип сделки #${dealId} не записаны: изменять существующие сделки не разрешено (⚙ → «Приложение»)`);
+      }
+    }
+    const cert = await this.create(user, {
+      nominal: input.nominal,
+      holderName: input.holderName,
+      paidOn: null,
+      validUntil: input.validUntil,
+      dealId,
+      comment: input.comment ?? null,
+      kind: input.kind,
+      saleKey: input.idempotencyKey,
+    });
+    return { certificate: await this.get(user, cert.id), dealId, warnings };
+  }
+
+  /** Новый сертификат + событие «выпуск» + журнал; номер — следующий свободный, если не задан. */
+  private async create(
+    user: B24UserContext,
+    input: { number?: string; nominal: number; holderName: string; paidOn?: string | null; validUntil: string; dealId?: number | null; comment?: string | null; kind?: 'paper' | 'electronic' | null; saleKey?: string },
+  ): Promise<Certificate> {
     const portalId = user.portal.id;
     // Свободный номер может занять параллельный выпуск — тогда следующий (unique по порталу).
     for (let attempt = 0; ; attempt++) {
@@ -111,6 +195,8 @@ export class CertificatesService {
               validUntil: dateOf(input.validUntil),
               dealId: input.dealId ?? null,
               comment: input.comment || null,
+              kind: input.kind ?? null,
+              saleKey: input.saleKey ?? null,
               createdByUserId: user.userId,
             },
           });
@@ -121,13 +207,13 @@ export class CertificatesService {
         });
         await this.log.user(user, {
           action: 'certificate.issued',
-          summary: `Выпустил сертификат №${number} на ${input.nominal} ₽ (${input.holderName}), действует по ${ru(input.validUntil)}`,
+          summary: `Выпустил${input.kind ? ` ${CERTIFICATE_KIND_LABELS[input.kind].toLowerCase()}` : ''} сертификат №${number} на ${input.nominal} ₽ (${input.holderName}), действует по ${ru(input.validUntil)}${input.dealId ? `, сделка #${input.dealId}` : ''}`,
           entityType: 'certificate',
           entityId: number,
           details: { ...input, number },
           via: 'app',
         });
-        return this.get(user, cert.id);
+        return cert;
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           if (input.number) throw new ConflictException({ code: 'NUMBER_TAKEN', message: `Сертификат №${number} уже есть` });
@@ -245,6 +331,7 @@ function toDto(c: Certificate, today: Date): CertificateDto {
     nominal: Number(c.nominal),
     holderName: c.holderName,
     status: c.status,
+    kind: c.kind ?? null,
     paidOn: c.paidOn ? iso(c.paidOn) : null,
     validUntil: iso(c.validUntil),
     overdue: c.status === 'new' && c.validUntil < today,

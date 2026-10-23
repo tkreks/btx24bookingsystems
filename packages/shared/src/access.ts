@@ -115,6 +115,8 @@ export type CalendarViewSetting = '' | CalendarView;
 export interface GroupOptionsDto {
   dealFields: DealFieldConfig[];
   productSectionIds: string[];
+  /** Выбранные разделы, скрытые из быстрых тегов мастера (👁 закрыт); товары раздела остаются доступны. */
+  productSectionsHidden?: string[];
   /** resourceId → товары по умолчанию. */
   resourceDefaults: Record<string, { productId: number; quantity: number }[]>;
   views: { desktop: CalendarViewSetting; mobile: CalendarViewSetting };
@@ -122,6 +124,8 @@ export interface GroupOptionsDto {
   bookingTypes?: BookingTypeRule[];
   /** Тип брони обязателен при создании брони (решение владельца 2026-10-22 — для «Бань»). */
   bookingTypeRequired?: boolean;
+  /** Шаг «Тип сделки» в мастере брони (сертификат / посещение / сертификатом / без оплаты). */
+  dealKinds?: boolean;
   /** Автоматические рассылки клиентам по броням группы (например, «подтвердите бронь» за сутки). */
   autoMessages?: AutoMessageRule[];
   payments: {
@@ -203,8 +207,10 @@ export interface MyGroupDto {
   defaultNights: number;
   /** Вид календаря по умолчанию на ПК и на телефоне ('' — авто). */
   views: GroupOptionsDto['views'];
-  /** Типы брони группы (для выбора в форме брони). */
-  bookingTypes: { id: string; title: string }[];
+  /** Типы брони группы (для выбора в форме брони); `unavailable` — сейчас не бронируется. */
+  bookingTypes: { id: string; title: string; unavailable?: boolean }[];
+  /** Шаг «Тип сделки» в мастере. */
+  dealKinds: boolean;
   /** Тип брони обязателен: не указан и не определился по товарам — бронь не создаётся. */
   bookingTypeRequired: boolean;
 }

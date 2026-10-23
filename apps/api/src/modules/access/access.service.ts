@@ -121,8 +121,9 @@ export class AccessService {
       checkOutTime: g.group.checkOutTime,
       defaultNights: g.group.defaultNights,
       views: (g.group.options as GroupOptionsDto | null)?.views ?? { desktop: '', mobile: '' },
-      bookingTypes: ((g.group.options as GroupOptionsDto | null)?.bookingTypes ?? []).map((t) => ({ id: t.id, title: t.title })),
+      bookingTypes: ((g.group.options as GroupOptionsDto | null)?.bookingTypes ?? []).map((t) => ({ id: t.id, title: t.title, ...(t.unavailable ? { unavailable: true } : {}) })),
       bookingTypeRequired: (g.group.options as GroupOptionsDto | null)?.bookingTypeRequired === true,
+      dealKinds: (g.group.options as GroupOptionsDto | null)?.dealKinds === true,
     };
   }
 

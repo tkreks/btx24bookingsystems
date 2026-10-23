@@ -560,6 +560,21 @@ main.loading {
 .settings-groups p {
   margin: 4px 0;
 }
+.settings-groups li > div {
+  flex: 1;
+  min-width: 0;
+}
+.group-order {
+  display: grid;
+  gap: 2px;
+}
+.group-order button {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border-radius: 7px;
+  line-height: 1;
+}
 .settings-form .danger {
   color: var(--danger);
   margin-left: auto;
@@ -2632,14 +2647,49 @@ button.warn-outline {
   font-weight: 700;
 }
 
-.cl-card-unread {
+/* Счётчик непрочитанных — в правом верхнем углу аватарки чата и иконки папки. */
+.cl-avatar-wrap,
+.cl-folder-icon {
+  position: relative;
+}
+.cl-avatar-wrap {
+  display: inline-block;
+  width: max-content;
+}
+.cl-badge {
   position: absolute;
-  top: 12px;
-  left: 44px;
+  top: -6px;
+  right: -8px;
   min-width: 20px;
   height: 20px;
+  padding: 0 5px;
   font-size: 11px;
-  box-shadow: 0 0 0 2px #fff;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.cl-folder.fav .cl-folder-icon {
+  color: #f5b301;
+}
+.cl-folder-flag {
+  flex: none;
+  font-size: 12px;
+}
+.cl-folder-note {
+  font-size: 12px;
+}
+.cl-star {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #9aa6b8;
+  font-size: 15px;
+  line-height: 1;
+}
+.cl-star.on {
+  color: #f5b301;
 }
 
 .cl-folder-head {
@@ -3754,10 +3804,19 @@ button.msg-media-ph {
   background: transparent !important;
 }
 .bk-add-deal {
-  justify-content: center;
+  justify-content: flex-start;
   border-style: dashed;
   color: var(--primary);
   font-weight: 600;
+}
+/* Выбранная «Новая сделка» — как выбранная карточка сделки. */
+.bk-add-deal.selected {
+  border-style: solid;
+  color: var(--text);
+}
+.bk-add-deal .wz-deal-sub {
+  color: var(--muted);
+  font-weight: 500;
 }
 .bk-more,
 .bk-service {
@@ -6604,6 +6663,10 @@ button.cert-row:hover {
   background: var(--warn-bg);
   color: var(--warn-text);
 }
+.deal-status.arrived {
+  background: var(--primary);
+  color: #fff;
+}
 .deal-status.done {
   background: var(--ok-bg);
   color: var(--ok-text);
@@ -6653,4 +6716,275 @@ button.cert-row:hover {
 }
 .dt-main .dt-title b {
   min-width: 0;
+}
+
+/* Разделы каталога: 👁 — быстрый тег в мастере брони. */
+.eye-toggle {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.eye-toggle.off {
+  opacity: 0.6;
+}
+
+/* Мастер: тип сделки, тип бронирования, ссылка при брони сертификатом. */
+.wz-kinds {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.wz-pay-mode {
+  display: inline-block;
+  padding: 7px 0;
+  font-weight: 600;
+}
+.wz-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wz-type {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-weight: 600;
+}
+.wz-type.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+  color: var(--primary);
+}
+.wz-type:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.wz-link-choice {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.wz-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.wz-change {
+  margin-left: 8px;
+  font-size: 12.5px;
+}
+
+/* Товары: «Выбрать», теги разделов, окно выбора. */
+.pe-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pe-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pe-tag {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--info-bg);
+  color: var(--info-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.pe-tag:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+.pe-picker {
+  width: min(640px, 100%);
+  max-height: 86%;
+}
+.pe-picker-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pe-picker-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.pe-picker-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-top: 1px solid var(--line);
+}
+.pe-picker-list li:first-child {
+  border-top: 0;
+}
+.pe-picker-add {
+  min-width: 44px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.pe-picker-add.added {
+  border-color: var(--ok);
+  color: var(--ok-text);
+  background: var(--ok-bg);
+}
+
+/* «Свернуть» модальное окно: окно скрыто, но не закрыто (данные целы); плашки — внизу экрана. */
+.sheet-backdrop.minimized {
+  display: none;
+}
+.sheet-minimize {
+  margin-left: auto;
+  min-width: 32px;
+  font-weight: 800;
+  line-height: 1;
+}
+.minimized-dock {
+  position: fixed;
+  right: 16px;
+  bottom: calc(12px + var(--safe-b));
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+.minimized-chip {
+  pointer-events: auto;
+  padding: 8px 16px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--primary);
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+}
+
+/* Стоп ресурса: знак у ресурса, блок «СТОП» в колонке, окно. */
+.grid-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+.grid-head-name {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grid-head.stopped .grid-head-name {
+  color: var(--danger);
+}
+.stop-btn {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  opacity: 0.75;
+}
+.stop-btn:hover {
+  border-color: var(--line);
+  opacity: 1;
+}
+.stop-block {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 6px 8px;
+  overflow: hidden;
+  border: 1px solid rgba(217, 45, 32, 0.45);
+  border-radius: 8px;
+  background: repeating-linear-gradient(135deg, rgba(217, 45, 32, 0.12) 0 10px, rgba(217, 45, 32, 0.04) 10px 20px);
+  color: var(--danger);
+  font-size: 12px;
+  cursor: not-allowed;
+}
+.stop-block strong {
+  letter-spacing: 0.08em;
+}
+.stop-sheet {
+  max-width: 520px;
+}
+.stop-sheet h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stop-period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.stop-period label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stop-reason {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.stop-reason textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.stop-bookings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.stop-existing {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.stop-existing-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.wz-res-row.stop .wz-res-state {
+  color: var(--danger);
+}
+.wz-res-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }

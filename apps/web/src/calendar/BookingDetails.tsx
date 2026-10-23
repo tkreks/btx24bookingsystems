@@ -4,6 +4,7 @@ import { apiGet, apiPost, apiPut } from '../api.js';
 import { openPortalPath } from '../b24.js';
 import { DealFieldsEditor, initialValues, useDealFieldValues } from '../bookings/DealFieldsEditor.js';
 import { fmtDateTime, fmtMoney } from '../format.js';
+import { MinimizeButton } from '../Minimize.js';
 
 export function BookingDetails({
   booking,
@@ -128,6 +129,7 @@ export function BookingDetails({
       <div className="sheet" role="dialog" aria-modal="true" aria-label={booking.name || 'Бронь'} onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>{booking.name || 'Бронь'}</h2>
+          <MinimizeButton label="Бронь" />
           <button aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>

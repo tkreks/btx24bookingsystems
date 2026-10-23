@@ -1,13 +1,30 @@
 import { useEffect, useState, type MouseEvent } from 'react';
-import { zonedDayRange, zonedTimeToUtc, type CalendarBooking, type CalendarDay, type CalendarTechWindow, type MyGroupDto } from '@btx24/shared';
+import {
+  zonedDayRange,
+  zonedTimeToUtc,
+  type CalendarBooking,
+  type CalendarDay,
+  type CalendarTechWindow,
+  type MyGroupDto,
+  type ResourceStopDto,
+} from '@btx24/shared';
 import { availabilityPieces, slotAt } from '../calendar/layout.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
 import { defaultPeriod, type PeriodFields } from './booking-form.js';
 
-/** Занятость ресурса на выбранное время: свободен, тех. окно (можно) или пересечение с бронью. */
-export type SlotState = { kind: 'free' } | { kind: 'tech' } | { kind: 'busy'; bookings: CalendarBooking[] };
+/** Занятость ресурса на выбранное время: свободен, тех. окно (можно), пересечение с бронью или стоп ресурса. */
+export type SlotState = { kind: 'free' } | { kind: 'tech' } | { kind: 'busy'; bookings: CalendarBooking[] } | { kind: 'stop'; stop: ResourceStopDto };
 
-export function slotStateOf(rid: number, bookings: CalendarBooking[], techWindows: CalendarTechWindow[], startMs: number, endMs: number): SlotState {
+export function slotStateOf(
+  rid: number,
+  bookings: CalendarBooking[],
+  techWindows: CalendarTechWindow[],
+  startMs: number,
+  endMs: number,
+  stops: ResourceStopDto[] = [],
+): SlotState {
+  const stop = stops.find((s) => s.resourceId === rid && Date.parse(s.start) < endMs && Date.parse(s.end) > startMs);
+  if (stop) return { kind: 'stop', stop };
   const hit = bookings.filter((b) => b.resourceIds.includes(rid) && Date.parse(b.start) < endMs && Date.parse(b.end) > startMs);
   if (hit.length) return { kind: 'busy', bookings: hit };
   if (techWindows.some((t) => t.resourceId === rid && Date.parse(t.start) < endMs && Date.parse(t.end) > startMs)) return { kind: 'tech' };
@@ -91,9 +108,10 @@ export function SlotPicker({
 
   const strip = Array.from({ length: 7 }, (_, i) => shiftDate(period.startDate, i - 2));
   const resources = days?.resources ?? [];
-  const rows = resources.map((r) => ({ r, state: slotStateOf(r.id, days?.bookings ?? [], days?.techWindows ?? [], startMs, endMs) }));
-  const free = rows.filter((x) => x.state.kind !== 'busy').length;
-  const shown = onlyFree ? rows.filter((x) => x.state.kind !== 'busy' || resourceIds.includes(x.r.id)) : rows;
+  const rows = resources.map((r) => ({ r, state: slotStateOf(r.id, days?.bookings ?? [], days?.techWindows ?? [], startMs, endMs, days?.stops ?? []) }));
+  const open = (s: SlotState) => s.kind !== 'busy' && s.kind !== 'stop';
+  const free = rows.filter((x) => open(x.state)).length;
+  const shown = onlyFree ? rows.filter((x) => open(x.state) || resourceIds.includes(x.r.id)) : rows;
   const ticks = interval
     ? Array.from({ length: nights + 1 }, (_, i) => ({ at: (i + 0.5) / (nights + 1), label: `${shiftDate(period.startDate, i).slice(8, 10)}.${shiftDate(period.startDate, i).slice(5, 7)}` }))
     : [0, 6, 12, 18, 24].map((h) => ({ at: h / 24, label: String(h).padStart(2, '0') }));
@@ -206,7 +224,9 @@ export function SlotPicker({
           const on = resourceIds.includes(r.id);
           const pieces = availabilityPieces(days?.bookings ?? [], days?.techWindows ?? [], r.id, range.from, range.to).filter((p) => p.kind !== 'free');
           const note =
-            state.kind === 'busy'
+            state.kind === 'stop'
+              ? `стоп: ${state.stop.reason}`
+              : state.kind === 'busy'
               ? `занят ${state.bookings.map((b) => `${fmtTime(b.start, timezone)}–${fmtTime(b.end, timezone)}`).join(', ')}`
               : state.kind === 'tech'
                 ? 'тех. окно — можно'
@@ -218,6 +238,8 @@ export function SlotPicker({
                 role="checkbox"
                 aria-checked={on}
                 className="wz-res-pick"
+                disabled={state.kind === 'stop' && !on}
+                title={state.kind === 'stop' ? `Ресурс закрыт: ${state.stop.reason}` : undefined}
                 onClick={() => onResources(on ? resourceIds.filter((x) => x !== r.id) : [...resourceIds, r.id])}
               >
                 <span className="wz-res-check" aria-hidden="true">

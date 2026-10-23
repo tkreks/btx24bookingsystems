@@ -11,12 +11,15 @@ export function DayGrid({
   highlightDealId,
   onSelect,
   onCreate,
+  onStop,
 }: {
   day: CalendarDay;
   highlightDealId: number | null;
   onSelect: (b: CalendarBooking) => void;
   /** Клик по пустому месту колонки — новая бронь ресурса с этого получаса (нет права — не передаётся). */
   onCreate?: (resourceId: number, start: string) => void;
+  /** 🛑 у ресурса — окно стопа (нет права — не передаётся). */
+  onStop?: (resourceId: number) => void;
 }) {
   const { start, end } = zonedDayRange(day.date, day.timezone);
   const dayStart = start.getTime();
@@ -40,9 +43,16 @@ export function DayGrid({
       <div className="grid" style={{ gridTemplateColumns: `56px repeat(${day.resources.length}, minmax(170px, 1fr))` }}>
         <div className="grid-corner" />
         {day.resources.map((r) => (
-          <div key={r.id} className="grid-head" title={r.name}>
-            {r.name}
-            <small className="muted">#{r.id}</small>
+          <div key={r.id} className={`grid-head${(day.stops ?? []).some((s) => s.resourceId === r.id) ? ' stopped' : ''}`} title={r.name}>
+            <span className="grid-head-name">
+              {r.name}
+              <small className="muted">#{r.id}</small>
+            </span>
+            {onStop && (
+              <button type="button" className="stop-btn" title={`Стоп ресурса «${r.name}»: закрыть для бронирования`} aria-label={`Стоп ресурса «${r.name}»`} onClick={() => onStop(r.id)}>
+                <StopSign />
+              </button>
+            )}
           </div>
         ))}
         <div className="grid-times" style={{ height: minutes * PX_PER_MIN }}>
@@ -66,6 +76,27 @@ export function DayGrid({
                 + {fmtTime(slotIso(hover.minute), day.timezone)}
               </div>
             )}
+            {(day.stops ?? [])
+              .filter((s) => s.resourceId === r.id)
+              .map((s) => {
+                const top = Math.max(0, (Date.parse(s.start) - dayStart) / 60_000);
+                const bottom = Math.min(minutes, (Date.parse(s.end) - dayStart) / 60_000);
+                if (bottom <= top) return null;
+                return (
+                  <div
+                    key={`s${s.id}`}
+                    className="stop-block"
+                    title={`Стоп ${s.from} — ${s.to}: ${s.reason} (${s.createdBy})`}
+                    style={{ top: top * PX_PER_MIN, height: (bottom - top) * PX_PER_MIN }}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseMove={(e) => e.stopPropagation()}
+                    onMouseEnter={() => setHover(null)}
+                  >
+                    <strong>СТОП</strong>
+                    <small>{s.reason}</small>
+                  </div>
+                );
+              })}
             {day.techWindows
               .filter((t) => t.resourceId === r.id)
               .map((t) => {
@@ -137,3 +168,13 @@ export function MissingVeil() {
 }
 
 export const bookingTitle = (b: CalendarBooking) => b.deal?.title || b.name || 'Бронирование';
+
+/** Знак «СТОП» (восьмиугольник). */
+export function StopSign({ size = 18 }: { size?: number }) {
+  return (
+    <svg className="stop-sign" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9Z" fill="#d92d20" />
+      <path d="M7 12h10" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
+    </svg>
+  );
+}

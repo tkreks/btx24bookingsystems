@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
+import { FAVORITES_FOLDER, hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
   ChatListDto,
@@ -177,10 +177,26 @@ export class ChatsService {
   }
 
   /** Мои папки: чат → папка. */
+  /**
+   * Папка каждого чата для сотрудника: его папки, затем глобальные папки коллег (решение владельца
+   * 2026-10-23) — своя папка важнее. Доступ к чату проверяется там, где строятся сводки.
+   */
   async myFolders(user: B24UserContext): Promise<Map<number, string>> {
     if (!this.prisma) return new Map();
-    const items = await this.prisma.chatFolderItem.findMany({ where: { portalId: user.portal.id, ownerUserId: user.userId } });
-    return new Map(items.map((i) => [i.chatId, i.folderId]));
+    const [mine, global] = await Promise.all([
+      this.prisma.chatFolderItem.findMany({ where: { portalId: user.portal.id, ownerUserId: user.userId } }),
+      this.prisma.chatFolderItem.findMany({ where: { portalId: user.portal.id, ownerUserId: { not: user.userId }, folder: { global: true } }, orderBy: { addedAt: 'asc' } }),
+    ]);
+    const out = new Map(mine.map((i) => [i.chatId, i.folderId]));
+    for (const i of global) if (!out.has(i.chatId)) out.set(i.chatId, i.folderId);
+    return out;
+  }
+
+  /** Избранные чаты сотрудника (★, личные). */
+  async favorites(user: B24UserContext): Promise<Set<number>> {
+    if (!this.prisma) return new Set();
+    const rows = await this.prisma.chatFavorite.findMany({ where: { portalId: user.portal.id, userId: user.userId }, select: { chatId: true } });
+    return new Set(rows.map((r) => r.chatId));
   }
 
   /** Непрочитанные по чатам открытых линий — личные счётчики мессенджера сотрудника. */
@@ -233,7 +249,8 @@ export class ChatsService {
     const { scope, offset, folder } = parsed.data;
     const folders = await this.myFolders(user);
     if (folder) {
-      const chatIds = [...folders].filter(([, f]) => f === folder).map(([c]) => c);
+      // «★ Избранное» — свои избранные (они остаются и в общем списке); папка — её чаты.
+      const chatIds = folder === FAVORITES_FOLDER ? [...(await this.favorites(user))] : [...folders].filter(([, f]) => f === folder).map(([c]) => c);
       return { items: await this.summariesByChat(user, chatIds.slice(0, MAX_FOLDER_CHATS)), nextOffset: null, exactOrder: true };
     }
     // Чаты моих папок в общем списке не показываем — они в строках папок.
@@ -301,11 +318,12 @@ export class ChatsService {
       .filter((x): x is { s: SessionRef; d: ImDialog } => Boolean(x.d?.id));
     const unique = [...new Map(pairs.map((x) => [x.d.id, x])).values()];
     if (!unique.length) return [];
-    const [phones, unread, folders, marks] = await Promise.all([
+    const [phones, unread, folders, marks, favorites] = await Promise.all([
       this.phonesOf(user, unique.map(({ d }) => crmLinksOf(d.entity_data_2))),
       this.unreadByChat(user),
       this.myFolders(user),
       this.noReplyMarks(user.portal.id, unique.map(({ d }) => Number(d.id))),
+      this.favorites(user),
     ]);
     const msgs = await user.client.batch(
       Object.fromEntries(
@@ -344,8 +362,10 @@ export class ChatsService {
         crm: crmLinksOf(d.entity_data_2),
         phones: phonesFor(crmLinksOf(d.entity_data_2), phones),
         clientName: clientNameFor(crmLinksOf(d.entity_data_2), phones) ?? clientFromTitle(d.name ?? null),
-        unread: unread.get(Number(d.id)) ?? 0,
+        // «Не требует ответа» обнуляет счётчик чата (решение владельца 2026-10-23).
+        unread: noReplyOf(marks.get(Number(d.id)) ?? null, last ? Number(last.message.id) : null) ? 0 : (unread.get(Number(d.id)) ?? 0),
         folderId: folders.get(Number(d.id)) ?? null,
+        favorite: favorites.has(Number(d.id)),
       };
       return { summary, sortKey, last, s, d, avatar: m.users?.length ? clientAvatarOf(m.users, user.portal.domain) : undefined };
     });
@@ -445,7 +465,7 @@ export class ChatsService {
     });
     if (stale) this.revalidate(user, refs);
 
-    const [unread, folders] = await Promise.all([this.unreadByChat(user), this.myFolders(user)]);
+    const [unread, folders, favorites] = await Promise.all([this.unreadByChat(user), this.myFolders(user), this.favorites(user)]);
     return ids
       .filter((id) => acc.get(id)!.allowed && byChat.has(id))
       .map((id) => {
@@ -468,8 +488,9 @@ export class ChatsService {
           sessionClosed: r.completed,
           crm,
           phones: Array.isArray(r.phones) ? (r.phones as string[]) : [],
-          unread: unread.get(id) ?? 0,
+          unread: noReplyOf(r, r.lastMessageId) ? 0 : (unread.get(id) ?? 0),
           folderId: folders.get(id) ?? null,
+          favorite: favorites.has(id),
         } satisfies ChatSummary;
       })
       .sort((a, b) => Date.parse(b.lastMessage?.date ?? '0') - Date.parse(a.lastMessage?.date ?? '0'));
@@ -624,8 +645,11 @@ export class ChatsService {
     const portalId = user.portal.id;
     const [allowed, ignored, hidden] = await Promise.all([
       this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: true }, select: { chatId: true } }),
-      // Чаты моих папок «Не обращать внимания» — не требуют внимания на моём дашборде.
-      this.prisma.chatFolderItem.findMany({ where: { portalId, ownerUserId: user.userId, folder: { ignoreAttention: true } }, select: { chatId: true } }),
+      // Чаты моих папок «Не обращать внимания» и глобальных папок с этой отметкой — не на моём дашборде.
+      this.prisma.chatFolderItem.findMany({
+        where: { portalId, folder: { ignoreAttention: true }, OR: [{ ownerUserId: user.userId }, { folder: { global: true } }] },
+        select: { chatId: true },
+      }),
       // Скрытые мной с дашборда (👁) — в списке чатов остаются.
       this.prisma.dashboardHiddenChat.findMany({ where: { portalId, userId: user.userId }, select: { chatId: true } }),
     ]);
@@ -726,6 +750,8 @@ export class ChatsService {
       where: { id: row.id },
       data: { ...mark, ...(last?.human ? { lastMessageId: lastId, lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}) },
     });
+    // Счётчик непрочитанных у отметившего — в ноль и в мессенджере (у остальных его скрывает отметка).
+    if (!needed) await user.client.call('im.dialog.read', { DIALOG_ID: `chat${chatId}` }).catch(() => undefined);
     return {
       chatId,
       waitingReply: isWaiting(updated.completed, updated.lastAuthor, updated.lastMessageId, updated),

@@ -1,5 +1,7 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import type {
+  ResourceStopCheckDto,
+  ResourceStopDto,
   BookingAlertDto,
   BookingVersionsDto,
   BookingCatalogDto,
@@ -32,6 +34,7 @@ import { BookingJournalService } from './booking-journal.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { DealFormService } from './deal-form.service.js';
+import { ResourceStopsService } from './resource-stops.service.js';
 
 /**
  * Уведомления о бронях и история броней. Видеть — право `booking.details` хотя бы в одной группе;
@@ -50,7 +53,27 @@ export class BookingsController {
     private readonly canceller: BookingCancelService,
     private readonly directory: BookingDirectoryService,
     private readonly restore: BookingRestoreService,
+    private readonly stops: ResourceStopsService,
   ) {}
+
+  /** Стоп ресурса: брони и стопы в периоде — перед установкой. */
+  @Post('resource-stops/check')
+  @HttpCode(200)
+  stopCheck(@B24User() user: B24UserContext, @Body() body: unknown): Promise<ResourceStopCheckDto> {
+    return this.stops.check(user, body);
+  }
+
+  /** Поставить стоп (броней в периоде нет — иначе 409 с их списком). */
+  @Post('resource-stops')
+  stopCreate(@B24User() user: B24UserContext, @Body() body: unknown): Promise<ResourceStopDto> {
+    return this.stops.create(user, body);
+  }
+
+  @Delete('resource-stops/:id')
+  @HttpCode(204)
+  stopLift(@B24User() user: B24UserContext, @Param('id') id: string): Promise<void> {
+    return this.stops.lift(user, id);
+  }
 
   /** Товары группы для формы брони (разделы каталога из настроек группы) и товары по умолчанию. */
   @Get('booking-catalog')

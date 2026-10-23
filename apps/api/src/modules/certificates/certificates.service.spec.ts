@@ -41,7 +41,7 @@ function setup({ manage = true, rows = [] as Row[] } = {}) {
   } as unknown as PrismaService;
   const access = { resolve: vi.fn(async () => ({ isAppAdmin: false, groups: manage ? [{ permissions: ['payment.send'] }] : [{ permissions: ['calendar.view'] }] })) } as unknown as AccessService;
   const log = { user: vi.fn(async () => undefined) } as unknown as ActionLogService;
-  return { svc: new CertificatesService(prisma, access, log), certs, events, log };
+  return { svc: new CertificatesService(prisma, access, log, {} as never), certs, events, log };
 }
 
 const issue = { nominal: 5000, holderName: 'Иван Петров', paidOn: '2026-10-23', validUntil: '2027-04-23' };
@@ -80,5 +80,29 @@ describe('CertificatesService', () => {
     const t = setup({ rows: [{ id: 'c9', portalId: 'p2', number: '1', status: 'new' }] });
     await expect(t.svc.get(user('p1'), 'c9')).rejects.toBeInstanceOf(NotFoundException);
     await expect(t.svc.redeem(user('p1'), 'c9', { reason: 'used' })).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('продажа из мастера: новая сделка «Покупка сертификата» с суммой = номиналу и сертификат; повтор — тот же', async () => {
+    const t = setup();
+    const calls: [string, Record<string, unknown>][] = [];
+    const u = {
+      ...user(),
+      client: { call: vi.fn(async (m: string, p: Record<string, unknown>) => (calls.push([m, p]), { result: m === 'crm.deal.add' ? 900 : true })) },
+    } as unknown as B24UserContext;
+    const access = (t.svc as unknown as { access: AccessService }).access;
+    Object.assign(access, { pick: vi.fn(() => ({ group: { dealCategoryId: 0 }, permissions: ['booking.create', 'deal.create', 'payment.send'] })) });
+    Object.assign(t.svc as object, {
+      fieldMap: { resolved: vi.fn(async () => ({ dealType: 'UF_T' })), enumId: vi.fn(async () => '74') },
+    });
+    const body = { idempotencyKey: 'sale-key-1', groupId: 'g1', newDeal: { title: 'Иван 25.10.2026', contactId: 5 }, nominal: 10000, kind: 'paper', holderName: 'Мария', validUntil: '2027-10-25' };
+    const r = await t.svc.sell(u, body);
+    expect(r).toMatchObject({ dealId: 900, certificate: { nominal: 10000, holderName: 'Мария', kind: 'paper', dealId: 900, paidOn: null } });
+    expect(calls[0]).toEqual(['crm.deal.add', { fields: expect.objectContaining({ TITLE: 'Иван 25.10.2026', CONTACT_ID: 5, OPPORTUNITY: 10000, UF_T: '74' }) }]);
+    // Повтор с тем же ключом — без второй сделки и сертификата.
+    (t.certs.at(-1) as Record<string, unknown>).saleKey = 'sale-key-1';
+    const again = await t.svc.sell(u, body);
+    expect(again.warnings[0]).toMatch(/Повтор/);
+    expect(calls.filter((c) => c[0] === 'crm.deal.add')).toHaveLength(1);
+    expect(t.certs).toHaveLength(1);
   });
 });

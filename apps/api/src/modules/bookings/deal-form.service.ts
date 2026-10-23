@@ -43,7 +43,9 @@ export class DealFormService {
         entityId: dealId,
         details: { groupId, values: Object.fromEntries(fields.map((f) => [f.label, f.display || null])) },
       });
-    return { groupId, dealId, currency: currencyOf(deal), fields };
+    const prepay = deal ? (await this.fieldMap.resolved(user.portal.id, user.client).catch(() => ({}) as { prepaymentAmount?: string })).prepaymentAmount : undefined;
+    const prepaymentAmount = prepay ? Number(String(deal?.[prepay] ?? '').split('|')[0]) || null : null;
+    return { groupId, dealId, currency: currencyOf(deal), fields, prepaymentAmount };
   }
 
   /** Правка из карточки брони: только изменённые поля группы, которые можно менять. */

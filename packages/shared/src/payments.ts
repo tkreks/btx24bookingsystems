@@ -37,7 +37,7 @@ export const DEFAULT_SURCHARGE_MESSAGE =
   'Просим внести доплату {prepayment} ₽ по ссылке: {link}\nПосле оплаты, пожалуйста, отправьте чек ответным сообщением.';
 
 /** Откуда взята сумма: фиксированная группы, ручная из сделки, процент от суммы сделки. */
-export type PaymentAmountSource = 'fixed' | 'manual' | 'percent' | 'none';
+export type PaymentAmountSource = 'fixed' | 'manual' | 'percent' | 'certificate' | 'none';
 
 /**
  * Сумма к оплате: предоплата — «ручная сумма предоплаты» сделки (как в БП прототипа — она

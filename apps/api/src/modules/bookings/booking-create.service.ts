@@ -1,6 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import {
   canUsePaymentMode,
+  DEAL_KIND_TYPE_VALUE,
+  DEAL_KINDS,
+  DEAL_KIND_LABELS,
   discountedPrice,
   detectBookingType,
   PROGRAM_FROM_KEYWORD,
@@ -25,6 +28,7 @@ import { ActionLogService } from '../audit/action-log.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { dealUpdateFields } from './deal-form.js';
 import { DealFormService } from './deal-form.service.js';
+import { ResourceStopsService } from './resource-stops.service.js';
 
 const iso = z.string().refine((v) => Number.isFinite(Date.parse(v)), 'ISO-дата');
 export const createSchema = z
@@ -58,6 +62,9 @@ export const createSchema = z
     paymentMode: z.enum(PAYMENT_MODES),
     bookingTypeId: z.string().min(1).max(40).nullable().optional(),
     dealFields: z.record(z.string().max(64), z.string().max(5000)).optional(),
+    // «Покупка сертификата» — не бронь (продажа — `POST /certificates/sale`).
+    dealKind: z.enum(DEAL_KINDS).exclude(['certificate']).nullable().optional(),
+    prepaymentAmount: z.number().positive().max(10_000_000).nullable().optional(),
   })
   .strict()
   .refine((b) => Date.parse(b.end) > Date.parse(b.start), { message: 'Конец брони раньше начала', path: ['end'] })
@@ -88,6 +95,7 @@ export class BookingCreateService {
     private readonly fieldMap: DealFieldMapService,
     private readonly dealForm: DealFormService,
     @Optional() private readonly actions?: ActionLogService,
+    @Optional() private readonly stops?: ResourceStopsService,
   ) {}
 
   async create(user: B24UserContext, body: unknown): Promise<CreateBookingResultDto> {
@@ -114,6 +122,7 @@ export class BookingCreateService {
       if (b.bookingTypeId) {
         const rule = rules.find((r) => r.id === b.bookingTypeId);
         if (!rule) throw new BadRequestException({ code: 'UNKNOWN_BOOKING_TYPE', message: 'Такого типа брони нет в группе' });
+        if (rule.unavailable) throw new BadRequestException({ code: 'BOOKING_TYPE_UNAVAILABLE', message: `«${rule.title}» сейчас недоступен для бронирования` });
         type = { rule, program: rule.program === PROGRAM_FROM_KEYWORD ? (detectBookingType([rule], await this.namesFor(user, b))?.program ?? '') : rule.program };
       } else type = detectBookingType(rules, await this.namesFor(user, b));
       if (!type && options?.bookingTypeRequired)
@@ -135,6 +144,8 @@ export class BookingCreateService {
     }
     const outside = b.resourceIds.filter((id) => !g.group.resourceIds.includes(id));
     if (outside.length) throw new BadRequestException({ code: 'RESOURCE_NOT_IN_GROUP', message: `Ресурсы не из группы: ${outside.join(', ')}` });
+    // Стоп ресурса — бронь в этот период не создаётся.
+    await this.stops?.assertOpen(user.portal.id, b.resourceIds, new Date(b.start), new Date(b.end), user.portal.timezone);
 
     // Идемпотентность: повтор заявки возвращает прежний результат.
     const prev = await this.prisma.bookingOperation.findUnique({
@@ -251,8 +262,21 @@ export class BookingCreateService {
         const typeValue =
           type?.rule.dealTypeValue && map.bookingType ? await this.fieldMap.enumId(user.portal.id, user.client, map.bookingType, type.rule.dealTypeValue) : null;
         if (type && type.rule.dealTypeValue && map.bookingType && !typeValue) warnings.push(`Тип «${type.rule.title}»: значение не найдено в поле «Тип бронирования» — поле не заполнено`);
+        // «Тип сделки» по выбору в мастере — вариант списка по началу названия.
+        const kindFields: Record<string, string> = {};
+        if (b.prepaymentAmount) {
+          const code = (await this.fieldMap.resolved(user.portal.id, user.client)).prepaymentAmount;
+          if (code) kindFields[code] = `${b.prepaymentAmount}|RUB`;
+          else warnings.push('Поле «Сумма предоплаты» не найдено — сумма ссылки только в окне оплаты');
+        }
+        if (b.dealKind) {
+          const code = (await this.fieldMap.resolved(user.portal.id, user.client)).dealType;
+          const value = code ? await this.fieldMap.enumId(user.portal.id, user.client, code, DEAL_KIND_TYPE_VALUE[b.dealKind], true).catch(() => null) : null;
+          if (code && value) kindFields[code] = value;
+          else warnings.push(`«${DEAL_KIND_LABELS[b.dealKind]}»: поле «Тип сделки» не заполнено (нет поля или такого варианта)`);
+        }
         // Системные поля важнее полей формы: их значения приложение считает само.
-        const fields = { ...groupFields, ...(await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '')) };
+        const fields = { ...groupFields, ...kindFields, ...(await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '')) };
         if (Object.keys(fields).length) {
           if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update')) {
             await log('deal.update', true, { fields: Object.keys(fields) });

@@ -10,9 +10,9 @@ describe('dealStatus', () => {
     expect(dealStatus({ stageSemantic: 'S', bookings: [] }, now)).toEqual({ status: 'done', needsClose: false, bookingEnd: null });
   });
 
-  it('в работе: бронь впереди или идёт — ожидание клиента; без брони — в работе', () => {
+  it('в работе: бронь впереди — ожидание клиента; идёт сейчас — клиент приехал; без брони — в работе', () => {
     expect(dealStatus({ stageSemantic: 'P', bookings: [b('2026-10-24T10:00:00Z', '2026-10-24T12:00:00Z')] }, now).status).toBe('waiting');
-    expect(dealStatus({ stageSemantic: 'P', bookings: [b('2026-10-23T11:00:00Z', '2026-10-23T13:00:00Z')] }, now).status).toBe('waiting');
+    expect(dealStatus({ stageSemantic: 'P', bookings: [b('2026-10-23T11:00:00Z', '2026-10-23T13:00:00Z')] }, now).status).toBe('arrived');
     expect(dealStatus({ stageSemantic: 'P', bookings: [] }, now)).toEqual({ status: 'in_work', needsClose: false, bookingEnd: null });
   });
 

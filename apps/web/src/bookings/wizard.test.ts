@@ -35,3 +35,21 @@ describe('товары со скидками', () => {
     expect(productsTotal([a, b])).toBe(13400);
   });
 });
+
+describe('newDealTitle', () => {
+  it('имя клиента + дата брони + ресурс', async () => {
+    const { newDealTitle } = await import('./BookingForm.js');
+    expect(newDealTitle('Иван Петров', '2026-10-25', ['Баня 1'])).toBe('Иван Петров 25.10.2026 Баня 1');
+    expect(newDealTitle(null, '2026-10-25', ['Баня 1', 'Баня 2'])).toBe('Новая сделка 25.10.2026 Баня 1, Баня 2');
+  });
+});
+
+describe('wizardSteps — тип сделки (бани)', () => {
+  it('после группы — «Тип сделки»; покупка сертификата — шаг «Сертификат» без даты и товаров', () => {
+    expect(wizardSteps({}, 4, { kinds: true, kind: null })).toEqual(['deal', 'group', 'kind', 'slot', 'details']);
+    expect(wizardSteps({}, 4, { kinds: true, kind: 'visit' })).toEqual(['deal', 'group', 'kind', 'slot', 'details']);
+    expect(wizardSteps({}, 4, { kinds: true, kind: 'certificate' })).toEqual(['deal', 'group', 'kind', 'certificate']);
+    expect(wizardSteps({ dealId: 5, resourceId: 3 }, 4, { kinds: true, kind: 'no_payment' })).toEqual(['kind', 'details']);
+    expect(wizardSteps({}, 4, { kinds: false, kind: 'certificate' })).toEqual(['deal', 'group', 'slot', 'details']);
+  });
+});

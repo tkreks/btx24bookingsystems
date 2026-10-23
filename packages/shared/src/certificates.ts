@@ -4,6 +4,11 @@
 export const CERTIFICATE_STATUSES = ['new', 'used', 'expired'] as const;
 export type CertificateStatus = (typeof CERTIFICATE_STATUSES)[number];
 
+/** Бумажный или электронный. */
+export const CERTIFICATE_KINDS = ['paper', 'electronic'] as const;
+export type CertificateKind = (typeof CERTIFICATE_KINDS)[number];
+export const CERTIFICATE_KIND_LABELS: Record<CertificateKind, string> = { paper: 'Бумажный', electronic: 'Электронный' };
+
 export const CERTIFICATE_STATUS_LABELS: Record<CertificateStatus, string> = {
   new: 'Новый',
   used: 'Использован',
@@ -29,6 +34,7 @@ export interface CertificateDto {
   nominal: number;
   holderName: string;
   status: CertificateStatus;
+  kind: CertificateKind | null;
   /** День оплаты (YYYY-MM-DD) или null. */
   paidOn: string | null;
   /** Действителен по этот день включительно (YYYY-MM-DD). */
@@ -72,6 +78,29 @@ export interface IssueCertificateInput {
   validUntil: string;
   dealId?: number | null;
   comment?: string | null;
+  kind?: CertificateKind | null;
+}
+
+/**
+ * `POST /api/certificates/sale` — «Покупка сертификата» из мастера брони: сделка (новая в воронке группы
+ * или выбранная) с типом «Покупка сертификата» и суммой = номиналу, и сертификат по ней (ещё не оплачен).
+ */
+export interface SellCertificateInput {
+  idempotencyKey: string;
+  groupId: string;
+  dealId?: number | null;
+  newDeal?: { title: string; contactId?: number | null } | null;
+  nominal: number;
+  kind: CertificateKind;
+  holderName: string;
+  validUntil: string;
+  comment?: string | null;
+}
+
+export interface SellCertificateResultDto {
+  certificate: CertificateDetailsDto;
+  dealId: number;
+  warnings: string[];
 }
 
 export interface ChangeCertificateInput {

@@ -3,6 +3,7 @@ import { DEFAULT_CLIENT_MESSAGE, type MessageTemplateDto, type MessageTemplatePu
 import { apiDelete, apiPost, apiPut } from '../api.js';
 import { isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { StepsEditor } from './StepsEditor.js';
+import { MinimizeButton } from '../Minimize.js';
 
 type Editing = { id: string | null; name: string; steps: ChainStep[]; shared: boolean; purpose: MessageTemplatePurpose };
 
@@ -75,6 +76,7 @@ export function TemplatesManager({
         {!embedded && (
         <header>
           <h2 id="templates-title">{editing ? (editing.id ? 'Шаблон' : 'Новый шаблон') : 'Шаблоны'}</h2>
+          <MinimizeButton label="Шаблоны" />
           <button aria-label="Закрыть шаблоны" onClick={onClose}>
             ×
           </button>

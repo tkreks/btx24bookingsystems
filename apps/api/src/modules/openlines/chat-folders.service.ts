@@ -1,21 +1,23 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { ChatFolderDto } from '@btx24/shared';
+import { FAVORITES_FOLDER, type ChatFolderDto } from '@btx24/shared';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { ChatsService } from './chats.service.js';
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(60) }).strict();
-/** Правка папки: название и/или «Не обращать внимания». */
+/** Правка папки: название, «Не обращать внимания», глобальная. */
 const updateSchema = z
-  .object({ name: z.string().trim().min(1).max(60).optional(), ignoreAttention: z.boolean().optional() })
+  .object({ name: z.string().trim().min(1).max(60).optional(), ignoreAttention: z.boolean().optional(), global: z.boolean().optional() })
   .strict()
-  .refine((b) => b.name !== undefined || b.ignoreAttention !== undefined, { message: 'Нечего менять' });
+  .refine((b) => b.name !== undefined || b.ignoreAttention !== undefined || b.global !== undefined, { message: 'Нечего менять' });
 const MAX_FOLDERS = 30;
 
 /**
- * Личные папки чатов сотрудника: видит и меняет только владелец (портал + сотрудник). Чат — только
- * в одной папке сотрудника; удаление папки возвращает её чаты в общий список.
+ * Папки чатов: личные (видит и меняет владелец) и **глобальные** (решение владельца 2026-10-23) —
+ * их видят все сотрудники, у которых есть доступ хотя бы к одному чату папки, и только эти чаты;
+ * «Не обращать внимания» глобальной папки действует у всех; менять её может только владелец. Чат —
+ * в одной папке сотрудника; своя папка важнее чужой глобальной. «★ Избранное» — псевдопапка.
  */
 @Injectable()
 export class ChatFoldersService {
@@ -26,41 +28,60 @@ export class ChatFoldersService {
 
   /** Папки со сводкой: сколько чатов, непрочитанные и последнее сообщение среди чатов папки. */
   async list(user: B24UserContext): Promise<ChatFolderDto[]> {
-    const folders = await this.prisma.chatFolder.findMany({
-      where: { portalId: user.portal.id, ownerUserId: user.userId },
-      include: { items: true },
-      orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }],
-    });
-    if (!folders.length) return [];
-    const allIds = folders.flatMap((f) => f.items.map((i) => i.chatId));
-    const [unread, summaries] = await Promise.all([
-      this.chats.unreadByChat(user),
-      allIds.length ? this.chats.summariesByChat(user, allIds) : Promise.resolve([]),
+    const portalId = user.portal.id;
+    const [own, others, favorites, placement] = await Promise.all([
+      this.prisma.chatFolder.findMany({ where: { portalId, ownerUserId: user.userId }, include: { items: true }, orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] }),
+      this.prisma.chatFolder.findMany({ where: { portalId, global: true, ownerUserId: { not: user.userId } }, include: { items: true }, orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] }),
+      this.chats.favorites(user),
+      this.chats.myFolders(user),
     ]);
+    // Чужие глобальные: только чаты, где папка — действующая для меня и чат мне доступен (кэш доступа).
+    const allowed = others.length
+      ? new Set(
+          (
+            await this.prisma.openlineChatAccess.findMany({
+              where: { portalId, userId: user.userId, allowed: true, chatId: { in: others.flatMap((f) => f.items.map((i) => i.chatId)) } },
+              select: { chatId: true },
+            })
+          ).map((a) => a.chatId),
+        )
+      : new Set<number>();
+    const folders = [
+      ...own.map((f) => ({ f, chatIds: f.items.map((i) => i.chatId), mine: true })),
+      ...others
+        .map((f) => ({ f, chatIds: f.items.map((i) => i.chatId).filter((id) => allowed.has(id) && placement.get(id) === f.id), mine: false }))
+        .filter((x) => x.chatIds.length),
+    ];
+    if (!folders.length && !favorites.size) return [];
+    const allIds = [...new Set([...folders.flatMap((x) => x.chatIds), ...favorites])];
+    const summaries = allIds.length ? await this.chats.summariesByChat(user, allIds) : [];
     const byId = new Map(summaries.map((c) => [c.chatId, c]));
-    return folders.map((f) => {
-      const inside = f.items.map((i) => byId.get(i.chatId)).filter((c): c is NonNullable<typeof c> => !!c);
-      const last = inside
-        .filter((c) => c.lastMessage)
-        .sort((a, b) => b.lastMessage!.date.localeCompare(a.lastMessage!.date))[0];
+    const sum = (id: string, name: string, chatIds: number[], extra: Pick<ChatFolderDto, 'sort' | 'ignoreAttention' | 'global' | 'mine' | 'kind'>): ChatFolderDto => {
+      const inside = chatIds.map((i) => byId.get(i)).filter((c): c is NonNullable<typeof c> => !!c);
+      const last = inside.filter((c) => c.lastMessage).sort((a, b) => b.lastMessage!.date.localeCompare(a.lastMessage!.date))[0];
       return {
-        id: f.id,
-        name: f.name,
-        sort: f.sort,
-        ignoreAttention: f.ignoreAttention,
-        chatCount: f.items.length,
-        unread: f.items.reduce((n, i) => n + (unread.get(i.chatId) ?? 0), 0),
+        id,
+        name,
+        ...extra,
+        chatCount: extra.mine && extra.kind !== 'favorites' ? chatIds.length : inside.length,
+        // Сумма счётчиков чатов папки («Не требует ответа» уже обнулил свои).
+        unread: inside.reduce((n, c) => n + c.unread, 0),
         last: last?.lastMessage
-          ? {
-              chatId: last.chatId,
-              title: last.title,
-              preview: last.lastMessage.preview,
-              date: last.lastMessage.date,
-              author: last.lastMessage.author,
-            }
+          ? { chatId: last.chatId, title: last.title, preview: last.lastMessage.preview, date: last.lastMessage.date, author: last.lastMessage.author }
           : null,
       };
-    });
+    };
+    return [
+      ...(favorites.size ? [sum(FAVORITES_FOLDER, 'Избранное', [...favorites], { sort: -1, ignoreAttention: false, global: false, mine: true, kind: 'favorites' })] : []),
+      ...folders.map(({ f, chatIds, mine }) => sum(f.id, f.name, chatIds, { sort: f.sort, ignoreAttention: f.ignoreAttention, global: f.global, mine, kind: 'folder' })),
+    ];
+  }
+
+  /** ★ Избранное: добавить или убрать чат (личное). */
+  async favorite(user: B24UserContext, chatId: number, on: boolean): Promise<void> {
+    const key = { portalId_userId_chatId: { portalId: user.portal.id, userId: user.userId, chatId } };
+    if (on) await this.prisma.chatFavorite.upsert({ where: key, create: { portalId: user.portal.id, userId: user.userId, chatId }, update: {} });
+    else await this.prisma.chatFavorite.deleteMany({ where: { portalId: user.portal.id, userId: user.userId, chatId } });
   }
 
   async create(user: B24UserContext, body: unknown): Promise<{ id: string }> {
@@ -71,12 +92,13 @@ export class ChatFoldersService {
     return { id: f.id };
   }
 
-  /** Переименовать папку и/или отметить «Не обращать внимания». */
-  async rename(user: B24UserContext, id: string, body: unknown): Promise<void> {
+  /** Переименовать папку, отметить «Не обращать внимания» или сделать глобальной (только владелец). */
+  async rename(user: B24UserContext, id: string, body: unknown): Promise<{ name?: string; ignoreAttention?: boolean; global?: boolean }> {
     await this.own(user, id);
     const p = updateSchema.safeParse(body);
     if (!p.success) throw new BadRequestException({ code: 'INVALID_FOLDER', message: 'Название папки — от 1 до 60 символов' });
     await this.prisma.chatFolder.update({ where: { id }, data: p.data });
+    return p.data;
   }
 
   /** Удалить папку: её чаты возвращаются в общий список (записи папки удаляются каскадом). */

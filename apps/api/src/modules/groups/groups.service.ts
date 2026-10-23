@@ -45,6 +45,19 @@ export class GroupsService {
     return this.one(portalId, g.id);
   }
 
+  /**
+   * Порядок групп (мастер брони, календарь, настройки): `ids` — все действующие группы портала в нужном
+   * порядке; чужие или пропущенные — 400.
+   */
+  async reorder(portalId: string, ids: unknown): Promise<GroupDto[]> {
+    const current = await this.prisma.workGroup.findMany({ where: { portalId, archivedAt: null }, select: { id: true } });
+    const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [];
+    if (list.length !== current.length || new Set(list).size !== list.length || !current.every((g) => list.includes(g.id)))
+      throw new BadRequestException({ code: 'INVALID_ORDER', message: 'Нужен список всех групп портала без повторов' });
+    await this.prisma.$transaction(list.map((id, i) => this.prisma.workGroup.update({ where: { id }, data: { sort: (i + 1) * 10 } })));
+    return this.list(portalId);
+  }
+
   /** Полная замена настроек, ресурсов и участников — одной транзакцией. */
   async update(portalId: string, id: string, body: unknown): Promise<GroupDto> {
     const s = this.parse(groupSettingsSchema, body);

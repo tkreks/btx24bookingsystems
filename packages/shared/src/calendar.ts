@@ -60,6 +60,36 @@ export interface CalendarDay {
   resources: CalendarResource[];
   bookings: CalendarBooking[];
   techWindows: CalendarTechWindow[];
+  /** Стопы ресурсов, пересекающие день: ресурс закрыт для бронирования. */
+  stops?: ResourceStopDto[];
+}
+
+/**
+ * Стоп ресурса (решение владельца 2026-10-23): ресурс недоступен для бронирования с дня `from` по день
+ * `to` включительно; ставится, только если броней в этот период нет.
+ */
+export interface ResourceStopDto {
+  id: string;
+  resourceId: number;
+  /** Дни портала (YYYY-MM-DD), включительно. */
+  from: string;
+  to: string;
+  /** Границы периода (UTC, ISO), `[start, end)`. */
+  start: string;
+  end: string;
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** `POST /api/resource-stops/check` и ответ 409 на установку: брони ресурса в периоде. */
+export interface ResourceStopCheckDto {
+  resourceId: number;
+  from: string;
+  to: string;
+  bookings: { id: number; name: string; start: string; end: string; dealId: number | null }[];
+  /** Уже действующие стопы ресурса в этом периоде. */
+  stops: ResourceStopDto[];
 }
 
 /**

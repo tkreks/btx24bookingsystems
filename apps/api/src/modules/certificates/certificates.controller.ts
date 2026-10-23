@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import type { CertificateDetailsDto, CertificateListDto } from '@btx24/shared';
+import type { CertificateDetailsDto, CertificateListDto, SellCertificateResultDto } from '@btx24/shared';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { CertificatesService } from './certificates.service.js';
@@ -23,6 +23,12 @@ export class CertificatesController {
   @Post()
   issue(@B24User() user: B24UserContext, @Body() body: unknown): Promise<CertificateDetailsDto> {
     return this.certificates.issue(user, body);
+  }
+
+  /** «Покупка сертификата» из мастера брони: сделка + сертификат. */
+  @Post('sale')
+  sell(@B24User() user: B24UserContext, @Body() body: unknown): Promise<SellCertificateResultDto> {
+    return this.certificates.sell(user, body);
   }
 
   @Put(':id')

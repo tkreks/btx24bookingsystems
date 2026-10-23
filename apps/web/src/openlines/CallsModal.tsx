@@ -4,6 +4,7 @@ import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime } from '../format.js';
 import { DealStatusBadge } from './DealStatusBadge.js';
+import { MinimizeButton } from '../Minimize.js';
 
 const OWNER: Record<number, { label: string; type: 'lead' | 'deal' | 'contact' | 'company' } | undefined> = {
   1: { label: 'Лид', type: 'lead' },
@@ -64,6 +65,7 @@ export function CallsModal({
               </span>
             )}
           </h3>
+          <MinimizeButton label="Звонки" />
           <button aria-label="Закрыть" onClick={onClose}>
             ×
           </button>

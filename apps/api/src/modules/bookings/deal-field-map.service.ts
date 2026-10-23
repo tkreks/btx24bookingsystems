@@ -28,7 +28,8 @@ export class DealFieldMapService {
    * по внутреннему коду (XML_ID, «3af19224…»), а `crm.deal.update` принимает только номер: код и
    * название варианта переводим в номер. Не нашли — null (не записываем мусор).
    */
-  async enumId(portalId: string, client: Bitrix24RestClient, fieldCode: string, value: string): Promise<string | null> {
+  /** `prefix` — вариант, название которого начинается с `value` («Бронирование посещения банного комплекса»). */
+  async enumId(portalId: string, client: Bitrix24RestClient, fieldCode: string, value: string, prefix = false): Promise<string | null> {
     const v = value.trim();
     if (!v) return null;
     const key = `${portalId}:${fieldCode}`;
@@ -40,8 +41,20 @@ export class DealFieldMapService {
     }
     // Не список (строка, число) — пишем как есть.
     if (!hit.items.length) return v;
-    const item = hit.items.find((i) => String(i.ID) === v) ?? hit.items.find((i) => i.XML_ID === v) ?? hit.items.find((i) => i.VALUE === v);
+    const low = v.toLocaleLowerCase('ru');
+    const item =
+      hit.items.find((i) => String(i.ID) === v) ??
+      hit.items.find((i) => i.XML_ID === v) ??
+      hit.items.find((i) => i.VALUE === v) ??
+      (prefix ? hit.items.find((i) => String(i.VALUE ?? '').toLocaleLowerCase('ru').startsWith(low)) : undefined);
     return item ? String(item.ID) : null;
+  }
+
+  /** Карта полей с автоопределением по названиям для ненастроенных ролей. */
+  async resolved(portalId: string, client: Bitrix24RestClient): Promise<DealFieldMapDto> {
+    const m = await this.get(portalId);
+    const found = await this.detected(portalId, client);
+    return { ...found, ...m };
   }
 
   /** Поля для «сделка состоялась» (бронь прошла / сертификат оплачен) — см. `deal-outcome.ts`. */

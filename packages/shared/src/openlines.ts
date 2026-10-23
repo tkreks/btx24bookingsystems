@@ -35,11 +35,16 @@ export interface ChatSummary {
   crm: ChatCrmLinks;
   /** Телефоны клиента из привязанных контакта / лида / компании (для поиска; не сохраняются). */
   phones: string[];
-  /** Непрочитанных сообщений у меня (счётчик мессенджера). */
+  /** Непрочитанных сообщений у меня (счётчик мессенджера); «Не требует ответа» — 0. */
   unread: number;
-  /** Моя папка, где лежит чат; null — в общем списке. */
+  /** Папка, где лежит чат (моя или глобальная коллеги); null — в общем списке. */
   folderId: string | null;
+  /** В моём избранном (★). */
+  favorite: boolean;
 }
+
+/** Псевдопапка «★ Избранное» в списке папок и `?folder=` списка чатов. */
+export const FAVORITES_FOLDER = 'favorites';
 
 /** Личная папка чатов (`/api/openlines/folders`): строка в списке чатов. */
 export interface ChatFolderDto {
@@ -53,6 +58,12 @@ export interface ChatFolderDto {
   last: { chatId: number; title: string; preview: string; date: string; author: MessageAuthorKind } | null;
   /** «Не обращать внимания»: чаты папки не попадают в «Требуют внимания» на дашборде. */
   ignoreAttention: boolean;
+  /** Глобальная: видят все с доступом к её чатам, «не обращать внимания» — у всех. */
+  global: boolean;
+  /** Моя папка (меняю я); чужая глобальная — только смотреть. */
+  mine: boolean;
+  /** `favorites` — псевдопапка «★ Избранное» (`id = FAVORITES_FOLDER`). */
+  kind?: 'folder' | 'favorites';
 }
 
 export interface ChatListDto {

@@ -12,7 +12,8 @@ import {
 } from '@btx24/shared';
 import { apiGet, apiPost, apiPut } from '../api.js';
 import { openCrm } from '../b24.js';
-import { fmtDateTime, fmtMoney } from '../format.js';
+import { fmtDateTime, fmtMoney, plusMonths } from '../format.js';
+import { MinimizeButton } from '../Minimize.js';
 
 type Filter = 'all' | CertificateStatus | 'overdue';
 const FILTERS: { key: Filter; label: string }[] = [
@@ -25,12 +26,6 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 /** «23.10.2026» из «2026-10-23». */
 const ru = (d: string | null) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '—');
-/** Дата через `months` месяцев (последний день месяца, если такого числа нет). */
-function plusMonths(date: string, months: number): string {
-  const [y, m, d] = date.split('-').map(Number);
-  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
-}
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
 /**
@@ -230,6 +225,7 @@ function IssueDialog({ timezone, onClose, onIssued }: { timezone: string; onClos
       >
         <header>
           <h2>Выпуск сертификата</h2>
+          <MinimizeButton label="Выпуск сертификата" />
           <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
@@ -330,6 +326,7 @@ function CertificateCard({ id, timezone, canManage, onClose, onChanged }: { id: 
       <div className="sheet cert-sheet" role="dialog" aria-modal="true" aria-label="Сертификат" onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>{c ? `Сертификат №${c.number}` : 'Сертификат'}</h2>
+          <MinimizeButton label="Сертификат" />
           <button aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>

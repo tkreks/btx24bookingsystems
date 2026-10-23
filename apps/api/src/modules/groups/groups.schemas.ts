@@ -19,6 +19,7 @@ const bookingTypeRule = z
     dealTypeValue: z.string().max(50),
     program: z.string().max(200),
     confirmation: z.array(messageStep).max(20),
+    unavailable: z.boolean().optional(),
   })
   .strict();
 
@@ -64,10 +65,12 @@ export const groupOptionsSchema = z
         });
       }),
     productSectionIds: z.array(z.string().max(32)).max(500),
+    productSectionsHidden: z.array(z.string().max(32)).max(500).optional(),
     resourceDefaults: z.record(z.string().regex(/^\d+$/), z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().positive() }).strict()).max(50)),
     views: z.object({ desktop: view, mobile: view }).strict(),
     bookingTypes: z.array(bookingTypeRule).max(30).optional(),
     bookingTypeRequired: z.boolean().optional(),
+    dealKinds: z.boolean().optional(),
     autoMessages: z
       .array(
         z

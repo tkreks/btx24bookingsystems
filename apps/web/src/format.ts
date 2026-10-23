@@ -51,3 +51,10 @@ export function fmtDuration(sec: number): string {
 export function fmtAt(iso: string, timeZone: string, oneDay: boolean): string {
   return oneDay ? fmtTime(iso, timeZone) : fmtDateTime(iso, timeZone);
 }
+
+/** Дата через `months` месяцев (последний день месяца, если такого числа нет): «2026-10-31» + 1 → «2026-11-30». */
+export function plusMonths(date: string, months: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
+}

@@ -11,6 +11,7 @@ import { DashBadge } from './RecentCalls.js';
 import { periodError } from './period.js';
 import { Avatar } from './Avatar.js';
 import { ThemeToggle } from '../theme/ThemeToggle.js';
+import { MinimizeButton } from '../Minimize.js';
 
 type Preset = 'today' | 'yesterday' | 'custom';
 
@@ -112,6 +113,7 @@ export function HeadDashboardPage({ session, onManager }: { session: SessionInfo
           >
             <header>
               <h3>Период</h3>
+              <MinimizeButton label="Период" />
               <button type="button" aria-label="Закрыть" onClick={() => setPicking(null)}>
                 ×
               </button>

@@ -3,6 +3,7 @@ import type { ChatChannelDto } from '@btx24/shared';
 import { fmtDateTime } from '../format.js';
 import { Channel } from './Channel.js';
 import { connectorLabel } from './format.js';
+import { MinimizeButton } from '../Minimize.js';
 
 /** Каналов больше — один кружок с иконками открытых линий; по нажатию — окно со списком чатов. */
 const INLINE_MAX = 2;
@@ -72,6 +73,7 @@ export function ChannelSwitch({
           <div className="sheet channels-modal" role="dialog" aria-modal="true" aria-label="Чаты клиента" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>Чаты клиента · {channels.length}</h3>
+              <MinimizeButton label="Каналы клиента" />
               <button aria-label="Закрыть" onClick={() => setOpen(false)}>
                 ×
               </button>

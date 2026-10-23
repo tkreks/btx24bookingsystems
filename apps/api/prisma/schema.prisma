@@ -66,6 +66,8 @@ model Portal {
   dealPayments         DealPayment[]
   certificates         Certificate[]
   certificateEvents    CertificateEvent[]
+  chatFavorites        ChatFavorite[]
+  resourceStops        ResourceStop[]
 }
 
 enum PortalStatus {
@@ -668,10 +670,26 @@ model ChatFolder {
   sort            Int              @default(0)
   /// «Не обращать внимания»: чаты папки не попадают в «Требуют внимания» и «ждут ответа» на дашборде владельца.
   ignoreAttention Boolean          @default(false)
+  /// Глобальная (решение владельца 2026-10-23): папку и доступные им чаты видят все сотрудники, и
+  /// «Не обращать внимания» действует у всех. Меняет только владелец.
+  global          Boolean          @default(false)
   createdAt       DateTime         @default(now()) @db.DateTime(3)
   items           ChatFolderItem[]
 
   @@index([portalId, ownerUserId])
+  @@index([portalId, global])
+}
+
+/// Избранный чат сотрудника (личное): «★ Избранное» вверху списка чатов.
+model ChatFavorite {
+  id       String   @id @default(cuid())
+  portalId String
+  portal   Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId   Int
+  chatId   Int
+  addedAt  DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([portalId, userId, chatId])
 }
 
 /// Чат в папке. У сотрудника чат может быть только в одной папке.
@@ -830,6 +848,11 @@ model WebSession {
 
 // ---------- Сертификаты (решение владельца 2026-10-23) ----------
 
+enum CertificateKind {
+  paper
+  electronic
+}
+
 enum CertificateStatus {
   new
   used
@@ -856,9 +879,14 @@ model Certificate {
   createdAt       DateTime          @default(now()) @db.DateTime(3)
   createdByUserId Int
   redeemedAt      DateTime?         @db.DateTime(3)
+  /// Бумажный или электронный; null — не указан (выпущен до появления поля).
+  kind            CertificateKind?
+  /// Ключ продажи из мастера брони: повтор запроса не выпускает второй сертификат.
+  saleKey         String?           @db.VarChar(64)
   events          CertificateEvent[]
 
   @@unique([portalId, number])
+  @@unique([portalId, saleKey])
   @@index([portalId, status, validUntil])
 }
 
@@ -877,4 +905,25 @@ model CertificateEvent {
   details       Json?
 
   @@index([portalId, certificateId, at])
+}
+
+// ---------- Стоп ресурса (решение владельца 2026-10-23) ----------
+
+/// Ресурс закрыт для бронирования на дни `[startsAt, endsAt)` (границы дней портала, UTC) с причиной.
+/// Ставится, только если броней в этот период нет; снимается сотрудником (`liftedAt`).
+model ResourceStop {
+  id              String    @id @default(cuid())
+  portalId        String
+  portal          Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  resourceId      Int
+  startsAt        DateTime  @db.DateTime(3)
+  endsAt          DateTime  @db.DateTime(3)
+  reason          String    @db.VarChar(500)
+  createdByUserId Int
+  createdByName   String    @db.VarChar(255)
+  createdAt       DateTime  @default(now()) @db.DateTime(3)
+  liftedAt        DateTime? @db.DateTime(3)
+  liftedByName    String?   @db.VarChar(255)
+
+  @@index([portalId, resourceId, startsAt])
 }

@@ -26,6 +26,8 @@ type Grp = { group: { id: string; name: string; dealCategoryId: number; options:
 function setup(
   o: {
     permissions?: string[];
+    /** Поле «Тип сделки» сделки (74 — покупка сертификата). */
+    dealType?: string;
     active?: boolean;
     prev?: Partial<PaymentRequest>;
     link?: string;
@@ -41,7 +43,8 @@ function setup(
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
-    if (method === 'crm.deal.get') return { result: { ID: '678', CATEGORY_ID: o.category ?? '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P' } };
+    if (method === 'crm.deal.get')
+      return { result: { ID: '678', CATEGORY_ID: o.category ?? '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P', UF_TYPE: o.dealType ?? '72' } };
     if (method === 'crm.item.add') return { result: { item: { id: 6001 } } };
     if (method === 'crm.item.get') return { result: { item: { id: 6001, ufCrmLink: o.link ?? '' } } };
     if (method === 'imopenlines.crm.chat.get') return { result: [{ CHAT_ID: '3301' }] };
@@ -83,7 +86,11 @@ function setup(
   } as unknown as PrismaService;
   const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options, resourceIds: [2, 14] }, permissions: o.permissions ?? ['payment.send'] };
   const access = { resolve: vi.fn(async () => ({ groups: [group, ...(o.groups ?? [])] })) } as unknown as AccessService;
-  const fieldMap = { get: vi.fn(async () => ({ prepayment: 'UF_PRE', prepaymentInvoiceId: 'UF_INV', prepaymentLink: 'UF_LINK' })) } as unknown as DealFieldMapService;
+  const fieldMap = {
+    get: vi.fn(async () => ({ prepayment: 'UF_PRE', prepaymentInvoiceId: 'UF_INV', prepaymentLink: 'UF_LINK' })),
+    // Тип сделки «Покупка сертификата» — вариант 74 поля UF_TYPE.
+    outcome: vi.fn(async () => ({ dealType: 'UF_TYPE', certificateTypeId: '74' })),
+  } as unknown as DealFieldMapService;
   const flow = new PaymentFlow(prisma, { find: vi.fn() } as unknown as BookingJournalService, fieldMap, new MessageContextService(prisma, fieldMap));
   flow.sendGapMs = 0;
   const svc = new PaymentsService(prisma, access, fieldMap, flow);
@@ -164,6 +171,13 @@ describe('PaymentsService', () => {
     } finally {
       delete (options.payments as { requireBooking?: boolean }).requireBooking;
     }
+  });
+
+  it('покупка сертификата: ссылка на весь номинал (сумма сделки), брони не нужно', async () => {
+    const t = setup({ bookings: [], dealType: '74' });
+    const p = await t.svc.preview(t.user, 678, 'prepayment');
+    expect(p).toMatchObject({ amount: 90000, source: 'certificate', bookingMissing: false, requireBooking: false });
+    expect(p.problems).not.toContain('Создайте бронирование, а потом переходите к отправке оплаты');
   });
 
   it('deal options: client deals in work, newest first by creation date', async () => {

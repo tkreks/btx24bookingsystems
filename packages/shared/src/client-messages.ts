@@ -29,6 +29,8 @@ export interface BookingTypeRule {
   program: string;
   /** Подтверждение после оплаты — по порядку. */
   confirmation: ClientMessageStep[];
+  /** Сейчас недоступен для бронирования (виден в мастере, но не выбирается). */
+  unavailable?: boolean;
 }
 
 export const PROGRAM_FROM_KEYWORD = '@keyword';

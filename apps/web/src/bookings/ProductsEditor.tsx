@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { discountedPrice, type BookingCatalogDto, type ProductDiscountType } from '@btx24/shared';
 import { fmtMoney } from '../format.js';
 
@@ -22,7 +22,8 @@ const rub = (n: number) => fmtMoney(n, 'RUB');
 
 /**
  * Товары брони (макет `docs/prototype/ui/booking-wizard.html`): поиск товара группы с подсказками,
- * таблица — количество −/+, цена, скидка % / ₽, сумма строки; итоги «без скидки / скидка / итого».
+ * «Выбрать» — окно со всем каталогом группы, теги разделов (⚙ → группа → разделы с 👁) — окно с
+ * товарами раздела; таблица — количество −/+, цена, скидка % / ₽, сумма строки; итоги.
  * Строки сделки заменяются целиком, поэтому у существующей сделки показываются её текущие товары.
  */
 export function ProductsEditor({
@@ -42,6 +43,15 @@ export function ProductsEditor({
   onRetry?: () => void;
 }) {
   const [q, setQ] = useState('');
+  // Окно выбора: весь каталог (null) или раздел-тег.
+  const [picker, setPicker] = useState<{ section: NonNullable<BookingCatalogDto['sections']>[number] | null } | null>(null);
+  const add = (p: BookingCatalogDto['products'][number]) => {
+    // Тот же товар ещё раз — +1 к количеству, а не новая строка.
+    const at = rows.findIndex((r) => r.productId === p.id);
+    if (at >= 0) onChange(rows.map((r, k) => (k === at ? { ...r, quantity: round(r.quantity + 1) } : r)));
+    else onChange([...rows, { productId: p.id, name: p.name, price: p.price ?? 0, quantity: 1, discountType: 'percent', discount: 0 }]);
+  };
+  const locked = !catalog || loading || !!error;
   const words = q.trim().toLocaleLowerCase('ru').split(/\s+/).filter(Boolean);
   const matches = words.length
     ? (catalog?.products ?? []).filter((p) => words.every((w) => `${p.name} ${p.section ?? ''}`.toLocaleLowerCase('ru').includes(w))).slice(0, 8)
@@ -56,6 +66,20 @@ export function ProductsEditor({
 
   return (
     <div className="pe">
+      <div className="pe-tools">
+        <button type="button" className="primary pe-pick" disabled={locked} onClick={() => setPicker({ section: null })}>
+          Выбрать
+        </button>
+        {(catalog?.sections ?? []).length > 0 && (
+          <span className="pe-tags" role="group" aria-label="Разделы каталога">
+            {(catalog?.sections ?? []).map((s) => (
+              <button key={s.id} type="button" className="pe-tag" disabled={locked} onClick={() => setPicker({ section: s })}>
+                {s.name}
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
       <div className="pe-add">
         <input
           type="search"
@@ -74,7 +98,7 @@ export function ProductsEditor({
                   role="option"
                   aria-selected={false}
                   onClick={() => {
-                    onChange([...rows, { productId: p.id, name: p.name, price: p.price ?? 0, quantity: 1, discountType: 'percent', discount: 0 }]);
+                    add(p);
                     setQ('');
                   }}
                 >
@@ -101,7 +125,16 @@ export function ProductsEditor({
           )}
         </p>
       )}
-      {!loading && !error && !rows.length && <p className="cp-hint">Товаров пока нет — найдите товар выше.</p>}
+      {!loading && !error && !rows.length && <p className="cp-hint">Товаров пока нет — «Выбрать», тег раздела или поиск.</p>}
+      {picker && catalog && (
+        <ProductPicker
+          catalog={catalog}
+          section={picker.section}
+          rows={rows}
+          onAdd={add}
+          onClose={() => setPicker(null)}
+        />
+      )}
       {rows.length > 0 && (
         <div className="pe-table" role="table" aria-label="Товары">
           <div className="pe-row pe-head" role="row">
@@ -174,6 +207,72 @@ export function ProductsEditor({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Окно выбора товаров: весь каталог группы или раздел (с вложенными), поиск, «+» — в бронь. */
+function ProductPicker({
+  catalog,
+  section,
+  rows,
+  onAdd,
+  onClose,
+}: {
+  catalog: BookingCatalogDto;
+  section: NonNullable<BookingCatalogDto['sections']>[number] | null;
+  rows: ProductRow[];
+  onAdd: (p: BookingCatalogDto['products'][number]) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    // Своё «Escape» — только это окно, не мастер под ним.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
+  }, [onClose]);
+  const inSection = section ? new Set(section.sectionIds) : null;
+  const words = q.trim().toLocaleLowerCase('ru').split(/\s+/).filter(Boolean);
+  const list = catalog.products
+    .filter((p) => !inSection || (p.sectionId && inSection.has(p.sectionId)))
+    .filter((p) => words.every((w) => `${p.name} ${p.section ?? ''}`.toLocaleLowerCase('ru').includes(w)));
+  const count = (id: number) => rows.filter((r) => r.productId === id).reduce((n, r) => n + r.quantity, 0);
+  return (
+    <div className="wz-modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="wz-modal pe-picker" role="dialog" aria-modal="true" aria-label={section ? `Раздел «${section.name}»` : 'Товары группы'} onClick={(e) => e.stopPropagation()}>
+        <header className="pe-picker-head">
+          <h4>{section ? section.name : 'Товары группы'}</h4>
+          <button type="button" className="bk-close" aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <input type="search" autoFocus aria-label="Поиск товара" placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <ul className="pe-picker-list">
+          {list.map((p) => (
+            <li key={p.id}>
+              <span className="pe-hit-name">
+                <b>{p.name}</b>
+                {!section && p.section && <span className="muted">{p.section}</span>}
+              </span>
+              <span className="pe-hit-price">{p.price !== null ? fmtMoney(p.price, p.currency) : 'без цены'}</span>
+              <button type="button" className={`pe-picker-add${count(p.id) ? ' added' : ''}`} aria-label={`Добавить: ${p.name}`} onClick={() => onAdd(p)}>
+                {count(p.id) ? `✓ ${count(p.id)}` : '+'}
+              </button>
+            </li>
+          ))}
+          {!list.length && <li className="cp-hint">Товаров не найдено.</li>}
+        </ul>
+        <div className="form-actions">
+          <button type="button" className="primary" onClick={onClose}>
+            Готово
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

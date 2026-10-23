@@ -227,6 +227,8 @@ export function GroupForm({
           onChange={(bookingTypes) => updateOptions({ bookingTypes })}
           required={options.bookingTypeRequired === true}
           onRequired={(bookingTypeRequired) => updateOptions({ bookingTypeRequired })}
+          dealKinds={options.dealKinds === true}
+          onDealKinds={(dealKinds) => updateOptions({ dealKinds })}
         />
 
         <PaymentsSection
@@ -253,6 +255,8 @@ export function GroupForm({
           selected={options.productSectionIds}
           catalog={refs.catalog}
           onChange={(productSectionIds) => updateOptions({ productSectionIds })}
+          hidden={options.productSectionsHidden ?? []}
+          onHidden={(productSectionsHidden) => updateOptions({ productSectionsHidden })}
         />
 
         <DealFieldsSection

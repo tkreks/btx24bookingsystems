@@ -92,6 +92,20 @@ export class GroupsAdminController {
     return g;
   }
 
+  @Put('groups-order')
+  async reorder(@B24User() user: B24UserContext, @Body() body: unknown): Promise<GroupDto[]> {
+    const ids = (body as { ids?: unknown } | null)?.ids;
+    const before = await this.groups.list(user.portal.id);
+    const after = await this.groups.reorder(user.portal.id, ids);
+    await this.actions.user(user, {
+      action: 'group.reorder',
+      summary: `Изменил порядок групп: ${after.map((g) => g.name).join(', ')}`,
+      entityType: 'group',
+      details: { before: before.map((g) => g.name), after: after.map((g) => g.name) },
+    });
+    return after;
+  }
+
   @Put('groups/:id')
   async update(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<GroupDto> {
     const before = (await this.groups.list(user.portal.id)).find((g) => g.id === id) ?? null;
@@ -158,6 +172,8 @@ const GROUP_LABELS: Record<string, string> = {
   'options.views': 'вид календаря',
   'options.bookingTypes': 'типы брони и сообщения',
   'options.bookingTypeRequired': 'обязательный тип брони',
+  'options.dealKinds': 'шаг «Тип сделки» в мастере',
+  'options.productSectionsHidden': 'разделы каталога, скрытые из быстрых тегов',
   'options.payments': 'оплаты',
 };
 const SETTINGS_LABELS: Record<string, string> = {

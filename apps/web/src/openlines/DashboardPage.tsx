@@ -30,6 +30,7 @@ import { Icon } from './icons.js';
 import { ListMore } from './ListMore.js';
 import { DealStatusBadge } from './DealStatusBadge.js';
 import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
+import { MinimizeButton } from '../Minimize.js';
 
 const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, string> = {
   payment_timeout: 'не оплачена — снята системой',
@@ -513,6 +514,7 @@ function NewDealsModal({
           <h3>
             {title} <span className="muted">· {items.length}</span>
           </h3>
+          <MinimizeButton label="Сделки" />
           <button aria-label="Закрыть" onClick={onClose}>
             ×
           </button>
@@ -833,6 +835,7 @@ function HideChatDialog({ chat, onClose, onHidden }: { chat: AttentionChatDto; o
       <div className="sheet hide-chat-modal" role="dialog" aria-modal="true" aria-label="Скрыть чат с дашборда" onClick={(e) => e.stopPropagation()}>
         <header>
           <h3>Скрыть чат с дашборда?</h3>
+          <MinimizeButton label="Скрыть чат" />
           <button aria-label="Закрыть" onClick={onClose}>
             ×
           </button>
@@ -867,6 +870,7 @@ function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDa
       <div className="sheet calls-modal" role="dialog" aria-modal="true" aria-label="Брони на сегодня и завтра" onClick={(e) => e.stopPropagation()}>
         <header>
           <h3>Брони</h3>
+          <MinimizeButton label="Брони" />
           <button aria-label="Закрыть" onClick={onClose}>
             ×
           </button>

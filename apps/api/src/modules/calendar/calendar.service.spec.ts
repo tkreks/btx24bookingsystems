@@ -207,6 +207,7 @@ describe('CalendarService — bookings deleted in Bitrix24', () => {
     });
     const prisma = {
       bookingRecord: { findMany: vi.fn(async () => [rec(7), rec(8), rec(9), rec(10), rec(11, [2])]) },
+      resourceStop: { findMany: vi.fn(async () => []) },
       bookingAlert: { findMany: vi.fn(async () => [{ id: 'a8', bookingId: 8 }]) },
     };
     const day = await new CalendarService(prisma as never).day({ ...user(client), portal: { id: 'p1', timezone: 'Europe/Moscow' } } as B24UserContext, '2026-10-21', {

@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   canUsePaymentMode,
+  CERTIFICATE_KIND_LABELS,
+  CERTIFICATE_KINDS,
+  DEAL_KIND_HINTS,
+  DEAL_KIND_LABELS,
+  DEAL_KIND_PAYMENT,
+  DEAL_KINDS,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
   todayIn,
@@ -10,21 +16,25 @@ import {
   type CreateBookingResultDto,
   type CrmContactHit,
   type CrmDealHit,
+  type CertificateKind,
   type CrmSearchDto,
+  type DealKind,
   type DealFormDto,
   type DealFormField,
   type DealProductRowDto,
   type MyGroupDto,
   type PaymentMode,
   type RecentDealsDto,
+  type SellCertificateResultDto,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
-import { fmtDate, fmtDateTime, fmtMoney, fmtTime, shiftDate } from '../format.js';
+import { fmtDate, fmtDateTime, fmtMoney, fmtTime, plusMonths, shiftDate } from '../format.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
 import { ClientPicker } from './ClientPicker.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
 import { ProductsEditor, productsTotal, type ProductRow } from './ProductsEditor.js';
 import { isPastStart, SlotPicker, useNow } from './SlotPicker.js';
+import { MinimizeButton } from '../Minimize.js';
 
 export interface BookingFormContext {
   date: string;
@@ -46,9 +56,22 @@ export interface BookingFormContext {
   }[];
 }
 
-/** `none` — ещё не выбрали (мастер из меню: клиента и сделки пока нет). */
-type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new'; title: string } | { mode: 'service' } | { mode: 'none' };
-type Step = 'deal' | 'group' | 'slot' | 'details';
+/** Итог мастера: бронь (или проданный сертификат) и нужно ли сразу окно оплаты (с суммой). */
+export interface WizardResult {
+  booking: CreateBookingResultDto | null;
+  dealId: number | null;
+  /** Открыть окно оплаты по `dealId`; `amount` — подставить (иначе расчёт); `fixedDeal` — без брони. */
+  payment: { amount: number | null; fixedDeal: boolean } | null;
+  /** Текст для сотрудника: что создано и предупреждения. */
+  note: string;
+}
+
+/**
+ * `none` — ещё не выбрали (мастер из меню: клиента и сделки пока нет). Название новой сделки не
+ * вводится — собирается при создании: клиент, дата брони, ресурс (`newDealTitle`).
+ */
+type DealChoice = { mode: 'existing'; dealId: number } | { mode: 'new' } | { mode: 'service' } | { mode: 'none' };
+type Step = 'deal' | 'group' | 'kind' | 'certificate' | 'slot' | 'details';
 type DealCard = {
   id: number;
   title: string;
@@ -67,7 +90,14 @@ const DEALS_STEP = 4;
 /** Начало брони уже прошло. */
 const PAST_START_ERROR = 'Начало брони уже прошло — выберите сегодня позже текущего времени или другой день';
 
-const STEP_TITLES: Record<Step, string> = { deal: 'Клиент и сделка', group: 'Группа', slot: 'Дата и ресурс', details: 'Товары и поля' };
+const STEP_TITLES: Record<Step, string> = {
+  deal: 'Клиент и сделка',
+  group: 'Группа',
+  kind: 'Тип сделки',
+  certificate: 'Сертификат',
+  slot: 'Дата и ресурс',
+  details: 'Товары и поля',
+};
 
 /** «4 ч», «1 сут 2 ч», «45 мин» — длительность брони для сводки. */
 export function durationText(ms: number): string {
@@ -93,14 +123,21 @@ export function agoText(iso: string | null | undefined, now = Date.now()): strin
 /**
  * Какие шаги нужны (решение владельца 2026-10-22): из меню/маркетплейса — клиент или сделка →
  * группа → календарь группы (бронь кликом) → товары и поля; из сделки — без первого шага; клик в
- * календаре — без шагов группы и даты; одна доступная группа — без шага группы.
+ * календаре — без шагов группы и даты; одна доступная группа — без шага группы. У группы с типами
+ * сделки (бани, 2026-10-23) после группы — «Тип сделки»; «Покупка сертификата» — без брони: шаг
+ * «Сертификат» вместо даты и товаров.
  */
-export function wizardSteps(ctx: Pick<BookingFormContext, 'dealId' | 'resourceId'>, groupsCount: number): Step[] {
+export function wizardSteps(
+  ctx: Pick<BookingFormContext, 'dealId' | 'resourceId'>,
+  groupsCount: number,
+  opts: { kinds?: boolean; kind?: DealKind | null } = {},
+): Step[] {
+  const certificate = !!opts.kinds && opts.kind === 'certificate';
   return [
     ...(ctx.dealId ? [] : (['deal'] as const)),
     ...(ctx.resourceId || groupsCount <= 1 ? [] : (['group'] as const)),
-    ...(ctx.resourceId ? [] : (['slot'] as const)),
-    'details' as const,
+    ...(opts.kinds ? (['kind'] as const) : []),
+    ...(certificate ? (['certificate'] as const) : [...(ctx.resourceId ? [] : (['slot'] as const)), 'details' as const]),
   ];
 }
 
@@ -119,18 +156,18 @@ export function BookingForm({
   groups: MyGroupDto[];
   timezone: string;
   context: BookingFormContext;
-  /** paymentMode — чтобы после брони с предоплатой сразу предложить счёт. */
-  onDone: (r: CreateBookingResultDto, paymentMode: PaymentMode | null) => void;
+  /** Создано: бронь или сертификат; `payment` — сразу предложить счёт (у кого есть право). */
+  onDone: (r: WizardResult) => void;
   onClose: () => void;
 }) {
   const allowed = groups.filter((g) => g.permissions.includes('booking.create'));
-  const steps = useMemo(() => wizardSteps(context, allowed.length), [context, allowed.length]);
-  const [step, setStep] = useState<Step>(steps[0]);
-  const stepIndex = steps.indexOf(step);
   const [groupId, setGroupId] = useState(
     () => allowed.find((g) => g.id === context.groupId || (context.resourceId && g.resourceIds.includes(context.resourceId)))?.id ?? allowed[0]?.id ?? '',
   );
   const group = allowed.find((g) => g.id === groupId);
+  // Тип сделки (группы с `dealKinds`): от него — шаги, оплата и обязательные поля.
+  const [kind, setKind] = useState<DealKind | null>(null);
+  const [step, setStep] = useState<Step>(() => wizardSteps(context, allowed.length)[0]);
   const modes = useMemo(() => PAYMENT_MODES.filter((m) => canUsePaymentMode(group?.permissions ?? [], m)), [group]);
   // Календарь мог остаться на прошедшем дне (страницу открыли до полуночи) — бронь начинаем с сегодня.
   const startDay = context.date < todayIn(timezone) ? todayIn(timezone) : context.date;
@@ -151,10 +188,24 @@ export function BookingForm({
       : deals[0]
         ? { mode: 'existing', dealId: deals[0].id }
         : context.contactId
-          ? { mode: 'new', title: context.clientName ?? '' }
+          ? { mode: 'new' }
           : { mode: 'none' },
   );
   const [dealsShown, setDealsShown] = useState(DEALS_STEP);
+  const kindsOn = !!group?.dealKinds && deal.mode !== 'service';
+  const steps = useMemo(() => wizardSteps(context, allowed.length, { kinds: kindsOn, kind }), [context, allowed.length, kindsOn, kind]);
+  const stepIndex = Math.max(0, steps.indexOf(step));
+  // «Бронирование сертификатом»: ссылку на оплату решает менеджер; сумма — «Сумма предоплаты» сделки.
+  const [sendLink, setSendLink] = useState(false);
+  // null — не правили: «Сумма предоплаты» из сделки (если заполнена).
+  const [prepayEdited, setPrepayAmount] = useState<string | null>(null);
+  // «Покупка сертификата»: номинал, бумажный/электронный, на чьё имя, срок (по умолчанию год).
+  const [cert, setCert] = useState<{ nominal: string; kind: CertificateKind; holder: string; validUntil: string }>(() => ({
+    nominal: '',
+    kind: 'electronic',
+    holder: context.clientName ?? '',
+    validUntil: plusMonths(todayIn(timezone), 12),
+  }));
   const [guests, setGuests] = useState('');
   const [comment, setComment] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('prepayment');
@@ -216,6 +267,9 @@ export function BookingForm({
     };
   }, [formKey]);
   const currentForm = formKey && dealForm?.key === formKey ? dealForm : null;
+  // «Сумма предоплаты» существующей сделки — в поле суммы ссылки (менеджер может поправить).
+  const dealPrepay = currentForm?.form?.prepaymentAmount ?? null;
+  const prepayAmount = prepayEdited ?? (dealPrepay ? String(dealPrepay) : '');
   // Тип брони — отдельным выбором (с автоопределением по товарам).
   const createFields = useMemo(() => (currentForm?.form?.fields ?? []).filter((f) => f.showCreate && f.role !== 'bookingType'), [currentForm]);
   const fieldState = useDealFieldValues(createFields, 'create', currentForm ? formKey : '');
@@ -301,26 +355,28 @@ export function BookingForm({
     setBookingTypeId('');
   };
 
-  // Группы, где можно создать именно такую бронь (новая сделка — нужно право на сделки); группа
-  // воронки выбранной сделки — первой.
+  // Группы, где можно создать именно такую бронь (новая сделка — нужно право на сделки) — в порядке
+  // из настроек (⚙ → «Группы», стрелки); группа воронки выбранной сделки только выбирается и помечается.
   const anyNewDeal = allowed.some((g) => g.permissions.includes('deal.create'));
   const chosenDeal = deal.mode === 'existing' ? deals.find((d) => d.id === deal.dealId) : undefined;
   const dealCategory = chosenDeal?.categoryId ?? null;
-  const groupChoices = allowed
-    .filter((g) => deal.mode !== 'new' || g.permissions.includes('deal.create'))
-    .sort((a, b) => Number(b.dealCategoryId === dealCategory) - Number(a.dealCategoryId === dealCategory));
+  const groupChoices = allowed.filter((g) => deal.mode !== 'new' || g.permissions.includes('deal.create'));
   const dealLabel =
-    deal.mode === 'none' ? null : deal.mode === 'service' ? 'служебная' : deal.mode === 'new' ? `новая «${deal.title || '…'}»` : chosenDeal ? `${chosenDeal.title} #${chosenDeal.id}` : `#${deal.dealId}`;
+    deal.mode === 'none' ? null : deal.mode === 'service' ? 'служебная' : deal.mode === 'new' ? 'новая сделка' : chosenDeal ? `${chosenDeal.title} #${chosenDeal.id}` : `#${deal.dealId}`;
 
   /** Почему с шага `s` нельзя идти дальше; null — можно. */
   const blocker = (s: Step): string | null => {
     if (s === 'deal') {
       if (deal.mode === 'none') return 'Выберите сделку, найдите клиента или создайте новую сделку';
-      if (deal.mode === 'new' && !deal.title.trim()) return 'Укажите название новой сделки';
     }
     if (s === 'group' && !groupChoices.some((g) => g.id === groupId)) return 'Выберите группу';
+    if (s === 'kind' && !kind) return 'Выберите тип сделки';
     if (s === 'slot' && !resourceIds.length) return 'Выберите время и ресурс в календаре';
     if (s === 'slot' && pastStart) return PAST_START_ERROR;
+    if (s === 'slot') {
+      const stop = (dayData?.stops ?? []).find((x) => resourceIds.includes(x.resourceId) && Date.parse(x.start) < endMs && Date.parse(x.end) > startMs);
+      if (stop) return `${names.get(stop.resourceId) ?? 'Ресурс'} закрыт (стоп): ${stop.reason}`;
+    }
     return null;
   };
   /**
@@ -356,16 +412,26 @@ export function BookingForm({
     if (prev) setStep(prev);
   };
 
+  // Оплата по типу сделки; без типа — как выбрал менеджер.
+  const effectiveMode: PaymentMode =
+    kindsOn && kind && kind !== 'certificate' ? (kind === 'by_certificate' ? (sendLink ? 'prepayment' : 'certificate') : DEAL_KIND_PAYMENT[kind]) : paymentMode;
+  const typeRequired = !!group?.bookingTypeRequired || (kindsOn && (kind === 'visit' || kind === 'by_certificate') && (group?.bookingTypes ?? []).length > 0);
+
   const values = fieldState.values;
   const submit = async () => {
+    if (kindsOn && kind === 'certificate') return sellCertificate();
     const p = periodToUtc(period, timezone);
     if ('error' in p) return setError(p.error);
     if (!resourceIds.length) return setError('Выберите ресурс');
     if (pastStart) return setError(PAST_START_ERROR);
     if (deal.mode === 'none') return setError('Выберите сделку на первом шаге');
-    if (deal.mode === 'new' && !deal.title.trim()) return setError('Название новой сделки');
+    if (kindsOn && !kind) return setError('Выберите тип сделки');
+    if (deal.mode !== 'service' && !modes.includes(effectiveMode)) return setError(`«${PAYMENT_MODE_LABELS[effectiveMode]}» — нет права в этой группе`);
+    if (kindsOn && typeRequired && !bookingTypeId) return setError('Выберите тип бронирования');
     if (deal.mode === 'new' && group?.bookingTypeRequired && !bookingTypeId && !productRows.length)
       return setError('Выберите тип брони или добавьте товары: у новой сделки ещё нет товаров');
+    if (kindsOn && kind === 'by_certificate' && sendLink && !(Number(prepayAmount.replace(',', '.')) > 0))
+      return setError('Заполните «Сумму предоплаты» — по ней будет ссылка на оплату');
     if (deal.mode !== 'service' && formKey && !currentForm) return setError('Поля сделки ещё загружаются');
     const missing = deal.mode === 'service' ? undefined : createFields.find((f) => f.required && !f.readOnly && !values[f.code]?.trim());
     if (missing) return setError(`Заполните поле «${missing.label}»`);
@@ -382,12 +448,17 @@ export function BookingForm({
         start: p.start,
         end: p.end,
         dealId: deal.mode === 'existing' ? deal.dealId : null,
-        newDeal: deal.mode === 'new' ? { title: deal.title.trim(), contactId: client.contactId } : null,
+        newDeal:
+          deal.mode === 'new'
+            ? { title: newDealTitle(client.name, period.startDate, resourceIds.map((id) => names.get(id) ?? '').filter(Boolean)), contactId: client.contactId }
+            : null,
         contactId: client.contactId,
         guests: !guestsField && guests ? Number(guests) : null,
         comment: commentText || undefined,
-        paymentMode,
+        paymentMode: effectiveMode,
         bookingTypeId: deal.mode === 'service' ? null : bookingTypeId || null,
+        ...(kindsOn && kind && kind !== 'certificate' ? { dealKind: kind } : {}),
+        ...(kindsOn && kind === 'by_certificate' && sendLink ? { prepaymentAmount: Number(prepayAmount.replace(',', '.')) } : {}),
         ...(deal.mode === 'service' ? {} : { dealFields }),
         // Товары — если их меняли (или у новой сделки есть товары по умолчанию): строки сделки заменяются.
         ...(deal.mode !== 'service' && (loadedProducts?.dirty || (deal.mode === 'new' && productRows.length))
@@ -398,9 +469,48 @@ export function BookingForm({
             }
           : {}),
       });
-      onDone(r, deal.mode === 'service' ? null : paymentMode);
+      const mode = deal.mode === 'service' ? null : effectiveMode;
+      onDone({
+        booking: r,
+        dealId: r.dealId,
+        payment: mode === 'prepayment' && r.dealId ? { amount: kind === 'by_certificate' ? Number(prepayAmount.replace(',', '.')) || null : null, fixedDeal: false } : null,
+        note: `Бронь #${r.bookingId} создана${r.dealId ? ` в сделке #${r.dealId}` : ''}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось создать бронь');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** «Покупка сертификата»: сделка + сертификат, затем окно оплаты на весь номинал. */
+  const sellCertificate = async () => {
+    const nominal = Number(cert.nominal.replace(',', '.').replace(/\s/g, ''));
+    if (deal.mode !== 'existing' && deal.mode !== 'new') return setError('Выберите сделку или новую сделку на первом шаге');
+    if (!(nominal > 0)) return setError('Укажите сумму сертификата');
+    if (!cert.holder.trim()) return setError('Укажите, на чьё имя сертификат');
+    if (!cert.validUntil) return setError('Укажите срок действия');
+    setBusy(true);
+    setError('');
+    try {
+      const r = await apiPost<SellCertificateResultDto>('/certificates/sale', {
+        idempotencyKey,
+        groupId,
+        dealId: deal.mode === 'existing' ? deal.dealId : null,
+        newDeal: deal.mode === 'new' ? { title: newDealTitle(client.name, todayIn(timezone), ['сертификат']), contactId: client.contactId } : null,
+        nominal,
+        kind: cert.kind,
+        holderName: cert.holder.trim(),
+        validUntil: cert.validUntil,
+      });
+      onDone({
+        booking: null,
+        dealId: r.dealId,
+        payment: { amount: null, fixedDeal: true },
+        note: `Сертификат №${r.certificate.number} на ${fmtMoney(r.certificate.nominal, 'RUB')} оформлен в сделке #${r.dealId}.${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось оформить сертификат');
     } finally {
       setBusy(false);
     }
@@ -426,7 +536,7 @@ export function BookingForm({
       const r = await apiGet<CrmSearchDto>(`/crm/search?contactId=${c.id}`);
       setDealList(r.deals.map(toCard));
       const open = r.deals.find((d) => !d.closed);
-      pick(open ? { mode: 'existing', dealId: open.id } : anyNewDeal ? { mode: 'new', title: c.name } : { mode: 'service' });
+      pick(open ? { mode: 'existing', dealId: open.id } : anyNewDeal ? { mode: 'new' } : { mode: 'service' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить сделки клиента');
     }
@@ -559,23 +669,23 @@ export function BookingForm({
         </>
       )}
       <div className="bk-choices wz-other">
-        {anyNewDeal &&
-          (deal.mode === 'new' ? (
-            <div className="bk-choice selected bk-new">
-              <span className="bk-dot" aria-hidden="true" />
-              <input
-                aria-label="Название новой сделки"
-                placeholder={client.contactId ? 'Название новой сделки для клиента' : 'Название новой сделки'}
-                value={deal.title}
-                maxLength={255}
-                onChange={(e) => setDeal({ mode: 'new', title: e.target.value })}
-              />
-            </div>
-          ) : (
-            <button type="button" className="bk-choice bk-add-deal" onClick={() => pick({ mode: 'new', title: client.name ?? '' })}>
-              ＋ {client.contactId ? 'Новая сделка для клиента' : 'Новая сделка'}
-            </button>
-          ))}
+        {anyNewDeal && (
+          // Выбор — как карточка сделки; название соберётся при создании (клиент, дата брони, ресурс).
+          <button
+            type="button"
+            role="radio"
+            aria-checked={deal.mode === 'new'}
+            className={`bk-choice bk-add-deal${deal.mode === 'new' ? ' selected' : ''}`}
+            title="Название: имя клиента, дата брони и ресурс"
+            onClick={() => pick({ mode: 'new' })}
+          >
+            <span className="bk-dot" aria-hidden="true" />
+            <span className="wz-deal-main">
+              <b>＋ {client.contactId ? 'Новая сделка для клиента' : 'Новая сделка'}</b>
+              <span className="wz-deal-sub">название — имя клиента, дата брони и ресурс</span>
+            </span>
+          </button>
+        )}
         <button type="button" role="radio" aria-checked={deal.mode === 'service'} className={`bk-service${deal.mode === 'service' ? ' selected' : ''}`} onClick={() => pick({ mode: 'service' })}>
           {deal.mode === 'service' ? '✓ Служебная бронь — без сделки (ремонт, уборка…)' : 'Служебная бронь без сделки'}
         </button>
@@ -600,6 +710,70 @@ export function BookingForm({
     </section>
   );
 
+  const kindStep = (
+    <section className="bk-section">
+      <div className="wz-groups wz-kinds" role="radiogroup" aria-label="Тип сделки">
+        {DEAL_KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={kind === k}
+            className={`wz-group${kind === k ? ' selected' : ''}`}
+            onClick={() => {
+              setKind(k);
+              setError('');
+            }}
+          >
+            <b>{DEAL_KIND_LABELS[k]}</b>
+            <span className="muted">{DEAL_KIND_HINTS[k]}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+
+  const certificateStep = (
+    <section className="bk-section">
+      <div className="df-grid">
+        <div className="df-row pair">
+          <label className="df-field">
+            <span className="df-label">
+              Сумма сертификата, ₽<i className="df-req">*</i>
+            </span>
+            <input inputMode="decimal" autoFocus value={cert.nominal} placeholder="10 000" onChange={(e) => setCert({ ...cert, nominal: e.target.value })} />
+          </label>
+          <div className="df-field">
+            <span className="df-label">Тип сертификата</span>
+            <span className="segmented" role="radiogroup" aria-label="Тип сертификата">
+              {CERTIFICATE_KINDS.map((k) => (
+                <button key={k} type="button" role="radio" aria-checked={cert.kind === k} className={cert.kind === k ? 'active' : ''} onClick={() => setCert({ ...cert, kind: k })}>
+                  {CERTIFICATE_KIND_LABELS[k]}
+                </button>
+              ))}
+            </span>
+          </div>
+        </div>
+        <div className="df-row pair">
+          <label className="df-field">
+            <span className="df-label">
+              На чьё имя<i className="df-req">*</i>
+            </span>
+            <input value={cert.holder} maxLength={255} placeholder="Имя и фамилия" onChange={(e) => setCert({ ...cert, holder: e.target.value })} />
+          </label>
+          <label className="df-field">
+            <span className="df-label">Действителен до</span>
+            <input type="date" value={cert.validUntil} min={todayIn(timezone)} onChange={(e) => setCert({ ...cert, validUntil: e.target.value })} />
+          </label>
+        </div>
+      </div>
+      <p className="cp-hint">
+        Сделка получит тип «Покупка сертификата» и сумму, сертификат появится в 🎟 «Сертификаты» (не оплачен). Дальше — ссылка на оплату всей
+        суммы.
+      </p>
+    </section>
+  );
+
   const slotStep = group ? (
     <SlotPicker group={group} timezone={timezone} period={period} onPeriod={setPeriod} days={dayData} resourceIds={resourceIds} onResources={setResourceIds} />
   ) : null;
@@ -607,23 +781,24 @@ export function BookingForm({
   const detailsStep = (
     <>
       <section className="bk-section">
-        <h4 className="bk-title">Где и когда</h4>
-        <div className="wz-resources" role="radiogroup" aria-label="Ресурс">
-          {(list ?? []).map((r) => {
+        <h4 className="bk-title">
+          Где и когда
+          {steps.includes('slot') && (
+            <button type="button" className="bk-more wz-change" onClick={() => goTo('slot')}>
+              Изменить
+            </button>
+          )}
+        </h4>
+        {/* Только ресурс(ы) этой брони — выбор и смена ресурса на шаге «Дата и ресурс». */}
+        <div className="wz-resources" role="list" aria-label="Ресурс брони">
+          {(list ?? []).filter((r) => resourceIds.includes(r.id)).map((r) => {
             const until = busyUntil(r.id);
             const on = resourceIds.includes(r.id);
             return (
-              <button
-                key={r.id}
-                type="button"
-                role="checkbox"
-                aria-checked={on}
-                className={`wz-resource${on ? ' selected' : ''}${until ? ' busy' : ''}`}
-                onClick={() => setResourceIds(on ? resourceIds.filter((x) => x !== r.id) : [...resourceIds, r.id])}
-              >
+              <span key={r.id} role="listitem" className={`wz-resource${on ? ' selected' : ''}${until ? ' busy' : ''}`}>
                 <b>{r.name}</b>
                 <span className={`wz-res-state${until ? ' busy' : ''}`}>{until ? `занят до ${until}` : 'свободен'}</span>
-              </button>
+              </span>
             );
           })}
           {!list && <p className="cp-hint">Загрузка ресурсов…</p>}
@@ -673,7 +848,7 @@ export function BookingForm({
           <h4 className="bk-title">Бронь и оплата</h4>
           <div className="df-grid">
             <div className="df-row pair">
-              {group && (group.bookingTypes ?? []).length > 0 && (
+              {group && (group.bookingTypes ?? []).length > 0 && !kindsOn && (
                 <label className="df-field">
                   <span className="df-label">
                     Тип брони{group.bookingTypeRequired && <i className="df-req">*</i>}
@@ -682,24 +857,74 @@ export function BookingForm({
                     {!(group.bookingTypeRequired && deal.mode === 'new' && !productRows.length) && <option value="">По товарам сделки</option>}
                     {group.bookingTypeRequired && deal.mode === 'new' && !productRows.length && !bookingTypeId && <option value="">Выберите…</option>}
                     {(group.bookingTypes ?? []).map((t) => (
-                      <option key={t.id} value={t.id}>
+                      <option key={t.id} value={t.id} disabled={t.unavailable}>
                         {t.title}
+                        {t.unavailable ? ' — сейчас недоступен' : ''}
                       </option>
                     ))}
                   </select>
                 </label>
               )}
-              <label className="df-field">
-                <span className="df-label">Оплата</span>
-                <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
-                  {modes.map((m) => (
-                    <option key={m} value={m}>
-                      {PAYMENT_MODE_LABELS[m]}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {kindsOn && kind ? (
+                <div className="df-field">
+                  <span className="df-label">Оплата</span>
+                  <span className="wz-pay-mode">{PAYMENT_MODE_LABELS[effectiveMode]}</span>
+                </div>
+              ) : (
+                <label className="df-field">
+                  <span className="df-label">Оплата</span>
+                  <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
+                    {modes.map((m) => (
+                      <option key={m} value={m}>
+                        {PAYMENT_MODE_LABELS[m]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
+            {/* Тип бронирования по типу сделки — карточками; недоступный (Теремок) виден, но не выбирается. */}
+            {kindsOn && group && (group.bookingTypes ?? []).length > 0 && (
+              <div className="df-field">
+                <span className="df-label">
+                  Тип бронирования{typeRequired && <i className="df-req">*</i>}
+                </span>
+                <span className="wz-types" role="radiogroup" aria-label="Тип бронирования">
+                  {(group.bookingTypes ?? []).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={bookingTypeId === t.id}
+                      disabled={t.unavailable}
+                      title={t.unavailable ? 'Сейчас недоступен для бронирования' : undefined}
+                      className={`wz-type${bookingTypeId === t.id ? ' selected' : ''}`}
+                      onClick={() => setBookingTypeId(bookingTypeId === t.id && !typeRequired ? '' : t.id)}
+                    >
+                      {t.title}
+                      {t.unavailable && <small> · недоступен</small>}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            )}
+            {kindsOn && kind === 'by_certificate' && (
+              <div className="wz-link-choice">
+                <label className="wz-check">
+                  <input type="checkbox" checked={sendLink} onChange={(e) => setSendLink(e.target.checked)} />
+                  Отправить клиенту ссылку на оплату (доплата сверх сертификата)
+                </label>
+                {sendLink && (
+                  <label className="df-field">
+                    <span className="df-label">
+                      Сумма предоплаты, ₽<i className="df-req">*</i>
+                    </span>
+                    <input inputMode="decimal" value={prepayAmount} placeholder="заполните перед отправкой ссылки" onChange={(e) => setPrepayAmount(e.target.value)} />
+                    {!prepayAmount && <span className="cp-hint error">В сделке «Сумма предоплаты» не заполнена — укажите её, она уйдёт в ссылку.</span>}
+                  </label>
+                )}
+              </div>
+            )}
             {!guestsField && (
               <div className="df-row pair">
                 <label className="df-field">
@@ -741,15 +966,18 @@ export function BookingForm({
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          if (step === 'details') void submit();
+          if (step === steps[steps.length - 1]) void submit();
           else goNext();
         }}
       >
         <header className="bk-head">
           <div>
             <h3>Новая бронь</h3>
-            <span className="bk-sub">{[group?.name, client.name, deal.mode !== 'new' || step !== 'deal' ? dealLabel : null].filter(Boolean).join(' · ')}</span>
+            <span className="bk-sub">
+              {[group?.name, kindsOn && kind ? DEAL_KIND_LABELS[kind] : null, client.name, deal.mode !== 'new' || step !== 'deal' ? dealLabel : null].filter(Boolean).join(' · ')}
+            </span>
           </div>
+          <MinimizeButton label="Новая бронь" />
           <button type="button" className="bk-close" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
@@ -777,6 +1005,8 @@ export function BookingForm({
             <>
               {step === 'deal' && dealStep}
               {step === 'group' && groupStep}
+              {step === 'kind' && kindStep}
+              {step === 'certificate' && certificateStep}
               {step === 'slot' && slotStep}
               {step === 'details' && detailsStep}
               {error && (
@@ -801,7 +1031,7 @@ export function BookingForm({
               </button>
               {step !== 'slot' && (
                 <button type="submit" className="primary" disabled={busy}>
-                  {step !== 'details' ? 'Далее' : busy ? 'Создаю…' : 'Создать бронь'}
+                  {step !== steps[steps.length - 1] ? 'Далее' : busy ? 'Создаю…' : step === 'certificate' ? 'Оформить сертификат' : 'Создать бронь'}
                 </button>
               )}
               {step === 'slot' && resourceIds.length > 0 && (
@@ -824,6 +1054,12 @@ export function BookingForm({
       </form>
     </div>
   );
+}
+
+/** Название новой сделки (решение владельца 2026-10-23): «Имя клиента 25.10.2026 Баня 1». */
+export function newDealTitle(client: string | null | undefined, date: string, resources: string[]): string {
+  const day = date ? `${date.slice(8, 10)}.${date.slice(5, 7)}.${date.slice(0, 4)}` : '';
+  return [client?.trim() || 'Новая сделка', day, resources.join(', ')].filter(Boolean).join(' ').slice(0, 255);
 }
 
 const toCard = (d: CrmDealHit): DealCard => ({
@@ -901,5 +1137,6 @@ function datesBetween(from: string, to: string): string[] {
 function mergeDays(list: CalendarDay[]): CalendarDay {
   const bookings = new Map(list.flatMap((d) => d.bookings).map((b) => [b.id, b]));
   const tech = new Map(list.flatMap((d) => d.techWindows).map((t) => [`${t.resourceId}:${t.start}`, t]));
-  return { ...list[0], bookings: [...bookings.values()], techWindows: [...tech.values()] };
+  const stops = new Map(list.flatMap((d) => d.stops ?? []).map((s) => [s.id, s]));
+  return { ...list[0], bookings: [...bookings.values()], techWindows: [...tech.values()], stops: [...stops.values()] };
 }
