@@ -18,6 +18,7 @@ export * from './certificates.js';
 export * from './deal-status.js';
 export * from './calls.js';
 export * from './dashboard-layout.js';
+export * from './deal-kanban.js';
 export * from './messengers.js';
 
 export * from './phones.js';

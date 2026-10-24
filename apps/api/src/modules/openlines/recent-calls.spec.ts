@@ -1,4 +1,5 @@
 import { DashboardService } from './dashboard.service.js';
+import { CallExclusionsService } from './call-exclusions.service.js';
 import type { CallActivity } from './call-stats.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { ChatsService } from './chats.service.js';
@@ -31,6 +32,21 @@ describe('Однострочные звонки: участники, линия,
     expect(r.items.some((c) => c.activityId === 999)).toBe(false);
     expect(t.client.call).toHaveBeenCalledWith('crm.activity.list', expect.objectContaining({ filter: expect.objectContaining({ RESPONSIBLE_ID: 7, '>=START_TIME': '2026-10-21T21:00:00.000Z', '<START_TIME': '2026-10-22T21:00:00.000Z' }) }));
     expect(t.client.listAll).toHaveBeenCalledWith('voximplant.statistic.get', expect.objectContaining({ FILTER: { CRM_ACTIVITY_ID: [2, 1] } }), { max: 200 });
+  });
+  it('исключённый из статистики звонок (внутренний тест) не виден в списке и не упущенный', async () => {
+    const t = setup();
+    const exclusions = new CallExclusionsService({ callExclusion: { findMany: vi.fn(async () => [{ activityId: 2 }]) } } as never);
+    const svc = new DashboardService(t.chats as unknown as ChatsService, {} as BookingJournalService, undefined, undefined, undefined, undefined, exclusions);
+    const r = await svc.recentCalls(t.user, { from: '2026-10-22', to: '2026-10-22', scope: 'mine' });
+    expect(r.items.map((c) => c.activityId)).toEqual([1]);
+    expect((await svc.fetchCalls(t.user, new Date('2026-10-22T00:00:00Z'))).rows.map((c) => c.ID)).toEqual(['1', '3']);
+  });
+  it('исключение — только с причиной, повтор обновляет причину', async () => {
+    const upsert = vi.fn(async () => ({}));
+    const svc = new CallExclusionsService({ callExclusion: { upsert } } as never);
+    await expect(svc.exclude('p1', 7, 2, '  ')).rejects.toMatchObject({ status: 400 });
+    await svc.exclude('p1', 7, 2, ' Внутренний тест ');
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { portalId_activityId: { portalId: 'p1', activityId: 2 } }, create: expect.objectContaining({ reason: 'Внутренний тест' }) }));
   });
   it('неудачный исходящий после пропущенного оставляет строку упущенной', async () => {
     const t = setup(); const original = t.client.listAll.getMockImplementation()!;

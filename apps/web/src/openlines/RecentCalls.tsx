@@ -2,7 +2,8 @@ import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { BlockLoading } from '../dashboard/BlockLoading.js';
 import { useState } from 'react';
 import { type CallLogRowDto, type CallScope, type RecentCallsDto, todayIn } from '@btx24/shared';
-import { useDashboardQuery } from '../dashboard/DashboardSync.js';
+import { useDashboardQuery, useDashboardRefreshAll } from '../dashboard/DashboardSync.js';
+import { apiPost } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtTime, fmtDate, fmtDateTime, shiftDate } from '../format.js';
 import { Avatar } from './Avatar.js';
@@ -63,7 +64,8 @@ export function callTimeText(at: string, timezone: string, from: string, to: str
  * длительность разговора; цвета — только те, что есть за период, нажатие на цвет оставляет только эту
  * категорию (ещё раз — все); время слева от кнопок: сегодня — ЧЧ:ММ, вчера — с подписью, иначе с датой. Кнопки — последняя сделка и чат клиента внутри приложения.
  */
-export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: CallScope; timezone: string; from: string; to: string; onOpenChat: (chatId: number) => void }) {
+export function RecentCalls({ scope, timezone, from, to, onOpenChat, total, canExclude = false }: { scope: CallScope; timezone: string; from: string; to: string; onOpenChat: (chatId: number) => void; total?: number | null; canExclude?: boolean }) {
+  const [excluding, setExcluding] = useState<CallLogRowDto | null>(null);
   const { data, error } = useDashboardQuery<RecentCallsDto>(`/dashboard/recent-calls?scope=${scope}&from=${from}&to=${to}`);
   const [filter, setFilter] = useState<{ key: string; tone: CallTone } | null>(null);
   const base = `${scope}|${from}|${to}`;
@@ -83,7 +85,11 @@ export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: 
   return (
     <section className="day-panel dash-block dash-recent-calls">
       <DashBadge name="phone" />
-      <p className="dash-attention-title muted">Звонки</p>
+      <p className="dash-attention-title muted">
+        Звонки
+        {/* Всего за период (по «Все / Мои»), а не только загруженные в блок последние. */}
+        {(total ?? all?.length) != null && <span className="pill" title="Всего звонков за период">{total ?? all!.length}</span>}
+      </p>
       {legend.length > 0 && (
         <div className="color-legend block call-filter" role="group" aria-label="Категории звонков: показать только выбранную">
           {legend.map((l) => (
@@ -121,6 +127,7 @@ export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: 
                 <span className="call-party"><Avatar src={c.employee?.photo} name={employeeName} size={24} /><span className="call-party-name" title={employeeName}>{employeeName}</span></span>
                 <time className="attention-time call-inline-time" dateTime={c.at} title={fmtDateTime(c.at, timezone)}>{callTimeText(c.at, timezone, from, to)}</time>
                 <span className="call-inline-actions">
+                  {canExclude && (tone === 'missed' || tone === 'lost') && <button type="button" className="dash-icon-btn" aria-label="Исключить из статистики" title="Исключить из статистики (внутренний тест, ошибочный звонок)" onClick={() => setExcluding(c)}><Icon name="close" size={16} /></button>}
                   {c.latestDealId && <button type="button" className="dash-icon-btn" aria-label="Открыть сделку" title="Последняя созданная сделка клиента" onClick={() => openCrm('deal', c.latestDealId!)}><Icon name="handshake" size={18} /></button>}
                   {!c.latestChatId && c.clientPhone && <MessengerSearchButton phone={c.clientPhone} timezone={timezone} onOpenChat={onOpenChat} />}
                   {c.latestChatId && <button type="button" className="dash-icon-btn" aria-label="Перейти в чат" title="Чат клиента с последней активностью" onClick={() => onOpenChat(c.latestChatId!)}><Icon name="chat" size={18} /></button>}
@@ -131,6 +138,7 @@ export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: 
         })}
       </ul></div>
       {items && <ListMore total={items.length} shown={shown} step={STEP} onShow={(n) => setMore({ key, n })} />}
+      {excluding && <ExcludeCallDialog call={excluding} timezone={timezone} onClose={() => setExcluding(null)} />}
     </section>
   );
 }
@@ -141,5 +149,51 @@ export function DashBadge({ name }: { name: Parameters<typeof Icon>[0]['name'] }
     <span className="dash-badge" aria-hidden="true">
       <Icon name={name} size={20} />
     </span>
+  );
+}
+
+/** Исключить звонок из статистики (только администратор приложения): причина обязательна. */
+function ExcludeCallDialog({ call, timezone, onClose }: { call: CallLogRowDto; timezone: string; onClose: () => void }) {
+  const [reason, setReason] = useState('Внутренний тест');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const refreshAll = useDashboardRefreshAll();
+  const name = call.contact?.name || call.clientPhone || 'клиент';
+  const submit = () => {
+    setBusy(true);
+    setError('');
+    apiPost(`/dashboard/calls/${call.activityId}/exclude`, { reason }).then(
+      () => {
+        refreshAll();
+        onClose();
+      },
+      (e) => {
+        setError(e instanceof Error ? e.message : 'Не получилось');
+        setBusy(false);
+      },
+    );
+  };
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <form className="sheet exclude-call" role="dialog" aria-modal="true" aria-label="Исключить звонок из статистики" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <header>
+          <h2>Исключить звонок из статистики</h2>
+          <button type="button" aria-label="Закрыть" onClick={onClose}>×</button>
+        </header>
+        <p>
+          {callTypeLabel(call)} от «{name}», {fmtDateTime(call.at, timezone)}. Звонок не будет считаться в показателях, упущенных и
+          списках звонков. В Битрикс24 он не меняется.
+        </p>
+        <label className="field">
+          Причина
+          <input value={reason} maxLength={500} required autoFocus onChange={(e) => setReason(e.target.value)} />
+        </label>
+        {error && <p className="notice error" role="alert">{error}</p>}
+        <footer className="sheet-actions">
+          <button type="button" onClick={onClose}>Отмена</button>
+          <button type="submit" className="primary" disabled={busy || !reason.trim()}>Исключить</button>
+        </footer>
+      </form>
+    </div>
   );
 }

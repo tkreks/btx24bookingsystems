@@ -41,6 +41,7 @@ export const DASHBOARD_BLOCK_TYPES = [
   'certificates',
   'stops',
   'messengers',
+  'kpiGrid',
 ] as const;
 export type DashboardBlockType = (typeof DASHBOARD_BLOCK_TYPES)[number];
 
@@ -85,6 +86,7 @@ export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = 
   alerts: { title: 'Уведомления о бронях', hint: 'новые уведомления: расхождения с Битрикс24, найденные брони', group: 'Контроль', width: 'quarter' },
   certificates: { title: 'Сертификаты', hint: 'новые, срок прошёл — погасить', group: 'Контроль', width: 'quarter' },
   stops: { title: 'Стопы ресурсов', hint: 'ресурсы, закрытые для бронирования', group: 'Контроль', width: 'half' },
+  kpiGrid: { title: 'Показатели (таблица)', hint: 'до 6 чисел на выбор: сделки, оплаты, брони, звонки; по числу — канбан сделок', group: 'Показатели', width: 'half' },
   messengers: { title: 'Мессенджеры', hint: 'номера ваших групп: работают или с ошибкой; экран мессенджера и файлы для отправки', group: 'Контроль', width: 'quarter' },
 };
 
@@ -95,6 +97,66 @@ export interface DashboardBlock {
   width: BlockWidth;
   /** Высота в рядах сетки: 2 — блок на высоту двух рядов (по умолчанию 1). */
   rows?: 1 | 2;
+  /** Только у `kpiGrid`: таблица показателей. */
+  kpi?: KpiGridConfig;
+}
+
+/** Показатели для составного блока (числа дашборда за период; по числу — канбан сделок). */
+export const KPI_METRICS = [
+  'newDeals',
+  'repeatDeals',
+  'paidDeals',
+  'bookingsToday',
+  'bookingsTomorrow',
+  'newBookings',
+  'removedBookings',
+  'callsIncoming',
+  'callsNew',
+  'callsAnswered',
+  'callsMissed',
+  'callsLost',
+] as const;
+export type KpiMetric = (typeof KPI_METRICS)[number];
+export const KPI_METRIC_LABELS: Record<KpiMetric, string> = {
+  newDeals: 'Новые сделки',
+  repeatDeals: 'Сделки повторных клиентов',
+  paidDeals: 'Оплаченные сделки',
+  bookingsToday: 'Брони сегодня',
+  bookingsTomorrow: 'Брони завтра',
+  newBookings: 'Новые бронирования',
+  removedBookings: 'Удалённые бронирования',
+  callsIncoming: 'Входящие звонки',
+  callsNew: 'Уникальные клиенты',
+  callsAnswered: 'Отвеченные звонки',
+  callsMissed: 'Пропущенные звонки',
+  callsLost: 'Упущенные звонки',
+};
+
+/** Таблица до 6 ячеек: столбцы × строки (1–3 × 1–3). `items` — по строкам, слева направо. */
+export interface KpiGridConfig {
+  cols: 1 | 2 | 3;
+  rows: 1 | 2 | 3;
+  items: KpiMetric[];
+}
+export const KPI_GRID_SIZES: { cols: 1 | 2 | 3; rows: 1 | 2 | 3 }[] = [
+  { cols: 1, rows: 1 },
+  { cols: 2, rows: 1 },
+  { cols: 1, rows: 2 },
+  { cols: 3, rows: 1 },
+  { cols: 1, rows: 3 },
+  { cols: 2, rows: 2 },
+  { cols: 3, rows: 2 },
+  { cols: 2, rows: 3 },
+];
+export const DEFAULT_KPI_GRID: KpiGridConfig = { cols: 3, rows: 2, items: ['newDeals', 'paidDeals', 'bookingsToday', 'callsIncoming', 'callsMissed', 'callsLost'] };
+
+/** Привести настройки к размеру таблицы: лишние ячейки отбросить, недостающие заполнить по порядку. */
+export function normalizeKpiGrid(c: KpiGridConfig | undefined): KpiGridConfig {
+  const size = KPI_GRID_SIZES.find((s) => s.cols === c?.cols && s.rows === c?.rows) ?? { cols: DEFAULT_KPI_GRID.cols, rows: DEFAULT_KPI_GRID.rows };
+  const n = size.cols * size.rows;
+  const items = (c?.items ?? DEFAULT_KPI_GRID.items).filter((m) => (KPI_METRICS as readonly string[]).includes(m)).slice(0, n);
+  for (const m of [...DEFAULT_KPI_GRID.items, ...KPI_METRICS]) if (items.length < n && !items.includes(m)) items.push(m);
+  return { ...size, items };
 }
 
 /** `GET/PUT /api/dashboard/layout` */

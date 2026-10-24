@@ -45,6 +45,8 @@ const PATHS = {
   play: 'M7 4.5v15l12-7.5Z',
   pause: 'M8 5v14M16 5v14',
   stop: 'M6 6h12v12H6Z',
+  // Заменить блок дашборда: стрелки в разные стороны.
+  swap: 'M12 3v18M3 12h18M12 3 9 6m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3',
 } as const;
 
 export type IconName = keyof typeof PATHS;

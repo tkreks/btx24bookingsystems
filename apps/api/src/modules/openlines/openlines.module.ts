@@ -12,6 +12,8 @@ import { ChatFoldersService } from './chat-folders.service.js';
 import { ChatsService } from './chats.service.js';
 import { DashboardGapsController, DashboardGapsService } from './dashboard-gaps.service.js';
 import { DashboardService } from './dashboard.service.js';
+import { CallExclusionsService } from './call-exclusions.service.js';
+import { DealKanbanService } from './deal-kanban.service.js';
 import { FilesService } from './files.service.js';
 import { OpenlineIndexService } from './openline-index.service.js';
 import { OpenlinesController } from './openlines.controller.js';
@@ -21,6 +23,6 @@ import { HeadDashboardService } from './head-dashboard.service.js';
 @Module({
   imports: [AccessModule, BookingsModule, Bitrix24Module, CrmMirrorModule],
   controllers: [DashboardGapsController, OpenlinesController, CallsController],
-  providers: [DashboardGapsService, ActivityService, ClientTimelineService, CallCardService, DashboardLayoutService, ChatFoldersService, ChatsService, DashboardService, FilesService, HeadDashboardService, OpenlineIndexService, TemplatesService],
+  providers: [CallExclusionsService, DealKanbanService, DashboardGapsService, ActivityService, ClientTimelineService, CallCardService, DashboardLayoutService, ChatFoldersService, ChatsService, DashboardService, FilesService, HeadDashboardService, OpenlineIndexService, TemplatesService],
 })
 export class OpenlinesModule {}

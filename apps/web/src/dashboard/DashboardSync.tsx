@@ -47,6 +47,11 @@ export function useDashboardQuery<T>(path: string | null, loader?: () => Promise
   const refresh = useCallback(() => path ? store.refresh(path) : Promise.resolve(), [store, path]);
   return { ...result, refresh };
 }
+/** Обновить все блоки дашборда (после действия, меняющего несколько показателей). */
+export function useDashboardRefreshAll() {
+  const store = useContext(Context);
+  return useCallback(() => store?.refreshActive(true), [store]);
+}
 export function DashboardSyncStatus() {
   const store = useContext(Context); if (!store) throw new Error('Missing dashboard sync');
   const state = useSyncExternalStore(store.subscribeSync, store.syncSnapshot);

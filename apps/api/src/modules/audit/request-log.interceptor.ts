@@ -56,6 +56,8 @@ const LABELS: Record<string, string> = {
  * шаблонов ничего не меняют.
  */
 const SKIP = new Set([
+  'POST /api/dashboard/calls/:activityId/exclude',
+  'DELETE /api/dashboard/calls/:activityId/exclude',
   'POST /api/activity/enter',
   'POST /api/activity/error',
   'PUT /api/admin/groups-order',

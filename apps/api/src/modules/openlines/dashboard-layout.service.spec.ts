@@ -20,6 +20,21 @@ function setup() {
 const user = (userId = 7) => ({ portal: { id: 'p1' }, userId }) as unknown as B24UserContext;
 
 describe('DashboardLayoutService', () => {
+  it('таблица показателей: до 6 ячеек по размеру, только у своего блока', async () => {
+    const t = setup();
+    const saved = await t.svc.save(user(), false, {
+      blocks: [
+        { id: 'k', type: 'kpiGrid', width: 'half', kpi: { cols: 2, rows: 1, items: ['callsLost', 'paidDeals', 'newDeals'] } },
+        { id: 'd', type: 'deals', width: 'half', kpi: { cols: 1, rows: 1, items: ['newDeals'] } },
+      ],
+    });
+    expect(saved.blocks).toEqual([
+      { id: 'k', type: 'kpiGrid', width: 'half', kpi: { cols: 2, rows: 1, items: ['callsLost', 'paidDeals'] } },
+      { id: 'd', type: 'deals', width: 'half' },
+    ]);
+    await expect(t.svc.save(user(), false, { blocks: [{ id: 'k', type: 'kpiGrid', width: 'half', kpi: { cols: 4, rows: 2, items: [] } }] })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('по умолчанию — дашборд менеджера; своя раскладка — у каждого своя; повтор типа отбрасывается', async () => {
     const t = setup();
     expect(await t.svc.get(user(), false)).toEqual({ blocks: DEFAULT_DASHBOARD, isDefault: true });

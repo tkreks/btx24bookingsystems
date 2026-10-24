@@ -10,6 +10,7 @@ import {
 } from '@btx24/shared';
 import { MinimizeButton } from '../Minimize.js';
 import { BlockSync } from './DashboardSync.js';
+import { Icon } from '../openlines/icons.js';
 import { replaceBlock } from './replace-block.js';
 
 const WIDTH_ICONS: Record<BlockWidth, string> = { sixth: '⅙', fifth: '⅕', quarter: '¼', third: '⅓', half: '½', full: '▭' };
@@ -27,7 +28,6 @@ export function BlockGrid({
   render,
   sources,
   onChange,
-  onCommit,
 }: {
   blocks: DashboardBlock[];
   editing: boolean;
@@ -37,8 +37,6 @@ export function BlockGrid({
   /** Запросы страницы, из которых блок взял данные — подпись «из кэша / обновлено». */
   sources?: (b: DashboardBlock) => string[];
   onChange: (blocks: DashboardBlock[]) => void;
-  /** Сохранить сразу (замена блока вне режима настройки). */
-  onCommit?: (blocks: DashboardBlock[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [replacing, setReplacing] = useState<DashboardBlock | null>(null);
@@ -110,15 +108,13 @@ export function BlockGrid({
                   >
                     ↕
                   </button>
+                  <button type="button" className="dash-cell-swap" aria-label={`Заменить блок «${DASHBOARD_BLOCKS[b.type].title}»`} title="Заменить на другой блок или поменять местами" onClick={() => setReplacing(b)}>
+                    <Icon name="swap" size={16} />
+                  </button>
                   <button type="button" className="dash-cell-remove" aria-label="Убрать блок" title="Убрать с дашборда" onClick={() => onChange(blocks.filter((x) => x.id !== b.id))}>
                     ×
                   </button>
                 </div>
-              )}
-              {(editing || onCommit) && (
-                <button type="button" className="dash-cell-edit" aria-label={`Заменить блок «${DASHBOARD_BLOCKS[b.type].title}»`} title="Заменить на другой блок" onClick={() => setReplacing(b)}>
-                  ✎
-                </button>
               )}
               <div className="dash-cell-body">{content ? <BlockSync paths={sources?.(b)}>{content}</BlockSync> : <p className="muted dash-cell-empty">Блок недоступен: нет прав или данных.</p>}</div>
             </div>
@@ -139,7 +135,7 @@ export function BlockGrid({
           onPick={(type) => {
             const next = replaceBlock(blocks, replacing.id, type);
             setReplacing(null);
-            (editing || !onCommit ? onChange : onCommit)(next);
+            onChange(next);
           }}
         />
       )}

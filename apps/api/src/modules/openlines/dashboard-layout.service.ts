@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { allowedBlocks, BLOCK_WIDTHS, DEFAULT_DASHBOARD, type DashboardBlock, type DashboardLayoutDto } from '@btx24/shared';
+import { allowedBlocks, BLOCK_WIDTHS, DEFAULT_DASHBOARD, KPI_METRICS, normalizeKpiGrid, type DashboardBlock, type DashboardLayoutDto } from '@btx24/shared';
 import { z } from 'zod';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -28,7 +28,8 @@ export class DashboardLayoutService {
     const schema = z
       .object({
         blocks: z
-          .array(z.object({ id: z.string().min(1).max(40), type: z.enum(allowed as [string, ...string[]]), width: z.enum(BLOCK_WIDTHS), rows: z.union([z.literal(1), z.literal(2)]).optional() }).strict())
+          .array(z.object({ id: z.string().min(1).max(40), type: z.enum(allowed as [string, ...string[]]), width: z.enum(BLOCK_WIDTHS), rows: z.union([z.literal(1), z.literal(2)]).optional(),
+            kpi: z.object({ cols: z.union([z.literal(1), z.literal(2), z.literal(3)]), rows: z.union([z.literal(1), z.literal(2), z.literal(3)]), items: z.array(z.enum(KPI_METRICS)).max(6) }).strict().optional() }).strict())
           .max(MAX_BLOCKS),
       })
       .strict();
@@ -36,7 +37,10 @@ export class DashboardLayoutService {
     if (!p.success) throw new BadRequestException({ code: 'INVALID_LAYOUT', message: 'Неверная раскладка дашборда (или блок недоступен)' });
     // Один тип — один раз (первый остаётся).
     const seen = new Set<string>();
-    const blocks = (p.data.blocks as DashboardBlock[]).filter((b) => (seen.has(b.type) ? false : (seen.add(b.type), true)));
+    const blocks = (p.data.blocks as DashboardBlock[])
+      .filter((b) => (seen.has(b.type) ? false : (seen.add(b.type), true)))
+      // Таблица показателей — только у своего блока и в пределах размера (до 6 ячеек).
+      .map(({ kpi, ...b }) => (b.type === 'kpiGrid' ? { ...b, kpi: normalizeKpiGrid(kpi) } : b));
     await this.prisma.dashboardLayout.upsert({
       where: { portalId_userId: { portalId: user.portal.id, userId: user.userId } },
       create: { portalId: user.portal.id, userId: user.userId, blocks: blocks as unknown as Prisma.InputJsonValue },

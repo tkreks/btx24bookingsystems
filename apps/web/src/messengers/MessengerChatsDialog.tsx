@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { normalizeMessengerPhone, type MessengerClientContextDto, type MessengerChatDto, type MessengerDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
+import { MESSENGER_KINDS, normalizeMessengerPhone, type MessengerClientContextDto, type MessengerChatDto, type MessengerDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
 import { apiBlob, apiDelete, apiGet, apiPost, apiPostForm, apiPut } from '../api.js';
 import { fmtDateTime } from '../format.js';
 import { MessengerThread, type ThreadApi } from './MessengerThread.js';
@@ -158,7 +158,7 @@ export function MessengerChatsDialog({ messenger, timezone, onClose, admin = tru
             </div>}
 
             {api ? (
-              <MessengerThread key={`${current}:${view}`} api={api} timezone={timezone} kind={messenger.kind} canSend={!!ctx && !ctx.needsChoice && !choosing && (view === 'all' || view === (ctx.activeDealId == null ? 'general' : String(ctx.activeDealId))) && (admin ? messenger.state === 'ready' : true)} label="WhatsApp" />
+              <MessengerThread key={`${current}:${view}`} api={api} timezone={timezone} kind={messenger.kind} canSend={!!ctx && !ctx.needsChoice && !choosing && (view === 'all' || view === (ctx.activeDealId == null ? 'general' : String(ctx.activeDealId))) && (admin ? messenger.state === 'ready' : true)} label={MESSENGER_KINDS.find((k) => k.kind === messenger.kind)?.label ?? messenger.kind} />
             ) : (
               <p className="muted pad">Выберите чат слева.</p>
             )}

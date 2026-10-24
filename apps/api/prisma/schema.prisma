@@ -79,6 +79,7 @@ model Portal {
   messengers           Messenger[]
   workdayStates        WorkdayState[]
   workdayEvents        WorkdayEvent[]
+  callExclusions       CallExclusion[]
 }
 
 enum PortalStatus {
@@ -1252,4 +1253,21 @@ model WorkdayEvent {
   at       DateTime @db.DateTime(3)
 
   @@index([portalId, userId, at])
+}
+
+// ---------- Звонки: исключённые из статистики ----------
+
+/// Звонок, исключённый из статистики дашборда (внутренний тест и т. п.): не считается в показателях,
+/// упущенных и списках звонков. Решение администратора приложения — с причиной.
+model CallExclusion {
+  id         String   @id @default(cuid())
+  portalId   String
+  portal     Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  /// ID дела CRM звонка (crm.activity, VOXIMPLANT_CALL).
+  activityId Int
+  reason     String   @db.VarChar(500)
+  userId     Int
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([portalId, activityId])
 }

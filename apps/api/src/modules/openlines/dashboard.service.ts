@@ -32,6 +32,7 @@ import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { callClients, reachedInChat, type ChatReach, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
 import { callClientLinks } from './call-client-links.js';
+import { CallExclusionsService } from './call-exclusions.service.js';
 import { CrmMirrorReader } from '../crm-mirror/crm-mirror.reader.js';
 
 const DAY_MS = 86_400_000;
@@ -54,7 +55,13 @@ export class DashboardService {
     private readonly statuses?: DealStatusService,
     /** Копия CRM (ADR 0013): когда загружена — сделки, звонки, клиенты и сотрудники из неё, с проверкой прав. */
     private readonly mirror?: CrmMirrorReader,
+    /** Исключённые из статистики звонки (внутренние тесты) — во всех показателях и списках. */
+    private readonly exclusions?: CallExclusionsService,
   ) {}
+
+  private withoutExcluded<T extends { ID: string | number }>(user: B24UserContext, rows: T[]): Promise<T[]> {
+    return this.exclusions ? this.exclusions.filter(user.portal.id, rows) : Promise.resolve(rows);
+  }
 
   /** Сделки — из копии, если она загружена и в ней есть `fields`; иначе — портал, как раньше. */
   private async mirrorDeals(user: B24UserContext, fields: string[] = []): Promise<CrmMirrorReader | null> {
@@ -278,7 +285,7 @@ export class DashboardService {
       order: { START_TIME: 'DESC' },
       select: ['ID', 'OWNER_ID', 'OWNER_TYPE_ID', 'DIRECTION', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'SETTINGS', 'COMMUNICATIONS'],
     });
-    const rows = [...(res.result ?? [])].sort((a, b) => Date.parse(b.START_TIME) - Date.parse(a.START_TIME) || Number(b.ID) - Number(a.ID));
+    const rows = (await this.withoutExcluded(user, [...(res.result ?? [])])).sort((a, b) => Date.parse(b.START_TIME) - Date.parse(a.START_TIME) || Number(b.ID) - Number(a.ID));
     const [items, lost] = await Promise.all([this.logRows(user, rows), this.lostCallIds(user, rows)]);
     const linked = await callClientLinks(user, this.chats, items, canReadChats);
     return { scope, ...(period ? { from: period.from, to: period.to } : {}), items: linked.map((c) => ({ ...c, lost: lost.has(c.activityId) })) };
@@ -649,7 +656,7 @@ export class DashboardService {
     const mirror = await this.mirrorCalls(user);
     if (mirror) {
       const r = await mirror.calls(user, { from: start, to: end }, MAX_CALLS);
-      return { rows: r.rows as unknown as CallActivity[], truncated: r.truncated };
+      return { rows: await this.withoutExcluded(user, r.rows as unknown as CallActivity[]), truncated: r.truncated };
     }
     const rows = await user.client.listAll<CallActivity>(
       'crm.activity.list',
@@ -664,7 +671,7 @@ export class DashboardService {
       },
       { max: MAX_CALLS },
     );
-    return { rows, truncated: rows.length >= MAX_CALLS };
+    return { rows: await this.withoutExcluded(user, rows), truncated: rows.length >= MAX_CALLS };
   }
 
   /** Названия сделок, лидов, контактов и компаний звонков — одним пакетом, правами пользователя. */

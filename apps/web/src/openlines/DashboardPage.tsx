@@ -25,6 +25,7 @@ import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
 import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
 import { MessengersBlock } from '../dashboard/MessengersBlock.js';
+import { KpiGridBlock } from '../dashboard/KpiGridBlock.js';
 import { WorkdayControls } from '../workday/WorkdayControls.js';
 import { MyActivityBlock } from '../dashboard/MyActivityBlock.js';
 import { ActionLogBlock, AlertsBlock, CertificatesBlock, DealGapsBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
@@ -171,6 +172,7 @@ export function DashboardPage({
       type === 'attention' ? [paths.chats]
       : type === 'bookingDays' || type === 'todayBookings' || type === 'newBookings' || type === 'removedBookings' ? [paths.base]
       : type === 'callsTotal' ? [paths.calls]
+      : type === 'kpiGrid' ? [paths.base, paths.calls, paths.deals]
       : type === 'newDeals' || type === 'repeatClients' || type === 'deals' || type === 'dealSources' ? [paths.deals]
       : (HEAD_BLOCKS as readonly string[]).includes(type) ? [headPath]
       : [];
@@ -178,7 +180,7 @@ export function DashboardPage({
   };
 
   // Блоки личного дашборда: тип → содержимое (null — сотруднику блок недоступен).
-  const renderBlock = (type: DashboardBlockType): ReactNode => {
+  const renderBlock = (type: DashboardBlockType, block?: DashboardBlock): ReactNode => {
     const loading = d ? '' : ' loading';
     switch (type) {
       case 'attention':
@@ -232,7 +234,7 @@ export function DashboardPage({
           </section>
         ) : null;
       case 'recentCalls':
-        return <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} onOpenChat={(chatId) => onChats({ chatId })} />;
+        return <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} total={d?.callsTotal} canExclude={session.canManageApp} onOpenChat={(chatId) => onChats({ chatId })} />;
       case 'deals':
         return <DealsCreated d={d} tz={tz} word={word} oneDay={range.from === range.to} />;
       case 'todayBookings':
@@ -272,6 +274,20 @@ export function DashboardPage({
         return <StopsBlock period={range} />;
       case 'messengers':
         return <MessengersBlock />;
+      case 'kpiGrid':
+        return (
+          <KpiGridBlock
+            config={block?.kpi}
+            d={d}
+            calls={{ from: range.from, to: range.to, scope: callsScope, funnel: d?.callsFunnel ?? null }}
+            timezone={tz}
+            onConfigure={(kpi) => {
+              // В режиме настройки — в черновик, иначе сохранить сразу.
+              if (editing) setDraft2(draft2.map((x) => (x.id === block?.id ? { ...x, kpi } : x)));
+              else if (layout) void saveLayout(layout.blocks.map((x) => (x.id === block?.id ? { ...x, kpi } : x)));
+            }}
+          />
+        );
       default:
         return (HEAD_BLOCKS as readonly string[]).includes(type) ? (
           <HeadBlock type={type as HeadBlockType} d={head} vs={versus(preset, head, (x) => fmtDay(x, tz))} word={word} periodText={periodText} tz={tz} />
@@ -504,8 +520,7 @@ export function DashboardPage({
         editing={editing}
         available={allowedBlocks(session.canManageApp)}
         onChange={setDraft2}
-        onCommit={(next) => void saveLayout(next)}
-        render={(b) => renderBlock(b.type)}
+        render={(b) => renderBlock(b.type, b)}
         sources={(b) => sourcesOf(b.type)}
       />
       {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}

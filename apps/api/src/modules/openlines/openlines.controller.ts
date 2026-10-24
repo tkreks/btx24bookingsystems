@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  DealKanbanDto,
   DiskBrowseDto,
   DashboardLayoutDto,
   NeedsCloseDto,
@@ -48,7 +49,9 @@ import { FilesService, MAX_FILE_BYTES, type UploadedFile as Upload } from './fil
 import { TemplatesService } from './templates.service.js';
 import { HeadDashboardService } from './head-dashboard.service.js';
 import { DashboardLayoutService } from './dashboard-layout.service.js';
-import { CACHE_TAGS, SwrCache, type CacheTag, type SwrOptions } from '../../common/swr-cache.js';
+import { CACHE_TAGS, invalidate, SwrCache, type CacheTag, type SwrOptions } from '../../common/swr-cache.js';
+import { CallExclusionsService } from './call-exclusions.service.js';
+import { DealKanbanService } from './deal-kanban.service.js';
 import { requestContext } from '../../common/cache-invalidation.js';
 
 /** Воронки групп пользователя (уникальные, в порядке групп). */
@@ -89,7 +92,45 @@ export class OpenlinesController {
     private readonly activity: ActivityService,
     private readonly head: HeadDashboardService,
     private readonly layouts: DashboardLayoutService,
+    private readonly exclusions: CallExclusionsService,
+    private readonly kanban: DealKanbanService,
   ) {}
+
+  /** Канбан сделок по числу показателя (только просмотр); права — по CRM сотрудника. */
+  @Get('dashboard/deal-kanban')
+  async dealKanban(@B24User() user: B24UserContext, @Query('ids') ids: unknown): Promise<DealKanbanDto> {
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
+    return this.kanban.kanban(user, ids);
+  }
+
+  /**
+   * Исключить звонок из статистики (внутренний тест и т. п.) — только администратор приложения, с
+   * причиной; повтор безопасен. Звонок в Битрикс24 не меняется.
+   */
+  @Post('dashboard/calls/:activityId/exclude')
+  @HttpCode(204)
+  async excludeCall(@B24User() user: B24UserContext, @Param('activityId', ParseIntPipe) activityId: number, @Body() body: { reason?: unknown }): Promise<void> {
+    await this.requireAppAdmin(user);
+    await this.exclusions.exclude(user.portal.id, user.userId, activityId, body?.reason);
+    invalidate(user.portal.memberId, ['calls']);
+    await this.actions.user(user, { action: 'call.exclude', summary: `Исключил звонок #${activityId} из статистики: ${String(body?.reason ?? '').trim().slice(0, 200)}`, entityType: 'call', entityId: String(activityId) });
+  }
+
+  @Delete('dashboard/calls/:activityId/exclude')
+  @HttpCode(204)
+  async restoreCall(@B24User() user: B24UserContext, @Param('activityId', ParseIntPipe) activityId: number): Promise<void> {
+    await this.requireAppAdmin(user);
+    await this.exclusions.restore(user.portal.id, activityId);
+    invalidate(user.portal.memberId, ['calls']);
+    await this.actions.user(user, { action: 'call.restore', summary: `Вернул звонок #${activityId} в статистику`, entityType: 'call', entityId: String(activityId) });
+  }
+
+  private async requireAppAdmin(user: B24UserContext): Promise<void> {
+    if (!(await this.access.resolve(user)).isAppAdmin)
+      throw new ForbiddenException({ code: 'APP_ADMIN_ONLY', message: 'Исключать звонки из статистики может администратор приложения' });
+  }
 
   @Get('dashboard/my-activity')
   async myActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>) {
