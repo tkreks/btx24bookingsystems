@@ -37,9 +37,17 @@ describe('DashboardLayoutService', () => {
 
   it('сохраняет и читает ширины 1/5 и 1/6 без сброса раскладки', async () => {
     const t = setup();
-    const blocks = [{ id: 'a', type: 'alerts', width: 'fifth' }, { id: 'b', type: 'waiting', width: 'sixth' }];
+    const blocks = [{ id: 'a', type: 'alerts', width: 'fifth' }, { id: 'b', type: 'callsTotal', width: 'sixth' }];
     expect((await t.svc.save(user(), false, { blocks })).blocks).toEqual(blocks);
     expect((await t.svc.get(user(), false)).blocks).toEqual(blocks);
+  });
+
+  it('высота блока — 1 или 2 ряда; убранный блок «Чатов ждут ответа» больше не сохранить и не показать', async () => {
+    const t = setup();
+    const blocks = [{ id: 'a', type: 'attention', width: 'half', rows: 2 }, { id: 'b', type: 'alerts', width: 'quarter' }];
+    expect((await t.svc.save(user(), false, { blocks })).blocks).toEqual(blocks);
+    await expect(t.svc.save(user(), false, { blocks: [{ id: 'a', type: 'attention', width: 'half', rows: 3 }] })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(t.svc.save(user(), false, { blocks: [{ id: 'w', type: 'waiting', width: 'quarter' }] })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it.each(['activity', 'actionLog'])('Блок %s — только администратору: остальным не сохранить и не показать', async (type) => {

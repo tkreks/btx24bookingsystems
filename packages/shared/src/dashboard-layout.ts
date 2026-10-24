@@ -7,8 +7,7 @@ export type BlockWidth = (typeof BLOCK_WIDTHS)[number];
 export const BLOCK_WIDTH_LABELS: Record<BlockWidth, string> = { sixth: 'Шестая часть', fifth: 'Пятая часть', quarter: 'Четверть', third: 'Треть', half: 'Половина', full: 'Весь ряд' };
 
 export const DASHBOARD_BLOCK_TYPES = [
-  // Показатели менеджера
-  'waiting',
+  // Показатели менеджера («Чатов ждут ответа» убран 2026-10-24: «Открыть чаты» — в «Сообщениях без ответа»)
   'bookingDays',
   'callsTotal',
   'newDeals',
@@ -56,12 +55,11 @@ export interface DashboardBlockMeta {
 }
 
 export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = {
-  waiting: { title: 'Чатов ждут ответа', hint: 'сколько чатов ждут ответа, кнопка «Открыть чаты»', group: 'Показатели', width: 'quarter' },
   bookingDays: { title: 'Бронирований сегодня / завтра', hint: 'брони на ресурсах ваших групп, окно «Календарь»', group: 'Показатели', width: 'quarter' },
   callsTotal: { title: 'Все звонки', hint: 'звонков за период, переход к звонкам', group: 'Показатели', width: 'quarter' },
   newDeals: { title: 'Новых сделок', hint: 'созданные за период в воронках ваших групп', group: 'Показатели', width: 'quarter' },
   repeatClients: { title: 'Повторные клиенты', hint: 'новые сделки клиентов, у которых уже была состоявшаяся', group: 'Показатели', width: 'quarter' },
-  attention: { title: 'Сообщения без ответа', hint: 'последние сообщения клиентов, на которые не ответили', group: 'Списки', width: 'half' },
+  attention: { title: 'Сообщения без ответа', hint: 'последние сообщения клиентов, на которые не ответили; «Открыть чаты»', group: 'Списки', width: 'half' },
   recentCalls: { title: 'Звонки', hint: 'последние звонки периода', group: 'Списки', width: 'half' },
   deals: { title: 'Сделки', hint: 'созданные за период и с оплатой за период', group: 'Списки', width: 'half' },
   todayBookings: { title: 'Брони сегодня', hint: 'сделки с бронью на сегодня: прошла, идёт, впереди', group: 'Списки', width: 'half' },
@@ -93,6 +91,8 @@ export interface DashboardBlock {
   id: string;
   type: DashboardBlockType;
   width: BlockWidth;
+  /** Высота в рядах сетки: 2 — блок на высоту двух рядов (по умолчанию 1). */
+  rows?: 1 | 2;
 }
 
 /** `GET/PUT /api/dashboard/layout` */
@@ -107,7 +107,6 @@ const block = (type: DashboardBlockType, width: BlockWidth = DASHBOARD_BLOCKS[ty
 /** Раскладка по умолчанию — как был дашборд менеджера, плюс блоки контроля. */
 export const DEFAULT_DASHBOARD: DashboardBlock[] = [
   block('onShift'),
-  block('waiting'),
   block('bookingDays'),
   block('callsTotal'),
   block('newDeals'),

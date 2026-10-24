@@ -77,6 +77,8 @@ model Portal {
   crmSyncStates        CrmSyncState[]
   crmAccessChecks      CrmAccessCheck[]
   messengers           Messenger[]
+  workdayStates        WorkdayState[]
+  workdayEvents        WorkdayEvent[]
 }
 
 enum PortalStatus {
@@ -1204,4 +1206,50 @@ model MessengerMessage {
   relayChatId  String? @db.VarChar(190)
   @@index([portalId, messengerId, chatId, dealId, sentAt])
 
+}
+
+// ---------- Рабочий день (решение владельца 2026-10-24) ----------
+
+/// Текущий рабочий день сотрудника — в приложении (быстро и без Битрикс24), синхронно с учётом
+/// времени Битрикс24: действие в приложении уходит в Битрикс24 (не дошло — `pendingAction`,
+/// повтор при следующем обращении), изменение в Битрикс24 (закрыли день там) — применяется здесь.
+model WorkdayState {
+  id            String    @id @default(cuid())
+  portalId      String
+  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId        Int
+  /// OPENED | PAUSED | CLOSED | EXPIRED (как `timeman.status`).
+  status        String    @db.VarChar(10)
+  timeStart     DateTime? @db.DateTime(3)
+  /// Отработано и перерывы на момент сверки с Битрикс24, HH:MM:SS.
+  duration      String?   @db.VarChar(12)
+  timeLeaks     String?   @db.VarChar(12)
+  /// Кто изменил последним: `app` — из приложения, `bitrix` — в Битрикс24.
+  source        String    @db.VarChar(10)
+  changedAt     DateTime  @db.DateTime(3)
+  /// Последняя успешная сверка с Битрикс24.
+  syncedAt      DateTime? @db.DateTime(3)
+  /// Действие приложения, ещё не переданное в Битрикс24 (open | pause | close) и комментарий к нему.
+  pendingAction String?   @db.VarChar(10)
+  pendingReport String?   @db.VarChar(1000)
+  syncError     String?   @db.VarChar(500)
+
+  @@unique([portalId, userId])
+}
+
+/// История рабочего дня в приложении: начал, пауза, продолжил, завершил — откуда и когда.
+model WorkdayEvent {
+  id       String   @id @default(cuid())
+  portalId String
+  portal   Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId   Int
+  /// open | pause | resume | close
+  action   String   @db.VarChar(10)
+  /// Статус после события.
+  status   String   @db.VarChar(10)
+  source   String   @db.VarChar(10)
+  report   String?  @db.VarChar(1000)
+  at       DateTime @db.DateTime(3)
+
+  @@index([portalId, userId, at])
 }

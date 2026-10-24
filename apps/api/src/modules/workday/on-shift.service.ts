@@ -3,11 +3,15 @@ import type { OnShiftDto } from '@btx24/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { photoUrl } from '../bitrix24/rest/photo-url.js';
+import { WorkdayService, type RawWorkday } from './workday.service.js';
 
 /** Текущая смена, независимо от периода дашборда. Чужими сменами здесь нельзя управлять. */
 @Injectable()
 export class OnShiftService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workday?: WorkdayService,
+  ) {}
 
   async list(user: B24UserContext): Promise<OnShiftDto> {
     const portalId = user.portal.id;
@@ -40,6 +44,8 @@ export class OnShiftService {
       this.prisma.actionLog.groupBy({ by:['userId'], where:{portalId,actorKind:'user',userId:{in:staffIds}}, _max:{at:true} }),
     ]);
     const last = new Map(activity.map(a=>[a.userId,a._max.at?.toISOString()??null]));
+    // Смены из Битрикс24 — и в базу приложения: день закрыли в Битрикс24 — закрыт и у нас.
+    if (this.workday) for (const id of staffIds) { const raw = statuses.result[`u${id}`] as RawWorkday | undefined; if (raw?.STATUS) await this.workday.applyBitrix(portalId, id, raw).catch(() => undefined); }
     const employees: OnShiftDto['employees']=[];
     for(const [id,p]of visible){
       const day=statuses.result[`u${id}`] as {STATUS?:string;TIME_START?:string}|undefined;

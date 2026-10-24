@@ -29,6 +29,7 @@ import {
   type ChatTab,
 } from './chat-list.js';
 import { Channel } from './Channel.js';
+import { ChannelFilter } from './ChannelFilter.js';
 import { AUTHOR_PREFIX, clipName, shortTime } from './format.js';
 import { MessengersButton } from '../messengers/MessengersButton.js';
 import { Icon } from './icons.js';
@@ -438,10 +439,14 @@ export function ChatsPage({
             ))}
           </nav>
           {period && <p className="cl-period muted">Последнее сообщение: {period.from} — {period.to} <button type="button" className="link" onClick={() => setPeriod(undefined)}>Все даты</button></p>}
-          <label className="cl-channel-filter">Канал сообщений <select aria-label="Канал сообщений" value={channel} onChange={e=>{setChannel(e.target.value);setOpenId(null);}}>
-            <option value="">Все каналы</option>
-            {[...new Set([...(current?.channels ?? []), ...(current?.items ?? []).map(c=>messageChannel(c.connector)), ...(channel ? [channel] : [])])].sort().map(code=><option key={code} value={code}>{connectorLabel(code)}</option>)}
-          </select></label>
+          <ChannelFilter
+            channels={[...new Set([...(current?.channels ?? []), ...(current?.items ?? []).map((c) => messageChannel(c.connector)), ...(channel ? [channel] : [])])].sort()}
+            value={channel}
+            onChange={(code) => {
+              setChannel(code);
+              setOpenId(null);
+            }}
+          />
           <div className="cl-list-caption">
             <span>{fullPhone ? (hits?.items ? 'Найдено по номеру' : 'Ищем по номеру…') : 'Переписки'}</span>
             <span>{current ? chatsCount(items.length) : ''}</span>

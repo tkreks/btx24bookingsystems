@@ -28,7 +28,7 @@ export class DashboardLayoutService {
     const schema = z
       .object({
         blocks: z
-          .array(z.object({ id: z.string().min(1).max(40), type: z.enum(allowed as [string, ...string[]]), width: z.enum(BLOCK_WIDTHS) }).strict())
+          .array(z.object({ id: z.string().min(1).max(40), type: z.enum(allowed as [string, ...string[]]), width: z.enum(BLOCK_WIDTHS), rows: z.union([z.literal(1), z.literal(2)]).optional() }).strict())
           .max(MAX_BLOCKS),
       })
       .strict();

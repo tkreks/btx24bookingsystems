@@ -1583,6 +1583,12 @@ main.cal-main.loading {
   justify-content: flex-end;
   gap: 6px;
 }
+/* Действие сохранено в приложении, в Битрикс24 ещё не передано. */
+.workday-pending {
+  font-size: 11px;
+  color: var(--warn-text);
+  white-space: nowrap;
+}
 .workday-error {
   max-width: 220px;
   overflow: hidden;
@@ -7243,6 +7249,8 @@ button.cert-row:hover {
 .dash-grid {
   display: grid;
   grid-template-columns: repeat(60, minmax(0, 1fr));
+  /* dense: рядом с блоком в два ряда встают следующие блоки, без пустых мест. */
+  grid-auto-flow: row dense;
   gap: 12px;
   align-items: stretch;
   margin: 12px 0;
@@ -7269,6 +7277,9 @@ button.cert-row:hover {
 }
 .dash-cell.w-full {
   grid-column: span 60;
+}
+.dash-cell.h-2 {
+  grid-row: span 2;
 }
 .dash-cell-body {
   display: flex;
@@ -7317,6 +7328,14 @@ button.cert-row:hover {
 }
 .dash-grid.editing .dash-cell.dragging {
   opacity: 0.5;
+}
+.dash-height.active {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.dash-open-chats {
+  margin-left: auto;
+  font-size: 13px;
 }
 .dash-grid.editing .dash-cell-body {
   pointer-events: none;
@@ -8045,9 +8064,22 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 .mt-attach { align-self: end; padding: 8px; min-width: 38px; }
 @media(max-width:600px) { .mt-composer:has(.mt-attach) { display: grid; grid-template-columns: auto minmax(0,1fr); } .mt-composer > .primary { grid-column: 1 / -1; } }
 
-.cl-channel-filter, .cv-channel-select { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
 .cl-channel-filter { padding: 8px 0; }
-.cl-channel-filter select, .cv-channel-select select { max-width: 100%; min-width: 0; padding: 5px 8px; border-radius: 9px; }
+
+/* Фильтр списка чатов по каналу: значок, название, номер мелко. */
+.cf { position: relative; padding: 6px 0 8px; }
+.cf-current { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; font-size: 13px; }
+.cf-current:hover { background: var(--hover); }
+.cf-caption { flex: none; color: var(--muted); font-size: 12px; }
+.cf-value { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.cf-caret { flex: none; color: var(--muted); font-size: 11px; }
+.cf-all { color: var(--text); font-size: 13px; }
+.cf .cl-channel { font-size: 13px; color: var(--text); }
+.cf-phone { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #3f4a5c; font-variant-numeric: tabular-nums; }
+.cf-menu { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% - 2px); margin: 0; padding: 4px; list-style: none; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 14px 30px rgba(28, 51, 95, 0.16); }
+.cf-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 7px 8px; border: 0; border-radius: 8px; background: none; text-align: left; }
+.cf-menu button:hover { background: var(--hover); }
+.cf-menu button.selected { background: var(--info-bg); }
 
 .messenger-search-dialog { width: min(680px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: var(--surface); color: var(--text); }
 .messenger-search-dialog::backdrop { background: #0006; }

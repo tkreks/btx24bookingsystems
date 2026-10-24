@@ -106,6 +106,11 @@ export function WorkdayControls({ timezone }: { timezone: string }) {
           </div>
         </form>
       )}
+      {day.pending && (
+        <span className="workday-pending" role="status" title="Битрикс24 сейчас недоступен — действие сохранено в приложении и уйдёт в Битрикс24 автоматически">
+          ⟳ ждёт Битрикс24
+        </span>
+      )}
       {error && (
         <span className="workday-error" role="alert" title={error}>
           {error}

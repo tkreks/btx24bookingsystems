@@ -167,7 +167,7 @@ export function DashboardPage({
   // Из каких запросов страницы блок берёт данные — для подписи «из кэша / обновлено» (свои запросы блоки отмечают сами).
   const sourcesOf = (type: DashboardBlockType): string[] => {
     const list =
-      type === 'waiting' || type === 'attention' ? [paths.chats]
+      type === 'attention' ? [paths.chats]
       : type === 'bookingDays' || type === 'todayBookings' || type === 'newBookings' || type === 'removedBookings' ? [paths.base]
       : type === 'callsTotal' ? [paths.calls]
       : type === 'newDeals' || type === 'repeatClients' || type === 'deals' || type === 'dealSources' ? [paths.deals]
@@ -180,83 +180,6 @@ export function DashboardPage({
   const renderBlock = (type: DashboardBlockType): ReactNode => {
     const loading = d ? '' : ' loading';
     switch (type) {
-      case 'waiting':
-        return (
-          <div className={loading}>
-          <div className={`dash-tile${openlines && waiting ? ' warn' : ''}`}>
-            <DashBadge name="alert" />
-            <span className="dash-tile-label">Чатов ждут ответа</span>
-            <span className="muted dash-period-note">За всё доступное время</span>
-            <span className="dash-tile-value">{openlines ? n(d?.chats ? waiting : undefined) : '—'}</span>
-            {openlines ? (
-              // Все доступные чаты, без ограничения датой дашборда.
-              <button className="primary dash-tile-action" onClick={() => onChats({})}>
-                Открыть чаты
-              </button>
-            ) : (
-              <span className="dash-tile-hint">Открытые линии не включены в ваших группах</span>
-            )}
-          </div>
-          </div>
-        );
-      case 'bookingDays':
-        return (
-          <div className={loading}>
-          <div className="dash-tile" title="Брони за выбранный период / на следующий после периода день">
-            <DashBadge name="calendar" />
-            <span className="dash-tile-label">Бронирования · {periodText} / следующий день</span>
-            <span className="dash-tile-value">
-              {n(d?.bookingDays?.today)}
-              <small> / {n(d?.bookingDays?.tomorrow)}</small>
-            </span>
-            <button className="dash-tile-action" disabled={!d?.bookingDays} onClick={() => setDaysOpen(true)}>
-              Календарь
-            </button>
-          </div>
-          </div>
-        );
-      case 'callsTotal':
-        return (
-          <div className={loading}>
-          <div className="dash-tile">
-            <DashBadge name="phone" />
-            <span className="dash-tile-label">Все звонки {word}</span>
-            <span className="dash-tile-value">{n(d?.callsTotal)}</span>
-            <button className="dash-tile-action" onClick={() => setView('calls')}>
-              Показать звонки
-            </button>
-          </div>
-          </div>
-        );
-      case 'newDeals':
-        return (
-          <div className={loading}>
-          <div className="dash-tile">
-            <DashBadge name="person" />
-            <span className="dash-tile-label">Новых сделок {word}</span>
-            <span className="dash-tile-value">{n(d?.newDeals === null ? null : d?.newDeals?.total)}</span>
-            <button className="dash-tile-action" disabled={!d?.newDeals?.total} onClick={() => setDealsOpen('all')}>
-              Показать сделки
-            </button>
-          </div>
-          </div>
-        );
-      case 'repeatClients':
-        return (
-          <div className={loading}>
-          <div className="dash-tile">
-            <DashBadge name="people" />
-            <span className="dash-tile-label">Повторные клиенты</span>
-            <span className="dash-tile-value">
-              {n(d?.newDeals === null ? null : d?.newDeals?.repeat)}
-              {!!d?.newDeals?.total && <small> из {d.newDeals.total}</small>}
-            </span>
-            <button className="dash-tile-action" disabled={!d?.newDeals?.repeat} onClick={() => setDealsOpen('repeat')}>
-              Показать
-            </button>
-          </div>
-          </div>
-        );
       case 'attention':
         return openlines ? (
           <section className="day-panel dash-block dash-attention">
@@ -264,6 +187,10 @@ export function DashboardPage({
             <p className="dash-attention-title muted">
               Последние сообщения клиентов без ответа
               {d?.chats && <span className={`pill${waiting ? ' waiting' : ''}`}>{waiting}</span>}
+              {/* Все доступные чаты, без ограничения датой дашборда (бывший блок «Чатов ждут ответа»). */}
+              <button type="button" className="link dash-open-chats" onClick={() => onChats({})}>
+                Открыть чаты
+              </button>
             </p>
             {!d && <BlockLoading />}
             {!d?.chats && <BlockLoading rows={4} />}

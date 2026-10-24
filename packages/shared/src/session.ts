@@ -60,6 +60,8 @@ export interface WorkdayDto {
   duration: string | null;
   /** Перерывы, HH:MM:SS. */
   timeLeaks: string | null;
+  /** Действие приложения ещё не передано в Битрикс24 (он недоступен) — уйдёт при следующей сверке. */
+  pending?: boolean;
 }
 
 export type WorkdayAction = 'open' | 'pause' | 'close';

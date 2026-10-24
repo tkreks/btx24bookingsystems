@@ -17,7 +17,7 @@ const GROUPS: DashboardBlockGroup[] = ['Показатели', 'Списки', '
 /**
  * Сетка личного дашборда (решение владельца 2026-10-24): 60 колонок — шестая часть (10), пятая (12), четверть (15), треть (20), половина
  * (30), весь ряд (60); на планшете четверть и треть — по половине, на телефоне все — во всю ширину. В режиме
- * настройки у блока — перетаскивание и стрелки (порядок), ширина, «убрать»; в конце — «+ Добавить блок».
+ * настройки у блока — перетаскивание и стрелки (порядок), ширина, высота (↕ — два ряда), «убрать»; в конце — «+ Добавить блок».
  */
 export function BlockGrid({
   blocks,
@@ -57,7 +57,7 @@ export function BlockGrid({
             <div
               key={b.id}
               data-dashboard-anchor={`block:${b.id}`}
-              className={`dash-cell w-${b.width}${drag === i ? ' dragging' : ''}`}
+              className={`dash-cell w-${b.width}${b.rows === 2 ? ' h-2' : ''}${drag === i ? ' dragging' : ''}`}
               draggable={editing}
               onDragStart={() => setDrag(i)}
               onDragEnd={() => setDrag(null)}
@@ -95,6 +95,16 @@ export function BlockGrid({
                       </button>
                     ))}
                   </span>
+                  <button
+                    type="button"
+                    className={`dash-height${b.rows === 2 ? ' active' : ''}`}
+                    aria-pressed={b.rows === 2}
+                    aria-label="Высота: два ряда"
+                    title={b.rows === 2 ? 'Высота — два ряда (нажмите, чтобы вернуть один)' : 'Растянуть на высоту двух рядов'}
+                    onClick={() => onChange(blocks.map((x) => (x.id === b.id ? { ...x, rows: x.rows === 2 ? 1 : 2 } : x)))}
+                  >
+                    ↕
+                  </button>
                   <button type="button" className="dash-cell-remove" aria-label="Убрать блок" title="Убрать с дашборда" onClick={() => onChange(blocks.filter((x) => x.id !== b.id))}>
                     ×
                   </button>
