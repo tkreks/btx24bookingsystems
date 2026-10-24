@@ -29,11 +29,11 @@ type ConnectorItem = { im?: { chat_id?: number; message_id?: number }; message?:
 const MAX_OPERATOR_FILE = 64 * 1024 * 1024;
 
 /**
- * Текст оператора из открытой линии (BBCode) → разметка WhatsApp. Telegram — простым текстом: сервис
- * отправляет его без разметки, и `*…*` остались бы звёздочками.
+ * Текст оператора из открытой линии (BBCode) → разметка WhatsApp. Telegram и MAX — простым текстом:
+ * сервис отправляет его без разметки, и `*…*` остались бы звёздочками.
  */
 export function bbToMessenger(text: string, kind = 'whatsapp'): string {
-  const plain = kind === 'telegram';
+  const plain = kind === 'telegram' || kind === 'max';
   return text
     .replace(/\[br\]/gi, '\n')
     .replace(/\[b\]([\s\S]*?)\[\/b\]/gi, plain ? '$1' : '*$1*')

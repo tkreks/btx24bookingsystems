@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { MessengerDto } from '@btx24/shared';
+import { messengerLabel, type MessengerDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { MessengerChatsDialog } from './MessengerChatsDialog.js';
 
@@ -26,7 +26,7 @@ export function MessengersButton({ timezone }: { timezone: string }) {
         <div className="cl-menu" role="menu">
           {items.map((m) => (
             <button key={m.id} role="menuitem" onClick={() => { setOpen(false); setCurrent(m); }}>
-              {m.title ?? (m.kind === 'telegram' ? 'Telegram' : 'WhatsApp')} +{m.phone}
+              {m.title ?? messengerLabel(m.kind)} +{m.phone}
             </button>
           ))}
         </div>

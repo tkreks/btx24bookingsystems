@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { MESSENGER_MAX_FILE_BYTES, normalizeMessengerPhone, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
+import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerPhone, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
 import type { Messenger, MessengerMessage } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
@@ -302,7 +302,7 @@ export class MessengerChatsService {
     }
     if (body?.mode === 'own') {
       if (m.lineMode === 'own') throw new BadRequestException({ code: 'ALREADY_LINKED', message: `Номер уже привязан к линии «${m.lineName ?? m.lineId}»` });
-      const name = String(body.name ?? '').trim().slice(0, 255) || `${m.kind === 'telegram' ? 'Telegram' : 'WhatsApp'} +${m.phone}`;
+      const name = String(body.name ?? '').trim().slice(0, 255) || `${messengerLabel(m.kind)} +${m.phone}`;
       const line = await this.connector.createOwnLine(user.portal, m, name);
       return this.prisma.messenger.update({ where: { id }, data: { lineMode: 'own', lineId: line.lineId, lineName: line.name } });
     }

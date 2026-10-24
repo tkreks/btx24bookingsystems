@@ -1,6 +1,6 @@
 # messengers
 
-**Назначение:** ⚙ → «Мессенджеры» (ADR 0014): номера компании в мессенджерах (WhatsApp и Telegram),
+**Назначение:** ⚙ → «Мессенджеры» (ADR 0014): номера компании в мессенджерах (WhatsApp, Telegram, MAX),
 браузер на номер в сервисе `apps/messenger`, вход кодом по номеру или QR, экран по VNC.
 
 | Маршрут (B24AuthGuard + PermanentAdminGuard) | Что |
@@ -102,3 +102,9 @@
 `<userId>@lid` (номер в `phone`, если Telegram его показывает), отправка по номеру — `<номер>@c.us`, как
 у WhatsApp. Текст оператора из линии уходит без разметки (`bbToMessenger(text, 'telegram')`). Своё
 сообщение можно изменить 48 часов. Устройство сервиса — `apps/messenger/MODULE.md`.
+
+## MAX
+`kind: max` — как Telegram: вход только на экране (`auth` всегда `qr`), чаты `<contactId>@lid` (номер в
+`phone`), отправка по номеру — `<номер>@c.us`, текст оператора без разметки (`bbToMessenger(text, 'max')`).
+Устройство сервиса — `apps/messenger/MODULE.md`.
+

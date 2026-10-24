@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { MESSENGER_KINDS, MESSENGER_STATE_LABELS, normalizeMessengerPhone, type GroupDto, type MessengerAuthMode, type MessengerDto, type MessengerKind } from '@btx24/shared';
+import { isScreenLoginKind, MESSENGER_KINDS, MESSENGER_STATE_LABELS, messengerLabel, normalizeMessengerPhone, type GroupDto, type MessengerAuthMode, type MessengerDto, type MessengerKind } from '@btx24/shared';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api.js';
 import { fmtDateTime } from '../format.js';
 import { MessengerScreen } from './MessengerScreen.js';
@@ -14,7 +14,7 @@ const fmtPhone = (p: string) => `+${p}`;
 
 /**
  * ⚙ → «Мессенджеры» (ADR 0014): подключённые номера и мастер «Добавить» — мессенджер → номер → вход.
- * Подключаются WhatsApp и Telegram (WhatsApp Web / Telegram Web в браузере сервиса); MAX — следующим.
+ * Подключаются WhatsApp, Telegram и MAX (их веб-версии в браузере сервиса).
  * Дальше мессенджеры сопоставляются с открытыми линиями Битрикс24 — чтобы написать клиенту первым.
  */
 export function MessengersSection({ timezone }: { timezone: string }) {
@@ -102,7 +102,7 @@ export function MessengersSection({ timezone }: { timezone: string }) {
               <button type="button" disabled={busy === m.id} onClick={() => void act(m.id, () => apiPost(`/admin/messengers/${m.id}/restart`, {}))}>
                 ↻ Перезапустить
               </button>
-              {m.state !== 'ready' && m.kind !== 'telegram' && (
+              {m.state !== 'ready' && !isScreenLoginKind(m.kind) && (
                 <button type="button" disabled={busy === m.id} onClick={() => void act(m.id, () => apiPost(`/admin/messengers/${m.id}/restart`, { auth: m.auth === 'code' ? 'qr' : 'code' }))}>
                   {m.auth === 'code' ? 'Войти по QR-коду' : 'Войти по коду'}
                 </button>
@@ -168,12 +168,19 @@ function MessengerLogin({ m }: { m: MessengerDto }) {
         экране «Вход по номеру телефона» и введите код из Telegram (и облачный пароль, если он включён).
       </p>
     );
+  if (m.state === 'qr' && m.kind === 'max')
+    return (
+      <p className="messenger-login">
+        Откройте «🖥 Экран» и отсканируйте QR-код камерой телефона, на котором MAX открыт с этим номером. Или нажмите на экране «Войти по
+        номеру телефона» и введите код подтверждения.
+      </p>
+    );
   if (m.state === 'qr')
     return <p className="messenger-login">Откройте «🖥 Экран» и отсканируйте QR-код в телефоне: WhatsApp → «Связанные устройства» → «Привязка устройства».</p>;
   if (m.state === 'logged_out')
     return (
       <p className="messenger-login">
-        {m.kind === 'telegram' ? 'Сеанс завершён в Telegram — откройте «🖥 Экран» и войдите заново.' : 'Вход отозван в телефоне — нажмите «Перезапустить», чтобы войти заново.'}
+        {isScreenLoginKind(m.kind) ? `Сеанс завершён в ${messengerLabel(m.kind)} — откройте «🖥 Экран» и войдите заново.` : 'Вход отозван в телефоне — нажмите «Перезапустить», чтобы войти заново.'}
       </p>
     );
   return null;
@@ -194,7 +201,7 @@ function AddMessengerWizard({ onClose, onCreated }: { onClose: () => void; onCre
     setSaving(true);
     setError('');
     try {
-      await apiPost<MessengerDto>('/admin/messengers', { kind, phone: normalized, auth: kind === 'telegram' ? 'qr' : auth, title: title.trim() || undefined });
+      await apiPost<MessengerDto>('/admin/messengers', { kind, phone: normalized, auth: isScreenLoginKind(kind) ? 'qr' : auth, title: title.trim() || undefined });
       onCreated();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось добавить');
@@ -243,6 +250,11 @@ function AddMessengerWizard({ onClose, onCreated }: { onClose: () => void; onCre
                 Приложение запустит браузер с Telegram Web для этого номера. Вход — на экране браузера («🖥 Экран»): QR-код или номер и код из
                 Telegram. Номера, скрытые настройками приватности, приложение находит через контакты аккаунта — они появятся в его контактах.
                 Пишите только своим клиентам: за массовые рассылки Telegram ограничивает аккаунт.
+              </p>
+            ) : kind === 'max' ? (
+              <p className="muted">
+                Приложение запустит браузер с MAX (web.max.ru) для этого номера. Вход — на экране браузера («🖥 Экран»): QR-код или номер и код
+                подтверждения. Это неофициальный способ подключения: пишите только своим клиентам, за рассылки MAX может ограничить аккаунт.
               </p>
             ) : (
             <>

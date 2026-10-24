@@ -1,5 +1,5 @@
-/** Мессенджеры, которые сервис умеет поднимать. MAX — следующим (тот же браузерный подход). */
-export const MESSENGER_KINDS = ['whatsapp', 'telegram'] as const;
+/** Мессенджеры, которые сервис умеет поднимать (каждый — браузер с веб-версией мессенджера). */
+export const MESSENGER_KINDS = ['whatsapp', 'telegram', 'max'] as const;
 export type MessengerKind = (typeof MESSENGER_KINDS)[number];
 
 /** Как входить: код по номеру телефона («Связать по номеру») или QR-код (видно на экране браузера). */

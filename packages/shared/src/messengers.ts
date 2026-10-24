@@ -1,11 +1,16 @@
 import { normalizeClientPhone } from './phones.js';
-/** Мессенджеры для связи с клиентом первым (ADR 0014). Подключаются WhatsApp и Telegram; MAX — следующим. */
+/** Мессенджеры для связи с клиентом первым (ADR 0014). */
 export const MESSENGER_KINDS = [
   { kind: 'whatsapp', label: 'WhatsApp', available: true },
   { kind: 'telegram', label: 'Telegram', available: true },
-  { kind: 'max', label: 'MAX', available: false },
+  { kind: 'max', label: 'MAX', available: true },
 ] as const;
 export type MessengerKind = (typeof MESSENGER_KINDS)[number]['kind'];
+
+/** Вход только на экране браузера (QR или номер и код там же) — без кода по номеру, как у WhatsApp. */
+export const isScreenLoginKind = (kind: string) => kind === 'telegram' || kind === 'max';
+/** Название мессенджера для подписей («MAX +7999…»). */
+export const messengerLabel = (kind: string) => MESSENGER_KINDS.find((k) => k.kind === kind)?.label ?? kind;
 
 /** Как входить: код по номеру («Связанные устройства → Связать по номеру телефона») или QR-код. */
 export type MessengerAuthMode = 'code' | 'qr';

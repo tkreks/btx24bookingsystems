@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { Instance, type InstanceConfig, type MessengerInstance } from './instance.js';
 import type { WireEvent } from './messages.js';
 import type { AuthMode, InstanceSpec, InstanceStatus, MessengerKind } from './spec.js';
+import { MaxInstance } from './max.js';
 import { TelegramInstance } from './telegram.js';
 
 /** Первый номер виртуального экрана; дальше — по порядку создания. */
@@ -21,7 +22,11 @@ export class Manager {
   constructor(
     private readonly config: InstanceConfig,
     private readonly make: (spec: InstanceSpec) => MessengerInstance = (spec) =>
-      spec.kind === 'telegram' ? new TelegramInstance(spec, config, undefined, (e) => emit(e)) : new Instance(spec, config, undefined, (e) => emit(e)),
+      spec.kind === 'telegram'
+        ? new TelegramInstance(spec, config, undefined, (e) => emit(e))
+        : spec.kind === 'max'
+          ? new MaxInstance(spec, config, undefined, (e) => emit(e))
+          : new Instance(spec, config, undefined, (e) => emit(e)),
   ) {}
 
   private get file() {
