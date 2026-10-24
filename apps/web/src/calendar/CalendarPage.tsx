@@ -284,6 +284,7 @@ export function CalendarPage({
           onSettings={() => setScreen({ name: 'settings', back: 'dashboard' })}
           onTemplates={openlinesSend ? () => setScreen({ name: 'templates' }) : undefined}
           onCertificates={() => setScreen({ name: 'certificates' })}
+          groups={groups ?? []}
           onSession={(s) => {
             setSession(s);
             setSettingsRevision((n) => n + 1);

@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  ChatFlagDto,
   DealKanbanDto,
   DiskBrowseDto,
   DashboardLayoutDto,
@@ -378,6 +379,16 @@ export class OpenlinesController {
       entityType: 'chat',
       entityId: chatId,
     });
+    return r;
+  }
+
+  /** «!» у чата — общая отметка «важно»; снимается сама, когда после неё пишет сотрудник. */
+  @Put('openlines/chats/:chatId/flag')
+  async flag(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number, @Body() body: unknown): Promise<ChatFlagDto> {
+    await this.require(user, 'openlines.read');
+    const r = await this.chats.setFlag(user, chatId, body);
+    invalidate(user.portal.memberId, ['chats']);
+    await this.actions.user(user, { action: 'chat.flag', summary: r.flag ? `Отметил чат #${chatId} знаком «!»` : `Снял «!» с чата #${chatId}`, entityType: 'chat', entityId: chatId });
     return r;
   }
 

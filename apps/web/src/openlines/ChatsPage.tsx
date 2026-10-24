@@ -5,6 +5,7 @@ import {
   todayIn,
   type ChatFolderDto,
   type ChatListDto,
+  type ChatFlagDto,
   type ChatScope,
   type ChatSummary,
   type ClientBookingsDto,
@@ -32,12 +33,14 @@ import { Channel } from './Channel.js';
 import { ChannelFilter } from './ChannelFilter.js';
 import { AUTHOR_PREFIX, clipName, shortTime } from './format.js';
 import { MessengersButton } from '../messengers/MessengersButton.js';
-import { Icon } from './icons.js';
+import { Icon, type IconName } from './icons.js';
 
-const TABS: { key: ChatTab; label: string }[] = [
-  { key: 'all', label: 'Все' },
-  { key: 'waiting', label: 'Ждут ответа' },
-  { key: 'mine', label: 'Мои' },
+/** Вкладки (решение владельца 2026-10-25): «Все», ⌛ ждут ответа, 📅 бронь сегодня, монета — ждём оплату; «Мои» убраны. */
+const TABS: { key: ChatTab; label: string; icon?: IconName; title: string }[] = [
+  { key: 'all', label: 'Все', title: 'Все чаты' },
+  { key: 'waiting', label: '', icon: 'hourglass', title: 'Ждут ответа' },
+  { key: 'booked', label: '', icon: 'calendar', title: 'Активная бронь на сегодня' },
+  { key: 'payment', label: '', icon: 'coin', title: 'Ждём оплату' },
 ];
 /** Список чатов обновляем раз в 15 секунд, пока страница открыта. */
 const POLL_MS = 15_000;
@@ -65,7 +68,7 @@ export function ChatsPage({
 }) {
   // По умолчанию — все доступные чаты и все статусы (решение владельца).
   const [tab, setTab] = useState<ChatTab>(initialWaiting ? 'waiting' : 'all');
-  const scope: ChatScope = tab === 'mine' ? 'mine' : 'all';
+  const scope: ChatScope = 'all';
   const [period, setPeriod] = useState(initialPeriod);
   const [sort, setSort] = useState<ChatSort>('recent');
   const [query, setQuery] = useState('');
@@ -78,7 +81,7 @@ export function ChatsPage({
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const periodQuery = period ? `&from=${period.from}&to=${period.to}` : '';
   const listKey = `${folderId ?? ''}|${scope}|${tab}|${periodQuery}`;
-  const listUrl = `/openlines/chats?scope=${scope}&status=${tab === 'waiting' ? 'waiting' : 'all'}${periodQuery}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
+  const listUrl = `/openlines/chats?scope=${scope}&status=${tab}${periodQuery}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
   const [list, setList] = useState<{
     key: string;
     items: ChatSummary[];
@@ -255,15 +258,32 @@ export function ChatsPage({
     }
   };
 
+  // «!» общий для всех: в списке — сразу, остальные увидят при обновлении.
+  const toggleFlag = async (c: ChatSummary) => {
+    try {
+      const r = await apiPut<ChatFlagDto>(`/openlines/chats/${c.chatId}/flag`, { on: !c.flag });
+      const apply = (items: ChatSummary[]) => items.map((x) => (x.chatId === r.chatId ? { ...x, flag: r.flag } : x));
+      setList((prev) => (prev ? { ...prev, items: apply(prev.items) } : prev));
+      setPhoneHits((prev) => (prev?.items ? { ...prev, items: apply(prev.items) } : prev));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось изменить «!»');
+    }
+  };
+
   const current = list?.key === listKey ? list : null;
   const all = current?.items ?? [];
-  const counts: Record<ChatTab, number> = current?.counts ?? { all: all.length, waiting: all.filter((c) => c.waitingReply).length, mine: all.filter((c) => c.responsibleId === current?.userId).length };
-  const waiting = counts.waiting;
+  const counts: Record<ChatTab, number | null> = {
+    all: current?.counts?.all ?? all.length,
+    waiting: current?.counts?.waiting ?? all.filter((c) => c.waitingReply).length,
+    booked: current?.counts?.booked ?? null,
+    payment: current?.counts?.payment ?? null,
+  };
   const hits = fullPhone && phoneHits?.q === query.trim() ? phoneHits : null;
   // По номеру: найденные по всему порталу + совпавшие среди загруженных (без повторов).
   // Найденные сервером уже совпали по номеру — их фильтруем только по вкладке.
   const local = visibleChats(all, tab, query, sort);
-  const searched = (hits?.items ?? []).filter((c) => (!channel || messageChannel(c.connector) === channel) && (tab !== 'mine' || c.responsibleId === current?.userId) && (!period || (c.lastMessage && dayKey(c.lastMessage.date, timezone) >= period.from && dayKey(c.lastMessage.date, timezone) <= period.to)));
+  // Брони и оплаты считает сервер: найденные по номеру по всему порталу в этих вкладках не показываем.
+  const searched = (hits?.items ?? []).filter((c) => tab !== 'booked' && tab !== 'payment' && (!channel || messageChannel(c.connector) === channel) && (!period || (c.lastMessage && dayKey(c.lastMessage.date, timezone) >= period.from && dayKey(c.lastMessage.date, timezone) <= period.to)));
   const items = fullPhone
     ? [
         ...visibleChats(searched, tab, '', sort),
@@ -282,11 +302,6 @@ export function ChatsPage({
             <div className="cl-heading">
               <div className="cl-heading-line">
                 <h1>Чаты</h1>
-                {waiting > 0 && (
-                  <span className="cl-count" title="Ждут ответа">
-                    {waiting}
-                  </span>
-                )}
               </div>
               <p className="cl-caption">
                 {current?.exactOrder === false ? 'Порядок приблизительный' : 'Сначала новые сообщения'}
@@ -327,6 +342,15 @@ export function ChatsPage({
               )}
             </div>
           </div>
+
+          <ChannelFilter
+            channels={[...new Set([...(current?.channels ?? []), ...(current?.items ?? []).map((c) => messageChannel(c.connector)), ...(channel ? [channel] : [])])].sort()}
+            value={channel}
+            onChange={(code) => {
+              setChannel(code);
+              setOpenId(null);
+            }}
+          />
 
           <label className="cl-search">
             <Icon name="search" />
@@ -427,26 +451,20 @@ export function ChatsPage({
             {TABS.map((t) => (
               <button
                 key={t.key}
-                className={`cl-tab${tab === t.key ? ' active' : ''}`}
+                className={`cl-tab${tab === t.key ? ' active' : ''}${t.icon ? ' icon' : ''}`}
                 aria-pressed={tab === t.key}
+                aria-label={t.title}
+                title={t.title}
                 onClick={() => setTab(t.key)}
               >
-                {t.label}
+                {t.icon ? <Icon name={t.icon} size={16} /> : t.label}
                 <span className={`cl-tab-counter${t.key === 'waiting' && counts.waiting ? ' alert' : ''}`}>
-                  {current ? counts[t.key] : '…'}
+                  {current ? (counts[t.key] ?? '—') : '…'}
                 </span>
               </button>
             ))}
           </nav>
           {period && <p className="cl-period muted">Последнее сообщение: {period.from} — {period.to} <button type="button" className="link" onClick={() => setPeriod(undefined)}>Все даты</button></p>}
-          <ChannelFilter
-            channels={[...new Set([...(current?.channels ?? []), ...(current?.items ?? []).map((c) => messageChannel(c.connector)), ...(channel ? [channel] : [])])].sort()}
-            value={channel}
-            onChange={(code) => {
-              setChannel(code);
-              setOpenId(null);
-            }}
-          />
           <div className="cl-list-caption">
             <span>{fullPhone ? (hits?.items ? 'Найдено по номеру' : 'Ищем по номеру…') : 'Переписки'}</span>
             <span>{current ? chatsCount(items.length) : ''}</span>
@@ -469,7 +487,6 @@ export function ChatsPage({
             <div className="cl-empty">
               <strong>{query || tab !== 'all' ? 'Чаты не найдены' : 'Чатов нет'}</strong>
               {(query || tab !== 'all') && <p>Попробуйте изменить запрос или фильтр</p>}
-              {scope !== 'all' && <p>Чаты коллег — во вкладке «Все».</p>}
             </div>
           )}
           {!folderId && !query && !period && tab === 'all' && !!folders?.length && (
@@ -511,8 +528,17 @@ export function ChatsPage({
                   setCreated(null);
                 }}
               />
-              {/* Под аватаркой: папка (меню), входящее/исходящее, участник ли я. */}
+              {/* Под аватаркой: «!», избранное, папка (меню), входящее/исходящее, участник ли я. */}
               <span className="cl-card-tools">
+                <button
+                  className={`cl-flag${c.flag ? ' on' : ''}`}
+                  aria-pressed={!!c.flag}
+                  aria-label={c.flag ? 'Снять «!»' : 'Отметить «!»'}
+                  title={c.flag ? `«!» — ${c.flag.byName ?? 'сотрудник'}; снимется, когда менеджер ответит клиенту. Нажмите — снять` : '«!» — видно всем, пока менеджер не ответит клиенту'}
+                  onClick={() => void toggleFlag(c)}
+                >
+                  !
+                </button>
                 <button
                   className={`cl-star${c.favorite ? ' on' : ''}`}
                   aria-pressed={c.favorite}
@@ -678,7 +704,7 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
   // Имя клиента из CRM; название чата — это название сделки/линии («Имя - WAZZUP - …»).
   const name = c.clientName || c.title;
   return (
-    <button className={`cl-card${active ? ' selected' : ''}`} role="listitem" aria-current={active} onClick={onOpen}>
+    <button className={`cl-card${active ? ' selected' : ''}${c.flag ? ' flagged' : ''}`} role="listitem" aria-current={active} onClick={onOpen}>
       {/* Непрочитанные — в правом верхнем углу аватарки («Не требует ответа» обнуляет). */}
       <span className="cl-avatar-wrap">
         <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(name)}</span>

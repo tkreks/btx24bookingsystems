@@ -12,6 +12,9 @@ function setup(portalId = 'p1') {
     openlineChat: { findMany: vi.fn(async () => rows) },
     chatFolderItem: { findMany: vi.fn(async (q: { where: { folder?: { ignoreAttention?: boolean }; ownerUserId?: unknown } }) => q.where.folder?.ignoreAttention ? [{ chatId: 60 }] : typeof q.where.ownerUserId === 'number' ? rows.slice(0, 30).map((r) => ({ chatId: r.chatId, folderId: 'ordinary' })) : []) },
     dashboardHiddenChat: { findMany: vi.fn(async () => [{ chatId: 1 }]) },
+    bookingRecord: { findMany: vi.fn(async () => [] as { dealId: number | null }[]) },
+    paymentRequest: { findMany: vi.fn(async () => [] as { dealId: number }[]) },
+    crmDeal: { findMany: vi.fn(async () => [] as { contactId: number | null }[]) },
   };
   const svc = new ChatsService({} as FilesService, {} as OpenlineIndexService, prisma as unknown as PrismaService);
   const realList = svc.list.bind(svc);
@@ -27,7 +30,7 @@ describe('Общая выборка чатов и дашборда', () => {
     const first = await t.svc.list(t.user, { status: 'waiting' });
     const second = await t.svc.list(t.user, { status: 'waiting', offset: first.nextOffset });
     const attention = await t.svc.attention(t.user);
-    expect(first.counts).toEqual({ all: 62, waiting: 59, mine: 31 });
+    expect(first.counts).toEqual({ all: 62, waiting: 59, mine: 31, booked: 0, payment: 0 });
     expect(first.items).toHaveLength(50);
     expect(second.items).toHaveLength(9);
     expect(second.nextOffset).toBeNull();
@@ -75,5 +78,21 @@ describe('Общая выборка чатов и дашборда', () => {
     vi.mocked(t.user.client.call).mockResolvedValueOnce({ result: { items: [{ id: 'chat1', counter: 2 }], hasMore: true } } as never).mockResolvedValueOnce({ result: { items: [{ chat_id: 222, counter: 9 }], hasMore: false } } as never);
     expect(await t.svc.unreadByChat(t.user)).toEqual(new Map([[1, 2], [222, 9]]));
     expect(t.user.client.call).toHaveBeenLastCalledWith('im.recent.list', { UNREAD_ONLY: 'Y', SKIP_OPENLINES: 'N', LIMIT: 200, OFFSET: 200 });
+  });
+  it('бронь сегодня и ждём оплату: сделка чата или контакт клиента этих сделок, до пагинации', async () => {
+    const t = setup();
+    const base = await t.prisma.openlineChat.findMany();
+    t.prisma.openlineChat.findMany.mockResolvedValue(base.map((r) => ({ ...r, crm: r.chatId === 5 ? { dealId: 500 } : r.chatId === 6 ? { contactId: 66 } : r.chatId === 7 ? { dealId: 700 } : null })) as never);
+    t.prisma.bookingRecord.findMany.mockResolvedValue([{ dealId: 500 }, { dealId: 501 }]);
+    t.prisma.crmDeal.findMany.mockImplementation(async (q?: unknown) => ((q as { where: { dealId: { in: number[] } } }).where.dealId.in.includes(501) ? [{ contactId: 66 }] : []));
+    t.prisma.paymentRequest.findMany.mockResolvedValue([{ dealId: 700 }]);
+    const booked = await t.svc.list(t.user, { status: 'booked' });
+    expect(booked.items.map((c) => c.chatId).sort()).toEqual([5, 6]);
+    expect(booked.counts).toMatchObject({ booked: 2, payment: 1 });
+    const payment = await t.svc.list(t.user, { status: 'payment' });
+    expect(payment.items.map((c) => c.chatId)).toEqual([7]);
+    // День брони — сегодня в часовом поясе портала; только активные брони этого портала со сделкой.
+    expect(t.prisma.bookingRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ portalId: 'p1', status: 'active', dealId: { not: null } }) }));
+    expect(t.prisma.paymentRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { portalId: 'p1', status: { in: ['link_pending', 'sent'] }, closedAt: null } }));
   });
 });

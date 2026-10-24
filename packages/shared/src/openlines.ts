@@ -31,6 +31,8 @@ export interface ChatSummary {
   waitingReply: boolean;
   /** «Не требует ответа» — общая отметка (кто и когда); действует до нового сообщения клиента. */
   noReply: { byName: string | null; at: string } | null;
+  /** «!» — общая отметка «важно» (кто и когда); пропадает, когда после неё в чат пишет сотрудник. */
+  flag?: { byName: string | null; at: string } | null;
   /** Пользователь — участник чата (иначе сначала «Присоединиться»). */
   joined: boolean;
   sessionClosed: boolean;
@@ -72,7 +74,8 @@ export interface ChatListDto {
   /** Каналы всех доступных чатов (до пагинации/фильтра по каналу). */
   channels?: string[];
   /** Итоги по всему отбору, до пагинации и раскрытия папок. */
-  counts?: { all: number; waiting: number; mine: number };
+  /** `booked` — клиенты с активной бронью на сегодня; `payment` — ждём оплату (счёт выставлен, не оплачен). */
+  counts?: { all: number; waiting: number; mine: number; booked?: number; payment?: number };
   userId?: number;
   items: ChatSummary[];
   /** Смещение следующей страницы; null — больше нет. */
@@ -393,6 +396,14 @@ export interface AttentionChatDto {
   dealId: number | null;
   contactId: number | null;
   responsibleId: number | null;
+  /** «!» у чата (общая отметка) — на дашборде подсвечивается и стоит первым. */
+  flag?: { byName: string | null; at: string } | null;
+}
+
+/** `PUT /api/openlines/chats/:chatId/flag {on}` */
+export interface ChatFlagDto {
+  chatId: number;
+  flag: { byName: string | null; at: string } | null;
 }
 
 /** `GET /api/openlines/chats/:chatId/channels` — чаты того же клиента в других открытых линиях. */

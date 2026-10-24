@@ -35,6 +35,20 @@ describe('DashboardLayoutService', () => {
     await expect(t.svc.save(user(), false, { blocks: [{ id: 'k', type: 'kpiGrid', width: 'half', kpi: { cols: 4, rows: 2, items: [] } }] })).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('шкала броней: группы только у своего блока, без повторов', async () => {
+    const t = setup();
+    const saved = await t.svc.save(user(), false, {
+      blocks: [
+        { id: 't', type: 'resourceTimeline', width: 'full', groupIds: ['g1', 'g2', 'g1'] },
+        { id: 'd', type: 'deals', width: 'half', groupIds: ['g1'] },
+      ],
+    });
+    expect(saved.blocks).toEqual([
+      { id: 't', type: 'resourceTimeline', width: 'full', groupIds: ['g1', 'g2'] },
+      { id: 'd', type: 'deals', width: 'half' },
+    ]);
+  });
+
   it('по умолчанию — дашборд менеджера; своя раскладка — у каждого своя; повтор типа отбрасывается', async () => {
     const t = setup();
     expect(await t.svc.get(user(), false)).toEqual({ blocks: DEFAULT_DASHBOARD, isDefault: true });

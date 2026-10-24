@@ -8,6 +8,7 @@ import {
   CALL_KINDS,
   CALL_KIND_LABELS,
   type AttentionChatDto,
+  type ChatFlagDto,
   type BookingAlertListDto,
   type CallKind,
   type CallScope,
@@ -17,6 +18,7 @@ import {
   type SessionInfo,
   allowedBlocks,
   type DashboardBlock,
+  type MyGroupDto,
   type DashboardBlockType,
   type DashboardLayoutDto,
   type HeadDashboardDto,
@@ -26,6 +28,7 @@ import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
 import { MessengersBlock } from '../dashboard/MessengersBlock.js';
 import { KpiGridBlock } from '../dashboard/KpiGridBlock.js';
+import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
 import { WorkdayControls } from '../workday/WorkdayControls.js';
 import { MyActivityBlock } from '../dashboard/MyActivityBlock.js';
 import { ActionLogBlock, AlertsBlock, CertificatesBlock, DealGapsBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
@@ -43,7 +46,8 @@ import { DashBadge, RecentCalls } from './RecentCalls.js';
 import { Icon } from './icons.js';
 import { ListMore } from './ListMore.js';
 import { DealStatusBadge } from './DealStatusBadge.js';
-import { PERIOD_PRESETS, periodError, presetRange, type PeriodPreset } from './period.js';
+import { presetRange, type PeriodPreset } from './period.js';
+import { PeriodPicker } from './PeriodPicker.js';
 import { MinimizeButton } from '../Minimize.js';
 
 /** «23 октября 2026». */
@@ -56,11 +60,9 @@ const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, st
   removed_in_bitrix: 'удалена в Битрикс24',
 };
 
-/** «сегодня» / «вчера» / «за период» — подпись плиток по выбранному периоду. */
 /** «Требуют внимания»: сколько чатов показывать сразу и сколько добавляет «Показать ещё». */
 const ATTENTION_STEP = 5;
-/** Выбор периода пока скрыт (владелец, 2026-10-24): дашборд — за текущий день; переключение остаётся в коде. */
-const SHOW_PERIOD_PICKER = false;
+/** «сегодня» / «вчера» / «за период» — подпись плиток по выбранному периоду. */
 const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p === 'yesterday' ? 'вчера' : 'за период');
 
 /**
@@ -78,6 +80,7 @@ export function DashboardPage({
   onSettings,
   onTemplates,
   onCertificates,
+  groups = [],
   onSession,
 }: {
   session: SessionInfo;
@@ -93,21 +96,42 @@ export function DashboardPage({
   onTemplates?: () => void;
   /** Сертификаты: список, выпуск, изменение срока, погашение. */
   onCertificates?: () => void;
+  /** Группы сотрудника — для блока «Брони сегодня (шкала)» и мастера брони из него. */
+  groups?: MyGroupDto[];
   onSession?: (s: SessionInfo) => void;
 }) {
   const tz = session.portal.timezone;
   const [view, setView] = useState<'main' | 'calls'>('main');
   const [preset, setPreset] = useState<PeriodPreset>('today');
   const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
-  const [draft, setDraft] = useState(range);
   // Части дашборда грузятся отдельно: основа — сразу, звонки и новые сделки — когда посчитаются.
   const alertsQuery = useDashboardQuery<BookingAlertListDto>(bookingAlerts ? '/booking-alerts?status=new' : null);
   const alertCount = alertsQuery.data?.counts.new;
   const [attentionShown, setAttentionShown] = useState(ATTENTION_STEP);
   const [hidden, setHidden] = useState<Set<number>>(() => new Set());
   const [hiding, setHiding] = useState<AttentionChatDto | null>(null);
+  // «!» у чата: поставленные/снятые здесь — сразу, до ответа сервера на следующий опрос.
+  const [flags, setFlags] = useState<Map<number, ChatFlagDto['flag']>>(() => new Map());
+  const [flagError, setFlagError] = useState('');
+  const toggleFlag = (c: AttentionChatDto) =>
+    apiPut<ChatFlagDto>(`/openlines/chats/${c.chatId}/flag`, { on: !c.flag }).then(
+      (r) => {
+        setFlagError('');
+        setFlags((m) => new Map(m).set(r.chatId, r.flag));
+        // После свежего ответа сервера местная отметка не нужна (её мог снять ответ менеджера).
+        void chatQuery.refresh().finally(() =>
+          setFlags((m) => {
+            const next = new Map(m);
+            next.delete(r.chatId);
+            return next;
+          }),
+        );
+      },
+      (e) => setFlagError(e instanceof Error ? e.message : 'Не удалось изменить «!»'),
+    );
   const [askCode, setAskCode] = useState(false);
-  const [callsScope, setCallsScope] = useState<CallScope>('all');
+  // «Все / Мои» убран с дашборда (решение владельца 2026-10-25): всегда все.
+  const callsScope: CallScope = 'all';
   const [callsOpen, setCallsOpen] = useState<CallKind | null>(null);
   const [dealsOpen, setDealsOpen] = useState<'all' | 'repeat' | { source: string } | null>(null);
   const [daysOpen, setDaysOpen] = useState(false);
@@ -143,9 +167,7 @@ export function DashboardPage({
   const choose = (p: PeriodPreset) => {
     setPreset(p);
     if (p !== 'custom') setRange(presetRange(p, todayIn(tz)));
-    else setDraft(range);
   };
-  const draftError = periodError(draft.from, draft.to);
 
   // Дашборд — из частей текущего запроса; нет основы — ещё грузится. Нет части — её плитки «…».
   const base = baseQuery.data;
@@ -163,7 +185,7 @@ export function DashboardPage({
   const head = headQuery.data;
   const periodText = range.from === range.to ? fmtDay(range.from, tz) : `${fmtDay(range.from, tz)} — ${fmtDay(range.to, tz)}`;
   // Скрытые с дашборда (👁) — сразу, не дожидаясь нового ответа сервера.
-  const attention = (d?.chats?.attention ?? []).filter((c) => !hidden.has(c.chatId));
+  const attention = (d?.chats?.attention ?? []).filter((c) => !hidden.has(c.chatId)).map((c) => (flags.has(c.chatId) ? { ...c, flag: flags.get(c.chatId) } : c));
   const waiting = d?.chats?.waitingReply ?? 0;
 
   // Из каких запросов страницы блок берёт данные — для подписи «из кэша / обновлено» (свои запросы блоки отмечают сами).
@@ -198,13 +220,23 @@ export function DashboardPage({
             </p>
             {!d && <BlockLoading />}
             {!d?.chats && <BlockLoading rows={4} />}
+            {flagError && <p className="notice error" role="alert">{flagError}</p>}
             {d?.chats && !attention.length && <p className="muted">Все клиенты получили ответ.</p>}
             <ul className="attention-rows">
               {attention.slice(0, attentionShown).map((c) => {
                 return (
-                  <li key={c.chatId} data-dashboard-anchor={`chat:${c.chatId}`}>
+                  <li key={c.chatId} className={c.flag ? 'flagged' : undefined} data-dashboard-anchor={`chat:${c.chatId}`}>
                     <AttentionMessage chat={c} timezone={tz} onOpen={() => onChats({ chatId: c.chatId })} />
                     <span className="attention-actions">
+                      <button
+                        className={`dash-icon-btn cl-flag${c.flag ? ' on' : ''}`}
+                        aria-pressed={!!c.flag}
+                        title={c.flag ? `«!» — ${c.flag.byName ?? 'сотрудник'}; снимется, когда менеджер ответит клиенту. Нажмите — снять` : '«!» — видно всем, пока менеджер не ответит клиенту'}
+                        aria-label={c.flag ? 'Снять «!»' : 'Отметить «!»'}
+                        onClick={() => void toggleFlag(c)}
+                      >
+                        !
+                      </button>
                       <button
                         className="dash-icon-btn"
                         title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'}
@@ -274,6 +306,20 @@ export function DashboardPage({
         return <StopsBlock period={range} />;
       case 'messengers':
         return <MessengersBlock />;
+      case 'resourceTimeline':
+        return (
+          <ResourceTimelineBlock
+            groups={groups}
+            config={block?.groupIds}
+            to={range.to}
+            timezone={tz}
+            onConfigure={(groupIds) => {
+              const apply = (list: DashboardBlock[]) => list.map((x) => (x.id === block?.id ? { ...x, groupIds: groupIds.length ? groupIds : undefined } : x));
+              if (editing) setDraft2(apply(draft2));
+              else if (layout) void saveLayout(apply(layout.blocks));
+            }}
+          />
+        );
       case 'kpiGrid':
         return (
           <KpiGridBlock
@@ -295,45 +341,17 @@ export function DashboardPage({
     }
   };
 
-  const periodBar = (
-    <div className="period-bar">
-      {SHOW_PERIOD_PICKER && (
-        <div className="segmented period-presets" role="group" aria-label="Период">
-          {PERIOD_PRESETS.map((p) => (
-            <button key={p.key} className={preset === p.key ? 'active' : ''} onClick={() => choose(p.key)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-      )}
-      {SHOW_PERIOD_PICKER && preset === 'custom' && (
-        <form
-          className="period-custom"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!draftError) setRange(draft);
-          }}
-        >
-          <label>
-            с <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
-          </label>
-          <label>
-            по <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
-          </label>
-          <button className="primary" type="submit" disabled={!!draftError}>
-            Показать
-          </button>
-          {draftError && <span className="muted">{draftError}</span>}
-        </form>
-      )}
-      <div className="segmented period-presets dash-scope" role="group" aria-label="Чьи звонки и сделки">
-        {(['all', 'mine'] as const).map((s) => (
-          <button key={s} className={callsScope === s ? 'active' : ''} onClick={() => setCallsScope(s)}>
-            {s === 'all' ? 'Все' : 'Мои'}
-          </button>
-        ))}
-      </div>
-    </div>
+  // Период — текстом в шапке, слева от смены темы (решение владельца 2026-10-25).
+  const periodPicker = (
+    <PeriodPicker
+      preset={preset}
+      range={range}
+      onPreset={(p) => choose(p)}
+      onRange={(r) => {
+        setPreset('custom');
+        setRange(r);
+      }}
+    />
   );
 
   const errorBox = error && (
@@ -355,6 +373,7 @@ export function DashboardPage({
             <span className="muted">клиенты {word}</span>
           </div>
           <div className="toolbar-controls">
+            {periodPicker}
             {funnels.length > 1 && (
               <label className="calls-funnel">
                 Повторные по воронке{' '}
@@ -369,7 +388,6 @@ export function DashboardPage({
             )}
           </div>
         </header>
-        {periodBar}
         {errorBox}
         {d && d.calls === null ? (
           <p className="notice">Статистика звонков недоступна: нет доступа к делам CRM.</p>
@@ -422,6 +440,7 @@ export function DashboardPage({
           <WorkdayControls timezone={tz} />
         </div>
         <div className="toolbar-controls">
+          {periodPicker}
           <ThemeToggle />
           {bookingAlerts && (
             <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} aria-label="Уведомления" title="Уведомления о бронях">
@@ -505,7 +524,6 @@ export function DashboardPage({
         />
       )}
 
-      {periodBar}
       {errorBox}
       {layoutError && <div className="notice error">{layoutError}</div>}
       {editing && (

@@ -26,7 +26,7 @@ describe('chat list', () => {
 
   it('filters by tab and searches title, channel and preview', () => {
     expect(visibleChats(items, 'waiting', '', 'recent').map((c) => c.chatId)).toEqual([2, 3]);
-    expect(visibleChats(items, 'mine', '', 'recent').map((c) => c.chatId)).toEqual([1, 2, 3]);
+    expect(visibleChats(items, 'booked', '', 'recent').map((c) => c.chatId)).toEqual([1, 2, 3]);
     expect(visibleChats(items, 'all', 'БАНЯ', 'recent').map((c) => c.chatId)).toEqual([2]);
     expect(visibleChats(items, 'all', 'telegram', 'recent').map((c) => c.chatId)).toEqual([2]);
   });

@@ -9,7 +9,7 @@
 | `GET /api/dashboard/calls?kind=incoming\|new\|repeat\|answered\|missed\|lost&from=&to=&scope=all\|mine&funnel=` | любая группа | клиенты вида за период — окно со сделками (`call-stats.ts`) |
 | `GET /api/dashboard/activity?date=YYYY-MM-DD`                 | руководитель или администратор приложения | «Активность сотрудников» за день по всем24часам (`activity.service.ts`, см. ниже) |
 | `POST /api/dashboard/hidden-chats/:chatId`                     | `openlines.read` | 👁 скрыть чат с **своего** дашборда (`DashboardHiddenChat`); в списке чатов он остаётся |
-| `GET /api/openlines/chats?scope=all\|mine&status=all\|waiting&from=&to=&offset=` | `openlines.read` | список чатов, сверху — с самыми новыми сообщениями                                        |
+| `GET /api/openlines/chats?scope=all\|mine&status=all\|waiting\|booked\|payment&from=&to=&offset=` | `openlines.read` | список чатов, сверху — с самыми новыми сообщениями                                        |
 | `GET/POST /api/openlines/folders`, `PUT/DELETE /api/openlines/folders/:id` | `openlines.read` | **личные папки** чатов (охрана, ресепшн, АХО…) со сводкой: число чатов, непрочитанные, последнее сообщение |
 | `PUT /api/openlines/folders/:id/chats/:chatId`, `DELETE /api/openlines/folder-chats/:chatId` | `openlines.read` | положить / перенести чат в папку, вернуть в общий список |
 | `GET /api/openlines/chats/search?q=<номер>`                    | `openlines.read` | поиск по телефону клиента по всему порталу: `crm.duplicate.findbycomm` → `imopenlines.crm.chat.get` |
@@ -319,7 +319,14 @@ IM_MESSAGE), а не BX24.openPath: в слайдере звонка /online/ о
 Сделки по-прежнему открываются штатным слайдером CRM.
 
 ## Период, вкладки чатов и карточка звонка (2026-10-24)
-- Вкладки UI: Все / Ждут ответа / Мои (ответственный = userId); старые Отвечены и Отдел убраны.
+- Вкладки UI (2026-10-25): Все / ⌛ ждут ответа / 📅 активная бронь сегодня (`booked`) / монета — ждём
+  оплату (`payment`); «Мои» в UI убраны (`scope=mine` в API остался). `booked` — `BookingRecord` портала
+  `active` со сделкой, пересекает сегодня (день в поясе портала); `payment` — `PaymentRequest`
+  `link_pending|sent`, не закрыт. Чат подходит, если его сделка из списка или его контакт — клиент этих
+  сделок (контакт сделки — из копии CRM `CrmDeal`). Фильтр — до счётчиков и пагинации (`counts.booked/payment`).
+- «!» у чата: `PUT /api/openlines/chats/:chatId/flag {on}` (`openlines.read` + положительная проверка
+  `imopenlines.dialog.get` клиентом сотрудника), поля `OpenlineChat.flag*`, видна всем; снимается сама,
+  когда после отметки последним написал сотрудник (`flagOf`). В `attention` отмеченные — первыми.
   Параметр status включает серверную фильтрацию **до** пагинации по 50. Ответ содержит counts
   (all/waiting/mine) по всей доступной выборке и userId для поиска по телефону.
 - population в ChatsService общая для list и attention: только portalId + проверенный доступ

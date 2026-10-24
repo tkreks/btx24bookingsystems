@@ -394,6 +394,11 @@ model OpenlineChat {
   noReplyByUserId  Int?
   noReplyByName    String?   @db.VarChar(255)
   noReplyAt        DateTime? @db.DateTime(3)
+  /// «!» — общая отметка «важно» (решение владельца 2026-10-25): видна всем; снимается сама, когда
+  /// после неё в чат пишет сотрудник (последнее сообщение — сотрудника и позже отметки).
+  flagAt           DateTime? @db.DateTime(3)
+  flagByUserId     Int?
+  flagByName       String?   @db.VarChar(255)
 
   @@unique([portalId, chatId])
   @@index([portalId, lastMessageAt])

@@ -29,7 +29,8 @@ export class DashboardLayoutService {
       .object({
         blocks: z
           .array(z.object({ id: z.string().min(1).max(40), type: z.enum(allowed as [string, ...string[]]), width: z.enum(BLOCK_WIDTHS), rows: z.union([z.literal(1), z.literal(2)]).optional(),
-            kpi: z.object({ cols: z.union([z.literal(1), z.literal(2), z.literal(3)]), rows: z.union([z.literal(1), z.literal(2), z.literal(3)]), items: z.array(z.enum(KPI_METRICS)).max(6) }).strict().optional() }).strict())
+            kpi: z.object({ cols: z.union([z.literal(1), z.literal(2), z.literal(3)]), rows: z.union([z.literal(1), z.literal(2), z.literal(3)]), items: z.array(z.enum(KPI_METRICS)).max(6) }).strict().optional(),
+            groupIds: z.array(z.string().min(1).max(40)).max(50).optional() }).strict())
           .max(MAX_BLOCKS),
       })
       .strict();
@@ -40,7 +41,7 @@ export class DashboardLayoutService {
     const blocks = (p.data.blocks as DashboardBlock[])
       .filter((b) => (seen.has(b.type) ? false : (seen.add(b.type), true)))
       // Таблица показателей — только у своего блока и в пределах размера (до 6 ячеек).
-      .map(({ kpi, ...b }) => (b.type === 'kpiGrid' ? { ...b, kpi: normalizeKpiGrid(kpi) } : b));
+      .map(({ kpi, groupIds, ...b }) => (b.type === 'kpiGrid' ? { ...b, kpi: normalizeKpiGrid(kpi) } : b.type === 'resourceTimeline' && groupIds?.length ? { ...b, groupIds: [...new Set(groupIds)] } : b));
     await this.prisma.dashboardLayout.upsert({
       where: { portalId_userId: { portalId: user.portal.id, userId: user.userId } },
       create: { portalId: user.portal.id, userId: user.userId, blocks: blocks as unknown as Prisma.InputJsonValue },

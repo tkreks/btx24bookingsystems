@@ -42,6 +42,7 @@ export const DASHBOARD_BLOCK_TYPES = [
   'stops',
   'messengers',
   'kpiGrid',
+  'resourceTimeline',
 ] as const;
 export type DashboardBlockType = (typeof DASHBOARD_BLOCK_TYPES)[number];
 
@@ -87,6 +88,7 @@ export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = 
   certificates: { title: 'Сертификаты', hint: 'новые, срок прошёл — погасить', group: 'Контроль', width: 'quarter' },
   stops: { title: 'Стопы ресурсов', hint: 'ресурсы, закрытые для бронирования', group: 'Контроль', width: 'half' },
   kpiGrid: { title: 'Показатели (таблица)', hint: 'до 6 чисел на выбор: сделки, оплаты, брони, звонки; по числу — канбан сделок', group: 'Показатели', width: 'half' },
+  resourceTimeline: { title: 'Брони сегодня (шкала)', hint: 'занятость ресурсов группы от сейчас до конца периода; по свободному — новая бронь', group: 'Списки', width: 'full' },
   messengers: { title: 'Мессенджеры', hint: 'номера ваших групп: работают или с ошибкой; экран мессенджера и файлы для отправки', group: 'Контроль', width: 'quarter' },
 };
 
@@ -99,6 +101,8 @@ export interface DashboardBlock {
   rows?: 1 | 2;
   /** Только у `kpiGrid`: таблица показателей. */
   kpi?: KpiGridConfig;
+  /** Только у `resourceTimeline`: группы для выбора в блоке (пусто — все группы сотрудника). */
+  groupIds?: string[];
 }
 
 /** Показатели для составного блока (числа дашборда за период; по числу — канбан сделок). */

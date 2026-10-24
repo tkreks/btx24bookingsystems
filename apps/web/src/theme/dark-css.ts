@@ -45,6 +45,9 @@ export const DARK_TOKENS = `:root${DARK_ATTR} {
   --status-fail-text: #fca5a5;
   --status-lost-bg: #2a1640;
   --status-lost-text: #d8b4fe;
+  --flag-bg: #3a1f0d;
+  --flag-line: #ea580c;
+  --flag-text: #fdba74;
   color-scheme: dark;
 }
 `;

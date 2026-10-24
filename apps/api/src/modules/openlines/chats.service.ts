@@ -1,9 +1,10 @@
-import { clientPhoneVariants, messageChannel } from '@btx24/shared';
+import { clientPhoneVariants, messageChannel, todayIn, zonedDayRange } from '@btx24/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { FAVORITES_FOLDER, hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
   ChatListDto,
+  ChatFlagDto,
   ChatReplyStatusDto,
   ChatChannelDto,
   AttentionChatDto,
@@ -88,7 +89,7 @@ const ACCESS_STALE_MS = 5 * 60_000;
 const listQuery = z
   .object({
     scope: z.enum(['mine', 'department', 'all']).default('all'),
-    status: z.enum(['all', 'waiting']).optional(),
+    status: z.enum(['all', 'waiting', 'booked', 'payment']).optional(),
     channel: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/).optional(),
     from: z.string().optional(),
     to: z.string().optional(),
@@ -368,6 +369,7 @@ export class ChatsService {
           : null,
         waitingReply: isWaiting(sessionClosed, last?.human ? last.kind : null, last ? Number(last.message.id) : null, marks.get(Number(d.id)) ?? null),
         noReply: noReplyOf(marks.get(Number(d.id)) ?? null, last ? Number(last.message.id) : null),
+        flag: flagOf(marks.get(Number(d.id)), last?.human ? last.kind : null, last?.human ? last.message.date : null),
         joined: isMember(d.role),
         sessionClosed,
         crm: crmLinksOf(d.entity_data_2),
@@ -496,6 +498,7 @@ export class ChatsService {
               : null,
           waitingReply: isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r),
           noReply: noReplyOf(r, r.lastMessageId),
+          flag: flagOf(r, r.lastAuthor, r.lastMessageAt),
           joined: acc.get(id)!.joined,
           sessionClosed: r.completed,
           crm,
@@ -668,9 +671,40 @@ export class ChatsService {
     return { rows, ignored: new Set(ignored.map((r) => r.chatId)) };
   }
 
-  private async filteredList(user: B24UserContext, q: { scope: ChatScope; status?: 'all' | 'waiting'; channel?: string; offset: number; folder?: string; from?: string; to?: string }): Promise<ChatListDto> {
+  /**
+   * Чаты клиентов со сделками из `dealIds`: сделка чата — из них, или контакт чата — клиент этих сделок
+   * (контакт сделки — из копии CRM).
+   */
+  private async clientsOfDeals(portalId: string, dealIds: number[]): Promise<(r: { crm: unknown }) => boolean> {
+    const deals = new Set(dealIds);
+    const contacts = new Set<number>();
+    if (deals.size && this.prisma)
+      for (const d of await this.prisma.crmDeal.findMany({ where: { portalId, dealId: { in: [...deals] }, deletedAt: null }, select: { contactId: true } }))
+        if (d.contactId) contacts.add(d.contactId);
+    return (r) => {
+      const crm = (r.crm as ChatSummary['crm'] | null) ?? null;
+      return (!!crm?.dealId && deals.has(crm.dealId)) || (!!crm?.contactId && contacts.has(crm.contactId));
+    };
+  }
+
+  /** Сделки с активной бронью на сегодня (журнал приложения, день — в часовом поясе портала). */
+  private async bookedTodayDeals(user: B24UserContext): Promise<number[]> {
+    if (!this.prisma) return [];
+    const { start, end } = zonedDayRange(todayIn(user.portal.timezone), user.portal.timezone);
+    const rows = await this.prisma.bookingRecord.findMany({ where: { portalId: user.portal.id, status: 'active', dealId: { not: null }, startsAt: { lt: end }, endsAt: { gt: start } }, select: { dealId: true } });
+    return [...new Set(rows.map((r) => r.dealId!))];
+  }
+
+  /** Сделки, где ждём оплату: счёт выставлен (ссылка готовится или отправлена), не оплачен и не закрыт. */
+  private async awaitingPaymentDeals(user: B24UserContext): Promise<number[]> {
+    if (!this.prisma) return [];
+    const rows = await this.prisma.paymentRequest.findMany({ where: { portalId: user.portal.id, status: { in: ['link_pending', 'sent'] }, closedAt: null }, select: { dealId: true } });
+    return [...new Set(rows.map((r) => r.dealId))];
+  }
+
+  private async filteredList(user: B24UserContext, q: { scope: ChatScope; status?: 'all' | 'waiting' | 'booked' | 'payment'; channel?: string; offset: number; folder?: string; from?: string; to?: string }): Promise<ChatListDto> {
     // Первая обычная страница прогревает доступ и метаданные при холодном входе.
-    const legacy = await this.list(user, { scope: q.scope, offset: q.status === 'waiting' ? 0 : q.offset, ...(q.folder ? { folder: q.folder } : {}) });
+    const legacy = await this.list(user, { scope: q.scope, offset: q.status && q.status !== 'all' ? 0 : q.offset, ...(q.folder ? { folder: q.folder } : {}) });
     const population = await this.population(user, q);
     if (!this.prisma) return { ...legacy, counts: { all: legacy.items.length, waiting: legacy.items.filter((c) => c.waitingReply).length, mine: legacy.items.filter((c) => c.responsibleId === user.userId).length }, userId: user.userId };
     const folders = await this.myFolders(user);
@@ -678,10 +712,17 @@ export class ChatsService {
     const channels = [...new Set(population.rows.map(r => messageChannel(r.connector)))].sort();
     const rows = population.rows.filter(r => !q.channel || messageChannel(r.connector) === q.channel).filter((r) => !q.folder || (favorite ? favorite.has(r.chatId) : folders.get(r.chatId) === q.folder));
     const waiting = rows.filter((r) => (q.folder || !population.ignored.has(r.chatId)) && isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));
-    const counts = { all: rows.length, waiting: waiting.length, mine: rows.filter((r) => r.responsibleId === user.userId).length };
-    const candidates = (q.status === 'waiting' ? waiting : rows).filter((r) => q.scope !== 'mine' || r.responsibleId === user.userId);
-    // Фильтр применяем до пагинации. Вкладки ожидания и Мои включают чаты обычных папок.
-    const selected = q.status === 'waiting' || q.scope === 'mine' || q.from || q.folder
+    const [isBooked, awaitsPayment] = await Promise.all([
+      this.bookedTodayDeals(user).then((ids) => this.clientsOfDeals(user.portal.id, ids)),
+      this.awaitingPaymentDeals(user).then((ids) => this.clientsOfDeals(user.portal.id, ids)),
+    ]);
+    const booked = rows.filter(isBooked);
+    const payment = rows.filter(awaitsPayment);
+    const counts = { all: rows.length, waiting: waiting.length, mine: rows.filter((r) => r.responsibleId === user.userId).length, booked: booked.length, payment: payment.length };
+    const byStatus = q.status === 'waiting' ? waiting : q.status === 'booked' ? booked : q.status === 'payment' ? payment : rows;
+    const candidates = byStatus.filter((r) => q.scope !== 'mine' || r.responsibleId === user.userId);
+    // Фильтр применяем до пагинации. Вкладки ожидания, броней, оплат и Мои включают чаты обычных папок.
+    const selected = (q.status && q.status !== 'all') || q.scope === 'mine' || q.from || q.folder
       ? candidates
       : candidates.filter((r) => !folders.has(r.chatId));
     const ids = selected.slice(q.offset, q.offset + PAGE).map((r) => r.chatId);
@@ -738,10 +779,13 @@ export class ChatsService {
     const hidden = await this.prisma.dashboardHiddenChat.findMany({ where: { portalId: user.portal.id, userId: user.userId }, select: { chatId: true } });
     const skip = new Set(hidden.map((r) => r.chatId));
     const waiting = population.rows.filter((r) => !population.ignored.has(r.chatId) && isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));
-    const unread = waiting.length ? await this.unreadByChat(user) : new Map<number, number>();
+    // «!» — первыми и даже без ожидания ответа (отметку видят все, пока сотрудник не напишет).
+    const flagged = population.rows.filter((r) => flagOf(r, r.lastAuthor, r.lastMessageAt));
+    const shown = [...flagged, ...waiting.filter((r) => !flagged.includes(r))];
+    const unread = shown.length ? await this.unreadByChat(user) : new Map<number, number>();
     return {
       waiting: waiting.length,
-      items: waiting.filter((r) => !skip.has(r.chatId)).slice(0, limit).map((r) => {
+      items: shown.filter((r) => !skip.has(r.chatId)).slice(0, limit).map((r) => {
         const crm = (r.crm as ChatSummary['crm'] | null) ?? null;
         return {
           chatId: r.chatId,
@@ -757,9 +801,30 @@ export class ChatsService {
           dealId: crm?.dealId ?? null,
           contactId: crm?.contactId ?? null,
           responsibleId: r.responsibleId,
+          flag: flagOf(r, r.lastAuthor, r.lastMessageAt),
         };
       }),
     };
+  }
+
+  /**
+   * «!» у чата — общая отметка для всех сотрудников (решение владельца 2026-10-25). Снимается сама,
+   * когда после неё в чат пишет сотрудник; вручную — `on: false`. Доступ к чату проверяется токеном
+   * сотрудника (`imopenlines.dialog.get`).
+   */
+  async setFlag(user: B24UserContext, chatId: number, body: unknown): Promise<ChatFlagDto> {
+    const on = (body as { on?: unknown } | null)?.on;
+    if (typeof on !== 'boolean') throw new BadRequestException({ code: 'INVALID_FLAG', message: 'Ожидается { on: true | false }' });
+    if (!this.prisma) throw new BadRequestException({ code: 'NO_CACHE', message: 'Кэш чатов недоступен' });
+    const dialog = (await user.client.call<{ id?: number }>('imopenlines.dialog.get', { CHAT_ID: chatId })).result;
+    if (!dialog?.id) throw new NotFoundException({ code: 'CHAT_NOT_FOUND', message: 'Чат недоступен' });
+    const row = await this.prisma.openlineChat.findUnique({ where: { portalId_chatId: { portalId: user.portal.id, chatId } } });
+    if (!row) throw new NotFoundException({ code: 'CHAT_NOT_CACHED', message: 'Чат ещё не загружен в список — обновите список чатов' });
+    const updated = await this.prisma.openlineChat.update({
+      where: { id: row.id },
+      data: on ? { flagAt: new Date(), flagByUserId: user.userId, flagByName: user.userName.slice(0, 255) } : { flagAt: null, flagByUserId: null, flagByName: null },
+    });
+    return { chatId, flag: flagOf(updated, updated.lastAuthor, updated.lastMessageAt) ?? null };
   }
 
   /** Скрыть чат с моего дашборда (решение владельца 2026-10-23): в списке чатов он остаётся. */
@@ -795,11 +860,11 @@ export class ChatsService {
   }
 
   /** Отметки «Не требует ответа» чатов (общие для всех сотрудников). */
-  private async noReplyMarks(portalId: string, chatIds: number[]): Promise<Map<number, NoReplyMark>> {
+  private async noReplyMarks(portalId: string, chatIds: number[]): Promise<Map<number, NoReplyMark & FlagMark>> {
     if (!this.prisma || !chatIds.length) return new Map();
     const rows = await this.prisma.openlineChat.findMany({
-      where: { portalId, chatId: { in: chatIds }, noReplyMessageId: { not: null } },
-      select: { chatId: true, noReplyMessageId: true, noReplyByName: true, noReplyAt: true },
+      where: { portalId, chatId: { in: chatIds }, OR: [{ noReplyMessageId: { not: null } }, { flagAt: { not: null } }] },
+      select: { chatId: true, noReplyMessageId: true, noReplyByName: true, noReplyAt: true, flagAt: true, flagByName: true },
     });
     return new Map(rows.map((r) => [r.chatId, r]));
   }
@@ -963,6 +1028,15 @@ export function phoneVariants(q: string): string[] {
 }
 
 type NoReplyMark = { noReplyMessageId: number | null; noReplyByName: string | null; noReplyAt: Date | null };
+type FlagMark = { flagAt: Date | null; flagByName: string | null };
+
+/** «!» действует, пока после отметки в чат не написал сотрудник. */
+export function flagOf(mark: FlagMark | null | undefined, lastAuthor: string | null | undefined, lastMessageAt: Date | string | null | undefined): { byName: string | null; at: string } | null {
+  if (!mark?.flagAt) return null;
+  const last = lastMessageAt ? new Date(lastMessageAt).getTime() : 0;
+  if (lastAuthor === 'employee' && last > mark.flagAt.getTime()) return null;
+  return { byName: mark.flagByName, at: mark.flagAt.toISOString() };
+}
 
 /** Отметка «Не требует ответа» действует, пока последнее сообщение — то, на котором её поставили. */
 function noReplyOf(mark: NoReplyMark | null, lastMessageId: number | null): ChatSummary['noReply'] {

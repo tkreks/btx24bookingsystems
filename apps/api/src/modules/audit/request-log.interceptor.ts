@@ -56,6 +56,7 @@ const LABELS: Record<string, string> = {
  * шаблонов ничего не меняют.
  */
 const SKIP = new Set([
+  'PUT /api/openlines/chats/:chatId/flag',
   'POST /api/dashboard/calls/:activityId/exclude',
   'DELETE /api/dashboard/calls/:activityId/exclude',
   'POST /api/activity/enter',

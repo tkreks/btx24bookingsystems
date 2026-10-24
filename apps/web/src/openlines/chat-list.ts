@@ -1,7 +1,8 @@
 import type { ChatSummary } from '@btx24/shared';
 import { connectorLabel } from './format.js';
 
-export type ChatTab = 'all' | 'waiting' | 'mine';
+/** `booked` — активная бронь на сегодня, `payment` — ждём оплату (оба фильтра считает сервер). */
+export type ChatTab = 'all' | 'waiting' | 'booked' | 'payment';
 export type ChatSort = 'recent' | 'waiting' | 'name';
 
 export const CHAT_SORTS: { key: ChatSort; label: string }[] = [
