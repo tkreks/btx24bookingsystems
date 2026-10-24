@@ -9,13 +9,14 @@ import {
   type DashboardBlockType,
 } from '@btx24/shared';
 import { MinimizeButton } from '../Minimize.js';
+import { BlockSync } from './DashboardSync.js';
 
-const WIDTH_ICONS: Record<BlockWidth, string> = { quarter: '¼', third: '⅓', half: '½', full: '▭' };
+const WIDTH_ICONS: Record<BlockWidth, string> = { sixth: '⅙', fifth: '⅕', quarter: '¼', third: '⅓', half: '½', full: '▭' };
 const GROUPS: DashboardBlockGroup[] = ['Показатели', 'Списки', 'По дням и сравнение', 'Контроль'];
 
 /**
- * Сетка личного дашборда (решение владельца 2026-10-24): 12 колонок — четверть (3), треть (4), половина
- * (6), весь ряд (12); на планшете четверть и треть — по половине, на телефоне все — во всю ширину. В режиме
+ * Сетка личного дашборда (решение владельца 2026-10-24): 60 колонок — шестая часть (10), пятая (12), четверть (15), треть (20), половина
+ * (30), весь ряд (60); на планшете четверть и треть — по половине, на телефоне все — во всю ширину. В режиме
  * настройки у блока — перетаскивание и стрелки (порядок), ширина, «убрать»; в конце — «+ Добавить блок».
  */
 export function BlockGrid({
@@ -23,6 +24,7 @@ export function BlockGrid({
   editing,
   available,
   render,
+  sources,
   onChange,
 }: {
   blocks: DashboardBlock[];
@@ -30,6 +32,8 @@ export function BlockGrid({
   /** Блоки, которые сотрудник может добавить (без «только администраторам» для остальных). */
   available: DashboardBlockType[];
   render: (b: DashboardBlock) => ReactNode;
+  /** Запросы страницы, из которых блок взял данные — подпись «из кэша / обновлено». */
+  sources?: (b: DashboardBlock) => string[];
   onChange: (blocks: DashboardBlock[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -52,6 +56,7 @@ export function BlockGrid({
           return (
             <div
               key={b.id}
+              data-dashboard-anchor={`block:${b.id}`}
               className={`dash-cell w-${b.width}${drag === i ? ' dragging' : ''}`}
               draggable={editing}
               onDragStart={() => setDrag(i)}
@@ -95,7 +100,7 @@ export function BlockGrid({
                   </button>
                 </div>
               )}
-              <div className="dash-cell-body">{content ?? <p className="muted dash-cell-empty">Блок недоступен: нет прав или данных.</p>}</div>
+              <div className="dash-cell-body">{content ? <BlockSync paths={sources?.(b)}>{content}</BlockSync> : <p className="muted dash-cell-empty">Блок недоступен: нет прав или данных.</p>}</div>
             </div>
           );
         })}

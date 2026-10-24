@@ -1,0 +1,26 @@
+{
+  "name": "@btx24/messenger",
+  "version": "0.0.1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Сервис мессенджеров: браузер на каждый подключённый мессенджер (WhatsApp Web), экран по VNC.",
+  "scripts": {
+    "build": "node scripts/patch-whatsapp.mjs && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "oxlint src/",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "1.34.7",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "oxlint": "^1.58.0",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.2"
+  }
+}

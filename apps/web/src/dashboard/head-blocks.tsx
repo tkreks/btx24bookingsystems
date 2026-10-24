@@ -1,3 +1,4 @@
+import { BlockLoading } from './BlockLoading.js';
 import type { DashboardBlockType, HeadDashboardDto, HeadDayDto, HeadTotalsDto } from '@btx24/shared';
 import { DashBadge } from '../openlines/RecentCalls.js';
 
@@ -89,7 +90,7 @@ export function HeadBlock({ type, d, vs, word, periodText, tz }: { type: HeadBlo
           <span className="dash-tile-label">Упущенных клиентов</span>
           <span className="dash-tile-value">{n(t?.lost, d?.calls)}</span>
           {p && d?.calls && <Trend cur={d.totals.lost} prev={p.lost} vs={vs} lowerIsBetter />}
-          <span className="dash-tile-hint">не перезвонили и не написали в чат</span>
+          <span className="dash-tile-hint">нет успешного звонка или диалога в чате</span>
         </div>
       );
     case 'dealsChart':
@@ -145,7 +146,7 @@ export function Trend({ cur, prev, vs, lowerIsBetter = false }: { cur: number; p
   const tone = diff === 0 ? 'same' : (diff > 0) !== lowerIsBetter ? 'good' : 'bad';
   const text = diff === 0 ? '0%' : prev ? `${diff > 0 ? '+' : '−'}${Math.round((Math.abs(diff) / prev) * 100)}%` : `${diff > 0 ? '+' : '−'}${Math.abs(diff)}`;
   return (
-    <span className={`trend ${tone}`} title={vs.title}>
+    <span className={`trend ${tone}`} title={`${vs.title}. Зелёный — лучше прошлого периода, красный — хуже`}>
       {diff > 0 ? '▲' : diff < 0 ? '▼' : '='} {text} {vs.label} <span className="muted">({prev})</span>
     </span>
   );
@@ -153,11 +154,11 @@ export function Trend({ cur, prev, vs, lowerIsBetter = false }: { cur: number; p
 
 /** Конверсия: разница в процентных пунктах с прошлым периодом. */
 export function ConvTrend({ cur, prev, vs }: { cur: number | null; prev: number | null; vs: { label: string; title: string } }) {
-  if (cur === null || prev === null) return <span className="trend same" title={vs.title}> · {vs.label}: {prev === null ? 'сделок не было' : `${prev}%`}</span>;
+  if (cur === null || prev === null) return <span className="trend same" title={`${vs.title}. Зелёный — лучше прошлого периода, красный — хуже`}> · {vs.label}: {prev === null ? 'сделок не было' : `${prev}%`}</span>;
   const diff = cur - prev;
   const tone = diff === 0 ? 'same' : diff > 0 ? 'good' : 'bad';
   return (
-    <span className={`trend ${tone}`} title={vs.title}>
+    <span className={`trend ${tone}`} title={`${vs.title}. Зелёный — лучше прошлого периода, красный — хуже`}>
       {' '}
       {diff > 0 ? '▲' : diff < 0 ? '▼' : '='} {diff > 0 ? '+' : diff < 0 ? '−' : ''}
       {Math.abs(diff)} п.п. {vs.label} <span className="muted">({prev}%)</span>
@@ -169,7 +170,7 @@ type SeriesKey = keyof Omit<HeadDayDto, 'date'>;
 
 /** Столбцы по дням: несколько показателей рядом; подписи дней снизу, значения — в подсказке. */
 export function BarChart({ days, series, tz }: { days: HeadDayDto[] | null; series: { key: SeriesKey; label: string; color: string }[]; tz: string }) {
-  if (!days) return <p className="muted">Загрузка…</p>;
+  if (!days) return <BlockLoading rows={2} />;
   const max = Math.max(1, ...days.flatMap((d) => series.map((s) => d[s.key])));
   const W = 640;
   const H = 180;

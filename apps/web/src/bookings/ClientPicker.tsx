@@ -2,8 +2,19 @@ import { useEffect, useState } from 'react';
 import type { CrmContactHit, CrmDealHit, CrmSearchDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { fmtMoney } from '../format.js';
+import { Avatar } from '../openlines/Avatar.js';
 
 type Kind = 'contact' | 'deal';
+
+/** «Имя Фамилия» и номер контакта — надстрочным тегом. */
+export function ContactName({ name, id }: { name: string; id: number }) {
+  return (
+    <span className="contact-name">
+      <b>{name}</b>
+      <sup className="contact-id">#{id}</sup>
+    </span>
+  );
+}
 
 /**
  * Поиск клиента или сделки для брони: «Клиент» — ID контакта, телефон, e-mail или ФИО; «Сделка» —
@@ -75,12 +86,16 @@ export function ClientPicker({
           {kind === 'contact'
             ? (hits as CrmContactHit[]).map((c) => (
                 <li key={c.id}>
-                  <button type="button" role="option" aria-selected={false} onClick={() => onContact(c)}>
-                    <b>{c.name}</b>
-                    <span className="muted">
-                      #{c.id}
-                      {c.phones[0] ? ` · ${c.phones[0]}` : ''}
-                      {c.emails[0] ? ` · ${c.emails[0]}` : ''}
+                  <button type="button" role="option" aria-selected={false} className="cp-contact" onClick={() => onContact(c)}>
+                    <Avatar src={c.photo} name={c.name} size={36} />
+                    <span className="cp-contact-main">
+                      <ContactName name={c.name} id={c.id} />
+                      {(c.phones[0] || c.emails[0]) && (
+                        <span className="muted cp-contact-comms">
+                          {c.phones[0] && <span>📞 {c.phones[0]}</span>}
+                          {c.emails[0] && <span>✉ {c.emails[0]}</span>}
+                        </span>
+                      )}
                     </span>
                   </button>
                 </li>

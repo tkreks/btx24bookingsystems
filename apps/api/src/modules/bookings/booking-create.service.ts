@@ -339,6 +339,10 @@ export class BookingCreateService {
       }
       const text = `${msg(err)}${createdDeal ? ` (создана сделка #${dealId} — повтор использует её)` : ''}`.slice(0, 1000);
       await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { status: 'failed', error: text, dealId, bookingId: leftBooking } });
+      if (leftBooking) await this.actions?.user(user, {
+        action: 'booking.compensation_failed', summary: `Не удалось откатить создание брони #${leftBooking}: требуется проверка ресурса`,
+        entityType: 'booking', entityId: leftBooking, details: { bookingId: leftBooking, dealId, operationId: op.id }, via: 'app',
+      });
       // Портал не ответил (лимит, сеть, сбой) — понятная ошибка «повторите»: повтор той же заявки безопасен.
       if (err instanceof Bitrix24Error && TRANSIENT_CODES.has(String(err.code)))
         throw new ServiceUnavailableException({

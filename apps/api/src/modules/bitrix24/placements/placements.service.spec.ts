@@ -1,4 +1,5 @@
 import { PlacementsService } from './placements.service.js';
+import { CRM_ENTITY_EVENTS } from '../install/install.service.js';
 import type { Bitrix24RestClient } from '../rest/rest-client.js';
 
 function client(bound: { placement: string; handler: string }[], events: { event: string; handler: string }[] = []) {
@@ -57,6 +58,7 @@ describe('PlacementsService', () => {
       'ONCRMDEALADD',
       'ONCRMDEALUPDATE',
       'ONCRMDEALDELETE',
+      ...CRM_ENTITY_EVENTS,
     ]);
     expect(st.placements.every((s) => s.bound) && st.events.every((e) => e.bound)).toBe(true);
     await svc.sync(c);

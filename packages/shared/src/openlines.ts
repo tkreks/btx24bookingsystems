@@ -16,6 +16,8 @@ export interface ChatCrmLinks {
 }
 
 export interface ChatSummary {
+  /** Аватар клиента из последней доступной сводки чата. */
+  clientAvatar?: string | null;
   chatId: number;
   sessionId: number;
   title: string;
@@ -67,6 +69,11 @@ export interface ChatFolderDto {
 }
 
 export interface ChatListDto {
+  /** Каналы всех доступных чатов (до пагинации/фильтра по каналу). */
+  channels?: string[];
+  /** Итоги по всему отбору, до пагинации и раскрытия папок. */
+  counts?: { all: number; waiting: number; mine: number };
+  userId?: number;
   items: ChatSummary[];
   /** Смещение следующей страницы; null — больше нет. */
   nextOffset: number | null;
@@ -208,7 +215,7 @@ export interface DashboardDto {
    */
   chats: { waitingReply: number; attention: AttentionChatDto[] } | null;
   /** Активные брони на ресурсах групп пользователя: на сегодня и на завтра (пересекают день) — и сами брони. */
-  bookingDays: { today: number; tomorrow: number; todayItems: DashboardBookingRow[]; tomorrowItems: DashboardBookingRow[] };
+  bookingDays: { from?: string; to?: string; nextDate?: string; today: number; tomorrow: number; todayItems: DashboardBookingRow[]; tomorrowItems: DashboardBookingRow[] };
   /** Клиенты по видам звонков за период; null — нет доступа к делам CRM. */
   calls: Record<CallKind, number> | null;
   /** Все звонки за период (входящие и исходящие, по `callsScope`); null — нет доступа к делам CRM. */
@@ -323,13 +330,23 @@ export interface CallLogRowDto {
   activityId: number;
   at: string;
   durationSec: number;
+  /** Последняя созданная доступная сделка клиента (независимо от даты звонка). */
+  latestDealId?: number | null;
+  /** Доступный чат клиента с самой свежей активностью. */
+  latestChatId?: number | null;
   direction: CallDirection;
   status: CallStatus;
   /** Номер клиента: кто звонил (входящий) или куда звонили (исходящий). */
   clientPhone: string | null;
+  /** Номер линии из статистики телефонии, если доступен; reg/SIP ID не показываем как телефон. */
+  portalPhone?: string | null;
+  /** Последний пропущенный без последующего успешного разговора или диалога в чате; как показатель «Упущенные». */
+  lost?: boolean;
   /** Сотрудник: кто принял (входящий) или кто звонил (исходящий); фото — аватарка в Битрикс24. */
   employee: { id: number; name: string | null; photo?: string | null } | null;
-  contact: { id: number; name: string | null } | null;
+  contact: { id: number; name: string | null; photo?: string | null } | null;
+  /** Аватар клиента из последнего доступного чата (как в блоке ожиданий). */
+  clientAvatar?: string | null;
   owner: { typeId: number; id: number; title: string | null };
   /** Звонок привязан к сделке — её статус (канбан + брони). */
   dealStatus?: DealStatusDto | null;
@@ -362,6 +379,8 @@ export interface ChatReplyStatusDto {
 /** Чат, требующий внимания: клиент написал последним, ответа нет. */
 export interface AttentionChatDto {
   chatId: number;
+  /** Личный счётчик непрочитанных сотрудника, как на странице чатов. */
+  unread: number;
   title: string;
   clientName: string | null;
   /** Аватарка клиента в открытой линии (URL); null — нет. */
@@ -409,6 +428,12 @@ export const ACTIVITY_KIND_LABELS: Record<ActivityKind, string> = {
 };
 
 export interface ActivityEventDto {
+  id?: string;
+  messageId?: number;
+  direction?: 'incoming' | 'outgoing';
+  action?: string;
+  details?: unknown;
+
   at: string;
   kind: ActivityKind;
   text: string;
@@ -467,7 +492,7 @@ export interface HeadDayDto {
   calls: number;
   /** Пропущенные входящие. */
   missed: number;
-  /** Упущенные клиенты: не перезвонили и не написали в чат после пропущенного. */
+  /** Упущенные клиенты: после пропущенного нет успешного разговора и диалога с сотрудником в чате. */
   lost: number;
 }
 
@@ -487,5 +512,14 @@ export interface HeadDashboardDto {
   previous: { from: string; to: string; totals: HeadTotalsDto };
   deals: boolean;
   calls: boolean;
+  notes: string[];
+}
+
+/** Личный журнал: userId всегда из аутентификации, права администратора его не расширяют. */
+export interface MyActivityDto {
+  userId: number;
+  from: string;
+  to: string;
+  events: import('./calls.js').ClientTimelineEvent[];
   notes: string[];
 }

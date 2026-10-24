@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseIntPipe, Put, Query, UseGuards } from '@nestjs/common';
-import type { BizprocImportDto, DiskFileRef, DiskItemDto, ResourceAdminDto } from '@btx24/shared';
+import type { BizprocImportDto, ClientFileRef, DiskItemDto, ResourceAdminDto } from '@btx24/shared';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
@@ -114,12 +114,13 @@ export class ClientMessagesAdminController {
   }
 
   /** Подставить настоящие имена файлов Диска (если у приложения есть доступ к Диску). */
-  private async fileNames(user: B24UserContext, files: DiskFileRef[]): Promise<void> {
-    const ids = [...new Set(files.map((f) => f.id))];
+  private async fileNames(user: B24UserContext, files: ClientFileRef[]): Promise<void> {
+    const diskFiles = files.filter((f) => 'id' in f);
+    const ids = [...new Set(diskFiles.map((f) => f.id))];
     if (!ids.length) return;
     try {
       const res = await user.client.batch(Object.fromEntries(ids.map((id) => [`f${id}`, { method: 'disk.file.get', params: { id } }])));
-      for (const f of files) {
+      for (const f of diskFiles) {
         const name = (res.result[`f${f.id}`] as { NAME?: string } | undefined)?.NAME;
         if (name) f.name = name;
       }

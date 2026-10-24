@@ -70,6 +70,13 @@ model Portal {
   resourceStops        ResourceStop[]
   telephonyCalls       TelephonyCall[]
   dashboardLayouts     DashboardLayout[]
+  crmDeals             CrmDeal[]
+  crmEntities          CrmEntity[]
+  crmCalls             CrmCall[]
+  portalEmployees      PortalEmployee[]
+  crmSyncStates        CrmSyncState[]
+  crmAccessChecks      CrmAccessCheck[]
+  messengers           Messenger[]
 }
 
 enum PortalStatus {
@@ -374,6 +381,8 @@ model OpenlineChat {
   lastMessageId    Int?
   lastPreview      String?   @db.VarChar(500)
   lastHasFiles     Boolean   @default(false)
+  /// Сообщений клиента подряд после последнего ответа сотрудника — «непрочитанные» на дашборде.
+  clientStreak     Int       @default(0)
   /// Когда сводку обновили (worker или живой запрос сотрудника).
   summaryAt        DateTime? @db.DateTime(3)
   /// «Не требует ответа» — общая отметка для всех сотрудников (решение владельца 2026-10-22): действует,
@@ -965,4 +974,234 @@ model DashboardLayout {
   updatedAt DateTime @updatedAt @db.DateTime(3)
 
   @@unique([portalId, userId])
+}
+
+// ---------- Копия CRM для дашборда (ADR 0013, решение владельца 2026-10-24) ----------
+
+/// Сделка CRM — копия, которую ведёт worker токеном приложения (события + изменения по дате).
+/// Прав не даёт: что показать сотруднику, решает CrmAccessService его токеном (≤5 мин).
+/// `row` — строка, как её отдаёт crm.deal.list (поля копии, см. CrmSyncState.fieldsKey).
+model CrmDeal {
+  id            String    @id @default(cuid())
+  portalId      String
+  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dealId        Int
+  categoryId    Int?
+  contactId     Int?
+  assignedById  Int?
+  stageSemantic String?   @db.VarChar(1)
+  createdAt     DateTime? @db.DateTime(3)
+  modifiedAt    DateTime? @db.DateTime(3)
+  row           Json
+  /// Сделку удалили в Битрикс24 (событие) — в выборки не попадает.
+  deletedAt     DateTime? @db.DateTime(3)
+  syncedAt      DateTime  @db.DateTime(3)
+
+  @@unique([portalId, dealId])
+  @@index([portalId, createdAt])
+  @@index([portalId, contactId])
+}
+
+/// Лид (1), контакт (3) или компания (4) CRM — имя/название и фото (копия, как CrmDeal).
+model CrmEntity {
+  id           String    @id @default(cuid())
+  portalId     String
+  portal       Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  entityTypeId Int
+  entityId     Int
+  title        String    @db.VarChar(255)
+  photo        String?   @db.VarChar(1000)
+  row          Json
+  deletedAt    DateTime? @db.DateTime(3)
+  syncedAt     DateTime  @db.DateTime(3)
+
+  @@unique([portalId, entityTypeId, entityId])
+}
+
+/// Звонок телефонии — дело CRM (`VOXIMPLANT_CALL`), копия; `row` — как из crm.activity.list.
+/// Видимость — по владельцу дела (сделка, лид, контакт, компания) токеном сотрудника.
+model CrmCall {
+  id            String    @id @default(cuid())
+  portalId      String
+  portal        Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  activityId    Int
+  ownerTypeId   Int
+  ownerId       Int
+  responsibleId Int?
+  startAt       DateTime  @db.DateTime(3)
+  row           Json
+  /// Линия и сотрудник из статистики телефонии (voximplant.statistic.get), когда звонок завершён.
+  portalNumber  String?   @db.VarChar(40)
+  portalUserId  Int?
+  statsAt       DateTime? @db.DateTime(3)
+  deletedAt     DateTime? @db.DateTime(3)
+  syncedAt      DateTime  @db.DateTime(3)
+
+  @@unique([portalId, activityId])
+  @@index([portalId, startAt])
+}
+
+/// Сотрудник портала (user.get, USER_TYPE=employee): имя и аватарка для подписей.
+model PortalEmployee {
+  id       String   @id @default(cuid())
+  portalId String
+  portal   Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId   Int
+  name     String   @db.VarChar(255)
+  photo    String?  @db.VarChar(1000)
+  active   Boolean
+  syncedAt DateTime @db.DateTime(3)
+
+  @@unique([portalId, userId])
+}
+
+/// Ход синхронизации копии по виду данных (`deal` | `call` | `entity` | `employee`).
+model CrmSyncState {
+  id             String    @id @default(cuid())
+  portalId       String
+  portal         Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  kind           String    @db.VarChar(16)
+  /// Изменения после этого момента ещё не забраны (с запасом на расхождение часов).
+  since          DateTime? @db.DateTime(3)
+  /// Первичная загрузка: последний загруженный ID; `backfillDoneAt` — загрузка завершена.
+  backfillCursor Int       @default(0)
+  backfillDoneAt DateTime? @db.DateTime(3)
+  /// Поля сделки в копии (через запятую): сменилось сопоставление полей — загрузка заново.
+  fieldsKey      String?   @db.VarChar(2000)
+  updatedAt      DateTime  @updatedAt @db.DateTime(3)
+
+  @@unique([portalId, kind])
+}
+
+/// Видит ли сотрудник запись CRM — последний ответ Битрикс24 его токеном (ADR 0013, решение владельца
+/// 2026-10-24): показ сразу по этому ответу (хоть через дни), а старше 5 минут — перепроверка в фоне.
+/// Тип: 1 лид, 2 сделка, 3 контакт, 4 компания.
+model CrmAccessCheck {
+  portalId     String
+  portal       Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  userId       Int
+  entityTypeId Int
+  entityId     Int
+  allowed      Boolean
+  checkedAt    DateTime @db.DateTime(3)
+
+  @@id([portalId, userId, entityTypeId, entityId])
+  @@index([checkedAt])
+}
+
+// ---------- Мессенджеры (ADR 0014, решение владельца 2026-10-24) ----------
+
+/// Подключённый мессенджер портала: браузер в сервисе messenger (WhatsApp Web), вход — кодом по номеру
+/// или QR. Позже сопоставляется с открытой линией Битрикс24 (написать клиенту первым).
+model Messenger {
+  id              String    @id @default(cuid())
+  portalId        String
+  portal          Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  /// `whatsapp` (сейчас), `telegram`, `max` — следующими.
+  kind            String    @db.VarChar(16)
+  /// Только цифры, с кодом страны.
+  phone           String    @db.VarChar(20)
+  /// Способ входа: `code` — код по номеру, `qr` — QR-код.
+  auth            String    @default("code") @db.VarChar(8)
+  title           String?   @db.VarChar(255)
+  /// Последнее состояние из сервиса — для списка, пока сервис недоступен.
+  state           String    @default("starting") @db.VarChar(20)
+  /// Вошедший аккаунт (wid), например 79991234567@c.us.
+  account         String?   @db.VarChar(100)
+  lastError       String?   @db.VarChar(500)
+  connectedAt     DateTime? @db.DateTime(3)
+  createdByUserId Int
+  createdAt       DateTime  @default(now()) @db.DateTime(3)
+  updatedAt       DateTime  @updatedAt @db.DateTime(3)
+  /// Привязка к открытой линии Битрикс24: `own` — своя линия приложения (коннектор `imconnector`).
+  /// Сообщения сотрудников идут через линию (действия видны в Битрикс24), права на чаты — линии.
+  /// Без привязки номер работает только в приложении (напрямую через шлюз) для групп `groupIds`.
+  /// (`existing` — сопоставление с чужой линией — отменено владельцем 2026-10-24.)
+  lineMode        String?   @db.VarChar(10)
+  lineId          Int?
+  lineName        String?   @db.VarChar(255)
+  /// Группы приложения, которым доступен номер (ID WorkGroup); пусто — только администраторам.
+  groupIds        Json?
+  chats           MessengerChat[]
+  messages        MessengerMessage[]
+
+  @@unique([portalId, kind, phone])
+}
+
+/// Чат мессенджера (собеседник): одна строка на чат — общая для всех сотрудников.
+model MessengerChat {
+  id            String    @id @default(cuid())
+  portalId      String
+  messengerId   String
+  messenger     Messenger @relation(fields: [messengerId], references: [id], onDelete: Cascade)
+  /// ID чата в мессенджере (`79991234567@c.us`).
+  chatId        String    @db.VarChar(100)
+  /// Номер собеседника (цифры), если чат личный.
+  phone         String?   @db.VarChar(20)
+  name          String?   @db.VarChar(255)
+  lastMessageAt DateTime? @db.DateTime(3)
+  lastText      String?   @db.VarChar(500)
+  /// Входящих после последнего ответа.
+  unread        Int       @default(0)
+
+  @@unique([messengerId, chatId])
+  @@index([messengerId, lastMessageAt])
+  /// CRM-сопоставление содержит только ID; имена/сделки в UI перечитываются токеном сотрудника.
+  crmContactId Int?
+  activeDealId Int?
+  crmMatch     Json?
+  crmMatchedAt DateTime? @db.DateTime(3)
+  @@index([portalId, activeDealId])
+
+}
+
+/// Сообщение мессенджера. Правки не затирают историю (`edits`), удаление — отметка `deletedAt`
+/// (решение владельца 2026-10-24: сообщения могут быть отредактированы и удалены).
+model MessengerMessage {
+  id           String    @id @default(cuid())
+  portalId     String
+  messengerId  String
+  messenger    Messenger @relation(fields: [messengerId], references: [id], onDelete: Cascade)
+  chatId       String    @db.VarChar(100)
+  /// ID сообщения в мессенджере.
+  externalId   String    @db.VarChar(190)
+  fromMe       Boolean
+  author       String?   @db.VarChar(100)
+  body         String    @db.Text
+  type         String    @db.VarChar(20)
+  hasMedia     Boolean   @default(false)
+  /// Вложение: файл в хранилище сервиса мессенджеров (`fileId`), тип, имя, размер; null — нет или
+  /// ещё не скачано (история — скачивается по первому запросу).
+  mediaId      String?   @db.VarChar(40)
+  mediaMime    String?   @db.VarChar(150)
+  mediaName    String?   @db.VarChar(255)
+  mediaSize    Int?
+  quotedId     String?   @db.VarChar(190)
+  sentAt       DateTime  @db.DateTime(3)
+  /// 0 отправляется · 1 на сервере · 2 доставлено · 3 прочитано.
+  ack          Int?
+  editedAt     DateTime? @db.DateTime(3)
+  /// Прежние тексты: [{ at, body }].
+  edits        Json?
+  deletedAt    DateTime? @db.DateTime(3)
+  /// Откуда: `messenger` (клиент или телефон), `app` (сотрудник в приложении), `bitrix` (оператор открытой линии).
+  source       String    @default("messenger") @db.VarChar(10)
+  sentByUserId Int?
+  /// Сообщение в открытой линии Битрикс24 (своя линия): ID в чате линии.
+  b24MessageId Int?
+  b24ChatId    Int?
+  /// Передано в открытую линию (своя линия); ошибка передачи — `relayError`.
+  relayedAt    DateTime? @db.DateTime(3)
+  relayError   String?   @db.VarChar(500)
+
+  @@unique([messengerId, externalId])
+  @@index([messengerId, chatId, sentAt])
+  @@index([messengerId, b24MessageId])
+  /// Контекст сообщения фиксируется при получении/отправке, переключение не меняет историю.
+  dealId       Int?
+  awaitingDeal Boolean @default(false)
+  /// Реальный ID диалога коннектора (может включать контекст сделки).
+  relayChatId  String? @db.VarChar(190)
+  @@index([portalId, messengerId, chatId, dealId, sentAt])
+
 }

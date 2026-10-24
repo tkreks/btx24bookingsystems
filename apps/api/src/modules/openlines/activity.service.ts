@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { todayIn, zonedDayRange, type ActivityDayDto, type ActivityEventDto } from '@btx24/shared';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { classifyActionLog, todayIn, zonedDayRange, type MyActivityDto, type ClientTimelineEvent, type ActivityDayDto, type ActivityEventDto } from '@btx24/shared';
+import { selectedPeriod } from '../../common/period.js';
+import { callDurationSec, callStatus, type CallActivity } from './call-stats.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
@@ -25,7 +27,6 @@ type Row = Record<string, unknown>;
  */
 @Injectable()
 export class ActivityService {
-  private readonly logger = new Logger(ActivityService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -35,10 +36,32 @@ export class ActivityService {
       throw new BadRequestException({ code: 'INVALID_DATE', message: 'date: YYYY-MM-DD' });
     const date = (query.date as string | undefined) ?? todayIn(tz);
     const { start, end } = zonedDayRange(date, tz);
+    return this.collect(user, date, start, end, false);
+  }
+
+  async mine(user: B24UserContext, query: { from?: unknown; to?: unknown }, readChats = false): Promise<MyActivityDto> {
+    const day = todayIn(user.portal.timezone);
+    const p = selectedPeriod(query, user.portal.timezone) ?? { from: day, to: day, ...zonedDayRange(day, user.portal.timezone) };
+    const data = await this.collect(user, p.from, p.start, p.end, true, readChats);
+    const kinds = { call: 'call', chat: 'message', phone: 'message', deal: 'deal', booking: 'booking', app: 'activity' } as const;
+    const events: ClientTimelineEvent[] = (data.employees.find((e) => e.userId === user.userId)?.events ?? []).map((e, i) => ({
+      id: e.id ?? `my:${e.kind}:${e.at}:${i}`, at: e.at, kind: kinds[e.kind],
+      title: e.kind === 'chat' || e.kind === 'phone' ? 'Отправлено сообщение' : e.text,
+      text: e.text,
+      actorId: user.userId, actorName: user.userName,
+      ...(e.dealId ? { dealId: e.dealId } : {}), ...(e.chatId ? { chatId: e.chatId } : {}),
+      ...(e.messageId ? { messageId: e.messageId } : {}), ...(e.direction ? { direction: e.direction } : {}),
+      ...(e.action ? classifyActionLog({ action: e.action, details: e.details }) : { category: e.kind === 'call' || e.kind === 'chat' || e.kind === 'phone' ? 'communications' as const : e.kind === 'deal' ? 'crm' as const : e.kind === 'booking' ? 'bookings' as const : 'other' as const, severity: 'info' as const }),
+    })).sort((a,b) => Date.parse(b.at) - Date.parse(a.at) || b.id.localeCompare(a.id));
+    return { userId: user.userId, from: p.from, to: p.to, events, notes: data.notes };
+  }
+
+  private async collect(user: B24UserContext, date: string, start: Date, end: Date, onlyMine: boolean, readChats = true): Promise<ActivityDayDto> {
+    const tz = user.portal.timezone;
     const notes: string[] = [];
     const portalId = user.portal.id;
 
-    const people = await this.employees(user);
+    const people = onlyMine ? new Map([[user.userId, { name: user.userName, photo: null as string | null }]]) : await this.employees(user);
     const ids = [...people.keys()];
     if (!ids.length) return { date, timezone: tz, fromHour: FROM_HOUR, toHour: TO_HOUR, employees: [], unattributedPhone: 0, notes: ['В группах нет сотрудников.'] };
 
@@ -55,14 +78,14 @@ export class ActivityService {
         notes.push('Новые сделки недоступны: нет доступа к сделкам CRM.');
         return [] as Row[];
       }),
-      this.prisma.openlineChat.findMany({ where: { portalId, lastMessageAt: { gte: start } }, orderBy: { lastMessageAt: 'desc' }, take: MAX_CHATS, select: { chatId: true, clientName: true, title: true } }),
+      readChats ? this.prisma.openlineChat.findMany({ where: { portalId, lastMessageAt: { gte: start } }, orderBy: { lastMessageAt: 'desc' }, take: MAX_CHATS, select: { chatId: true, clientName: true, title: true } }) : Promise.resolve([]),
       this.prisma.systemMessage.findMany({ where: { portalId, sentAt: { gte: new Date(start.getTime() - 3600_000), lt: new Date(end.getTime() + 3600_000) } } }),
       this.prisma.bookingRecord.findMany({ where: { portalId, createdAt: { gte: start, lt: end }, createdByUserId: { in: ids } }, select: { bookingId: true, dealId: true, createdAt: true, createdByUserId: true } }),
       this.prisma.actionLog.findMany({
-        where: { portalId, at: { gte: start, lt: end }, actorKind: 'user', userId: { in: ids }, action: { notIn: ['app.enter', 'app.error', 'bitrix.error', 'request'] } },
-        orderBy: { at: 'asc' },
+        where: { portalId, at: { gte: start, lt: end }, actorKind: 'user', userId: { in: ids }, ...(onlyMine ? {} : { action: { notIn: ['app.enter', 'app.login', 'app.error', 'bitrix.error'] } }) },
+        orderBy: { at: 'desc' },
         take: 2000,
-        select: { at: true, userId: true, summary: true, entityType: true, entityId: true },
+        select: { id: true, at: true, action: true, details: true, userId: true, summary: true, entityType: true, entityId: true },
       }),
     ]);
 
@@ -79,24 +102,23 @@ export class ActivityService {
     });
 
     for (const c of calls) {
-      const s = Date.parse(String(c.START_TIME));
-      const e = Date.parse(String(c.END_TIME ?? c.START_TIME));
-      // Длительность — по началу и концу; больше 3 часов — не разговор (дело не закрыли вовремя).
-      const dur = Number.isFinite(e - s) && e > s && e - s < 3 * 3600_000 ? Math.round((e - s) / 1000) : 0;
+      const dur = callDurationSec(c as unknown as CallActivity);
+      const status = callStatus(c as unknown as CallActivity);
       const dealId = Number(c.OWNER_TYPE_ID) === 2 ? Number(c.OWNER_ID) || null : null;
       const incoming = String(c.DIRECTION) === '1';
-      push(Number(c.RESPONSIBLE_ID), ev(String(c.START_TIME), 'call', `${incoming ? 'Входящий' : 'Исходящий'} звонок${dur ? `, ${Math.ceil(dur / 60)} мин` : ' — без разговора'}`, { durationSec: dur, dealId }));
+      const text = status === 'missed' ? 'Пропущенный звонок' : `${incoming ? 'Входящий' : 'Исходящий'} звонок${dur ? `, ${dur} с` : ' — без разговора'}`;
+      push(Number(c.RESPONSIBLE_ID), ev(String(c.START_TIME), 'call', text, { id: `call:${c.ID}`, durationSec: dur, dealId, direction: incoming ? 'incoming' : 'outgoing' }));
     }
-    for (const d of deals) push(Number(d.CREATED_BY_ID), ev(String(d.DATE_CREATE), 'deal', `Создал сделку «${String(d.TITLE ?? '').slice(0, 80)}»`, { dealId: Number(d.ID) }));
-    for (const b of bookings) push(b.createdByUserId, ev(b.createdAt, 'booking', `Создал бронь #${b.bookingId}`, { dealId: b.dealId }));
-    for (const a of actions) push(a.userId, ev(a.at, 'app', a.summary.slice(0, 160), { dealId: a.entityType === 'deal' ? Number(a.entityId) || null : null }));
+    for (const d of deals) push(Number(d.CREATED_BY_ID), ev(String(d.DATE_CREATE), 'deal', `Создал сделку «${String(d.TITLE ?? '').slice(0, 80)}»`, { id: `deal:${d.ID}`, dealId: Number(d.ID) }));
+    for (const b of bookings) push(b.createdByUserId, ev(b.createdAt, 'booking', `Создал бронь #${b.bookingId}`, { id: `booking:${b.bookingId}`, dealId: b.dealId }));
+
 
     let unattributedPhone = 0;
     // Сообщения с телефона, когда смены нескольких сотрудников совпали, — отдельной строкой.
     const shared: ActivityEventDto[] = [];
     const sharedIds = new Set<number>();
     const markList = marks.map((m) => ({ chatId: m.chatId, messageId: m.messageId, userId: m.userId, sentAt: m.sentAt.getTime() }));
-    const msgs = await this.messages(user, chats.map((c) => c.chatId)).catch(() => {
+    const msgs = await this.messages(user, chats.map((c) => c.chatId), start, notes).catch(() => {
       notes.push('Переписка недоступна: нет доступа к чатам открытых линий.');
       return new Map<number, { messages: ImMessage[]; users: ImUser[] }>();
     });
@@ -109,8 +131,9 @@ export class ActivityService {
         const who = chatName.get(chatId) ?? `Чат #${chatId}`;
         if (kind === 'employee' && events.has(Number(m.author_id))) {
           if (isSystemMessage(markList, chatId, Number(m.id), Number(m.author_id), at)) continue;
-          push(Number(m.author_id), ev(m.date, 'chat', `Чат «${who}»: ${preview(m.text, 60)}`, { chatId }));
+          push(Number(m.author_id), ev(m.date, 'chat', `Чат «${who}»: ${preview(m.text, 60)}`, { id: `chat:${chatId}:${m.id}`, messageId: Number(m.id), direction: 'outgoing', chatId }));
         } else if (kind === 'client') {
+          if (onlyMine) continue; // Общий телефон не доказывает автора: чужое сообщение не приписываем мне.
           const phone = phoneOutgoing(m.text);
           if (!phone) continue;
           const owner = shiftOwner(shifts, at);
@@ -123,6 +146,23 @@ export class ActivityService {
         }
       }
     }
+    // Приложение отправляет сообщение и фиксирует запрос; не считаем его вторым сообщением.
+    for (const a of actions) {
+      const own = events.get(a.userId ?? 0);
+      if (!own) continue;
+      if (a.action === 'booking.created' && own.some((e) => e.id === `booking:${a.entityId}`)) continue;
+      const detail = a.details && typeof a.details === 'object' && !Array.isArray(a.details) ? a.details as Record<string, unknown> : {};
+      if (!onlyMine && detail.error) continue;
+      const sentChat = a.action === 'request' && typeof detail.route === 'string' && /\/chats\/[^/]+\/send$/.test(detail.route) && !detail.error;
+      const chatId = a.entityType === 'chat' ? Number(a.entityId) || null : null;
+      if (sentChat) {
+        const ids = Array.isArray(detail.messageIds) ? detail.messageIds.map(Number).filter((id) => id > 0) : [];
+        if (ids.length && ids.every((id) => own.some((e) => e.chatId === chatId && e.messageId === id))) continue;
+        if (!ids.length && own.some((e) => e.kind === 'chat' && e.chatId === chatId && Math.abs(Date.parse(e.at) - a.at.getTime()) < 30_000)) continue;
+      }
+      push(a.userId, ev(a.at, sentChat ? 'chat' : 'app', a.summary, { id: `audit:${a.id}`, action: a.action, details: a.details, chatId, dealId: a.entityType === 'deal' ? Number(a.entityId) || null : null, ...(sentChat ? { direction: 'outgoing' as const } : {}) }));
+    }
+    if (actions.length >= 2000) notes.push('Показаны последние 2000 действий приложения выбранного периода.');
     if (chats.length >= MAX_CHATS) notes.push(`Переписка — по ${MAX_CHATS} последним чатам дня.`);
     if (unattributedPhone) notes.push(`Сообщений с телефона без смены: ${unattributedPhone} — никто не начал рабочий день в Битрикс24.`);
 
@@ -223,17 +263,18 @@ export class ActivityService {
     return out;
   }
 
-  private calls(user: B24UserContext, start: Date, end: Date): Promise<Row[]> {
-    return user.client.listAll<Row>(
-      'crm.activity.list',
-      {
-        // Состоявшиеся звонки телефонии: незавершённые — это запланированные «позвонить» (12:00–13:00)
-        // и пропущенные, не работа. Не сотрудников групп отсеивает day().
-        filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', COMPLETED: 'Y', '>=START_TIME': start.toISOString(), '<START_TIME': end.toISOString() },
-        select: ['ID', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'DIRECTION', 'OWNER_ID', 'OWNER_TYPE_ID'],
-      },
-      { max: 2000 },
-    );
+  private async calls(user: B24UserContext, start: Date, end: Date): Promise<Row[]> {
+    const rows = await user.client.listAll<Row>('crm.activity.list', {
+      // Факт VOXIMPLANT_CALL: COMPLETED=N бывает и у уже завершённых входящих звонков.
+      filter: { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL', '>=START_TIME': start.toISOString(), '<START_TIME': end.toISOString() },
+      select: ['ID', 'START_TIME', 'END_TIME', 'SETTINGS', 'RESPONSIBLE_ID', 'DIRECTION', 'OWNER_ID', 'OWNER_TYPE_ID'],
+    }, { max: 2000 });
+    if (!rows.length) return rows;
+    try {
+      const stats = await user.client.listAll<{ CRM_ACTIVITY_ID?: string; PORTAL_USER_ID?: string }>('voximplant.statistic.get', { FILTER: { CRM_ACTIVITY_ID: rows.map((r) => Number(r.ID)) }, SORT: 'ID', ORDER: 'DESC' }, { max: 2000 });
+      const actual = new Map(stats.filter((r) => Number(r.PORTAL_USER_ID) > 0).map((r) => [Number(r.CRM_ACTIVITY_ID), Number(r.PORTAL_USER_ID)]));
+      return rows.map((r) => ({ ...r, RESPONSIBLE_ID: actual.get(Number(r.ID)) ?? r.RESPONSIBLE_ID }));
+    } catch { return rows; }
   }
 
   private deals(user: B24UserContext, start: Date, end: Date): Promise<Row[]> {
@@ -244,16 +285,25 @@ export class ActivityService {
     );
   }
 
-  /** Последние 50 сообщений каждого чата (пакетами); чат без доступа — пропускаем. */
-  private async messages(user: B24UserContext, chatIds: number[]): Promise<Map<number, { messages: ImMessage[]; users: ImUser[] }>> {
+  /** История выбранного периода: страницы50, максимум500/чат; недоступный чат пропускаем. */
+  private async messages(user: B24UserContext, chatIds: number[], since: Date, notes: string[]): Promise<Map<number, { messages: ImMessage[]; users: ImUser[] }>> {
     const out = new Map<number, { messages: ImMessage[]; users: ImUser[] }>();
-    if (!chatIds.length) return out;
-    const res = await user.client.batch(Object.fromEntries(chatIds.map((id) => [`c${id}`, { method: 'im.dialog.messages.get', params: { DIALOG_ID: `chat${id}`, LIMIT: 50 } }])));
-    for (const id of chatIds) {
-      const r = res.result[`c${id}`] as { messages?: ImMessage[]; users?: ImUser[] } | undefined;
-      if (r?.messages) out.set(id, { messages: r.messages, users: r.users ?? [] });
+    let pending = chatIds.map((id) => ({ id, before: 0 }));
+    for (let page = 0; pending.length && page < 10; page++) {
+      const res = await user.client.batch(Object.fromEntries(pending.map(({ id, before }) => [`c${id}`, { method: 'im.dialog.messages.get', params: { DIALOG_ID: `chat${id}`, LIMIT: 50, ...(before ? { LAST_ID: before } : {}) } }])));
+      const next: typeof pending = [];
+      for (const { id, before } of pending) {
+        const r = res.result[`c${id}`] as { messages?: ImMessage[]; users?: ImUser[] } | undefined;
+        if (!r?.messages?.length) continue;
+        const old = out.get(id) ?? { messages: [], users: [] };
+        out.set(id, { messages: [...new Map([...old.messages, ...r.messages].map((m) => [m.id, m])).values()], users: [...new Map([...old.users, ...(r.users ?? [])].map((u) => [u.id, u])).values()] });
+        const first = Math.min(...r.messages.map((m) => Number(m.id)));
+        const earliest = Math.min(...r.messages.map((m) => Date.parse(m.date)));
+        if (r.messages.length >= 50 && earliest >= since.getTime() && first > 0 && (!before || first < before)) next.push({ id, before: first });
+      }
+      pending = next;
     }
-    if (Object.keys(res.errors ?? {}).length) this.logger.debug(`activity: ${Object.keys(res.errors).length} chats without access`);
+    if (pending.length) notes.push('Переписка ограничена 500 сообщениями на чат; сузьте период для более полной истории.');
     return out;
   }
 }

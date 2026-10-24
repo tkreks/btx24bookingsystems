@@ -1,3 +1,4 @@
+import { selectedPeriod } from '../../common/period.js';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   CERTIFICATE_DEAL_TYPE,
@@ -75,13 +76,16 @@ export class CertificatesService {
     private readonly fieldMap: DealFieldMapService,
   ) {}
 
-  async list(user: B24UserContext, query: { q?: unknown; status?: unknown }): Promise<CertificateListDto> {
+  async list(user: B24UserContext, query: { q?: unknown; status?: unknown; from?: unknown; to?: unknown }): Promise<CertificateListDto> {
     const portalId = user.portal.id;
     const today = dateOf(todayIn(user.portal.timezone));
     const q = typeof query.q === 'string' ? query.q.trim().slice(0, 100) : '';
     const status = typeof query.status === 'string' ? query.status : '';
+    const period = selectedPeriod(query, user.portal.timezone);
+    const dateFilter = period ? { createdAt: { gte: period.start, lt: period.end } } : {};
     const where: Prisma.CertificateWhereInput = {
       portalId,
+      ...dateFilter,
       ...(q ? { OR: [{ number: { contains: q.toUpperCase() } }, { holderName: { contains: q } }] } : {}),
       ...(status === 'overdue'
         ? { status: 'new', validUntil: { lt: today } }
@@ -91,8 +95,8 @@ export class CertificatesService {
     };
     const [rows, grouped, overdue, canManage] = await Promise.all([
       this.prisma.certificate.findMany({ where, orderBy: { createdAt: 'desc' }, take: LIST_LIMIT + 1 }),
-      this.prisma.certificate.groupBy({ by: ['status'], where: { portalId }, _count: { _all: true } }),
-      this.prisma.certificate.count({ where: { portalId, status: 'new', validUntil: { lt: today } } }),
+      this.prisma.certificate.groupBy({ by: ['status'], where: { portalId, ...dateFilter }, _count: { _all: true } }),
+      this.prisma.certificate.count({ where: { portalId, ...dateFilter, status: 'new', validUntil: { lt: today } } }),
       this.canManage(user),
     ]);
     const counts = { all: 0, new: 0, used: 0, expired: 0, overdue };

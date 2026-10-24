@@ -106,18 +106,29 @@ export function preview(text: string | null | undefined, max = 160): string {
 /**
  * Последнее сообщение клиента или оператора — по нему Битрикс24 считает «Дату последнего
  * сообщения» в списке диалогов (сверено на портале): системные и сообщения ботов не считаются.
- * Нет таких — самое свежее сообщение как есть (для превью); `human: false`.
+ * Нет таких — самое свежее сообщение как есть (для превью); `human: false`. `streak` — сколько
+ * сообщений клиента подряд после последнего ответа сотрудника (в пределах переданных сообщений).
  */
 export function lastMeaningful(
   messages: ImMessage[],
   users: ImUser[],
-): { message: ImMessage; kind: MessageAuthorKind; human: boolean } | null {
+): { message: ImMessage; kind: MessageAuthorKind; human: boolean; streak: number } | null {
   const sorted = [...messages].sort((a, b) => b.id - a.id);
+  let last: { message: ImMessage; kind: MessageAuthorKind } | null = null;
+  let streak = 0;
   for (const m of sorted) {
     const kind = messageKind(m, users);
-    if (kind === 'client' || kind === 'employee') return { message: m, kind, human: true };
+    if (kind === 'employee') {
+      last ??= { message: m, kind };
+      break;
+    }
+    if (kind === 'client') {
+      last ??= { message: m, kind };
+      streak++;
+    }
   }
-  return sorted[0] ? { message: sorted[0], kind: messageKind(sorted[0], users), human: false } : null;
+  if (last) return { ...last, human: true, streak };
+  return sorted[0] ? { message: sorted[0], kind: messageKind(sorted[0], users), human: false, streak: 0 } : null;
 }
 
 export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): ChatMessageDto {

@@ -187,7 +187,7 @@ export const CERTIFICATE_DEAL_TYPE = 'Покупка сертификата';
  * Тип сделки в мастере брони (решение владельца 2026-10-23, группа «Бани» — опция `dealKinds`): от него
  * зависят шаги, поля и оплата. Значение поля «Тип сделки» ищется по началу названия варианта.
  */
-export const DEAL_KINDS = ['certificate', 'visit', 'by_certificate', 'no_payment'] as const;
+export const DEAL_KINDS = ['visit', 'certificate', 'by_certificate', 'no_payment'] as const;
 export type DealKind = (typeof DEAL_KINDS)[number];
 export const DEAL_KIND_LABELS: Record<DealKind, string> = {
   certificate: 'Покупка сертификата',
@@ -241,6 +241,8 @@ export interface ClientBookingsDto {
   upcoming: ClientBookingDto[];
   /** Последние прошлые (до 5). */
   recent: ClientBookingDto[];
+  /** Полный доступный список прошлых броней при запросе из карточки звонка. */
+  history?: ClientBookingDto[];
   /**
    * Открытые сделки клиента — для привязки новой брони: сумма, когда создана, бронь по сделке
    * (текущая или будущая; мастер выделяет такую сделку красным).
@@ -413,9 +415,19 @@ export function discountedPrice(p: Pick<BookingProductInput, 'price' | 'discount
 /** Поиск клиента в форме брони (`GET /api/crm/search?kind=contact&q=`): ID, телефон, e-mail, ФИО. */
 export interface CrmContactHit {
   id: number;
+  /** «Имя Фамилия». */
   name: string;
+  /** Фото контакта в Битрикс24 (URL портала) или null. */
+  photo?: string | null;
   phones: string[];
   emails: string[];
+}
+
+/** Сотрудник, последним изменивший сделку (`MODIFY_BY_ID`). */
+export interface CrmDealModifier {
+  id: number;
+  name: string;
+  photo: string | null;
 }
 
 /** Поиск сделки (`kind=deal`): название, ID или имя клиента; открытые — первыми. */
@@ -432,9 +444,12 @@ export interface CrmDealHit {
   lastActivityAt: string | null;
   /** Цвет для выбора сделки новой брони (бронь есть / поля заполнены / пустая). */
   tone?: DealBookingTone;
+  modifiedBy?: CrmDealModifier | null;
+  modifiedAt?: string | null;
 }
 
 export interface CrmSearchDto {
+  /** Найденные клиенты; при `contactId` — сам этот клиент (имя и фото для шага мастера). */
   contacts: CrmContactHit[];
   deals: CrmDealHit[];
 }

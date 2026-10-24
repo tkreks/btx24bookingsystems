@@ -1,3 +1,4 @@
+import { clientPhoneVariants, messageChannel } from '@btx24/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { FAVORITES_FOLDER, hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
@@ -13,6 +14,8 @@ import type {
   TemplateStepDto,
 } from '@btx24/shared';
 import { z } from 'zod';
+import { reachedInChat, type CallClient, type ChatReach } from './call-stats.js';
+import { selectedPeriod } from '../../common/period.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { bitrix24ErrorMessage } from '../bitrix24/http/bitrix24-error.filter.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
@@ -84,7 +87,11 @@ const SUMMARY_STALE_MS = 30_000;
 const ACCESS_STALE_MS = 5 * 60_000;
 const listQuery = z
   .object({
-    scope: z.enum(['mine', 'department', 'all']).default('mine'),
+    scope: z.enum(['mine', 'department', 'all']).default('all'),
+    status: z.enum(['all', 'waiting']).optional(),
+    channel: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
     offset: z.coerce.number().int().min(0).default(0),
     /** Моя папка: только её чаты (без папки — общий список без чатов моих папок). */
     folder: z.string().min(1).max(40).optional(),
@@ -202,14 +209,16 @@ export class ChatsService {
   /** Непрочитанные по чатам открытых линий — личные счётчики мессенджера сотрудника. */
   async unreadByChat(user: B24UserContext): Promise<Map<number, number>> {
     try {
-      const res = await user.client.call<{ items?: { id?: string | number; chat_id?: number | string; counter?: number }[] }>(
-        'im.recent.list',
-        { ONLY_OPENLINES: 'Y', LIMIT: 200 },
-      );
       const out = new Map<number, number>();
-      for (const i of res.result?.items ?? []) {
-        const chatId = Number(i.chat_id) || Number(String(i.id ?? '').replace(/^chat/, ''));
-        if (chatId > 0 && Number(i.counter) > 0) out.set(chatId, Number(i.counter));
+      for (let offset = 0; offset < 2000; offset += 200) {
+        const res = await user.client.call<{ items?: { id?: string | number; chat_id?: string | number; counter?: number }[]; hasMore?: boolean; hasMorePages?: boolean }>('im.recent.list', { UNREAD_ONLY: 'Y', SKIP_OPENLINES: 'N', LIMIT: 200, OFFSET: offset });
+        const items = Array.isArray(res.result) ? res.result : res.result?.items ?? [];
+        for (const i of items) {
+          const chatId = Number(i.chat_id) || Number(String(i.id ?? '').replace(/^chat/, ''));
+          if (chatId > 0 && Number(i.counter) > 0) out.set(chatId, Number(i.counter));
+        }
+        if (!res.result?.hasMore && !res.result?.hasMorePages) break;
+        if (!items.length) break;
       }
       return out;
     } catch (err) {
@@ -246,6 +255,7 @@ export class ChatsService {
     const parsed = listQuery.safeParse(query);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_QUERY', message: 'Неверные параметры списка чатов' });
+    if (parsed.data.status || parsed.data.channel) return this.filteredList(user, parsed.data);
     const { scope, offset, folder } = parsed.data;
     const folders = await this.myFolders(user);
     if (folder) {
@@ -341,6 +351,7 @@ export class ChatsService {
       const live = last?.human ? Date.parse(last.message.date) : 0;
       const sortKey = Math.max(live, s.indexedAt?.getTime() ?? 0);
       const summary: ChatSummary = {
+        clientAvatar: m.users?.length ? clientAvatarOf(m.users, user.portal.domain) : null,
         chatId: Number(d.id),
         sessionId: s.sessionId,
         title: d.name ?? `Чат #${d.id}`,
@@ -403,7 +414,7 @@ export class ChatsService {
         lastPreview: texts ? (c.lastMessage?.preview.slice(0, 500) ?? null) : null,
         lastHasFiles: c.lastMessage?.hasFiles ?? false,
         summaryAt: now,
-        ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
+        ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}),
       };
       return [
         prisma.openlineChat.upsert({
@@ -475,6 +486,7 @@ export class ChatsService {
           chatId: id,
           sessionId: r.sessionId,
           title: r.title ?? `Чат #${id}`,
+          clientAvatar: r.clientAvatar ?? null,
           clientName: r.clientName ?? clientFromTitle(r.title),
           connector: r.connector,
           responsibleId: r.responsibleId,
@@ -521,7 +533,7 @@ export class ChatsService {
               lastHasFiles: Boolean(last.message.params?.FILE_ID?.length),
             }
           : {}),
-        ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
+        ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}),
         summaryAt: now,
       },
     });
@@ -640,32 +652,101 @@ export class ChatsService {
    * Ждут ответа среди всех доступных сотруднику чатов (кэш: сводки общие, доступ — его) и самые
    * свежие из них — «требуют внимания» на дашборде.
    */
-  async attention(user: B24UserContext, limit = 50): Promise<{ waiting: number; items: AttentionChatDto[] }> {
-    if (!this.prisma) return { waiting: 0, items: [] };
+  /** Одна область доступных чатов для счётчиков дашборда и вкладок, включая обычные папки. */
+  private async population(user: B24UserContext, query: { from?: unknown; to?: unknown } = {}) {
+    const period = selectedPeriod(query, user.portal.timezone);
+    if (!this.prisma) return { rows: [], ignored: new Set<number>() };
     const portalId = user.portal.id;
-    const [allowed, ignored, hidden] = await Promise.all([
+    const [allowed, ignored] = await Promise.all([
       this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: true }, select: { chatId: true } }),
-      // Чаты моих папок «Не обращать внимания» и глобальных папок с этой отметкой — не на моём дашборде.
-      this.prisma.chatFolderItem.findMany({
-        where: { portalId, folder: { ignoreAttention: true }, OR: [{ ownerUserId: user.userId }, { folder: { global: true } }] },
-        select: { chatId: true },
-      }),
-      // Скрытые мной с дашборда (👁) — в списке чатов остаются.
-      this.prisma.dashboardHiddenChat.findMany({ where: { portalId, userId: user.userId }, select: { chatId: true } }),
+      this.prisma.chatFolderItem.findMany({ where: { portalId, folder: { ignoreAttention: true }, OR: [{ ownerUserId: user.userId }, { folder: { global: true } }] }, select: { chatId: true } }),
     ]);
-    const skip = new Set([...ignored, ...hidden].map((i) => i.chatId));
-    if (!allowed.length) return { waiting: 0, items: [] };
-    const rows = await this.prisma.openlineChat.findMany({
-      where: { portalId, completed: false, lastAuthor: 'client', chatId: { in: allowed.map((a) => a.chatId).filter((id) => !skip.has(id)) } },
-      orderBy: { lastMessageAt: 'desc' },
-    });
-    const waiting = rows.filter((r) => isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));
+    const rows = allowed.length ? await this.prisma.openlineChat.findMany({
+      where: { portalId, chatId: { in: allowed.map((a) => a.chatId) }, ...(period ? { lastMessageAt: { gte: period.start, lt: period.end } } : {}) },
+      orderBy: [{ lastMessageAt: 'desc' }, { chatId: 'desc' }],
+    }) : [];
+    return { rows, ignored: new Set(ignored.map((r) => r.chatId)) };
+  }
+
+  private async filteredList(user: B24UserContext, q: { scope: ChatScope; status?: 'all' | 'waiting'; channel?: string; offset: number; folder?: string; from?: string; to?: string }): Promise<ChatListDto> {
+    // Первая обычная страница прогревает доступ и метаданные при холодном входе.
+    const legacy = await this.list(user, { scope: q.scope, offset: q.status === 'waiting' ? 0 : q.offset, ...(q.folder ? { folder: q.folder } : {}) });
+    const population = await this.population(user, q);
+    if (!this.prisma) return { ...legacy, counts: { all: legacy.items.length, waiting: legacy.items.filter((c) => c.waitingReply).length, mine: legacy.items.filter((c) => c.responsibleId === user.userId).length }, userId: user.userId };
+    const folders = await this.myFolders(user);
+    const favorite = q.folder === FAVORITES_FOLDER ? await this.favorites(user) : null;
+    const channels = [...new Set(population.rows.map(r => messageChannel(r.connector)))].sort();
+    const rows = population.rows.filter(r => !q.channel || messageChannel(r.connector) === q.channel).filter((r) => !q.folder || (favorite ? favorite.has(r.chatId) : folders.get(r.chatId) === q.folder));
+    const waiting = rows.filter((r) => (q.folder || !population.ignored.has(r.chatId)) && isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));
+    const counts = { all: rows.length, waiting: waiting.length, mine: rows.filter((r) => r.responsibleId === user.userId).length };
+    const candidates = (q.status === 'waiting' ? waiting : rows).filter((r) => q.scope !== 'mine' || r.responsibleId === user.userId);
+    // Фильтр применяем до пагинации. Вкладки ожидания и Мои включают чаты обычных папок.
+    const selected = q.status === 'waiting' || q.scope === 'mine' || q.from || q.folder
+      ? candidates
+      : candidates.filter((r) => !folders.has(r.chatId));
+    const ids = selected.slice(q.offset, q.offset + PAGE).map((r) => r.chatId);
+    const items = await this.summariesByChat(user, ids);
+    return { items, nextOffset: q.offset + PAGE < selected.length ? q.offset + PAGE : null, exactOrder: true, counts, userId: user.userId, channels };
+  }
+
+  /** После пропущенного была переписка с сотрудником; последнее сообщение может быть клиентским. */
+  async reachedSince(user: B24UserContext, since: Date, clients: CallClient[]): Promise<ChatReach[]> {
+    if (!this.prisma || !clients.length) return [];
+    const population = await this.population(user);
+    const rows = population.rows.filter((r) => r.lastMessageAt && r.lastMessageAt >= since).map((r) => ({ chatId: r.chatId, contactId: Number((r.crm as { contactId?: number } | null)?.contactId) || null, reachPhones: (Array.isArray(r.phones) ? r.phones as string[] : []).map((p) => String(p).replace(/\D/g, '').slice(-10)) })).filter((r) => clients.some((c) => reachedInChat(c, [{ contactId: r.contactId, phones: r.reachPhones, at: Number.MAX_SAFE_INTEGER }])));
+    // Новый сотрудник мог ещё не открывать список: чаты контакта проверяем его REST-клиентом.
+    for (const c of clients) {
+      if (!c.contactId || rows.some((r) => r.contactId === c.contactId)) continue;
+      try {
+        const found = (await user.client.call<{ CHAT_ID: string }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'contact', CRM_ENTITY: c.contactId, ACTIVE_ONLY: 'N' })).result;
+        for (const item of Array.isArray(found) ? found : []) {
+          const chatId = Number(item.CHAT_ID);
+          if (!(chatId > 0) || rows.some((r) => r.chatId === chatId)) continue;
+          const dialog = (await user.client.call<ImDialog>('imopenlines.dialog.get', { CHAT_ID: chatId })).result;
+          if (crmLinksOf(dialog?.entity_data_2).contactId !== c.contactId) continue;
+          rows.push({ chatId, contactId: c.contactId, reachPhones: [] });
+        }
+      } catch { /* Без доступа — не считаем диалог доказанным. */ }
+    }
+    if (!rows.length) return [];
+    const marks = await this.prisma.systemMessage.findMany({ where: { portalId: user.portal.id, chatId: { in: rows.map((r) => r.chatId) }, sentAt: { gte: since } }, select: { chatId: true, messageId: true } });
+    const system = new Set(marks.map((r) => `${r.chatId}:${r.messageId}`));
+    const reached = await Promise.all(rows.map(async (row): Promise<ChatReach | null> => {
+      try {
+        let before: number | undefined;
+        // Метаданные, без хранения/выдачи текста. Ищем ответ даже если последним снова написал клиент.
+        for (let page = 0; page < 10; page++) {
+          const r = (await user.client.call<ImMessages>('im.dialog.messages.get', { DIALOG_ID: `chat${row.chatId}`, LIMIT: HISTORY_LIMIT, ...(before ? { LAST_ID: before } : {}) })).result ?? {};
+          const messages = r.messages ?? [];
+          if (!messages.length) break;
+          const at = Math.max(0, ...messages.filter((m) => !system.has(`${row.chatId}:${m.id}`)).map((m) => toMessageDto(m, r.users ?? [], [])).filter((m) => m.viaPhone || (m.author.kind === 'employee' && (r.users ?? []).some((u) => Number(u.id) === m.author.id && !u.connector && !u.bot))).map((m) => Date.parse(m.date)));
+          if (at > since.getTime()) return { contactId: row.contactId, phones: row.reachPhones, at };
+          if (messages.length < HISTORY_LIMIT || messages.some((m) => Date.parse(m.date) <= since.getTime())) break;
+          const next = Math.min(...messages.map((m) => Number(m.id)));
+          if (next === before) break;
+          before = next;
+        }
+      } catch { /* Нет доступа/истории — не выдаём общение за состоявшееся. */ }
+      return null;
+    }));
+    return reached.filter((r): r is ChatReach => r !== null);
+  }
+
+  async attention(user: B24UserContext, limit = 50, query: { from?: unknown; to?: unknown } = {}): Promise<{ waiting: number; items: AttentionChatDto[] }> {
+    if (!this.prisma) return { waiting: 0, items: [] };
+    const population = await this.population(user, query);
+    const hidden = await this.prisma.dashboardHiddenChat.findMany({ where: { portalId: user.portal.id, userId: user.userId }, select: { chatId: true } });
+    const skip = new Set(hidden.map((r) => r.chatId));
+    const waiting = population.rows.filter((r) => !population.ignored.has(r.chatId) && isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r));
+    const unread = waiting.length ? await this.unreadByChat(user) : new Map<number, number>();
     return {
       waiting: waiting.length,
-      items: waiting.slice(0, limit).map((r) => {
+      items: waiting.filter((r) => !skip.has(r.chatId)).slice(0, limit).map((r) => {
         const crm = (r.crm as ChatSummary['crm'] | null) ?? null;
         return {
           chatId: r.chatId,
+          // Личный счётчик мессенджера есть только у участника чата — иначе сообщения клиента без ответа.
+          unread: Math.max(unread.get(r.chatId) ?? 0, r.clientStreak ?? 0),
           title: r.title ?? `Чат #${r.chatId}`,
           clientName: r.clientName ?? clientFromTitle(r.title),
           clientAvatar: r.clientAvatar,
@@ -702,21 +783,15 @@ export class ChatsService {
     const portalId = user.portal.id;
     const me = await this.prisma.openlineChat.findUnique({ where: { portalId_chatId: { portalId, chatId } }, select: { crm: true } });
     const contactId = (me?.crm as ChatSummary['crm'] | null)?.contactId ?? null;
-    if (!contactId) return [];
-    const [rows, denied] = await Promise.all([
-      this.prisma.openlineChat.findMany({ where: { portalId }, orderBy: { lastMessageAt: 'desc' }, take: 5000 }),
-      this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, allowed: false }, select: { chatId: true } }),
-    ]);
-    const no = new Set(denied.map((d) => d.chatId));
-    return rows
-      .filter((r) => (r.crm as ChatSummary['crm'] | null)?.contactId === contactId && !no.has(r.chatId))
-      .map((r) => ({
-        chatId: r.chatId,
-        connector: r.connector,
-        title: r.title ?? `Чат #${r.chatId}`,
-        lastMessageAt: r.lastMessageAt?.toISOString() ?? null,
-        waitingReply: isWaiting(r.completed, r.lastAuthor, r.lastMessageId, r),
-      }));
+    const current = await this.summariesByChat(user, [chatId]);
+    if (!current.length) return [];
+    const rows = await this.prisma.openlineChat.findMany({ where: { portalId }, orderBy: { lastMessageAt: 'desc' }, take: 5000 });
+    const linked = await this.prisma.messengerMessage.findFirst({ where: { portalId, b24ChatId: chatId }, select: { messengerId: true, chatId: true } });
+    const siblingRows = linked ? await this.prisma.messengerMessage.findMany({ where: { portalId, messengerId: linked.messengerId, chatId: linked.chatId, b24ChatId: { not: null } }, select: { b24ChatId: true }, distinct: ['b24ChatId'] }) : [];
+    const siblings = new Set(siblingRows.map(r => r.b24ChatId));
+    const candidates = rows.filter(r => (!!contactId && (r.crm as ChatSummary['crm'] | null)?.contactId === contactId) || siblings.has(r.chatId));
+    const allowed = await this.summariesByChat(user, candidates.map(r => r.chatId));
+    return allowed.map(r => ({ chatId: r.chatId, connector: r.connector, title: r.title, lastMessageAt: r.lastMessage?.date ?? null, waitingReply: r.waitingReply }));
   }
 
   /** Отметки «Не требует ответа» чатов (общие для всех сотрудников). */
@@ -748,7 +823,7 @@ export class ChatsService {
       : { noReplyMessageId: lastId ?? 0, noReplyByUserId: user.userId, noReplyByName: user.userName.slice(0, 255), noReplyAt: new Date() };
     const updated = await this.prisma.openlineChat.update({
       where: { id: row.id },
-      data: { ...mark, ...(last?.human ? { lastMessageId: lastId, lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}) },
+      data: { ...mark, ...(last?.human ? { lastMessageId: lastId, lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}) },
     });
     // Счётчик непрочитанных у отметившего — в ноль и в мессенджере (у остальных его скрывает отметка).
     if (!needed) await user.client.call('im.dialog.read', { DIALOG_ID: `chat${chatId}` }).catch(() => undefined);
@@ -884,14 +959,7 @@ function phonesFor(l: ChatSummary['crm'], phones: Map<string, string[]>): string
  * +79851234567, 89851234567, 79851234567. Меньше 10 цифр — не номер.
  */
 export function phoneVariants(q: string): string[] {
-  const digits = q.replace(/\D/g, '');
-  if (digits.length < 10 || digits.length > 15) return [];
-  if (digits.length === 10) return [`+7${digits}`, `8${digits}`, `7${digits}`];
-  if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) {
-    const rest = digits.slice(1);
-    return [`+7${rest}`, `8${rest}`, `7${rest}`];
-  }
-  return [`+${digits}`, digits];
+  return clientPhoneVariants(q);
 }
 
 type NoReplyMark = { noReplyMessageId: number | null; noReplyByName: string | null; noReplyAt: Date | null };

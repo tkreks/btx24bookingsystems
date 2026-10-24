@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { StoredFileDto } from '@btx24/shared';
-import { apiUpload } from '../api.js';
+import { AttachmentButtons } from './AttachmentButtons.js';
 import { moveStep, newStep, type ChainStep } from './chain.js';
 import { fileSize } from './format.js';
 import { insertAt, VariableMenu } from '../settings/VarTextarea.js';
@@ -16,10 +15,12 @@ export function StepsEditor({
   onSubmitShortcut,
   variables = false,
   paymentVariables = false,
+  onUploadingChange,
 }: {
   steps: ChainStep[];
   onChange: (steps: ChainStep[]) => void;
   disabled?: boolean;
+  onUploadingChange?: (busy: boolean) => void;
   /** Меню «＋ Переменная» (редактор шаблонов; при вставке в чат значения подставит сделка). */
   variables?: boolean;
   /** В меню — и переменные оплаты ({link}, {prepayment}…): шаблон сообщения об оплате. */
@@ -28,9 +29,7 @@ export function StepsEditor({
   onSubmitShortcut?: () => void;
 }) {
   const [uploading, setUploading] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const input = useRef<HTMLInputElement>(null);
-  const target = useRef<string | null>(null);
+
   const areas = useRef(new Map<string, HTMLTextAreaElement>());
   // Курсор после вставки переменной — когда React уже записал новый текст в поле.
   const caret = useRef<{ key: string; pos: number } | null>(null);
@@ -45,34 +44,8 @@ export function StepsEditor({
   const patch = (key: string, p: Partial<ChainStep>) =>
     onChange(steps.map((s) => (s.key === key ? { ...s, ...p } : s)));
 
-  const pick = (key: string) => {
-    target.current = key;
-    input.current?.click();
-  };
-  const upload = async (files: FileList | null) => {
-    const key = target.current;
-    if (!files?.length || !key) return;
-    setError('');
-    setUploading(key);
-    try {
-      const added: StoredFileDto[] = [];
-      for (const f of Array.from(files)) {
-        if (f.size > 10 * 1024 * 1024) throw new Error(`«${f.name}» больше 10 МБ`);
-        added.push(await apiUpload<StoredFileDto>('/openlines/files', f));
-      }
-      const step = steps.find((s) => s.key === key);
-      if (step) patch(key, { files: [...step.files, ...added].slice(0, 10) });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось загрузить файл');
-    } finally {
-      setUploading(null);
-      if (input.current) input.current.value = '';
-    }
-  };
-
   return (
     <div className="steps-editor">
-      <input ref={input} type="file" multiple hidden onChange={(e) => void upload(e.target.files)} />
       {steps.map((s, i) => (
         <div className="step" key={s.key}>
           {steps.length > 1 && <span className="step-number">{i + 1}</span>}
@@ -86,7 +59,7 @@ export function StepsEditor({
               placeholder={steps.length > 1 ? `Сообщение ${i + 1}` : 'Сообщение'}
               aria-label={`Текст сообщения ${i + 1}`}
               value={s.text}
-              disabled={disabled}
+              disabled={disabled || uploading !== null}
               maxLength={4000}
               onChange={(e) => patch(s.key, { text: e.target.value })}
               onKeyDown={(e) => {
@@ -99,7 +72,7 @@ export function StepsEditor({
             {variables && (
               <VariableMenu
                 payment={paymentVariables}
-                disabled={disabled}
+                disabled={disabled || uploading !== null}
                 onPick={(token) => {
                   const r = insertAt(areas.current.get(s.key) ?? null, s.text, token);
                   caret.current = { key: s.key, pos: r.caret };
@@ -115,7 +88,7 @@ export function StepsEditor({
                     <button
                       type="button"
                       aria-label={`Убрать вложение ${f.name}`}
-                      disabled={disabled}
+                      disabled={disabled || uploading !== null}
                       onClick={() => patch(s.key, { files: s.files.filter((x) => x.id !== f.id) })}
                     >
                       ×
@@ -125,22 +98,14 @@ export function StepsEditor({
               </ul>
             )}
           </div>
+          <AttachmentButtons disabled={disabled || uploading !== null} remaining={10 - s.files.length} onBusyChange={(busy) => { setUploading(busy ? s.key : null); onUploadingChange?.(busy); }} onAdd={(files) => patch(s.key, { files: [...s.files, ...files] })} />
           <div className="step-actions">
-            <button
-              type="button"
-              title="Вложение"
-              aria-label={`Вложение к сообщению ${i + 1}`}
-              disabled={disabled || uploading !== null}
-              onClick={() => pick(s.key)}
-            >
-              {uploading === s.key ? '…' : '📎'}
-            </button>
             {steps.length > 1 && (
               <>
                 <button
                   type="button"
                   aria-label={`Выше: сообщение ${i + 1}`}
-                  disabled={disabled || i === 0}
+                  disabled={disabled || uploading !== null || i === 0}
                   onClick={() => onChange(moveStep(steps, i, -1))}
                 >
                   ↑
@@ -148,7 +113,7 @@ export function StepsEditor({
                 <button
                   type="button"
                   aria-label={`Ниже: сообщение ${i + 1}`}
-                  disabled={disabled || i === steps.length - 1}
+                  disabled={disabled || uploading !== null || i === steps.length - 1}
                   onClick={() => onChange(moveStep(steps, i, 1))}
                 >
                   ↓
@@ -156,7 +121,7 @@ export function StepsEditor({
                 <button
                   type="button"
                   aria-label={`Удалить сообщение ${i + 1}`}
-                  disabled={disabled}
+                  disabled={disabled || uploading !== null}
                   onClick={() => onChange(steps.filter((x) => x.key !== s.key))}
                 >
                   ×
@@ -169,16 +134,11 @@ export function StepsEditor({
       <button
         type="button"
         className="link"
-        disabled={disabled || steps.length >= 20}
+        disabled={disabled || uploading !== null || steps.length >= 20}
         onClick={() => onChange([...steps, newStep()])}
       >
         + ещё сообщение в цепочку
       </button>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
     </div>
   );
 }

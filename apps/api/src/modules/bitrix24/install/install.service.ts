@@ -41,8 +41,16 @@ export const TELEPHONY_EVENTS = ['ONVOXIMPLANTCALLINIT', 'ONVOXIMPLANTCALLSTART'
 /** Брони и сделки (решение владельца 2026-10-24): сразу сверка / учёт оплат; сверка по расписанию — страховка. */
 export const BOOKING_EVENTS = ['ONBOOKINGADD', 'ONBOOKINGUPDATE', 'ONBOOKINGDELETE'] as const;
 export const DEAL_EVENTS = ['ONCRMDEALADD', 'ONCRMDEALUPDATE', 'ONCRMDEALDELETE'] as const;
+/** Копия CRM для дашборда (ADR 0013): изменения сразу; без подписки — раз в минуту по дате изменения. */
+export const CRM_ENTITY_EVENTS = [
+  'ONCRMACTIVITYADD', 'ONCRMACTIVITYUPDATE', 'ONCRMACTIVITYDELETE',
+  'ONCRMCONTACTADD', 'ONCRMCONTACTUPDATE', 'ONCRMCONTACTDELETE',
+  'ONCRMLEADADD', 'ONCRMLEADUPDATE', 'ONCRMLEADDELETE',
+  'ONCRMCOMPANYADD', 'ONCRMCOMPANYUPDATE', 'ONCRMCOMPANYDELETE',
+] as const;
+export const CRM_MIRROR_EVENTS = [...DEAL_EVENTS, ...CRM_ENTITY_EVENTS] as const;
 /** Подписки, которыми управляет ⚙ → «Встройки» (могут не встать без прав — установку не ломают). */
-export const OPTIONAL_EVENTS = [...TELEPHONY_EVENTS, ...BOOKING_EVENTS, ...DEAL_EVENTS] as const;
+export const OPTIONAL_EVENTS = [...TELEPHONY_EVENTS, ...BOOKING_EVENTS, ...DEAL_EVENTS, ...CRM_ENTITY_EVENTS] as const;
 /** События, на которые приложение подписывается при установке. */
 export const BOUND_EVENTS = ['ONAPPUNINSTALL', ...OPTIONAL_EVENTS] as const;
 

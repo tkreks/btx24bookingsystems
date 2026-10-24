@@ -6,6 +6,7 @@ import type { DealFormField } from '@btx24/shared';
 import type { AccessService } from '../access/access.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import type { ActionLogService } from '../audit/action-log.service.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 
 const group = {
@@ -21,7 +22,7 @@ const group = {
 };
 const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
 
-function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[]; formFields?: DealFormField[] } = {}) {
+function setup(o: { failCompensation?: boolean; fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[]; formFields?: DealFormField[] } = {}) {
   const ops: Record<string, unknown>[] = [];
   const prisma = {
     bookingOperation: {
@@ -43,6 +44,7 @@ function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
+    if (o.failCompensation && method === 'booking.v1.booking.delete') throw new Error('delete failed');
     if (o.fail === method) throw new Bitrix24Error(o.failCode ?? (method === 'booking.v1.booking.add' ? '1018' : 'ERR'), `${method} failed`);
     if (method === 'crm.deal.add') return { result: 900 };
     if (method === 'booking.v1.booking.add') return { result: 555 };
@@ -52,8 +54,9 @@ function setup(o: { fail?: string; failCode?: string; can?: boolean; permissions
   const listAll = vi.fn(async () => [{ NAME: 'Программа «Алатырь» 4 часа' }]);
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call, listAll } } as unknown as B24UserContext;
   const dealForm = { createFields: vi.fn(async () => o.formFields ?? []) } as unknown as DealFormService;
-  const svc = new BookingCreateService(prisma, access, journal as unknown as BookingJournalService, fieldMap, dealForm);
-  return { svc, user, calls, journal, ops };
+  const actions = { user: vi.fn(async () => undefined) };
+  const svc = new BookingCreateService(prisma, access, journal as unknown as BookingJournalService, fieldMap, dealForm, actions as unknown as ActionLogService);
+  return { svc, user, calls, journal, ops, actions };
 }
 
 const body = (over: Record<string, unknown> = {}) => ({
@@ -114,6 +117,13 @@ describe('BookingCreateService', () => {
     expect(t.calls.at(-1)).toEqual(['booking.v1.booking.delete', { id: 555 }]);
     expect(t.journal.recordCreated).not.toHaveBeenCalled();
     expect(t.ops[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('неудавшаяся компенсация видна в журнале как критическое событие', async () => {
+    const t = setup({ fail: 'crm.deal.update', failCompensation: true });
+    await expect(t.svc.create(t.user, body())).rejects.toThrow('crm.deal.update failed');
+    expect(t.ops[0]).toMatchObject({ status: 'failed', bookingId: 555 });
+    expect(t.actions.user).toHaveBeenCalledWith(t.user, expect.objectContaining({ action: 'booking.compensation_failed', entityType: 'booking', entityId: 555 }));
   });
 
   it('повтор с тем же ключом: готово — прежний результат; идёт — 409; сорвалось — выполняется заново', async () => {

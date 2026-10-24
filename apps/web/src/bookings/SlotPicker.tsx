@@ -1,4 +1,5 @@
-import { useEffect, useState, type MouseEvent } from 'react';
+import { ColorLegend, type LegendItem } from '../ColorLegend.js';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
   zonedDayRange,
   zonedTimeToUtc,
@@ -10,7 +11,7 @@ import {
 } from '@btx24/shared';
 import { availabilityPieces, slotAt } from '../calendar/layout.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
-import { defaultPeriod, type PeriodFields } from './booking-form.js';
+import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
 
 /** Занятость ресурса на выбранное время: свободен, тех. окно (можно), пересечение с бронью или стоп ресурса. */
 export type SlotState = { kind: 'free' } | { kind: 'tech' } | { kind: 'busy'; bookings: CalendarBooking[] } | { kind: 'stop'; stop: ResourceStopDto };
@@ -52,33 +53,46 @@ const NIGHTS = [1, 2, 3, 5, 7];
  * сверху — день и время (длительность или заезд/ночи), ниже — список ресурсов сверху вниз со
  * статусом на это время и шкалой занятости. Клик по шкале — время с этого места (почасовые группы).
  */
+/** Цвета таймлайна ресурса: занято, тех. окно, выбранное время. */
+const SLOT_LEGEND: LegendItem[] = [
+  { label: 'Занято', swatch: { background: '#93c5fd' } },
+  { label: 'Тех. окно — можно', swatch: { background: '#fcd34d' }, title: 'Пересечение с тех. окном разрешено, с предупреждением' },
+  { label: 'Выбранное время', swatch: { borderColor: 'var(--primary)', background: 'rgba(0, 122, 255, 0.18)' } },
+];
+
 export function SlotPicker({
+  compact = false,
   group,
   timezone,
   period,
   onPeriod,
   days,
+  loading = false,
   resourceIds,
   onResources,
 }: {
+  compact?: boolean;
   group: MyGroupDto;
   timezone: string;
   period: PeriodFields;
   onPeriod: (p: PeriodFields) => void;
   /** Дни брони (с первого по последний) — занятость ресурсов на всё время брони; null — загрузка. */
   days: CalendarDay | null;
+  /** Занятость на выбранные дни ещё не пришла: `days` — прежние, под загрузчиком. */
+  loading?: boolean;
   resourceIds: number[];
   onResources: (ids: number[]) => void;
 }) {
   const [onlyFree, setOnlyFree] = useState(false);
+  const [draft, setDraft] = useState<{ rid: number; period: PeriodFields } | null>(null);
   const now = useNow();
   const interval = group.bookingMode === 'interval';
   const startMs = zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).getTime();
   const endMs = zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).getTime();
   const durationMs = endMs - startMs;
   const nights = Math.round((Date.parse(period.endDate) - Date.parse(period.startDate)) / 86_400_000);
-  // Шкала: сутки дня брони; для «заезд/выезд» — с дня заезда до конца дня выезда.
-  const range = { from: zonedDayRange(period.startDate, timezone).start.getTime(), to: zonedDayRange(interval ? period.endDate : period.startDate, timezone).end.getTime() };
+  // Во встройке — сутки выбранного дня; вне неё «заезд/выезд» охватывает весь период.
+  const range = { from: zonedDayRange(period.startDate, timezone).start.getTime(), to: zonedDayRange(interval && !compact ? period.endDate : period.startDate, timezone).end.getTime() };
   const span = range.to - range.from;
   const frac = (ms: number) => Math.min(1, Math.max(0, (ms - range.from) / span));
 
@@ -98,12 +112,19 @@ export function SlotPicker({
     setStart(new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(s), fmtTime(s.toISOString(), timezone));
   };
   const pickOnBar = (rid: number, e: MouseEvent<HTMLDivElement>) => {
-    if (interval) return onResources([rid]);
+    if (interval && !compact) return onResources([rid]);
     const r = e.currentTarget.getBoundingClientRect();
     const dayMin = span / 60_000;
     const m = slotAt(((e.clientX - r.left) / r.width) * dayMin, dayMin);
-    setStart(period.startDate, `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
-    onResources([rid]);
+    const start = new Date(range.from + m * 60_000);
+    const end = new Date(start.getTime() + (durationMs > 0 ? durationMs : group.durationMinutes * 60_000));
+    const localDay = (d: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(d);
+    const next = { startDate: localDay(start), startTime: fmtTime(start.toISOString(), timezone), endDate: localDay(end), endTime: fmtTime(end.toISOString(), timezone) };
+    if (compact) setDraft({ rid, period: next });
+    else {
+      onPeriod(next);
+      onResources([rid]);
+    }
   };
 
   const strip = Array.from({ length: 7 }, (_, i) => shiftDate(period.startDate, i - 2));
@@ -112,9 +133,13 @@ export function SlotPicker({
   const open = (s: SlotState) => s.kind !== 'busy' && s.kind !== 'stop';
   const free = rows.filter((x) => open(x.state)).length;
   const shown = onlyFree ? rows.filter((x) => open(x.state) || resourceIds.includes(x.r.id)) : rows;
-  const ticks = interval
+  // Метки считаются по местному времени портала, включая дни перехода на летнее время.
+  const ticks = interval && !compact
     ? Array.from({ length: nights + 1 }, (_, i) => ({ at: (i + 0.5) / (nights + 1), label: `${shiftDate(period.startDate, i).slice(8, 10)}.${shiftDate(period.startDate, i).slice(5, 7)}` }))
-    : [0, 6, 12, 18, 24].map((h) => ({ at: h / 24, label: String(h).padStart(2, '0') }));
+    : [0, 4, 8, 12, 16, 20].map((h) => ({
+      at: frac(zonedTimeToUtc(period.startDate, `${String(h).padStart(2, '0')}:00`, timezone).getTime()),
+      label: `${h}ч`,
+    }));
 
   return (
     <section className="bk-section wz-slot">
@@ -137,10 +162,13 @@ export function SlotPicker({
         <button type="button" aria-label="Позже" onClick={() => setDay(shiftDate(period.startDate, 1))}>
           ›
         </button>
-        <input type="date" aria-label="Дата брони" value={period.startDate} onChange={(e) => e.target.value && setDay(e.target.value)} />
+        <label className="wz-date-jump">
+          <span>Быстрый переход к дате</span>
+          <input type="date" aria-label="Дата брони" value={period.startDate} onChange={(e) => e.target.value && setDay(e.target.value)} />
+        </label>
       </div>
 
-      <div className="wz-when">
+      {!compact && <div className="wz-when">
         {interval ? (
           <>
             <label className="wz-when-field">
@@ -195,7 +223,8 @@ export function SlotPicker({
             </label>
           </>
         )}
-      </div>
+      </div>}
+      {compact && <p className="muted">Нажмите на таймлайн ресурса, чтобы выбрать начало и завершение брони.</p>}
 
       {isPastStart(startMs, now) && (
         <p className="wz-slot-state busy" role="alert">
@@ -203,22 +232,22 @@ export function SlotPicker({
         </p>
       )}
       <div className="wz-res-bar-head">
-        <span className="muted">{days ? `Свободно ${free} из ${resources.length} на это время` : 'Загрузка занятости…'}</span>
+        <span className="muted">{days && !loading ? `Свободно ${free} из ${resources.length} на это время` : 'Загрузка занятости…'}</span>
         <label className="wz-only-free">
           <input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} />
           Только свободные
         </label>
       </div>
-      <div className="wz-res-ticks" aria-hidden="true">
-        <span />
-        <div>
-          {ticks.map((t) => (
-            <span key={t.label + t.at} style={{ left: `${t.at * 100}%` }}>
-              {t.label}
-            </span>
-          ))}
+      <ColorLegend items={SLOT_LEGEND} label="Обозначения таймлайна" className="block" />
+      <div className="wz-res-wrap" aria-busy={loading || !days}>
+      {(loading || !days) && (
+        <div className="cal-loader" role="status">
+          <span className="cal-loader-box">
+            <span className="spinner" aria-hidden="true" />
+            Загрузка занятости…
+          </span>
         </div>
-      </div>
+      )}
       <ul className="wz-res-list" aria-label="Ресурсы">
         {shown.map(({ r, state }) => {
           const on = resourceIds.includes(r.id);
@@ -248,22 +277,90 @@ export function SlotPicker({
                 <b>{r.name}</b>
                 <span className={`wz-res-state ${state.kind}`}>{note}</span>
               </button>
+              <div className="wz-res-timeline">
               <div
                 className="wz-res-scale"
-                title={interval ? 'Выбрать ресурс' : 'Кликните — бронь с этого времени'}
-                aria-hidden="true"
+                title={interval && !compact ? 'Выбрать ресурс' : 'Кликните — бронь с этого времени'}
+                role="button"
+                tabIndex={0}
+                aria-label={`Выбрать время: ${r.name}`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (compact) setDraft({ rid: r.id, period: { ...period } });
+                    else onResources([r.id]);
+                  }
+                }}
                 onClick={(e) => pickOnBar(r.id, e)}
               >
                 {pieces.map((p, i) => (
                   <i key={i} className={`piece ${p.kind}`} style={{ left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` }} />
                 ))}
                 {durationMs > 0 && <i className="pick" style={{ left: `${frac(startMs) * 100}%`, width: `${(frac(endMs) - frac(startMs)) * 100}%` }} />}
+                {ticks.map((t, i) => <i key={i} className="wz-res-tick" style={{ left: `${t.at * 100}%` }} />)}
+              </div>
+              <div className="wz-res-tick-labels" aria-hidden="true">
+                {ticks.map((t, i) => <span key={i} style={{ left: `${t.at * 100}%` }}>{t.label}</span>)}
+              </div>
               </div>
             </li>
           );
         })}
-        {days && !shown.length && <li className="cp-hint">Свободных ресурсов на это время нет — выберите другое время или день.</li>}
+        {days && !loading && !shown.length && <li className="cp-hint">Свободных ресурсов на это время нет — выберите другое время или день.</li>}
       </ul>
+      </div>
+      {draft && <SlotTimeDialog
+        initial={draft.period}
+        timezone={timezone}
+        resourceName={resources.find((r) => r.id === draft.rid)?.name ?? 'Ресурс'}
+        onClose={() => setDraft(null)}
+        onApply={(p) => { onPeriod(p); onResources([draft.rid]); setDraft(null); }}
+      />}
     </section>
+  );
+}
+
+
+/** Нативный dialog удерживает фокус внутри и возвращает его на таймлайн при закрытии. */
+function SlotTimeDialog({ initial, timezone, resourceName, onClose, onApply }: {
+  initial: PeriodFields;
+  timezone: string;
+  resourceName: string;
+  onClose: () => void;
+  onApply: (period: PeriodFields) => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [value, setValue] = useState(initial);
+  const [error, setError] = useState('');
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const apply = () => {
+    const result = periodToUtc(value, timezone);
+    if ('error' in result) return setError(result.error);
+    if (isPastStart(Date.parse(result.start), Date.now())) return setError('Начало брони уже прошло — выберите время позже');
+    onApply(value);
+  };
+  return (
+    <dialog ref={ref} className="wz-time-dialog" aria-label="Время брони" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(); }
+    }}>
+      <h3>Время брони · {resourceName}</h3>
+      <p className="muted">{fmtDayTitle(value.startDate, timezone)}</p>
+      <div className="df-grid">
+        <label className="df-field"><span className="df-label">Время начала</span>
+          <input type="time" autoFocus value={value.startTime} onChange={(e) => setValue({ ...value, startTime: e.target.value })} />
+        </label>
+        <label className="df-field"><span className="df-label">Дата завершения</span>
+          <input type="date" min={value.startDate} value={value.endDate} onChange={(e) => setValue({ ...value, endDate: e.target.value })} />
+        </label>
+        <label className="df-field"><span className="df-label">Время завершения</span>
+          <input type="time" value={value.endTime} onChange={(e) => setValue({ ...value, endTime: e.target.value })} />
+        </label>
+      </div>
+      {error && <p className="notice error" role="alert">{error}</p>}
+      <div className="wz-time-actions">
+        <button type="button" onClick={onClose}>Отмена</button>
+        <button type="button" className="primary" onClick={apply}>Применить</button>
+      </div>
+    </dialog>
   );
 }

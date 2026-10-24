@@ -12,6 +12,7 @@ export interface CallCardDto {
   client: ClientBookingsDto | null;
   /** Сделка, которую предложить для брони: сделка звонка (новая) или самая новая открытая. */
   suggestedDealId: number | null;
+  timeline: ClientTimelineDto;
   /** Чаты клиента в открытых линиях (по номеру); нет права — пусто. */
   chats: ChatSummary[];
   /** Последние сообщения самого свежего чата (по возрастанию времени). */
@@ -25,4 +26,31 @@ export interface ActiveCallDto {
   /** 1 исходящий, 2 входящий, 3 с переадресацией, 4 обратный, 5 инфозвонок. */
   callType: number | null;
   answeredAt: string;
+}
+
+
+/** Событие клиента: время события, а не время чтения карточки. */
+export interface ClientTimelineEvent {
+  category?: import('./audit-classification.js').ActionLogCategory;
+  severity?: import('./audit-classification.js').ActionLogSeverity;
+
+  id: string;
+  at: string;
+  kind: 'message' | 'call' | 'deal' | 'booking' | 'payment' | 'invoice' | 'activity';
+  title: string;
+  text: string | null;
+  dealId?: number;
+  chatId?: number;
+  messageId?: number;
+  direction?: 'incoming' | 'outgoing';
+  actorId?: number;
+  actorName?: string;
+  amount?: number;
+  currency?: string;
+}
+
+export interface ClientTimelineDto {
+  events: ClientTimelineEvent[];
+  /** Недоступные источники и ограничения объёма истории. */
+  notes: string[];
 }

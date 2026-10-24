@@ -117,3 +117,99 @@
 - [`user.get`](https://apidocs.bitrix24.com/api-reference/user/user-get.html) принимает
   массив id в `FILTER.ID`. Для подписей сохранённых участников запрашиваем только сотрудников
   из групп и списка администраторов текущего портала; в ответ нашего API идут только id и имя.
+
+### Открытая линия контакта и новая сделка (проверено 2026-10-24)
+`imopenlines.crm.chat.get` для новой сделки может вернуть пустой список, а для её контакта —
+существующие чаты, привязанные к прежним сделкам. Для отправки используем CRM-объект `contact`,
+предварительно проверяя CONTACT в `imopenlines.dialog.get.entity_data_2`. Метод
+`imopenlines.crm.message.add` официально поддерживает `lead/deal/company/contact`, отправитель
+должен быть участником и иметь доступ к объекту.
+Документация проверена через bitrix24-docs MCP:
+[чаты CRM](https://apidocs.bitrix24.com/api-reference/imopenlines/openlines/chats/imopenlines-crm-chat-get.html),
+[отправка сообщения](https://apidocs.bitrix24.com/api-reference/imopenlines/openlines/messages/imopenlines-crm-message-add.html),
+[дела CRM для ленты клиента](https://apidocs.bitrix24.com/api-reference/crm/timeline/activities/activity-base/crm-activity-list.html).
+
+### CALL_CARD: контекст, высота и сообщение (2026-10-24)
+- `BX24.placement.call('getStatus', {}, callback)` возвращает актуальные CALL_ID, PHONE_NUMBER,
+  CRM_ENTITY_TYPE/ID; исходные options могут появиться раньше привязки. Документация через MCP:
+  https://apidocs.bitrix24.com/api-reference/widgets/ui-interaction/call-card/get-status.html
+- CALL_CARD не монтирует CalendarPage: fitWindow/fitFrame нужно вызывать в самой карточке
+  при старте и изменении содержимого, иначе низкий фрейм может показывать белое поле.
+- BX24.im.openMessenger принимает только dialogId. Путь к конкретному сообщению —
+  `/online/?IM_DIALOG=chat4396&IM_MESSAGE=123456`. MCP для SDK возвращал обзор вместо страницы;
+  индивидуальная страница SDK и пример ссылки проверены в официальных источниках:
+  https://apidocs.bitrix24.com/sdk/bx24-js-sdk/additional-functions/bx24-im-open-messenger.html
+  https://vibecode.bitrix24.tech/docs/chats/service/task-form-message
+
+### Сообщение из окна звонка: обычная страница вместо слайдера (2026-10-24)
+На живом интерфейсе владелец подтвердил: BX24.openPath('/online/?IM_DIALOG=...&IM_MESSAGE=...')
+открывает позади звонка пустое окно «Чат и звонки», кнопка открытия не помогает. Поэтому
+ссылка сообщения теперь открывает https://<домен портала>/online/ с обоими параметрами
+в новой вкладке браузера, синхронно по клику. Слайдеры CRM для сделок не изменялись.
+
+### Личные непрочитанные в мессенджере (2026-10-24)
+Официальная документация im.recent.list (проверено через bitrix24-docs):
+https://apidocs.bitrix24.com/api-reference/chats/im-recent-list.html
+ONLY_OPENLINES не поддерживается. Используем UNREAD_ONLY=Y, SKIP_OPENLINES=N, LIMIT=200,
+OFFSET и флаги hasMore/hasMorePages; result.items содержит id/chat_id и counter.
+Счётчик непрочитанных личный и не равен числу чатов, ожидающих ответа.
+
+### Файлы Диска для шаблонов (2026-10-24)
+Через официальный bitrix24-docs проверены disk.storage.getList (список доступных хранилищ),
+disk.folder.getChildren (только объекты с правом чтения), disk.file.get (метаданные и
+DOWNLOAD_URL). Новые маршруты используют клиент сотрудника, а не токен приложения:
+- https://apidocs.bitrix24.com/api-reference/disk/storage/disk-storage-get-list.html
+- https://apidocs.bitrix24.com/api-reference/disk/folder/disk-folder-get-children.html
+- https://apidocs.bitrix24.com/api-reference/disk/file/disk-file-get.html
+Нужен scope disk. Импорт — копия в StoredFile, URL скачивания не возвращается клиенту;
+защита/лимит скачивания — общий bitrix24/rest-client.download. В портал ничего не загружается
+до явной отправки клиенту. Штатные бизнес-процессы не регистрируются и не меняются.
+
+### Линия и сотрудник звонка (2026-10-24)
+Официальный bitrix24-docs: voximplant.statistic.get, scope telephony,
+https://apidocs.bitrix24.ru/api-reference/telephony/voximplant/voximplant-statistic-get.html
+FILTER CRM_ACTIVITY_ID сопоставляется с делами CRM, которые уже прочитал сотрудник своим
+токеном. PORTAL_NUMBER может быть reg133788/внутренним ID — такое не показываем как телефон.
+PORTAL_USER_ID — фактический сотрудник. При отсутствии прав остаются данные дела CRM.
+
+### Переходы из звонка на дашборде (2026-10-24)
+Проверено через официальный bitrix24-docs MCP: crm.deal.list поддерживает filter/contact,
+order DATE_CREATE+ID, select ID/DATE_CREATE и start; CONTACT_IDS в select не поддерживается.
+Нужна первая страница, берём первый результат сортировки DESC (включая закрытые сделки).
+imopenlines.crm.chat.get принимает CRM_ENTITY_TYPE=contact/deal/lead/company, CRM_ENTITY=id,
+ACTIVE_ONLY=N для завершённых и активных диалогов. Доступ к самим диалогам проверяется через
+существующий summariesByChat токеном пользователя. crm.duplicate.findbycomm: type=PHONE,
+entity_type=CONTACT, values — не более20 вариантов. Связи не ограничиваются периодом звонка.
+
+Аватары звонков (2026-10-24): из доступного диалога берётся уже полученный clientAvatar;
+для CRM-контакта дополнительно выбирается PHOTO. crm.contact.get/права чтения проверены через
+официальный MCP (PHOTO входит в данные контакта). URL нормализуется через photoUrl, числовой
+идентификатор файла не используется как ссылка. Пользовательский токен и прежние проверки
+доступа к чатам/контактам сохраняются.
+
+### Активность и смены (2026-10-24)
+Read-only диагностика: последние8 VOXIMPLANT_CALL имелиCOMPLETED=N, хотя END_TIME−START_TIME
+даёт реальные длительности. Нельзя исключатьN при учёте входящих. Фактический сотрудник —
+voximplant.statistic.get.PORTAL_USER_ID по CRM_ACTIVITY_ID уже доступных дел.
+Официальный bitrix24-docs подтвердил: im.dialog.messages.get.LAST_ID возвращает более старые
+сообщения, LIMIT≤50; для периода читаются страницы до500/чат. timeman.status поддерживает
+USER_ID для read-only списка; timeman.open/pause/close для управления остаются без USER_ID,
+то есть строго собственный день пользователя. Права портала действуют на оба случая.
+
+### Вложения своего коннектора (2026-10-24)
+Официальный MCP method_details `imconnector.send.messages` подтверждает `message.files`:
+массив `{url,name}`, обязателен либо text, либо files; `user_id` — менеджер, от имени которого
+отправляется сообщение. Ссылка доступна Битрикс24 без Bearer; используем HMAC24ч.
+Документация: https://apidocs.bitrix24.com/api-reference/imopenlines/imconnector/imconnector-send-messages.html
+Входящий формат `OnImConnectorMessageAdd.message.files` проверить по реальному событию после
+создания своей линии владельцем: сейчас обработчик поддерживает link/url/downloadLink/urlDownload.
+
+### Клиент мессенджера и сделки
+Официальный MCP проверен: crm.duplicate.findbycomm PHONE принимает ≤20 values; используем варианты
++7/8/7. crm.contact.list и crm.deal.list — user.client в HTTP, все страницы next. CONTACT_IDS не
+поддерживается select crm.deal.list; используем CONTACT_ID. imopenlines.dialog.get CHAT_ID
+положительно проверяет права на существующий диалог. imopenlines.crm.chat.get возвращает диалоги
+contact/deal, каждый результат перепроверяем dialog.get. imconnector.send.messages message.disable_crm=Y
+отключает CRM tracker у сопоставленного/ожидающего выбора клиента, исключает создание дубля CRM.
+Произвольного метода imopenlines.crm.chat.update нет: локальная связь диалога со сделкой — в приложении;
+чужие подключения провайдеров не переиспользуются как собственные каналы доставки.

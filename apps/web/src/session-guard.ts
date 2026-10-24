@@ -1,3 +1,4 @@
+import { clearDashboardCaches } from './dashboard/dashboard-cache.js';
 // Сторож сессии: приложение может часами висеть открытым во фрейме портала. Раз в несколько
 // минут (и при возврате на вкладку) проверяем, что авторизация Битрикс24 жива и что не вышла
 // новая версия приложения. Если нет — интерфейс блокируется окном «Обновите страницу»,
@@ -24,6 +25,7 @@ let started = false;
 function set(p: Exclude<SessionProblem, null>) {
   // Потеря авторизации и доступа важнее обновления: их окна не заменяем.
   if (problem === 'auth' || problem === 'denied' || problem === p) return;
+  if (p === 'auth' || p === 'denied') { clearDashboardCaches(); window.dispatchEvent(new Event('btx24:session-lost')); }
   problem = p;
   for (const l of listeners) l();
 }

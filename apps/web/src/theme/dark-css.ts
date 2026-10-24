@@ -33,6 +33,16 @@ export const DARK_TOKENS = `:root${DARK_ATTR} {
   --warn-bg: #352610;
   --warn-text: #fcd38d;
   --neutral-bg: #262d39;
+  --status-work-bg: #101d35;
+  --status-work-text: #bfdbfe;
+  --status-wait-bg: #211608;
+  --status-wait-text: #fed7aa;
+  --status-arrived-bg: #0a1732;
+  --status-arrived-text: #eff6ff;
+  --status-done-bg: #092417;
+  --status-done-text: #86efac;
+  --status-fail-bg: #310f16;
+  --status-fail-text: #fca5a5;
   color-scheme: dark;
 }
 `;

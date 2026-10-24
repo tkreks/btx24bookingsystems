@@ -5,6 +5,7 @@ import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { ClientBookingsService } from '../bookings/client-bookings.service.js';
+import { ClientTimelineService } from './client-timeline.service.js';
 import { ChatsService, phoneVariants } from './chats.service.js';
 
 /** Звонок «идёт», если ответили не раньше — и нет конца (событие конца могло потеряться). */
@@ -23,6 +24,7 @@ export class CallCardService {
     private readonly access: AccessService,
     private readonly chats: ChatsService,
     private readonly clients: ClientBookingsService,
+    private readonly timeline: ClientTimelineService,
   ) {}
 
   /** Звонки, на которые сотрудник ответил и которые ещё не закончились. */
@@ -60,13 +62,20 @@ export class CallCardService {
       }
     }
 
+    if (!phone && contactId) {
+      const c = await user.client.call<{ PHONE?: { VALUE?: string }[] }>('crm.contact.get', { id: contactId }).catch(rest(null));
+      phone = c?.result?.PHONE?.find((p) => p.VALUE)?.VALUE ?? null;
+    }
     const a = await this.access.resolve(user);
     const can = (p: string) => a.isAppAdmin || a.groups.some((g) => g.permissions.includes(p as never));
     const [client, chats] = await Promise.all([
-      contactId || dealId ? this.clients.forContact(user, contactId || null, dealId ? [dealId] : []).catch(rest(null)) : Promise.resolve(null),
-      can('openlines.read') && phone && phoneVariants(phone).length
-        ? this.chats.searchByPhone(user, { q: phone }).then((r) => r.items, rest([]))
-        : Promise.resolve([]),
+      contactId || dealId ? this.clients.forContact(user, contactId || null, dealId ? [dealId] : [], new Date(), true).catch(rest(null)) : Promise.resolve(null),
+      can('openlines.read') && contactId
+        ? user.client.call<{ CHAT_ID: string }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'contact', CRM_ENTITY: contactId, ACTIVE_ONLY: 'N' })
+          .then((r) => this.chats.summariesByChat(user, (Array.isArray(r.result) ? r.result : []).map((c) => Number(c.CHAT_ID)).filter((n) => n > 0)), rest([]))
+        : can('openlines.read') && phone && phoneVariants(phone).length
+          ? this.chats.searchByPhone(user, { q: phone }).then((r) => r.items, rest([]))
+          : Promise.resolve([]),
     ]);
     const latest = [...chats].sort((x, y) => Date.parse(y.lastMessage?.date ?? '0') - Date.parse(x.lastMessage?.date ?? '0'))[0];
     const history = latest ? await this.chats.history(user, latest.chatId, {}, false).catch(rest(null)) : null;
@@ -75,6 +84,7 @@ export class CallCardService {
     const suggested = dealId && open.some((d) => d.id === dealId) ? dealId : (open[0]?.id ?? null);
     return {
       phone,
+      timeline: await this.timeline.get(user, contactId || null, client, chats),
       contact: client?.contact ?? (contactId ? { id: contactId, name: null } : null),
       client,
       suggestedDealId: suggested,

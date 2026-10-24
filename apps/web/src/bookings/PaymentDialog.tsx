@@ -13,6 +13,7 @@ import {
   type PaymentRequestDto,
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
+import { paymentFeedback } from './payment-feedback.js';
 import { Countdown } from './Countdown.js';
 import { MinimizeButton } from '../Minimize.js';
 
@@ -39,6 +40,7 @@ export function PaymentDialog({
   bookingId: initialBookingId,
   initialAmount,
   fixedDeal = false,
+  callPlacement = false,
   timezone,
   onClose,
   onCreateBooking,
@@ -49,6 +51,7 @@ export function PaymentDialog({
   initialAmount?: number | null;
   /** Сделку не подменять «самой новой в работе» (сертификат из мастера: брони нет, сделка — эта). */
   fixedDeal?: boolean;
+  callPlacement?: boolean;
   timezone: string;
   onClose: () => void;
   /** «Создать бронь» по выбранной сделке (группа требует бронь перед оплатой). */
@@ -71,6 +74,7 @@ export function PaymentDialog({
   }, [initialDealId, initialBookingId, fixedDeal]);
   const chooseDeal = (id: number) => {
     setDealId(id);
+    setSubmitted(null);
     setGroupId(null);
     setBookingId(null);
     setBookingChosen(false);
@@ -89,6 +93,7 @@ export function PaymentDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [submitted, setSubmitted] = useState<PaymentRequestDto | null>(null);
   // Свой ключ на сделку и вид платежа: повторное нажатие не выставит второй счёт.
   const keys = useRef(new Map<string, string>());
   const keyFor = (k: string) => {
@@ -99,13 +104,17 @@ export function PaymentDialog({
   const loadHistory = useCallback(
     () =>
       apiGet<DealInvoicesDto>(`/payments/invoices?dealId=${dealId}`).then(
-        (d) => setInvoices(d.invoices),
+        (d) => {
+          setInvoices(d.invoices);
+          setSubmitted((prev) => prev ? d.invoices.find((i) => i.request?.id === prev.id)?.request ?? prev : null);
+        },
         () => undefined,
       ),
     [dealId],
   );
   const chooseKind = (k: PaymentKind) => {
     setKind(k);
+    setSubmitted(null);
     setPreview(null);
     setError('');
   };
@@ -135,10 +144,11 @@ export function PaymentDialog({
 
   const blocking = (preview?.problems ?? []).filter((p) => !(Number(amount) > 0 && /сумм/i.test(p)));
   const submit = async () => {
+    if (busy || !preview || blocking.length || preview.bookingMissing || !(Number(amount) > 0)) return;
     setBusy(true);
     setError('');
     try {
-      await apiPost<PaymentRequestDto>('/payments', {
+      const result = await apiPost<PaymentRequestDto>('/payments', {
         idempotencyKey: keyFor(`${dealId}:${kind}:${bookingId ?? ''}`),
         dealId,
         kind,
@@ -146,6 +156,7 @@ export function PaymentDialog({
         amount: Number(amount) > 0 && Number(amount) !== preview?.amount ? Number(amount) : null,
         bookingId: bookingId ?? null,
       });
+      setSubmitted(result);
       await loadHistory();
       setTab('work');
     } catch (e) {
@@ -172,7 +183,7 @@ export function PaymentDialog({
     }).format(new Date(iso));
 
   return (
-    <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
+    <div className={`sheet-backdrop${callPlacement ? ' call-payment-backdrop' : ''}`} onClick={() => !busy && onClose()}>
       <div
         className="sheet payment-dialog"
         role="dialog"
@@ -181,12 +192,33 @@ export function PaymentDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <header>
-          <h3>Счета сделки #{dealId}</h3>
+          <h3>{callPlacement ? PAYMENT_KIND_LABELS[kind] : `Счета сделки #${dealId}`}</h3>
           <MinimizeButton label="Оплата" />
           <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
         </header>
+        {callPlacement && (
+          <section className="call-payment-send" aria-label="Отправка ссылки на оплату">
+            <p className="muted call-payment-context">{initialBookingId ? `Бронь #${initialBookingId} создана · ` : ''}Сделка #{dealId}</p>
+            <label>
+              {kind === 'prepayment' ? 'Сумма предоплаты, ₽' : 'Сумма доплаты, ₽'}
+              <input type="number" min="0.01" step="0.01" value={amount} disabled={busy || !preview || !!preview.bookingMissing} onChange={(e) => setAmount(e.target.value)} />
+            </label>
+            <button type="button" className="primary" disabled={busy || !preview || blocking.length > 0 || !!preview.bookingMissing || !(Number(amount) > 0)} onClick={() => void submit()}>
+              {busy ? 'Отправляем ссылку…' : kind === 'prepayment' ? 'Отправить ссылку на предоплату' : 'Отправить ссылку на доплату'}
+            </button>
+            {!preview && !error && <p className="muted" role="status">Рассчитываем сумму…</p>}
+            {busy && <p className="muted" role="status">Создаём счёт и отправляем сообщение клиенту…</p>}
+            {error && <p className="notice error" role="alert">{error}</p>}
+            {!!blocking.length && <p className="notice error" role="alert">{blocking.join('. ')}</p>}
+            {submitted && !error && <div className="call-payment-result" role="status">
+              <p className={submitted.error || (submitted.status === 'sent' && !submitted.messageSent) ? 'notice error' : 'notice'}>{paymentFeedback(submitted)}</p>
+              {submitted.warnings.map((w) => <p key={w} className="muted">{w}</p>)}
+              {submitted.link && <button type="button" className="link" onClick={() => void copy(submitted)}>{copied === submitted.id ? 'Ссылка скопирована' : 'Скопировать ссылку'}</button>}
+            </div>}
+          </section>
+        )}
         {dealOptions && dealOptions.deals.length > 1 && (
           <label className="payment-deal">
             Сделка
@@ -236,7 +268,7 @@ export function PaymentDialog({
             />
           ))}
         </section>
-        <h4 className="payment-new">Выставить счёт</h4>
+        <h4 className="payment-new">{callPlacement ? 'Параметры платежа' : 'Выставить счёт'}</h4>
         <div className="segmented" role="group" aria-label="Что выставить">
           {PAYMENT_KINDS.map((k) => (
             <button
@@ -321,7 +353,7 @@ export function PaymentDialog({
             )}
             {!preview.bookingMissing && (
               <>
-                <label>
+                {!callPlacement && <label>
                   Сумма, ₽
                   <input type="number" min={1} step={100} value={amount} onChange={(e) => setAmount(e.target.value)} />
                   {preview.amount !== null && (
@@ -329,7 +361,7 @@ export function PaymentDialog({
                       Рассчитано: {rub(preview.amount)} — {SOURCE[preview.source]}
                     </span>
                   )}
-                </label>
+                </label>}
                 <label className="settings-block">
                   Сообщение клиенту{preview.templateName ? ` · шаблон «${preview.templateName}»` : ' · стандартный текст'}
                   <textarea rows={4} readOnly value={preview.message} />
@@ -348,12 +380,12 @@ export function PaymentDialog({
               ))}
           </>
         )}
-        {error && (
+        {error && !callPlacement && (
           <p className="notice error" role="alert">
             {error}
           </p>
         )}
-        {!preview?.bookingMissing && (
+        {!callPlacement && !preview?.bookingMissing && (
           <div className="sheet-actions">
             <button
               type="button"

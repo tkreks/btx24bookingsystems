@@ -225,19 +225,19 @@ describe('PaymentsService', () => {
     expect((await t.svc.preview(t.user, 678, 'prepayment', 'g1')).groupId).toBeNull(); // «Бани» — не воронка сделки и не группа брони
   });
 
-  it('sends the system payment template of the group: texts and template files', async () => {
+  it.each(['prepayment', 'surcharge'] as const)('sends system %s template: ordered texts and attachments', async (kind) => {
     const template = { id: 'tp1', name: 'Предоплата бани', steps: [{ text: 'Ссылка: {link}', fileIds: [] }, { text: 'Правила', fileIds: ['f1'] }] };
     const t = setup({ link: 'https://pay.example/x', template, groups: [] });
-    (options.payments as Record<string, unknown>).prepaymentTemplateId = 'tp1';
+    (options.payments as Record<string, unknown>)[`${kind}TemplateId`] = 'tp1';
     try {
-      const p = await t.svc.preview(t.user, 678, 'prepayment');
+      const p = await t.svc.preview(t.user, 678, kind);
       expect(p.templateName).toBe('Предоплата бани');
-      await t.svc.create(t.user, body());
+      await t.svc.create(t.user, body({ kind, amount: 25000 }));
       const sent = t.calls.filter((c) => c[0] === 'imopenlines.crm.message.add').map((c) => c[1].MESSAGE);
       expect(sent).toEqual(['Ссылка: https://pay.example/x', 'Правила']);
       expect(t.calls.find((c) => c[0] === 'im.v2.File.upload')![1]).toMatchObject({ dialogId: 'chat3301', fields: { name: 'прайс.pdf' } });
     } finally {
-      delete (options.payments as Record<string, unknown>).prepaymentTemplateId;
+      delete (options.payments as Record<string, unknown>)[`${kind}TemplateId`];
     }
   });
 });

@@ -28,7 +28,8 @@ export function callDurationSec(c: CallActivity): number {
  * исходящий без разговора (длительность 0) — «нет ответа». Без права `telephony` точнее не узнать.
  */
 export function callStatus(c: CallActivity): 'success' | 'missed' | 'no_answer' {
-  if (incoming(c)) return isMissed(c) ? 'missed' : 'success';
+  if (isMissed(c)) return incoming(c) ? 'missed' : 'no_answer';
+  if (incoming(c)) return 'success';
   return callDurationSec(c) === 0 ? 'no_answer' : 'success';
 }
 const t = (c: CallActivity) => Date.parse(c.START_TIME);
@@ -59,15 +60,15 @@ export interface CallClient {
   firstIncomingAt: number;
   answered: boolean;
   missed: boolean;
-  /** Последний пропущенный не сменился ни отвеченным входящим, ни исходящим (после него). */
+  /** После последнего пропущенного не состоялся успешный входящий или исходящий разговор. */
   lost: boolean;
 }
 
 /**
  * Клиенты, звонившие в периоде (входящие; при `responsibleId` — свои). `calls` — все звонки с
  * начала периода по сейчас: перезвон мог быть позже периода и другим сотрудником.
- * Ограничение: «не дозвонились» на исходящем по делам CRM не видно (нужна статистика телефонии,
- * право `telephony`) — любой исходящий после пропущенного считается попыткой перезвонить.
+ * Неудачная попытка перезвона не снимает упущенного: нужен успешный звонок (callStatus).
+ * Если у исходящего нет подтверждённой длительности разговора, связь не считаем состоявшейся.
  */
 export function callClients(calls: CallActivity[], start: Date, end: Date, responsibleId: number | null): CallClient[] {
   const byKey = new Map<string, CallClient>();
@@ -96,7 +97,16 @@ export function callClients(calls: CallActivity[], start: Date, end: Date, respo
     const lastMissed = cl.incoming.find(isMissed);
     cl.lost =
       !!lastMissed &&
-      !all.some((c) => clientKey(c) === cl.key && t(c) > t(lastMissed) && (!incoming(c) || !isMissed(c)));
+      !all.some((c) => clientKey(c) === cl.key && t(c) > t(lastMissed) && callStatus(c) === 'success');
   }
   return [...byKey.values()].sort((a, b) => t(b.incoming[0]) - t(a.incoming[0]));
+}
+
+/** Доказанное сообщение сотрудника в доступном чате клиента. */
+export interface ChatReach { contactId: number | null; phones: string[]; at: number }
+export function reachedInChat(cl: CallClient, chats: ChatReach[]): boolean {
+  const missed = cl.incoming.find(isMissed);
+  if (!missed) return false;
+  const phone = String(missed.COMMUNICATIONS?.find((x) => x.VALUE)?.VALUE ?? '').replace(/\D/g, '').slice(-10);
+  return chats.some((ch) => ch.at > Date.parse(missed.START_TIME) && ((cl.contactId !== null && ch.contactId === cl.contactId) || (phone.length === 10 && ch.phones.includes(phone))));
 }

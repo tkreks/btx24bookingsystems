@@ -24,7 +24,7 @@ export class ClientBookingsService {
     @Optional() private readonly statuses?: DealStatusService,
   ) {}
 
-  async forContact(user: B24UserContext, contactId: number | null, extraDealIds: number[] = [], now = new Date()): Promise<ClientBookingsDto> {
+  async forContact(user: B24UserContext, contactId: number | null, extraDealIds: number[] = [], now = new Date(), includeHistory = false): Promise<ClientBookingsDto> {
     const map = await this.fieldMap.get(user.portal.id);
     const outcome = await this.fieldMap.outcome(user.portal.id, user.client);
     const toneFields = (await this.statuses?.toneFields(user.portal.id)) ?? [];
@@ -145,6 +145,7 @@ export class ClientBookingsService {
         currency: won.find((d) => d.CURRENCY_ID)?.CURRENCY_ID ?? null,
       },
       past: past.length,
+      ...(includeHistory ? { history: past } : {}),
       upcoming,
       // Последние прошлые + все прошлые брони запрошенных сделок (встройке нужна дата именно её брони).
       recent: past.filter((b, i) => i < RECENT || (b.dealId !== null && extraDealIds.includes(b.dealId))),

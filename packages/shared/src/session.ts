@@ -63,3 +63,9 @@ export interface WorkdayDto {
 }
 
 export type WorkdayAction = 'open' | 'pause' | 'close';
+
+/** Сотрудники с открытым/приостановленным рабочим днём из списка доступа приложения. */
+export interface OnShiftDto {
+  employees: { userId: number; name: string; photo: string | null; status: 'OPENED' | 'PAUSED'; timeStart: string | null; lastActivityAt: string | null }[];
+  notes: string[];
+}

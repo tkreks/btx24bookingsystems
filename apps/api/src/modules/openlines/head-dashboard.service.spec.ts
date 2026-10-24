@@ -17,7 +17,7 @@ const call = (id: number, at: string, dir: 1 | 2, missed: boolean, phone: string
 });
 
 describe('HeadDashboardService', () => {
-  it('по дням: новые сделки, брони по ним, повторные; звонки — все, пропущенные, упущенные (без перезвона и без чата)', async () => {
+  it('по дням: новые сделки, брони по ним, повторные; звонки — все, пропущенные, упущенные (перезвон без разговора не снимает упущенный, диалог в чате снимает)', async () => {
     const dashboard = {
       newDeals: vi.fn(async (_u: unknown, start: Date) =>
         // Прошлый период (20–21.10) — одна сделка.
@@ -39,12 +39,13 @@ describe('HeadDashboardService', () => {
               ],
             },
       ),
+      chatReach: vi.fn(async () => [{ contactId: null, phones: ['9000000002'], at: Date.parse(msk('2026-10-23T11:20:00')) }]),
       fetchCalls: vi.fn(async () => ({
         truncated: false,
         rows: [
-          call(1, '2026-10-23T10:00:00', 1, true, '+7 900 000-00-01'), // пропущен, перезвонили
+          call(1, '2026-10-23T10:00:00', 1, true, '+7 900 000-00-01'), // пропущен, перезвонили без разговора — упущен
           call(2, '2026-10-23T10:30:00', 2, false, '+7 900 000-00-01'),
-          call(3, '2026-10-23T11:00:00', 1, true, '+7 900 000-00-02'), // пропущен, написали в чат — не упущен
+          call(3, '2026-10-23T11:00:00', 1, true, '+7 900 000-00-02'), // пропущен, написали в чат — разговор не состоялся
           call(4, '2026-10-23T12:00:00', 1, true, '+7 900 000-00-03', 55), // упущен
           call(5, '2026-10-22T12:00:00', 1, false, '+7 900 000-00-04'),
           call(6, '2026-10-21T12:00:00', 1, true, '+7 900 000-00-05'), // прошлый период
@@ -67,14 +68,14 @@ describe('HeadDashboardService', () => {
       r.days.map((d) => [d.date, d.newDeals, d.bookedDeals, d.bookings, d.repeat, d.calls, d.missed, d.lost]),
     ).toEqual([
       ['2026-10-22', 1, 1, 1, 0, 1, 0, 0],
-      ['2026-10-23', 2, 1, 2, 1, 4, 3, 1],
+      ['2026-10-23', 2, 1, 2, 1, 4, 3, 2],
     ]);
     expect(r.totals).toMatchObject({
       newDeals: 3,
       bookings: 3,
       calls: 5,
       missed: 3,
-      lost: 1,
+      lost: 2,
       incoming: 4,
       outgoing: 1,
     });

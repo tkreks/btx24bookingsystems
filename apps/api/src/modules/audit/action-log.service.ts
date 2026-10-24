@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { isIsoDate, zonedDayRange, type ActionLogDto, type ActionLogEntryDto } from '@btx24/shared';
+import { isIsoDate, zonedDayRange, classifyActionLog, ACTION_LOG_CATEGORIES, ACTION_LOG_SEVERITIES, type ActionLogDto, type ActionLogEntryDto } from '@btx24/shared';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -71,6 +71,13 @@ export class ActionLogService {
    * текст; новые сверху, по 100, дальше — курсором `before` (ID записи).
    */
   async list(portalId: string, timezone: string, q: Record<string, unknown>): Promise<ActionLogDto> {
+    const limit = q.limit === undefined ? PAGE : Number(q.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > PAGE)
+      throw new BadRequestException({ code: 'INVALID_LIMIT', message: 'limit: целое число от 1 до 100' });
+    const category = q.category === undefined || q.category === '' ? null : q.category;
+    const severity = q.severity === undefined || q.severity === '' ? null : q.severity;
+    if (category !== null && !ACTION_LOG_CATEGORIES.some((v) => v === category)) throw new BadRequestException('Неизвестная категория журнала');
+    if (severity !== null && !ACTION_LOG_SEVERITIES.some((v) => v === severity)) throw new BadRequestException('Неизвестная критичность журнала');
     const day = (v: unknown, name: string) => {
       if (v === undefined || v === '') return null;
       if (typeof v !== 'string' || !isIsoDate(v)) throw new BadRequestException({ code: 'INVALID_PERIOD', message: `${name}: YYYY-MM-DD` });
@@ -97,21 +104,29 @@ export class ActionLogService {
       ...(text ? { OR: [{ summary: { contains: text } }, { actorName: { contains: text } }, { action: { contains: text } }] } : {}),
       ...(cursor ? { AND: [{ OR: [{ at: { lt: cursor.at } }, { at: cursor.at, id: { lt: cursor.id } }] }] } : {}),
     };
-    const rows = await this.prisma.actionLog.findMany({ where, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: PAGE + 1 });
-    const items: ActionLogEntryDto[] = rows.slice(0, PAGE).map((r) => ({
-      id: r.id,
-      at: r.at.toISOString(),
-      actorKind: r.actorKind,
-      userId: r.userId,
-      actorName: r.actorName,
-      action: r.action,
-      entityType: r.entityType,
-      entityId: r.entityId,
-      summary: r.summary,
-      details: r.details ?? null,
-      via: r.via,
-    }));
-    return { items, nextCursor: rows.length > PAGE ? items[items.length - 1].id : null };
+    // Старые записи неизменяемы. Фильтруем классификацию ДО пагинации, читая индексированные
+    // страницы портала/периода, пока не найдём limit+1 совпадений или конец журнала.
+    const classified = category !== null || severity !== null;
+    const take = classified ? 200 : limit + 1;
+    const matches: ActionLogEntryDto[] = [];
+    let pageCursor: { id: string; at: Date } | null = null;
+    for (;;) {
+      const pageWhere: Prisma.ActionLogWhereInput = pageCursor ? { AND: [where, { OR: [{ at: { lt: pageCursor.at } }, { at: pageCursor.at, id: { lt: pageCursor.id } }] }] } : where;
+      const rows = await this.prisma.actionLog.findMany({ where: pageWhere, orderBy: [{ at: 'desc' }, { id: 'desc' }], take });
+      for (const r of rows) {
+        const classification = classifyActionLog(r);
+        if (category !== null && classification.category !== category || severity !== null && classification.severity !== severity) continue;
+        matches.push({ id: r.id, at: r.at.toISOString(), actorKind: r.actorKind, userId: r.userId,
+          actorName: r.actorName, action: r.action, entityType: r.entityType, entityId: r.entityId,
+          summary: r.summary, details: r.details ?? null, via: r.via, ...classification });
+        if (matches.length > limit) break;
+      }
+      if (matches.length > limit || rows.length < take) break;
+      const last = rows[rows.length - 1];
+      pageCursor = { id: last.id, at: last.at };
+    }
+    const items = matches.slice(0, limit);
+    return { items, nextCursor: matches.length > limit ? items[items.length - 1].id : null };
   }
 }
 

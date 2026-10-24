@@ -3,21 +3,17 @@ import { previousPeriod, todayIn, zonedDayRange, type HeadDashboardDto, type Hea
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { callClients, isMissed, type CallActivity, type CallClient } from './call-stats.js';
+import { callClients, reachedInChat, isMissed } from './call-stats.js';
 import { DashboardService, parsePeriod } from './dashboard.service.js';
-
-const CACHE_MS = 60_000;
-const digits10 = (v: unknown) => String(v ?? '').replace(/\D/g, '').slice(-10);
 
 /**
  * Дашборд руководителя (решение владельца 2026-10-23): по дням периода и итого — новые сделки (воронки
- * всех групп), брони по ним, повторные клиенты; звонки — все, пропущенные, упущенные (не перезвонили и
- * не написали клиенту в чат после пропущенного). Итоги — и за предыдущий период той же длины (сравнение
+ * всех групп), брони по ним, повторные клиенты; звонки — все, пропущенные, упущенные (нет успешного разговора или диалога в чате после пропущенного). Итоги — и за предыдущий период той же длины (сравнение
  * на плитках). Данные CRM — правами руководителя.
  */
 @Injectable()
 export class HeadDashboardService {
-  private readonly cache = new Map<string, { expiresAt: number; value: Promise<HeadDashboardDto> }>();
+  private readonly cache = new Map<string, Promise<HeadDashboardDto>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -26,13 +22,11 @@ export class HeadDashboardService {
 
   get(user: B24UserContext, query: { from?: unknown; to?: unknown }): Promise<HeadDashboardDto> {
     const key = JSON.stringify([user.portal.id, user.userId, query.from, query.to]);
-    const now = Date.now();
     const hit = this.cache.get(key);
-    if (hit && hit.expiresAt > now) return hit.value;
-    if (this.cache.size > 200) for (const [k, v] of this.cache) if (v.expiresAt <= now) this.cache.delete(k);
+    if (hit) return hit;
     const value = this.compute(user, query);
-    this.cache.set(key, { expiresAt: now + CACHE_MS, value });
-    value.catch(() => this.cache.delete(key));
+    this.cache.set(key, value);
+    void value.then(() => this.cache.delete(key), () => this.cache.delete(key));
     return value;
   }
 
@@ -69,7 +63,7 @@ export class HeadDashboardService {
     const perDeal = new Map<number, number>();
     for (const r of records) if (r.dealId) perDeal.set(r.dealId, (perDeal.get(r.dealId) ?? 0) + 1);
 
-    const contacted = calls ? await this.chatContacts(user.portal.id, prevStart) : [];
+    const contacted = calls ? await this.dashboard.chatReach?.(user, prevStart, calls.rows) ?? [] : [];
     const daysOf = (a: string, b: string): HeadDayDto[] => {
       const out: HeadDayDto[] = [];
       for (let date = a; date <= b; date = todayIn(tz, new Date(zonedDayRange(date, tz).end.getTime() + 1))) {
@@ -122,26 +116,4 @@ export class HeadDashboardService {
     };
   }
 
-  /** Чаты, где последним после начала периода писал сотрудник: контакт и номера клиента, когда. */
-  private async chatContacts(portalId: string, since: Date): Promise<{ contactId: number | null; phones: string[]; at: number }[]> {
-    const rows = await this.prisma.openlineChat.findMany({
-      where: { portalId, lastMessageAt: { gte: since }, lastAuthor: { not: 'client' } },
-      select: { crm: true, phones: true, lastMessageAt: true },
-      take: 5000,
-    });
-    return rows.map((r) => ({
-      contactId: Number((r.crm as { contactId?: unknown } | null)?.contactId) || null,
-      phones: (Array.isArray(r.phones) ? (r.phones as unknown[]) : []).map(digits10).filter((x) => x.length === 10),
-      at: r.lastMessageAt?.getTime() ?? 0,
-    }));
-  }
-}
-
-/** Клиенту написали в чат после его последнего пропущенного звонка (по контакту или номеру). */
-export function reachedInChat(cl: CallClient, chats: { contactId: number | null; phones: string[]; at: number }[]): boolean {
-  const missed = cl.incoming.find(isMissed);
-  if (!missed) return false;
-  const after = Date.parse(missed.START_TIME);
-  const phone = digits10(missed.COMMUNICATIONS?.find((x: NonNullable<CallActivity['COMMUNICATIONS']>[number]) => x.VALUE)?.VALUE);
-  return chats.some((ch) => ch.at > after && ((cl.contactId !== null && ch.contactId === cl.contactId) || (phone.length === 10 && ch.phones.includes(phone))));
 }

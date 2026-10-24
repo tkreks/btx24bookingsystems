@@ -32,11 +32,12 @@ export function TemplatesManager({
   const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial, shared: false, purpose: 'chat' } : null);
   // В чате шаблоны оплаты не нужны (ссылку подставляет автоматизация); на странице «Шаблоны» — администраторам.
   const shown = templates.filter((t) => t.purpose === 'chat' || (admin && embedded));
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
-    if (!editing) return;
+    if (!editing || uploading) return;
     const body: SaveTemplateDto = {
       name: editing.name,
       steps: toSteps(editing.steps),
@@ -128,6 +129,7 @@ export function TemplatesManager({
                 Общий шаблон — видят все сотрудники
               </label>
             )}
+            <p className="muted">К каждому сообщению можно добавить файлы из устройства или Диска Битрикс24.</p>
             {editing.purpose === 'payment' ? (
               <p className="muted">
                 Уйдёт клиенту автоматически, когда портал выдаст ссылку на оплату. {'{link}'} — ссылка (обязательно), {'{prepayment}'} — сумма к оплате,{' '}
@@ -149,6 +151,7 @@ export function TemplatesManager({
             )}
             <StepsEditor
               variables
+              onUploadingChange={setUploading}
               paymentVariables={editing.purpose === 'payment'}
               steps={editing.steps}
               disabled={busy}
@@ -158,7 +161,7 @@ export function TemplatesManager({
               <button
                 className="primary"
                 type="submit"
-                disabled={busy || !editing.name.trim() || editing.steps.every(isEmpty)}
+                disabled={busy || uploading || !editing.name.trim() || editing.steps.every(isEmpty)}
               >
                 {busy ? 'Сохранение…' : 'Сохранить шаблон'}
               </button>

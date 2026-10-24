@@ -1,3 +1,7 @@
+import { BlockLoading } from '../dashboard/BlockLoading.js';
+import { ColorLegend, type LegendItem } from '../ColorLegend.js';
+import { AttentionMessage } from '../dashboard/AttentionMessage.js';
+import { DashboardSyncStatus, useDashboardQuery } from '../dashboard/DashboardSync.js';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   todayIn,
@@ -8,9 +12,7 @@ import {
   type CallKind,
   type CallScope,
   type DashboardBookingRow,
-  DASHBOARD_PARTS,
   type DashboardDto,
-  type DashboardPart,
   type DashboardNewDeal,
   type SessionInfo,
   allowedBlocks,
@@ -21,18 +23,18 @@ import {
 } from '@btx24/shared';
 import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
 import { BlockGrid } from '../dashboard/BlockGrid.js';
-import { AlertsBlock, CertificatesBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
+import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
+import { MyActivityBlock } from '../dashboard/MyActivityBlock.js';
+import { ActionLogBlock, AlertsBlock, CertificatesBlock, DealGapsBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
 import { HEAD_BLOCKS, HeadBlock, versus, type HeadBlockType } from '../dashboard/head-blocks.js';
 import { EmployeeActivity } from './EmployeeActivity.js';
 import { isStandalone, openCrm, openPortalPath } from '../b24.js';
-import { fmtAt, fmtDateTime, fmtMoney, fmtTime, fmtWhen } from '../format.js';
+import { fmtAt, fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { Avatar } from './Avatar.js';
-import { avatarTone, dayKey } from './chat-list.js';
+import { dayKey } from './chat-list.js';
 import { TempAccessDialog } from '../settings/TempAccessDialog.js';
 import { ThemeToggle } from '../theme/ThemeToggle.js';
-import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { CallLog } from './CallLog.js';
-import { Channel } from './Channel.js';
 import { CallsModal } from './CallsModal.js';
 import { DashBadge, RecentCalls } from './RecentCalls.js';
 import { Icon } from './icons.js';
@@ -76,7 +78,7 @@ export function DashboardPage({
   session: SessionInfo;
   openlines: boolean;
   onBack: () => void;
-  onChats: (opts: { chatId?: number; waiting?: boolean }) => void;
+  onChats: (opts: { chatId?: number; waiting?: boolean; from?: string; to?: string }) => void;
   /** Видны ли уведомления о бронях (право `booking.details`). */
   bookingAlerts?: boolean;
   onAlerts?: () => void;
@@ -94,9 +96,8 @@ export function DashboardPage({
   const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
   const [draft, setDraft] = useState(range);
   // Части дашборда грузятся отдельно: основа — сразу, звонки и новые сделки — когда посчитаются.
-  const [parts, setParts] = useState<Partial<Record<DashboardPart, { key: string; dto: Partial<DashboardDto> }>>>({});
-  const [error, setError] = useState('');
-  const [alertCount, setAlertCount] = useState<number | null>(null);
+  const alertsQuery = useDashboardQuery<BookingAlertListDto>(bookingAlerts ? '/booking-alerts?status=new' : null);
+  const alertCount = alertsQuery.data?.counts.new;
   const [attentionShown, setAttentionShown] = useState(ATTENTION_STEP);
   const [hidden, setHidden] = useState<Set<number>>(() => new Set());
   const [hiding, setHiding] = useState<AttentionChatDto | null>(null);
@@ -126,34 +127,13 @@ export function DashboardPage({
       (e) => setLayoutError(e instanceof Error ? e.message : 'Не удалось сохранить дашборд'),
     );
 
-  useEffect(() => {
-    if (!bookingAlerts) return;
-    let active = true;
-    apiGet<BookingAlertListDto>('/booking-alerts?status=new').then(
-      (l) => active && setAlertCount(l.counts.new),
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [bookingAlerts]);
-
   const query = `from=${range.from}&to=${range.to}&callsScope=${callsScope}${callsFunnel === null ? '' : `&callsFunnel=${callsFunnel}`}`;
-  useEffect(() => {
-    let active = true;
-    for (const part of DASHBOARD_PARTS)
-      apiGet<Partial<DashboardDto>>(`/dashboard?${query}&part=${part}`).then(
-        (dto) => {
-          if (!active) return;
-          setParts((prev) => ({ ...prev, [part]: { key: query, dto } }));
-          setError('');
-        },
-        (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить дашборд'),
-      );
-    return () => {
-      active = false;
-    };
-  }, [query]);
+  const paths = { base: `/dashboard?${query}&part=base`, calls: `/dashboard?${query}&part=calls`, deals: `/dashboard?${query}&part=deals`, chats: openlines ? '/dashboard/chat-attention' : null };
+  const baseQuery = useDashboardQuery<Partial<DashboardDto>>(paths.base);
+  const callsQuery = useDashboardQuery<Partial<DashboardDto>>(paths.calls);
+  const dealsQuery = useDashboardQuery<Partial<DashboardDto>>(paths.deals);
+  const chatQuery = useDashboardQuery<NonNullable<DashboardDto['chats']>>(paths.chats, undefined, 15_000);
+  const error = baseQuery.error || callsQuery.error || dealsQuery.error;
 
   const choose = (p: PeriodPreset) => {
     setPreset(p);
@@ -163,10 +143,9 @@ export function DashboardPage({
   const draftError = periodError(draft.from, draft.to);
 
   // Дашборд — из частей текущего запроса; нет основы — ещё грузится. Нет части — её плитки «…».
-  const fresh = (p: DashboardPart) => (parts[p]?.key === query ? parts[p]!.dto : undefined);
-  const base = fresh('base');
-  const d: Partial<DashboardDto> | null = base ? { ...base, ...fresh('calls'), ...fresh('deals') } : null;
-  const data = d ?? parts.base?.dto ?? null;
+  const base = baseQuery.data;
+  const d: Partial<DashboardDto> | null = base || callsQuery.data || dealsQuery.data ? { ...base, ...callsQuery.data, ...dealsQuery.data, ...(chatQuery.data ? { chats: chatQuery.data } : {}) } : null;
+  const data = d;
   const funnels = data?.callFunnels ?? [];
   // null — недоступно (нет прав), undefined — ещё считается.
   const n = (v: number | null | undefined) => (v === undefined ? '…' : v === null ? '—' : String(v));
@@ -174,24 +153,25 @@ export function DashboardPage({
   // Блоки «по дням и сравнение» — одним запросом за период дашборда, только если они есть на дашборде.
   const needHead = blocks.some((b) => (HEAD_BLOCKS as readonly string[]).includes(b.type));
   const headKey = needHead ? `${range.from}|${range.to}` : '';
-  const [headResp, setHeadResp] = useState<{ key: string; dto: HeadDashboardDto } | null>(null);
-  useEffect(() => {
-    if (!headKey) return;
-    let active = true;
-    const [from, to] = headKey.split('|');
-    apiGet<HeadDashboardDto>(`/head-dashboard?from=${from}&to=${to}`).then(
-      (dto) => active && setHeadResp({ key: headKey, dto }),
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [headKey]);
-  const head = headResp?.key === headKey ? headResp.dto : null;
+  const headPath = headKey ? `/head-dashboard?from=${range.from}&to=${range.to}` : null;
+  const headQuery = useDashboardQuery<HeadDashboardDto>(headPath);
+  const head = headQuery.data;
   const periodText = range.from === range.to ? fmtDay(range.from, tz) : `${fmtDay(range.from, tz)} — ${fmtDay(range.to, tz)}`;
   // Скрытые с дашборда (👁) — сразу, не дожидаясь нового ответа сервера.
   const attention = (d?.chats?.attention ?? []).filter((c) => !hidden.has(c.chatId));
-  const waiting = Math.max(0, (d?.chats?.waitingReply ?? 0) - ((d?.chats?.attention ?? []).length - attention.length));
+  const waiting = d?.chats?.waitingReply ?? 0;
+
+  // Из каких запросов страницы блок берёт данные — для подписи «из кэша / обновлено» (свои запросы блоки отмечают сами).
+  const sourcesOf = (type: DashboardBlockType): string[] => {
+    const list =
+      type === 'waiting' || type === 'attention' ? [paths.chats]
+      : type === 'bookingDays' || type === 'todayBookings' || type === 'newBookings' || type === 'removedBookings' ? [paths.base]
+      : type === 'callsTotal' ? [paths.calls]
+      : type === 'newDeals' || type === 'repeatClients' || type === 'deals' || type === 'dealSources' ? [paths.deals]
+      : (HEAD_BLOCKS as readonly string[]).includes(type) ? [headPath]
+      : [];
+    return list.filter((x): x is string => !!x);
+  };
 
   // Блоки личного дашборда: тип → содержимое (null — сотруднику блок недоступен).
   const renderBlock = (type: DashboardBlockType): ReactNode => {
@@ -203,9 +183,10 @@ export function DashboardPage({
           <div className={`dash-tile${openlines && waiting ? ' warn' : ''}`}>
             <DashBadge name="alert" />
             <span className="dash-tile-label">Чатов ждут ответа</span>
+            <span className="muted dash-period-note">За всё доступное время</span>
             <span className="dash-tile-value">{openlines ? n(d?.chats ? waiting : undefined) : '—'}</span>
             {openlines ? (
-              // Чаты → «Все доступные» → «Все».
+              // Все доступные чаты, без ограничения датой дашборда.
               <button className="primary dash-tile-action" onClick={() => onChats({})}>
                 Открыть чаты
               </button>
@@ -218,9 +199,9 @@ export function DashboardPage({
       case 'bookingDays':
         return (
           <div className={loading}>
-          <div className="dash-tile" title="Активные брони на ресурсах ваших групп: на сегодня / на завтра">
+          <div className="dash-tile" title="Брони за выбранный период / на следующий после периода день">
             <DashBadge name="calendar" />
-            <span className="dash-tile-label">Бронирований сегодня / завтра</span>
+            <span className="dash-tile-label">Бронирования · {periodText} / следующий день</span>
             <span className="dash-tile-value">
               {n(d?.bookingDays?.today)}
               <small> / {n(d?.bookingDays?.tomorrow)}</small>
@@ -281,24 +262,14 @@ export function DashboardPage({
               Последние сообщения клиентов без ответа
               {d?.chats && <span className={`pill${waiting ? ' waiting' : ''}`}>{waiting}</span>}
             </p>
-            {!d && <p className="muted">Загрузка…</p>}
+            {!d && <BlockLoading />}
+            {!d?.chats && <BlockLoading rows={4} />}
             {d?.chats && !attention.length && <p className="muted">Все клиенты получили ответ.</p>}
             <ul className="attention-rows">
               {attention.slice(0, attentionShown).map((c) => {
-                const name = c.clientName || c.title;
                 return (
-                  <li key={c.chatId}>
-                    <button className="attention-row" onClick={() => onChats({ chatId: c.chatId })}>
-                      <span className="attention-title">
-                        <Channel connector={c.connector} />
-                        <Avatar src={c.clientAvatar} name={name} size={24} tone={avatarTone(c.chatId)} />
-                        <span className="attention-name" title={c.title}>
-                          {name}
-                        </span>
-                      </span>
-                      <span className="attention-preview muted">{c.preview || (c.hasFiles ? '📎 Файл' : 'Сообщение клиента')}</span>
-                      <span className="attention-time">{fmtWhen(c.lastMessageAt, tz)}</span>
-                    </button>
+                  <li key={c.chatId} data-dashboard-anchor={`chat:${c.chatId}`}>
+                    <AttentionMessage chat={c} timezone={tz} onOpen={() => onChats({ chatId: c.chatId })} />
                     <span className="attention-actions">
                       <button
                         className="dash-icon-btn"
@@ -322,25 +293,25 @@ export function DashboardPage({
             </ul>
             {!!d?.chats && <ListMore total={attention.length} shown={attentionShown} step={ATTENTION_STEP} onShow={setAttentionShown} />}
             {!!d?.chats && attentionShown >= attention.length && waiting > attention.length && (
-              <button className="list-more" onClick={() => onChats({ waiting: true })}>
+              <button className="list-more" onClick={() => onChats({})}>
                 Все ждущие ответа в чатах · {waiting}
               </button>
             )}
           </section>
         ) : null;
       case 'recentCalls':
-        return <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} />;
+        return <RecentCalls scope={callsScope} timezone={tz} from={range.from} to={range.to} onOpenChat={(chatId) => onChats({ chatId })} />;
       case 'deals':
         return <DealsCreated d={d} tz={tz} word={word} oneDay={range.from === range.to} />;
       case 'todayBookings':
-        return <TodayBookings d={d} tz={tz} />;
+        return <TodayBookings d={d} tz={tz} periodText={periodText} />;
       case 'dealSources':
         return d?.newDeals && d.newDeals.total > 0 ? (
           <DealSources items={d.newDeals.items} word={word} onOpen={(source) => setDealsOpen({ source })} />
         ) : (
           <section className="day-panel dash-sources">
             <p className="dash-attention-title muted">Источники новых сделок {word}</p>
-            <p className="muted">{d ? 'Новых сделок нет.' : 'Загрузка…'}</p>
+            {d ? <p className="muted">Новых сделок нет.</p> : <BlockLoading rows={2} />}
           </section>
         );
       case 'newBookings':
@@ -348,15 +319,25 @@ export function DashboardPage({
       case 'removedBookings':
         return <BookingList title="Удалённые бронирования" empty="Удалённых броней за период нет." list={d?.bookings?.removed} tz={tz} variant="removed" />;
       case 'activity':
-        return session.canManageApp ? <EmployeeActivity timezone={tz} startDate={range.from} /> : null;
+        return session.canManageApp ? <EmployeeActivity key={`${range.from}|${range.to}`} timezone={tz} startDate={range.from} endDate={range.to} /> : null;
+      case 'noOpenline':
+        return <DealGapsBlock period={range} kind="chat" tz={tz} />;
+      case 'noContact':
+        return <DealGapsBlock period={range} kind="contact" tz={tz} />;
+      case 'onShift':
+        return <OnShiftBlock timezone={tz} />;
+      case 'myActivity':
+        return <MyActivityBlock period={range} timezone={tz} onOpenChat={(chatId) => onChats({ chatId })} />;
+      case 'actionLog':
+        return session.canManageApp ? <ActionLogBlock tz={tz} period={range} /> : null;
       case 'needsClose':
         return <NeedsCloseBlock tz={tz} />;
       case 'alerts':
-        return bookingAlerts ? <AlertsBlock onOpen={onAlerts} /> : null;
+        return bookingAlerts ? <AlertsBlock period={range} onOpen={onAlerts} /> : null;
       case 'certificates':
-        return <CertificatesBlock onOpen={onCertificates} />;
+        return <CertificatesBlock period={range} onOpen={onCertificates} />;
       case 'stops':
-        return <StopsBlock />;
+        return <StopsBlock period={range} />;
       default:
         return (HEAD_BLOCKS as readonly string[]).includes(type) ? (
           <HeadBlock type={type as HeadBlockType} d={head} vs={versus(preset, head, (x) => fmtDay(x, tz))} word={word} periodText={periodText} tz={tz} />
@@ -412,6 +393,7 @@ export function DashboardPage({
   if (view === 'calls')
     return (
       <div className="page dashboard">
+      <DashboardSyncStatus />
         <header className="toolbar">
           <div className="toolbar-title">
             <button aria-label="К дашборду" onClick={() => setView('main')}>
@@ -454,11 +436,11 @@ export function DashboardPage({
               Всего звонков {word}: <b>{n(d?.callsTotal)}</b> (входящие и исходящие). Плитки считают клиентов, а не звонки:
               несколько звонков от клиента и ему — один клиент. Повторный — есть состоявшаяся сделка в воронке{' '}
               {funnels.find((f) => f.id === d?.callsFunnel)?.name ?? 'группы'} до его первого звонка в периоде (не проиграна и бронь
-              уже прошла; без брони — выигранная). Упущенный — после пропущенного не перезвонили и он сам не дозвонился.
+              уже прошла; без брони — выигранная). Упущенный — после пропущенного нет успешного звонка и диалога с сотрудником в чате. Перезвон без ответа не снимает упущенного.
             </p>
           </>
         )}
-        <CallLog scope={callsScope} timezone={tz} />
+        <CallLog key={`${range.from}|${range.to}`} scope={callsScope} timezone={tz} period={range} />
         {callsOpen && (
           <CallsModal
             kind={callsOpen}
@@ -475,6 +457,7 @@ export function DashboardPage({
 
   return (
     <div className="page dashboard">
+      <DashboardSyncStatus />
       <header className="toolbar">
         <div className="toolbar-title">
           <button className="dash-calendar-btn" aria-label="К календарю" title="Календарь броней" onClick={onBack}>
@@ -488,10 +471,9 @@ export function DashboardPage({
         </div>
         <div className="toolbar-controls">
           <ThemeToggle />
-          <WorkdayButton timezone={tz} />
           {bookingAlerts && (
-            <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} title="Уведомления о бронях">
-              <span aria-hidden="true">🔔</span> Уведомления
+            <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} aria-label="Уведомления" title="Уведомления о бронях">
+              <Icon name="bell" size={20} />
               {!!alertCount && <span className="badge">{alertCount}</span>}
             </button>
           )}
@@ -515,34 +497,36 @@ export function DashboardPage({
                 setDraft2(layout?.blocks ?? []);
                 setEditing(true);
               }}
+              aria-label="Настроить"
               title="Настроить дашборд: блоки, порядок, ширина"
             >
-              <span aria-hidden="true">▦</span> Настроить
+              <Icon name="layout" size={20} />
             </button>
           )}
           {onTemplates && (
-            <button className="settings-button" onClick={onTemplates} title="Шаблоны сообщений: свои, общие и автоматические">
-              <span aria-hidden="true">✉</span> Шаблоны
+            <button className="settings-button" onClick={onTemplates} aria-label="Шаблоны" title="Шаблоны сообщений: свои, общие и автоматические">
+              <Icon name="mail" size={20} />
             </button>
           )}
           {onCertificates && (
-            <button className="settings-button" onClick={onCertificates} title="Сертификаты: выпуск, изменение срока, погашение">
-              <span aria-hidden="true">🎟</span> Сертификаты
+            <button className="settings-button" onClick={onCertificates} aria-label="Сертификаты" title="Сертификаты: выпуск, изменение срока, погашение">
+              <Icon name="certificate" size={20} />
             </button>
           )}
           {onSettings && (
             <button
               className="settings-button"
               onClick={() => (session.canManageApp ? onSettings() : setAskCode(true))}
+              aria-label="Настройки"
               title={session.canManageApp ? 'Настройки приложения' : 'Настройки — для администраторов или по временному паролю'}
             >
-              <span aria-hidden="true">⚙</span> Настройки
+              <Icon name="settings" size={20} />
             </button>
           )}
           {/* Вне портала (вход через Битрикс24) — выход из сессии приложения. */}
           {isStandalone() && (
-            <button className="settings-button" onClick={() => void logout()} title={`Выйти: ${session.user.name}`}>
-              Выйти
+            <button className="settings-button" onClick={() => void logout()} aria-label="Выйти" title={`Выйти: ${session.user.name}`}>
+              <Icon name="logout" size={20} />
             </button>
           )}
         </div>
@@ -585,6 +569,7 @@ export function DashboardPage({
         available={allowedBlocks(session.canManageApp)}
         onChange={setDraft2}
         render={(b) => renderBlock(b.type)}
+        sources={(b) => sourcesOf(b.type)}
       />
       {d && d.newDeals === null && <p className="muted dash-note">Новые сделки недоступны: нет доступа к сделкам CRM.</p>}
       <p className="muted dash-note">
@@ -702,7 +687,7 @@ function BookingList({
         <b>{title}</b>
         {list && <span className="pill">{list.total}</span>}
       </div>
-      {!rows && <p className="muted">Загрузка…</p>}
+      {!rows && <BlockLoading />}
       {rows && !rows.length && <p className="muted">{empty}</p>}
       <ul className="booking-rows">
         {rows?.map((r) => (
@@ -786,6 +771,12 @@ function slotState(start: string, end: string, now = Date.now()): 'past' | 'now'
   return Date.parse(start) <= now ? 'now' : 'soon';
 }
 const SLOT_LABEL = { past: 'прошла', now: 'идёт сейчас', soon: 'впереди' } as const;
+/** Легенда цветов броней (карточки и время брони у сделок). */
+const SLOT_LEGEND: LegendItem[] = [
+  { label: 'прошла', swatch: { borderColor: '#b9e6fe', background: '#e0f2fe' } },
+  { label: 'идёт сейчас', swatch: { borderColor: '#a6e9c3', background: '#dcfae6' } },
+  { label: 'впереди', swatch: { borderColor: '#fedf89', background: '#fef0c7' } },
+];
 
 /** Время брони: сегодняшняя — «14:00–16:00», иначе — с датами. */
 function slotText(start: string, end: string, tz: string): string {
@@ -797,45 +788,38 @@ function slotText(start: string, end: string, tz: string): string {
  * «Брони сегодня»: сделки с бронью на сегодня, по 5. В строке — сумма сделки, сделка и клиент, ресурс,
  * время; цвет — прошла (голубая), идёт (зелёная), впереди (жёлтая).
  */
-function TodayBookings({ d, tz }: { d: Partial<DashboardDto> | null; tz: string }) {
+function TodayBookings({ d, tz, periodText }: { d: Partial<DashboardDto> | null; tz: string; periodText: string }) {
   const [shown, setShown] = useState(LIST_STEP);
   const booked = [...new Map((d?.bookingDays?.todayItems ?? []).filter((r) => r.dealId).map((r) => [r.dealId!, r])).values()];
   return (
     <section className="day-panel dash-block dash-today-bookings">
       <DashBadge name="calendar" />
       <p className="dash-attention-title muted">
-        Брони сегодня
+        Брони · {periodText}
         {d?.bookingDays && <span className="pill">{booked.length}</span>}
       </p>
-      {!d?.bookingDays && <p className="muted">Загрузка…</p>}
-      <ul className="dt-rows">
+      <ColorLegend items={SLOT_LEGEND} label="Цвета броней" className="block" />
+      {!d?.bookingDays && <BlockLoading rows={4} />}
+      <ul className="dt-rows booking-card-grid">
         {booked.slice(0, shown).map((r) => {
           const state = slotState(r.start, r.end);
           return (
             <li key={`b${r.bookingId}`}>
               <button
-                className={`dt-row dt-grid slot-${state}${r.pendingRemoval ? ' today missing' : ''}`}
+                className={`dt-row dash-record slot-${state}${r.pendingRemoval ? ' today missing' : ''}`}
                 title={r.pendingRemoval ? 'Удалена в Битрикс24 — ждёт решения' : `Бронь ${SLOT_LABEL[state]}`}
                 onClick={() => openCrm('deal', r.dealId!)}
               >
-                <span className="dt-amount">{r.deal ? fmtMoney(r.deal.opportunity ?? 0, r.deal.currency) : '—'}</span>
-                <span className="dt-main">
-                  <span className="dt-title">
-                    <b>{r.deal?.title || r.title || `Сделка #${r.dealId}`}</b>
-                    <DealStatusBadge s={r.deal?.status} />
-                  </span>
-                  <span className="muted">
-                    {r.deal?.client || 'без клиента'}
-                    {r.pendingRemoval ? ' · удалена в Битрикс24 — ждёт решения' : ''}
-                  </span>
-                </span>
-                <span className="dt-res">{r.resources.join(', ')}</span>
-                <span className={`dt-time slot-chip ${state}`}>{slotText(r.start, r.end, tz)}</span>
+                <span className="booking-card-head"><b>{r.resources.join(', ') || 'Ресурс не указан'}</b><DealStatusBadge s={r.deal?.status} /></span>
+                <span className="booking-card-time"><Icon name="clock" size={15} />{slotText(r.start, r.end, tz)}</span>
+                <span className="booking-card-client"><Icon name="person" size={15} />{r.deal?.client || 'Без клиента'}</span>
+                <span className="booking-card-foot"><span className="dash-record-link" title={r.deal?.title || r.title || undefined}>Сделка #{r.dealId}</span><b>{r.deal ? fmtMoney(r.deal.opportunity ?? 0, r.deal.currency) : '—'}</b></span>
+                {r.pendingRemoval && <span className="dash-record-details error">Удалена в Битрикс24 — ждёт решения</span>}
               </button>
             </li>
           );
         })}
-        {d?.bookingDays && !booked.length && <li className="muted dt-empty">Броней по сделкам на сегодня нет.</li>}
+        {d?.bookingDays && !booked.length && <li className="muted dt-empty">Броней за выбранный период нет.</li>}
       </ul>
       <ListMore total={booked.length} shown={shown} step={LIST_STEP} onShow={setShown} />
     </section>
@@ -878,54 +862,35 @@ function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null
           🪙 {paidWhen[0].toUpperCase() + paidWhen.slice(1)} · {d?.paidDeals === undefined ? '…' : (d.paidDeals?.total ?? '—')}
         </button>
       </div>
+      {created.some((i) => i.slot) && <ColorLegend items={SLOT_LEGEND} label="Цвета времени брони" className="block" />}
       {paidMode && (
         <p className="muted dt-hint">
           Только сделки, по которым {word === 'за период' ? 'за период' : word} поступила оплата: счёт переведён в «Оплачен» или внесена сумма. Справа — когда и
-          сколько оплачено; дата брони — в строке.
+          сколько оплачено; ресурс и время брони — ниже.
         </p>
       )}
-      {(!d || d.newDeals === undefined) && <p className="muted">Загрузка…</p>}
+      {(!d || d.newDeals === undefined) && <BlockLoading rows={4} />}
       {d?.newDeals === null && <p className="muted">Нет доступа к сделкам CRM.</p>}
       <ul className="dt-rows">
         {created.slice(0, shown).map((i) => {
           const state = i.slot ? slotState(i.slot.start, i.slot.end) : null;
           return (
             <li key={`n${i.id}`}>
-              <button className={`dt-row dt-grid${i.paid ? ' paid' : ''}`} title={i.paid ? 'Сделка оплачена' : undefined} onClick={() => openCrm('deal', i.id)}>
-                <span className="dt-amount">
-                  {i.paid && (
-                    <span className="deal-coins" aria-label="Оплачена">
-                      🪙
-                    </span>
-                  )}
-                  {fmtMoney(i.opportunity ?? 0, i.currency)}
+              <button className={`dt-row dash-record${i.paid ? ' paid' : ''}`} title={i.paid ? 'Сделка оплачена' : undefined} onClick={() => openCrm('deal', i.id)}>
+                <b className="dash-record-main" title={i.title}>{i.title}</b>
+                <span className="dash-record-value">
+                  {paidMode && i.payment ? <>Оплачено {fmtMoney(i.payment.amount, i.currency)}</> : fmtMoney(i.opportunity ?? 0, i.currency)}
                 </span>
-                <span className="dt-main">
-                  <span className="dt-title">
-                    <b>{i.title}</b>
-                    <DealStatusBadge s={i.status} />
-                  </span>
-                  <span className="muted">
-                    {i.contact?.name || 'без контакта'} · {paidMode && i.slot ? `бронь ${slotText(i.slot.start, i.slot.end, tz)}` : fmtAt(i.createdAt, tz, oneDay)}
-                    {i.source ? ` · ${i.source.name}` : ''}
-                    {i.repeat ? ' · повторный' : ''}
-                  </span>
+                <span className="dash-record-details"><span>{i.contact?.name || 'Без контакта'}</span><DealStatusBadge s={i.status} /></span>
+                <span className="dash-record-details">
+                  {i.slot && state ? <><span>{i.slot.resources.join(', ')}</span><span className={`slot-chip ${state}`}>{slotText(i.slot.start, i.slot.end, tz)}</span></> : <BookingMark state={i.booking} certificate={i.certificate} />}
                 </span>
-                <span className="dt-res">{i.slot?.resources.join(', ') ?? ''}</span>
-                {/* «С оплатой»: справа — когда и сколько оплачено (а не время брони). */}
-                {paidMode && i.payment ? (
-                  <span className="dt-time slot-chip paid" title={`Оплата ${fmtMoney(i.payment.amount, i.currency)}`}>
-                    🪙 {fmtMoney(i.payment.amount, i.currency)} · {fmtAt(i.payment.at, tz, oneDay)}
-                  </span>
-                ) : i.slot && state ? (
-                  <span className={`dt-time slot-chip ${state}`} title={`Бронь ${SLOT_LABEL[state]}`}>
-                    {slotText(i.slot.start, i.slot.end, tz)}
-                  </span>
-                ) : (
-                  <span className="dt-time">
-                    <BookingMark state={i.booking} certificate={i.certificate} />
-                  </span>
-                )}
+                <span className="dash-record-meta">
+                  <span>Создана {fmtAt(i.createdAt, tz, oneDay)}</span>
+                  {i.source && <span>{i.source.name}</span>}
+                  {i.repeat && <span>Повторный клиент</span>}
+                  {paidMode && i.payment && <><span>Оплата {fmtAt(i.payment.at, tz, oneDay)}</span><span>Сумма сделки {fmtMoney(i.opportunity ?? 0, i.currency)}</span></>}
+                </span>
               </button>
             </li>
           );
@@ -993,7 +958,7 @@ function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDa
   const rows = tab === 'today' ? days.todayItems : days.tomorrowItems;
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet calls-modal" role="dialog" aria-modal="true" aria-label="Брони на сегодня и завтра" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet calls-modal" role="dialog" aria-modal="true" aria-label="Брони выбранного периода и следующего дня" onClick={(e) => e.stopPropagation()}>
         <header>
           <h3>Брони</h3>
           <MinimizeButton label="Брони" />
@@ -1003,10 +968,10 @@ function DayBookingsModal({ days, tz, onClose }: { days: DashboardDto['bookingDa
         </header>
         <div className="wz-seg dbm-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'today'} className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')}>
-            Сегодня · {days.today}
+            {days.from === days.to ? days.from : `${days.from} — ${days.to}`} · {days.today}
           </button>
           <button role="tab" aria-selected={tab === 'tomorrow'} className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')}>
-            Завтра · {days.tomorrow}
+            {days.nextDate ?? 'Следующий день'} · {days.tomorrow}
           </button>
         </div>
         {!rows.length && <p className="muted">Броней нет.</p>}
@@ -1047,8 +1012,18 @@ function DealSources({ items, word, onOpen }: { items: DashboardNewDeal[]; word:
     .sort((a, b) => b.count - a.count);
   const max = groups[0]?.count ?? 1;
   return (
-    <section className="day-panel dash-sources">
+    <section className="day-panel dash-block dash-sources">
+      <DashBadge name="handshake" />
       <p className="dash-attention-title muted">Источники новых сделок {word}</p>
+      {!!items.length && <svg className="source-donut" viewBox="0 0 100 100" role="img" aria-label="Диаграмма источников новых сделок">
+        {groups.map((g, i) => {
+          const share = g.count / items.length * 100;
+          const before = groups.slice(0, i).reduce((n, row) => n + row.count, 0) / items.length * 100;
+          return <circle key={g.id || '-'} cx="50" cy="50" r="38" pathLength="100" fill="none" stroke={SOURCE_COLORS[i % SOURCE_COLORS.length]} strokeWidth="18" strokeDasharray={`${share} ${100 - share}`} strokeDashoffset={-before} transform="rotate(-90 50 50)"><title>{g.name}: {g.count} · {Math.round(share)}%</title></circle>;
+        })}
+        <text x="50" y="49" textAnchor="middle" dominantBaseline="middle" className="source-donut-total">{items.length}</text>
+        <text x="50" y="62" textAnchor="middle" className="source-donut-label">сделок</text>
+      </svg>}
       <ul className="src-rows">
         {groups.map((g, i) => (
           <li key={g.id || '-'}>

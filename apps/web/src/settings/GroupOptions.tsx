@@ -33,16 +33,8 @@ export function Section({
   );
 }
 
-/** Системные шаблоны оплаты портала — один запрос на страницу настроек. */
-let paymentTemplatesLoad: Promise<MessageTemplateDto[]> | null = null;
-const loadPaymentTemplates = () =>
-  (paymentTemplatesLoad ??= apiGet<MessageTemplateDto[]>('/openlines/templates').then(
-    (all) => all.filter((t) => t.purpose === 'payment'),
-    (e) => {
-      paymentTemplatesLoad = null;
-      throw e;
-    },
-  ));
+/** После правки/создания шаблона в SPA список выбора должен перечитываться. */
+const loadPaymentTemplates = () => apiGet<MessageTemplateDto[]>('/openlines/templates').then((all) => all.filter((t) => t.purpose === 'payment'));
 
 /** Выбор системного шаблона сообщения об оплате; не выбран — стандартный текст (показываем его). */
 function PaymentTemplatePick({ label, value, fallback, onChange }: { label: string; value?: string; fallback: string; onChange: (id: string | undefined) => void }) {
@@ -66,7 +58,7 @@ function PaymentTemplatePick({ label, value, fallback, onChange }: { label: stri
         ))}
       </select>
       {error && <span className="notice error">{error}</span>}
-      {list && !list.length && <span className="muted">Системных шаблонов оплаты пока нет — уйдёт стандартный текст.</span>}
+      {list && !list.length && <span className="muted">Для цепочки с вложениями создайте шаблон с назначением «Сообщение об оплате» на странице «Шаблоны», затем выберите его здесь.</span>}
       {chosen && !chosen.steps.some((st) => st.text.includes('{link}')) && <span className="notice error">В шаблоне нет {'{link}'} — клиент не получит ссылку</span>}
       <textarea rows={3} readOnly value={text} aria-label={`${label}: текст`} />
     </label>

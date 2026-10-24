@@ -32,7 +32,7 @@ describe('DashboardService', () => {
     expect(() => parsePeriod('Europe/Moscow', { from: '2026-07-22', to: '2026-10-21' })).not.toThrow();
   });
 
-  it('ждут ответа — из кэша чатов; звонки — одним запросом; ответ кэшируется на 30 секунд', async () => {
+  it('ждут ответа — из кэша чатов; звонки — одним запросом; завершённый ответ не кэшируется', async () => {
     const chats = {
       attention: vi.fn(async () => ({ waiting: 2, items: [{ chatId: 1 }, { chatId: 2 }] })),
     } as unknown as ChatsService;
@@ -45,6 +45,10 @@ describe('DashboardService', () => {
     } as unknown as B24UserContext;
     const svc = new DashboardService(chats, emptyJournal);
     const d = await svc.get(user, { from: '2026-10-15', to: '2026-10-21' }, true);
+    expect(chats.attention).toHaveBeenCalledWith(user, 50);
+    expect(emptyJournal.activeListBetween).toHaveBeenCalledWith('p1', new Date('2026-10-14T21:00:00Z'), new Date('2026-10-21T21:00:00Z'), null);
+    expect(emptyJournal.activeListBetween).toHaveBeenCalledWith('p1', new Date('2026-10-21T21:00:00Z'), new Date('2026-10-22T21:00:00Z'), null);
+    expect(d.bookingDays).toMatchObject({ from: '2026-10-15', to: '2026-10-21', nextDate: '2026-10-22' });
     expect(d).toMatchObject({
       from: '2026-10-15',
       to: '2026-10-21',
@@ -55,7 +59,22 @@ describe('DashboardService', () => {
     expect(listAll.mock.calls.some((c) => c[1]?.filter?.PROVIDER_ID === 'IMOPENLINES_SESSION')).toBe(false);
     const before = listAll.mock.calls.length;
     await svc.get(user, { from: '2026-10-15', to: '2026-10-21' }, true);
-    expect(listAll.mock.calls.length).toBe(before);
+    expect(listAll.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('объединяет только одновременные запросы; следующий перечитывает брони', async () => {
+    const svc = new DashboardService({ attention: vi.fn() } as unknown as ChatsService, emptyJournal);
+    let release!: (data: Partial<import('@btx24/shared').DashboardDto>) => void;
+    const compute = vi.spyOn(svc as never as { compute: () => Promise<Partial<import('@btx24/shared').DashboardDto>> }, 'compute')
+      .mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const user = { portal: { id: 'p1' }, userId: 7 } as B24UserContext;
+    const a = svc.get(user, { part: 'base' }, false);
+    const b = svc.get(user, { part: 'base' }, false);
+    expect(compute).toHaveBeenCalledTimes(1);
+    release({ from: '2026-10-24' }); await Promise.all([a,b]);
+    const c = svc.get(user, { part: 'base' }, false);
+    expect(compute).toHaveBeenCalledTimes(2);
+    release({ from: '2026-10-25' }); expect(await c).toEqual({ from: '2026-10-25' });
   });
 
   it('calls by client: new vs repeat by won deals in the chosen funnel before the first call', async () => {

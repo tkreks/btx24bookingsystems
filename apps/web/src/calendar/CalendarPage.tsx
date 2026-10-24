@@ -1,3 +1,5 @@
+import { freshPoll } from '../fresh-poll.js';
+import { DashboardSyncProvider, dashboardScope } from '../dashboard/DashboardSync.js';
 import { useEffect, useMemo, useState } from 'react';
 import {
   todayIn,
@@ -23,7 +25,6 @@ import { DashboardPage } from '../openlines/DashboardPage.js';
 import { TemplatesPage } from '../openlines/TemplatesPage.js';
 import { SettingsPanel } from '../settings/SettingsPanel.js';
 import { ThemeToggle } from '../theme/ThemeToggle.js';
-import { WorkdayButton } from '../workday/WorkdayButton.js';
 import { BookingDetails } from './BookingDetails.js';
 import { DayAvailability } from './DayAvailability.js';
 import { DayGrid } from './DayGrid.js';
@@ -68,11 +69,9 @@ export function CalendarPage({
   const [groups, setGroups] = useState<MyGroupDto[] | null>(null);
   const [groupId, setGroupId] = useState<string | null>(savedGroup);
   // Ответ привязан к ключу запроса (дата + группа): «загружается» = ответа на текущий ключ ещё
-  // нет. Пока он идёт, показываем прошлый день приглушённым; поздний ответ на старый ключ
-  // отбрасывается.
+  // нет. Данные другой даты/группы не показываем; поздний ответ на старый ключ отбрасывается.
   const [resp, setResp] = useState<{ key: string; day: CalendarDay | null; error: string | null } | null>(null);
   const [selected, setSelected] = useState<CalendarBooking | null>(null);
-  const [adminOpen, setAdminOpen] = useState(false);
   // Открытая форма брони: из «+ Бронь» — на текущий день; кликом в календаре — ресурс и время.
   const [bookingForm, setBookingForm] = useState<{ date: string; time?: string; resourceId?: number } | null>(null);
   const [payment, setPayment] = useState<{ dealId: number; bookingId: number | null; amount?: number | null; fixedDeal?: boolean } | null>(null);
@@ -88,10 +87,11 @@ export function CalendarPage({
   const [screen, setScreen] = useState<
     | { name: 'calendar' }
     | { name: 'dashboard' }
-    | { name: 'chats'; chatId?: number; waiting?: boolean }
+    | { name: 'chats'; chatId?: number; waiting?: boolean; from?: string; to?: string }
     | { name: 'alerts'; alertId?: string | null }
     | { name: 'templates' }
     | { name: 'certificates' }
+    | { name: 'settings'; back: 'dashboard' | 'templates' }
   >(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
     if (alertId) return { name: 'alerts', alertId };
@@ -132,26 +132,27 @@ export function CalendarPage({
     setAppliedViewKey(viewKey);
     setView(viewForGroup(activeGroup, view, userChosen, isNarrow()));
   }
-  const day = resp?.day ?? null;
+  const day = resp?.key === query ? resp.day : null;
+  // Пока нет ответа на выбранную дату/группу — прежний день под загрузчиком, без действий с ним.
+  const shownDay = day ?? (loading ? (resp?.day ?? null) : null);
   const error = loading ? null : (resp?.error ?? null);
 
   useEffect(() => {
-    if (groups === null) return;
+    if (groups === null || screen.name !== 'calendar') return;
     let cancelled = false;
-    apiGet<CalendarDay>(`/calendar?${query}`).then(
+    const stop = freshPoll(() => apiGet<CalendarDay>(`/calendar?${query}`).then(
       (d) => !cancelled && setResp({ key: query, day: d, error: null }),
       (e) =>
         !cancelled &&
         setResp((prev) => ({
           key: query,
-          day: prev?.day ?? null,
+          day: prev?.key === query ? prev.day : null,
           error: e instanceof ApiRequestError ? e.message : 'Не удалось загрузить календарь',
         })),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [query, groups, dayRev]);
+    ));
+    // Прежний ответ помечаем устаревшим: он виден под загрузчиком до свежего ответа.
+    return () => { cancelled = true; stop(); setResp((prev) => (prev ? { ...prev, key: '' } : null)); };
+  }, [query, groups, dayRev, screen.name]);
 
   const chooseGroup = (id: string) => {
     setGroupId(id);
@@ -196,7 +197,8 @@ export function CalendarPage({
     if (targetGroup && targetGroup.id !== activeGroup?.id) setGroupId(targetGroup.id);
   }
 
-  useEffect(() => fitFrame(), [day, view, selected, adminOpen, screen]);
+  const hasDay = day !== null;
+  useEffect(() => fitFrame(), [hasDay, day?.bookings.length, view, selected?.id, screen.name]);
 
   const switchView = (v: CalendarView) => {
     setView(v);
@@ -241,6 +243,16 @@ export function CalendarPage({
       />
     );
 
+  if (screen.name === 'settings' && session.canManageApp)
+    return (
+      <SettingsPanel
+        timezone={tz}
+        temporary={session.settingsAccessUntil}
+        onClose={() => setScreen(screen.back === 'templates' ? { name: 'templates' } : { name: 'dashboard' })}
+        onChanged={() => setSettingsRevision((n) => n + 1)}
+      />
+    );
+
   if (screen.name === 'certificates') return <CertificatesPage timezone={tz} onBack={() => setScreen({ name: 'dashboard' })} />;
 
   if (screen.name === 'templates')
@@ -249,23 +261,19 @@ export function CalendarPage({
         <TemplatesPage
           admin={session.canManageApp}
           onBack={() => setScreen({ name: 'dashboard' })}
-          onSettings={session.canManageApp ? () => setAdminOpen(true) : undefined}
+          onSettings={session.canManageApp ? () => setScreen({ name: 'settings', back: 'templates' }) : undefined}
         />
-        {adminOpen && session.canManageApp && (
-          <SettingsPanel
-            timezone={tz}
-            temporary={session.settingsAccessUntil}
-            onClose={() => setAdminOpen(false)}
-            onChanged={() => setSettingsRevision((n) => n + 1)}
-          />
-        )}
       </>
     );
+
+  // Область снимков строится только после проверки групп и прав, без промежуточного пустого scope.
+  if (screen.name === 'dashboard' && groups === null) return <div className="page"><p className="muted" role="status">Загрузка доступа…</p>{groupsError && <><p className="notice error">{groupsError}</p><button type="button" onClick={() => setSettingsRevision(n => n + 1)}>Повторить</button></>}</div>;
 
   // Настройки открываются только с дашборда (решение владельца): админам и по временному паролю.
   if (screen.name === 'dashboard')
     return (
       <>
+        <DashboardSyncProvider scope={dashboardScope(session, groups)}>
         <DashboardPage
           session={session}
           openlines={openlinesRead}
@@ -273,7 +281,7 @@ export function CalendarPage({
           onChats={(o) => setScreen({ name: 'chats', ...o })}
           bookingAlerts={bookingsView}
           onAlerts={() => setScreen({ name: 'alerts' })}
-          onSettings={() => setAdminOpen(true)}
+          onSettings={() => setScreen({ name: 'settings', back: 'dashboard' })}
           onTemplates={openlinesSend ? () => setScreen({ name: 'templates' }) : undefined}
           onCertificates={() => setScreen({ name: 'certificates' })}
           onSession={(s) => {
@@ -281,14 +289,7 @@ export function CalendarPage({
             setSettingsRevision((n) => n + 1);
           }}
         />
-        {adminOpen && session.canManageApp && (
-          <SettingsPanel
-            timezone={tz}
-            temporary={session.settingsAccessUntil}
-            onClose={() => setAdminOpen(false)}
-            onChanged={() => setSettingsRevision((n) => n + 1)}
-          />
-        )}
+        </DashboardSyncProvider>
       </>
     );
   if (screen.name === 'chats')
@@ -298,6 +299,7 @@ export function CalendarPage({
         canSend={openlinesSend}
         initialChatId={screen.chatId}
         initialWaiting={screen.waiting}
+        period={screen.from && screen.to ? { from: screen.from, to: screen.to } : undefined}
         onClose={() => setScreen({ name: 'dashboard' })}
         groups={groups ?? []}
         onOpenDay={(d) => {
@@ -356,7 +358,6 @@ export function CalendarPage({
             </button>
           )}
           <ThemeToggle />
-          <WorkdayButton timezone={tz} />
           <button
             className="home-button"
             aria-label="Мой дашборд"
@@ -417,29 +418,37 @@ export function CalendarPage({
       )}
       {error && <div className="notice error">{error}</div>}
 
-      <main className={loading ? 'loading' : ''}>
-        {day && view === 'calendar' && (
-          <DayGrid day={day} highlightDealId={placement.dealId} onSelect={setSelected} onCreate={createAt} onStop={canStop ? setStopFor : undefined} />
+      <main className={`cal-main${loading ? ' loading' : ''}`} aria-busy={loading}>
+        {shownDay && view === 'calendar' && (
+          <DayGrid day={shownDay} highlightDealId={placement.dealId} onSelect={setSelected} onCreate={createAt} onStop={canStop ? setStopFor : undefined} />
         )}
-        {day && view === 'list' && (
+        {shownDay && view === 'list' && (
           <DayList
-            day={day}
+            day={shownDay}
             groupName={activeGroup?.name ?? ''}
             highlightDealId={placement.dealId}
             onSelect={setSelected}
             onCreate={createAt}
           />
         )}
-        {day && view === 'availability' && (
+        {shownDay && view === 'availability' && (
           <DayAvailability
-            day={day}
+            day={shownDay}
             groupName={activeGroup?.name ?? ''}
             highlightDealId={placement.dealId}
             onSelect={setSelected}
             onCreate={createAt}
           />
         )}
-        {!day && loading && <div className="muted pad">Загрузка броней…</div>}
+        {!shownDay && loading && <div className="cal-loading-space" />}
+        {loading && (
+          <div className="cal-loader" role="status">
+            <span className="cal-loader-box">
+              <span className="spinner" aria-hidden="true" />
+              Загрузка броней…
+            </span>
+          </div>
+        )}
       </main>
 
       {createdNote && <div className="notice">{createdNote}</div>}

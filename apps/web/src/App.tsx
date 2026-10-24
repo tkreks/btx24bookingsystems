@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AppEnterDto, SessionInfo } from '@btx24/shared';
 import { apiGet, apiPost, ApiRequestError } from './api.js';
-import { initB24, placementContext, setStandalone, type PlacementContext } from './b24.js';
+import { fitFrame, initB24, placementContext, setPortalDomain, setStandalone, type PlacementContext } from './b24.js';
 import { LoginPage } from './LoginPage.js';
 import { CalendarPage } from './calendar/CalendarPage.js';
 import { CallLayer } from './calls/CallLayer.js';
@@ -25,8 +25,10 @@ export function App() {
       if (!inFrame) setStandalone();
       try {
         const session = await apiGet<SessionInfo>('/session');
+        setPortalDomain(session.portal.domain);
         if (!inFrame) setStandalone(session.portal.domain);
         const placement: PlacementContext = inFrame ? placementContext() : { placement: 'STANDALONE', dealId: null };
+        if (placement.placement === 'CALL_CARD') fitFrame();
         setBoot({ state: 'ready', session, placement });
         // Вход — в журнал действий (откуда открыли); сбой записи не мешает работе.
         void apiPost('/activity/enter', { placement: placement.placement, dealId: placement.dealId } satisfies AppEnterDto).catch(() => undefined);

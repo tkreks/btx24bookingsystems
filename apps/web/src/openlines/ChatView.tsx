@@ -5,6 +5,7 @@ import { openCrm, openMessenger } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { avatarTone, dayKey, initials } from './chat-list.js';
+import { MessengerDealSelector } from '../messengers/MessengerDealSelector.js';
 import { ChannelSwitch } from './ChannelSwitch.js';
 import { clipName } from './format.js';
 import { Icon } from './icons.js';
@@ -55,6 +56,7 @@ export function ChatView({
   // Ошибка обновления ленты отдельно: фоновое обновление не должно стирать ошибку отправки.
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   // Отправка — отдельно от прочих действий: блок сообщения закрывается загрузчиком.
   const [sending, setSending] = useState(false);
@@ -161,6 +163,7 @@ export function ChatView({
   };
 
   const send = async () => {
+    if (uploading) return;
     const steps = toSteps(chain);
     if (!steps.length || busy) return;
     setBusy(true);
@@ -208,6 +211,7 @@ export function ChatView({
         onTitle={crm.contactId ? () => openCrm('contact', crm.contactId!) : undefined}
         subtitle={
           <>
+            {chat.connector.startsWith('btx24_') && <MessengerDealSelector chatId={chatId} timezone={timezone} />}
             <ChannelSwitch channels={channels} current={chat.chatId} connector={chat.connector} timezone={timezone} onOpen={onOpenChat} />
             {crm.dealId && (
               <>
@@ -301,7 +305,7 @@ export function ChatView({
             <select
               aria-label="Шаблон"
               value={templatePick}
-              disabled={busy || !chatTemplates?.length}
+              disabled={busy || uploading || !chatTemplates?.length}
               onChange={(e) => {
                 const t = chatTemplates?.find((x) => x.id === e.target.value);
                 setTemplatePick('');
@@ -322,9 +326,9 @@ export function ChatView({
               Сохранить как шаблон
             </button>
           </div>
-          <StepsEditor steps={chain} onChange={setChain} disabled={busy} onSubmitShortcut={() => void send()} />
+          <StepsEditor onUploadingChange={setUploading} steps={chain} onChange={setChain} disabled={busy} onSubmitShortcut={() => void send()} />
           <div className="form-actions">
-            <button className="primary" disabled={busy || chain.every(isEmpty)} onClick={() => void send()}>
+            <button className="primary" disabled={busy || uploading || chain.every(isEmpty)} onClick={() => void send()}>
               {busy
                 ? 'Отправка…'
                 : toSteps(chain).length > 1

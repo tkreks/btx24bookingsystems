@@ -25,10 +25,11 @@ function setup(o: { can?: boolean; contacts?: unknown[]; deals?: unknown[]; dup?
       });
     }
     if (method === 'crm.deal.list') return o.deals ?? [];
+    if (method === 'user.get') return [{ ID: '7', NAME: 'Ольга', LAST_NAME: 'Петрова', PERSONAL_PHOTO: '/upload/o.jpg' }];
     return [];
   });
   const call = vi.fn(async () => ({ result: { CONTACT: o.dup ?? [] } }));
-  const user = { portal: { id: 'p1' }, client: { listAll, call } } as unknown as B24UserContext;
+  const user = { portal: { id: 'p1', domain: 'x.bitrix24.ru' }, client: { listAll, call } } as unknown as B24UserContext;
   return { svc: new BookingDirectoryService(access), user, call, listAll };
 }
 
@@ -52,7 +53,7 @@ describe('BookingDirectoryService', () => {
     const t = setup({ contacts, dup: [140] });
     const byPhone = await t.svc.search(t.user, { kind: 'contact', q: '8 999 123-45-67' });
     expect(t.call).toHaveBeenCalledWith('crm.duplicate.findbycomm', expect.objectContaining({ type: 'PHONE', values: ['+79991234567', '89991234567', '79991234567'] }));
-    expect(byPhone.contacts.map((c) => [c.id, c.name, c.phones])).toEqual([[140, 'Иванова Анна', ['+79991234567']]]);
+    expect(byPhone.contacts.map((c) => [c.id, c.name, c.phones])).toEqual([[140, 'Анна Иванова', ['+79991234567']]]);
     const byName = await t.svc.search(t.user, { kind: 'contact', q: 'анна петр' });
     expect(byName.contacts.map((c) => c.id)).toEqual([150]);
     await expect(t.svc.search(t.user, { kind: 'contact', q: 'а' })).rejects.toMatchObject({ status: 400 });
@@ -61,11 +62,15 @@ describe('BookingDirectoryService', () => {
   it('сделки: открытые первыми, с клиентом; без права — 403', async () => {
     const deals = [
       { ID: '700', TITLE: 'Баня, октябрь', CLOSED: 'Y', CONTACT_ID: '140', CATEGORY_ID: '0' },
-      { ID: '678', TITLE: 'Баня на субботу', CLOSED: 'N', CONTACT_ID: '140', CATEGORY_ID: '0' },
+      { ID: '678', TITLE: 'Баня на субботу', CLOSED: 'N', CONTACT_ID: '140', CATEGORY_ID: '0', MODIFY_BY_ID: '7' },
     ];
-    const t = setup({ deals, contacts: [{ ID: '140', NAME: 'Анна', LAST_NAME: 'Иванова' }] });
+    const t = setup({ deals, contacts: [{ ID: '140', NAME: 'Анна', LAST_NAME: 'Иванова', PHOTO: { showUrl: '/upload/a.jpg' } }] });
     const r = await t.svc.search(t.user, { contactId: '140' });
-    expect(r.deals.map((d) => [d.id, d.closed, d.contact?.name])).toEqual([[678, false, 'Иванова Анна'], [700, true, 'Иванова Анна']]);
+    expect(r.deals.map((d) => [d.id, d.closed, d.contact?.name])).toEqual([[678, false, 'Анна Иванова'], [700, true, 'Анна Иванова']]);
+    // Выбранный клиент — с именем «Имя Фамилия» для шага мастера.
+    expect(r.contacts.map((c) => [c.id, c.name, c.photo])).toEqual([[140, 'Анна Иванова', 'https://x.bitrix24.ru/upload/a.jpg']]);
+    // Кто последним изменил сделку — имя и аватарка сотрудника.
+    expect(r.deals.map((d) => d.modifiedBy)).toEqual([{ id: 7, name: 'Ольга Петрова', photo: 'https://x.bitrix24.ru/upload/o.jpg' }, null]);
     const no = setup({ can: false });
     await expect(no.svc.search(no.user, { kind: 'deal', q: 'баня' })).rejects.toMatchObject({ status: 403 });
   });

@@ -296,6 +296,28 @@ export class BookingJournalService {
   }
 
   /** Активные брони, пересекающие [from, to) — по ресурсам (null — все), по началу. */
+  /** Завершение — событие в [from,to), включая ровно полночь начала периода. */
+  /** Текущая очередь закрытия за всё время, без ограничения периода или числа записей. */
+  async endedForClosing(portalId: string, now: Date, resourceIds: number[] | null): Promise<BookingRecord[]> {
+    const result: BookingRecord[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const rows = await this.prisma.bookingRecord.findMany({
+        where: { portalId, status: 'active', endsAt: { lte: now }, dealId: { not: null } },
+        orderBy: { id: 'asc' }, take: PERIOD_LIMIT,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      result.push(...rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id)))));
+      if (rows.length < PERIOD_LIMIT) return result;
+      cursor = rows[rows.length - 1].id;
+    }
+  }
+
+  async endingBetween(portalId: string, from: Date, to: Date, resourceIds: number[] | null): Promise<BookingRecord[]> {
+    const rows = await this.prisma.bookingRecord.findMany({ where: { portalId, status: 'active', endsAt: { gte: from, lt: to } }, orderBy: { endsAt: 'desc' }, take: PERIOD_LIMIT });
+    return rows.filter((r) => resourceIds === null || (r.resourceIds as number[]).some((id) => resourceIds.includes(Number(id))));
+  }
+
   async activeListBetween(portalId: string, from: Date, to: Date, resourceIds: number[] | null): Promise<BookingRecord[]> {
     const rows = await this.prisma.bookingRecord.findMany({
       where: { portalId, status: 'active', startsAt: { lt: to }, endsAt: { gt: from } },

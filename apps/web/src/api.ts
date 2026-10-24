@@ -1,3 +1,4 @@
+import { clearDashboardCaches } from './dashboard/dashboard-cache.js';
 import type { ApiError } from '@btx24/shared';
 import { getAuth, isStandalone, placementContext, refreshAuth, type B24Auth } from './b24.js';
 import { reportSessionLost } from './session-guard.js';
@@ -21,13 +22,36 @@ export async function apiGet<T>(path: string): Promise<T> {
   return request<T>('GET', path);
 }
 
+/** Откуда сервер взял ответ блока дашборда (заголовки `X-Cache*`, ADR 0012). */
+export interface ServerCacheMeta {
+  state: 'fresh' | 'stale' | 'miss';
+  /** Возраст данных на момент ответа, мс. */
+  ageMs: number;
+  /** Сервер обновляет данные в фоне — свежий ответ будет через несколько секунд. */
+  refreshing: boolean;
+}
+
+export function cacheMetaOf(h: Pick<Headers, 'get'>): ServerCacheMeta | null {
+  const state = h.get('X-Cache');
+  if (state !== 'fresh' && state !== 'stale' && state !== 'miss') return null;
+  return { state, ageMs: Math.max(0, Number(h.get('X-Cache-Age')) || 0) * 1000, refreshing: h.get('X-Cache-Refreshing') === '1' };
+}
+
+/** GET вместе с отметкой серверного кэша (для дашборда). */
+export async function apiGetMeta<T>(path: string): Promise<{ data: T; meta: ServerCacheMeta | null }> {
+  let meta: ServerCacheMeta | null = null;
+  const data = await request<T>('GET', path, undefined, false, (h) => (meta = cacheMetaOf(h)));
+  return { data, meta };
+}
+
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('POST', path, body);
 }
 
-async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, retried = false, onHeaders?: (h: Headers) => void): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
+    cache: 'no-store',
     headers: {
       ...(await authHeaders(retried)),
       // Откуда открыто приложение (сделка, меню) — для журнала действий.
@@ -37,11 +61,16 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     },
     body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
   });
-  if (res.ok) return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  if (res.ok) {
+    onHeaders?.(res.headers);
+    const data = res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+    if (method !== 'GET') window.dispatchEvent(new Event('btx24:mutation'));
+    return data;
+  }
   const err = (await res.json().catch(() => ({}))) as Partial<ApiError>;
   if (res.status === 401 && isStandalone()) reportSessionLost();
   else if (res.status === 401 && (err.code === 'TOKEN_EXPIRED' || err.code === 'INVALID_TOKEN')) {
-    if (!retried) return request<T>(method, path, body, true);
+    if (!retried) return request<T>(method, path, body, true, onHeaders);
     reportSessionLost();
   }
   throw new ApiRequestError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? `Ошибка ${res.status}`);
@@ -68,8 +97,8 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   return request<T>('PUT', path, body);
 }
 
-export async function apiDelete(path: string): Promise<void> {
-  return request<void>('DELETE', path);
+export async function apiDelete<T = void>(path: string): Promise<T> {
+  return request<T>('DELETE', path);
 }
 
 /** Файл с нашего API (картинки чата и т. п.): `<img src>` не умеет передать токен — берём Blob. */
@@ -88,8 +117,14 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   return request<T>('POST', path, form);
 }
 
+/** Multipart с дополнительными полями (адресат, подпись файла). */
+export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
+  return request<T>('POST', path, form);
+}
+
 /** Выход из приложения, открытого вне портала: сессия удаляется на сервере, затем страница входа. */
 export async function logout(): Promise<void> {
+  clearDashboardCaches(); window.dispatchEvent(new Event('btx24:session-lost'));
   await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Btx24-Standalone': '1' } }).catch(() => undefined);
   window.location.assign('/');
 }

@@ -38,6 +38,16 @@ describe('тёмная тема', () => {
     expect(Object.keys(darkTokens).sort()).toEqual(Object.keys(lightTokens).filter((k) => !k.startsWith('safe-') && k !== 'radius').sort());
   });
 
+  it('статусы читаются в обеих темах и темнее похожих фонов строк', () => {
+    for (const k of ['work', 'wait', 'arrived', 'done', 'fail']) {
+      for (const t of [lightTokens, darkTokens]) expect(contrast(c(t[`status-${k}-text`]), c(t[`status-${k}-bg`])), k).toBeGreaterThan(4.5);
+    }
+    for (const [k, row] of [['work', '#eff8ff'], ['wait', '#fffaeb'], ['done', '#ecfdf3'], ['arrived', '#eff8ff'], ['fail', '#fef3f2']]) {
+      expect(luminance(c(lightTokens[`status-${k}-bg`]))).toBeLessThan(luminance(c(row)));
+      expect(luminance(c(darkTokens[`status-${k}-bg`]))).toBeLessThan(luminance(map(c(row), 'bg')));
+    }
+  });
+
   it('правила styles.css: фон и текст одного правила в тёмной теме не хуже светлой (или не ниже 4.5)', () => {
     const css = source.replace(/\/\*[\s\S]*?\*\//g, '');
     const color = (v: string, t: Record<string, string>) => {

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Prisma } from '../../../generated/prisma/client.js';
+import type { Portal, Prisma } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { matchesHash } from '../crypto/secret-box.js';
 import { PortalService } from '../portals/portal.service.js';
@@ -12,6 +12,17 @@ export interface IncomingEvent {
 }
 
 export type EventOutcome = 'stored' | 'processed' | 'rejected';
+
+/** Обработчик событий другого модуля (по префиксу имени): получает портал и `data` события. */
+export type BitrixEventHandler = (portal: Portal, event: string, data: unknown) => Promise<void>;
+const handlers = new Map<string, BitrixEventHandler>();
+/**
+ * Подписать модуль на события Битрикс24 по префиксу (например, `ONIMCONNECTOR` — мессенджеры):
+ * событие сохраняется как обычно, обработчик выполняется сразу после ответа порталу.
+ */
+export function onBitrixEvent(prefix: string, handler: BitrixEventHandler): void {
+  handlers.set(prefix.toUpperCase(), handler);
+}
 
 /**
  * Входящие события Битрикс24. Порядок по документации: проверить application_token → сохранить →
@@ -51,6 +62,18 @@ export class EventsService {
       await this.telephony(portal.id, event, (body.data ?? {}) as Record<string, unknown>);
       await this.prisma.bitrix24Event.update({ where: { id: stored.id }, data: { status: 'PROCESSED', processedAt: new Date() } });
       return 'processed';
+    }
+    const handler = [...handlers].find(([prefix]) => event.startsWith(prefix))?.[1];
+    if (handler) {
+      // Порталу отвечаем сразу; итог — в статусе события (повторная доставка обрабатывается идемпотентно).
+      void handler(portal, event, body.data ?? null).then(
+        () => this.prisma.bitrix24Event.update({ where: { id: stored.id }, data: { status: 'PROCESSED', processedAt: new Date() } }),
+        (err: unknown) => {
+          this.logger.warn(`${event}: ${err instanceof Error ? err.message : String(err)}`);
+          return this.prisma.bitrix24Event.update({ where: { id: stored.id }, data: { status: 'FAILED', error: String(err instanceof Error ? err.message : err).slice(0, 2000), processedAt: new Date() } });
+        },
+      );
+      return 'stored';
     }
     // Остальные события обрабатывает worker (появятся вместе с синхронизацией броней).
     return 'stored';

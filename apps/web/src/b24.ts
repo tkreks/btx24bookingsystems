@@ -11,7 +11,7 @@ interface Bx24 {
   init(cb: () => void): void;
   getAuth(): Bx24Auth | false;
   refreshAuth(cb: (auth: Bx24Auth) => void): void;
-  placement: { info(): { placement: string; options: Record<string, unknown> } };
+  placement: { call?(command: string, params: Record<string, unknown>, cb: (result: Record<string, unknown>) => void): void; info(): { placement: string; options: Record<string, unknown> } };
   fitWindow(cb?: () => void): void;
   openPath?(path: string): void;
   im?: { openMessenger?(dialogId: string): void };
@@ -39,6 +39,8 @@ let ready: Promise<boolean> | null = null;
 let standalone = false;
 /** Домен портала для ссылок вне фрейма (из сессии). */
 let portalDomain = '';
+
+export function setPortalDomain(domain: string): void { portalDomain = domain; }
 
 export function setStandalone(domain = ''): void {
   standalone = true;
@@ -94,6 +96,7 @@ let cached: (B24Auth & { expiresAt: number }) | null = null;
 let refreshing: Promise<B24Auth> | null = null;
 
 function remember(a: Bx24Auth): B24Auth {
+  if (a.domain) portalDomain = a.domain;
   // expires_in — сколько секунд осталось; без него считаем как у Битрикс24 — час.
   const ttl = Number(a.expires_in) > 0 ? Number(a.expires_in) * 1000 : 3600_000;
   cached = { token: a.access_token, memberId: a.member_id, expiresAt: Date.now() + ttl };
@@ -205,7 +208,15 @@ export function selectEmployees(onSelect: (users: { id: number; name: string }[]
 }
 
 /** Открыть чат в мессенджере портала (поверх приложения). */
-export function openMessenger(chatId: number): void {
+export function openMessenger(chatId: number, messageId?: number): void {
+  if (messageId && Number.isSafeInteger(messageId) && messageId > 0) {
+    const path = `/online/?IM_DIALOG=chat${chatId}&IM_MESSAGE=${messageId}`;
+    // /online/ в слайдере CALL_CARD не инициализирует мессенджер и остаётся позади звонка.
+    // Полная страница портала читает IM_MESSAGE при старте и открывается отдельной вкладкой.
+    if (portalDomain) window.open(`https://${portalDomain}${path}`, '_blank', 'noopener');
+    else openPortalPath(path);
+    return;
+  }
   const sdk = standalone ? undefined : window.BX24;
   if (sdk?.im?.openMessenger) sdk.im.openMessenger(`chat${chatId}`);
   else openPortalPath(`/online/?IM_DIALOG=chat${chatId}`);
@@ -214,4 +225,21 @@ export function openMessenger(chatId: number): void {
 /** Карточка CRM в слайдере портала. */
 export function openCrm(type: 'lead' | 'contact' | 'company' | 'deal', id: number): void {
   openPortalPath(`/crm/${type}/details/${id}/`);
+}
+
+
+/** CALL_CARD может передать актуальную привязку только после загрузки вкладки. */
+export function readCallContext(fallback: PlacementContext['call']): Promise<PlacementContext['call']> {
+  const sdk = window.BX24;
+  if (!sdk?.placement.call) return Promise.resolve(fallback);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), 2500);
+    try {
+      sdk.placement.call!('getStatus', {}, (value) => {
+        clearTimeout(timer);
+        const s = (key: string, previous: string | null | undefined) => value[key] && value[key] !== 'hidden' ? String(value[key]) : previous ?? null;
+        resolve({ callId: s('CALL_ID', fallback?.callId), phone: s('PHONE_NUMBER', fallback?.phone), entityType: s('CRM_ENTITY_TYPE', fallback?.entityType), entityId: s('CRM_ENTITY_ID', fallback?.entityId), direction: s('CALL_DIRECTION', fallback?.direction) });
+      });
+    } catch { clearTimeout(timer); resolve(fallback); }
+  });
 }

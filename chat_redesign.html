@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Чаты — новый интерфейс</title>
+  <style>
+    :root {
+      --blue: #3269f6;
+      --blue-dark: #2455df;
+      --ink: #172238;
+      --muted: #8590a4;
+      --line: #e7ebf3;
+      --sidebar: #f8faff;
+      --white: #ffffff;
+      --shadow: 0 8px 26px rgba(35, 68, 126, .07);
+      --radius: 17px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      font-size: 14px;
+      color: var(--ink);
+      background: #eff3fa;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 3px solid #a7c0ff;
+      outline-offset: 2px;
+    }
+    .icon { width: 18px; height: 18px; display: block; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .icon.xs { width: 14px; height: 14px; }
+    .icon.sm { width: 16px; height: 16px; }
+    .icon.lg { width: 21px; height: 21px; }
+    .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .app {
+      height: 100vh;
+      height: 100dvh;
+      min-height: 480px;
+      max-width: 2100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: clamp(395px, 33vw, 510px) minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--white);
+      box-shadow: 0 0 0 1px rgba(31, 58, 104, .035), 0 25px 60px rgba(40, 70, 125, .08);
+    }
+    .list-panel { min-width: 0; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); }
+    .list-top { z-index: 2; padding: 27px 24px 14px; background: var(--sidebar); }
+    .list-title-row { display: flex; align-items: center; gap: 12px; }
+    .back-button, .round-btn {
+      width: 42px; height: 42px; flex: none;
+      display: grid; place-items: center;
+      background: #fff; color: #4b5b75;
+      border: 1px solid #e4eaf4; border-radius: 14px;
+      transition: background .18s, border-color .18s, transform .18s;
+    }
+    .back-button:hover, .round-btn:hover { background: #f1f6ff; border-color: #b9cafa; }
+    .back-button:active, .round-btn:active { transform: scale(.97); }
+    .heading-block { min-width: 0; flex: 1; }
+    .heading-line { display: flex; align-items: center; gap: 10px; }
+    h1 { font-size: 27px; font-weight: 760; line-height: 1.2; letter-spacing: -.8px; margin: 0; }
+    .heading-caption { margin: 5px 0 0; color: #8994a8; font-size: 12.5px; }
+    .count-pill { min-width: 26px; height: 24px; padding: 0 7px; border-radius: 999px; display: inline-grid; place-items: center; color: white; background: #fc655f; font-size: 12px; font-weight: 700; box-shadow: 0 3px 8px rgba(246, 81, 81, .15); }
+    .sort-wrap { position: relative; margin-left: auto; }
+    .sort-menu, .more-menu {
+      position: absolute; z-index: 9; min-width: 224px;
+      right: 0; top: calc(100% + 8px);
+      padding: 6px; border: 1px solid var(--line); border-radius: 14px;
+      background: #fff; box-shadow: 0 16px 35px rgba(28, 51, 95, .17);
+    }
+    .sort-menu[hidden], .more-menu[hidden] { display: none; }
+    .menu-item { display: block; width: 100%; background: transparent; border: 0; text-align: left; border-radius: 9px; padding: 11px 12px; color: #40516d; font-size: 13px; }
+    .menu-item:hover, .menu-item.active { background: #eef4ff; color: #205add; }
+    .search-wrap { margin-top: 23px; height: 46px; display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #e1e7f0; border-radius: 13px; padding: 0 13px; color: #99a5b8; transition: border-color .2s, box-shadow .2s; }
+    .search-wrap:focus-within { border-color: #9db8ff; box-shadow: 0 0 0 3px #e6edff; }
+    .search-wrap input { width: 100%; border: 0; outline: none; background: transparent; min-width: 0; color: var(--ink); font-size: 13px; }
+    .search-wrap input::placeholder { color: #a3adbf; }
+    .search-clear { background: none; padding: 3px; border: 0; color: #9ca9bb; display: none; }
+    .search-clear.visible { display: grid; }
+    .tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 14px; }
+    .tab { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; border: 1px solid transparent; border-radius: 11px; padding: 9px 11px; background: #eef2f9; color: #4b5b74; font-size: 12.5px; font-weight: 650; transition: all .18s; }
+    .tab:hover { background: #e5edfc; }
+    .tab.active { color: #fff; background: linear-gradient(120deg, #3b7aff, #285bf0); box-shadow: 0 5px 12px rgba(43, 99, 234, .19); }
+    .tab-counter { border-radius: 100px; padding: 2px 6px; font-size: 11.5px; background: rgba(64, 83, 129, .08); }
+    .tab.active .tab-counter { color: #205be7; background: #fff; }
+    .tab-counter.alert { color: #d74441; background: #ffe7e6; }
+    .tab.active .tab-counter.alert { color: #d74441; }
+    .list-caption { margin: 11px 0 6px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .85px; color: #a0aabb; }
+    .list-caption span:last-child { font-weight: 500; text-transform: none; letter-spacing: 0; }
+    .chat-list { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; padding: 0 12px 20px; scrollbar-width: thin; scrollbar-color: #d6deec transparent; }
+    .chat-card {
+      position: relative; display: grid; grid-template-columns: 50px minmax(0,1fr); align-items: start;
+      width: 100%; gap: 12px; text-align: left; border: 1px solid transparent;
+      border-radius: 15px; background: transparent; padding: 13px 12px;
+      color: inherit; transition: background .16s, border-color .16s, box-shadow .16s;
+      margin: 3px 0;
+    }
+    .chat-card:hover { background: #fff; border-color: #ebeff6; }
+    .chat-card.selected { background: linear-gradient(107deg, #e4edff, #edf4ff); border-color: #d9e6ff; box-shadow: 0 5px 18px rgba(60, 102, 193, .08); }
+    .chat-card.selected::before { content: ''; position: absolute; left: -1px; top: 14px; bottom: 14px; width: 3px; border-radius: 4px; background: #3875ff; }
+    .avatar { position: relative; flex: none; display: grid; place-items: center; width: 50px; height: 50px; border-radius: 50%; font-size: 17px; font-weight: 740; letter-spacing: -.5px; color: #49516b; user-select: none; box-shadow: inset 0 0 0 2px rgba(255,255,255,.65); }
+    .avatar.a1 { background: linear-gradient(145deg,#ffe2c7,#d3d9f9); color:#85543c; }
+    .avatar.a2 { background: linear-gradient(145deg,#e6c5ff,#ffe1e9); color:#84577f; }
+    .avatar.a3 { background: linear-gradient(145deg,#bde7e9,#dbe4ff); color:#36798b; }
+    .avatar.a4 { background: linear-gradient(145deg,#faad66,#e64bb3,#8448ee); color:#fff; }
+    .avatar.a5 { background: linear-gradient(145deg,#d2e3ff,#9abaf7); color:#315bb0; }
+    .avatar.a6 { background: linear-gradient(145deg,#ffe9cb,#f4b2bb); color:#93585a; }
+    .avatar.a7 { background: linear-gradient(145deg,#d5e5ff,#d2d9e4); color:#526e9e; }
+    .avatar.a8 { background: linear-gradient(145deg,#c9f2dd,#ddf6ed); color:#348d60; }
+    .avatar.a9 { background: linear-gradient(145deg,#d8dbff,#e4caff); color:#6e5eaa; }
+    .avatar.online::after { content: ''; position: absolute; bottom: 0; right: -2px; width: 12px; height: 12px; background: #25bd77; border: 2px solid #fff; border-radius: 50%; }
+    .card-body { min-width: 0; padding-top: 1px; }
+    .card-heading { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .card-name { font-size: 14px; font-weight: 760; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; letter-spacing: -.17px; }
+    .card-time { font-size: 11px; color: #8d99ab; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .card-meta { display: flex; gap: 9px; align-items: center; min-width: 0; margin-top: 7px; }
+    .messenger { display: inline-flex; gap: 6px; align-items: center; min-width: 0; color: #5c6a80; font-size: 11.5px; }
+    .messenger-dot { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 6px; flex: none; background: var(--messenger); color: white; }
+    .messenger-dot.ig { background: linear-gradient(145deg, #f9c03d 3%,#f05457 43%,#af38da 80%); }
+    .messenger-dot svg { width: 13px; height: 13px; }
+    .messenger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .direction { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11px; color: #8996aa; }
+    .direction .icon { color: #3774ef; }
+    .direction.in .icon { color: #23b776; }
+    .card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; margin-top: 9px; }
+    .preview { font-size: 12px; color: #8a97ab; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; flex: 1; }
+    .chat-card.selected .preview { color: #586985; }
+    .status { flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 20px; padding: 6px 9px; line-height: 1; white-space: nowrap; font-size: 10.5px; font-weight: 700; }
+    .status.waiting { color: #d5444b; background: #ffe6e8; }
+    .status.answered { color: #169a68; background: #daf8e9; }
+    .empty-state { text-align: center; padding: 55px 24px; color: #8996aa; }
+    .empty-state .empty-ico { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 17px; background: #eaf0fa; margin: auto auto 14px; color: #8298bf; }
+    .empty-state strong { display: block; color: #556781; font-size: 14px; margin-bottom: 6px; }
+    .empty-state p { margin: 0; font-size: 12px; }
+    .chat-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #fff; }
+    .conversation-head { position: relative; padding: 21px 30px 18px; background: #fff; border-bottom: 1px solid #edf0f6; box-shadow: 0 3px 16px rgba(31, 57, 99, .02); z-index: 1; }
+    .contact-line { display: flex; align-items: center; min-width: 0; gap: 15px; }
+    .avatar.large { width: 56px; height: 56px; font-size: 19px; }
+    .contact-info { flex: 1; min-width: 0; }
+    .contact-name { font-weight: 780; letter-spacing: -.55px; font-size: 23px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .contact-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: #6d7a90; font-size: 12.5px; margin-top: 6px; }
+    .contact-sub .messenger { font-size: 12px; }
+    .bullet { color: #bec7d5; }
+    .contact-actions { display: flex; gap: 9px; align-items: center; margin-left: auto; }
+    .round-btn { width: 39px; height: 39px; border-radius: 12px; }
+    .round-btn.starred { color: #ecb543; background: #fff9e6; border-color: #f4e2ae; }
+    .crm-btn { height: 39px; border: 1px solid #e2e8f2; background: #fff; border-radius: 11px; color: #40516d; padding: 0 13px; display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 650; }
+    .crm-btn:hover { background: #f2f6ff; }
+    .more-wrap { position: relative; }
+    .mobile-back { display: none; }
+    .tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 14px 0 0 71px; }
+    .tag { display: inline-flex; border-radius: 9px; padding: 7px 11px; background: #f3f5f9; color: #69788e; font-size: 11.5px; white-space: nowrap; }
+    .tag:first-child { background: #eaf1ff; color: #3567df; font-weight: 650; }
+    .add-tag { background: #fff; border: 1px dashed #cbd6e7; color: #8190a6; cursor: pointer; }
+    .add-tag:hover { border-color: #91aff2; color: #3872e5; }
+    .conversation { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px clamp(18px, 3.1vw, 47px) 25px; scrollbar-color: #d6deea transparent; scrollbar-width: thin; background: radial-gradient(ellipse 620px 400px at 50% -40%, #f4f8ff 10%, transparent 95%); }
+    .date-separator { width: max-content; background: #f2f5f9; color: #8592a7; border-radius: 100px; font-size: 11px; padding: 8px 13px; margin: 0 auto 24px; }
+    .message-row { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 15px; }
+    .message-row.out { justify-content: flex-end; }
+    .message-avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 11px; font-weight: 720; }
+    .message-avatar.agent { color: #5d67b0; background: linear-gradient(145deg, #dfdfff, #f5dfe8); }
+    .bubble { border-radius: 16px 16px 16px 5px; padding: 12px 15px 11px; max-width: min(72%, 580px); background: #f1f4f9; line-height: 1.48; font-size: 13px; color: #354156; box-shadow: 0 3px 11px rgba(26, 51, 101, .025); overflow-wrap: anywhere; }
+    .out .bubble { border-radius: 16px 16px 5px 16px; background: #e5efff; }
+    .bubble-meta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+    .bubble-meta strong { font-size: 11.5px; color: #2b3548; }
+    .bubble-meta time { font-size: 10.5px; color: #909db0; }
+    .bubble-text { white-space: pre-wrap; }
+    .message-check { color: #4089ff; font-size: 11px; margin-left: auto; margin-top: 5px; text-align: right; }
+    .composer { padding: 13px 24px 20px; border-top: 1px solid #edf0f5; background: #fff; }
+    .compose-box { border: 1px solid #e0e7f2; border-radius: 15px; padding: 11px 11px 10px 16px; box-shadow: 0 3px 10px rgba(58, 85, 146, .025); transition: border-color .18s, box-shadow .18s; }
+    .compose-box:focus-within { border-color: #a8c1ff; box-shadow: 0 0 0 3px #edf3ff; }
+    #messageText { display: block; resize: none; width: 100%; min-height: 27px; max-height: 155px; background: transparent; border: 0; outline: 0; overflow-y: auto; font-size: 13px; line-height: 1.5; color: #26354d; }
+    #messageText::placeholder { color: #a4afc1; }
+    .compose-actions { display: flex; align-items: center; margin-top: 7px; gap: 7px; }
+    .compose-tool { display: grid; place-items: center; height: 31px; width: 31px; color: #8794a7; background: transparent; border: 0; border-radius: 8px; }
+    .compose-tool:hover { color: #396ae4; background: #f0f4ff; }
+    .send-btn { margin-left: auto; display: flex; align-items: center; justify-content: center; width: 43px; height: 40px; background: linear-gradient(135deg, #4386ff, #2565ee); color: white; border: 0; border-radius: 11px; box-shadow: 0 4px 10px rgba(48, 104, 235, .25); transition: transform .16s, opacity .16s; }
+    .send-btn:hover { transform: translateY(-1px); }
+    .send-btn:disabled { opacity: .48; cursor: not-allowed; box-shadow: none; }
+    .composer-hint { text-align: center; font-size: 10px; color: #b0baca; padding-top: 8px; }
+    .toast { position: fixed; z-index: 30; left: 50%; bottom: 25px; transform: translate(-50%, 20px); opacity: 0; visibility: hidden; transition: all .22s; max-width: calc(100vw - 30px); padding: 12px 17px; background: #25334e; color: #fff; text-align: center; border-radius: 12px; box-shadow: 0 10px 30px rgba(14, 34, 70, .22); font-size: 12.5px; }
+    .toast.show { transform: translate(-50%,0); opacity: 1; visibility: visible; }
+    @media (max-width: 1150px) {
+      .app { grid-template-columns: 395px minmax(0, 1fr); }
+      .list-top { padding: 23px 17px 13px; }
+      .chat-list { padding: 0 7px 15px; }
+      .chat-card { padding: 12px 9px; gap: 9px; }
+      .conversation-head { padding: 20px 20px 16px; }
+      .crm-btn { padding: 0 10px; }
+      .tag-row { margin-left: 70px; }
+      .contact-actions { gap: 5px; }
+      .bubble { max-width: 82%; }
+    }
+    @media (max-width: 850px) {
+      .app { display: block; min-height: 0; }
+      .list-panel, .chat-panel { height: 100%; }
+      .chat-panel { display: none; }
+      .app.mobile-chat-open .list-panel { display: none; }
+      .app.mobile-chat-open .chat-panel { display: flex; }
+      .mobile-back { display: grid; }
+      .conversation-head { padding: 14px 15px; }
+      .contact-line { gap: 9px; }
+      .contact-name { font-size: 18px; }
+      .contact-sub { font-size: 11.5px; gap: 5px; }
+      .avatar.large { width: 43px; height: 43px; font-size: 15px; }
+      .tag-row { margin: 11px 0 0 50px; }
+      .list-top { padding: 20px 17px 12px; }
+      .chat-list { padding: 0 12px 18px; }
+      .chat-card { padding: 13px 12px; gap: 12px; }
+      .bubble { max-width: 84%; }
+    }
+    @media (max-width: 550px) {
+      .crm-btn { display: none; }
+      .contact-line { gap: 8px; }
+      .contact-actions { gap: 4px; }
+      .contact-sub .phone { display: none; }
+      .contact-sub .bullet { display: none; }
+      .round-btn { width: 35px; height: 35px; }
+      .heading-caption { font-size: 11px; }
+      h1 { font-size: 24px; }
+      .tab { padding: 8px 10px; }
+      .message-avatar { width: 26px; height: 26px; font-size: 9px; }
+      .bubble { padding: 11px 12px; font-size: 12.5px; }
+      .conversation { padding: 17px 10px 22px; }
+      .composer { padding: 10px 11px 12px; }
+      .composer-hint { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <!-- Иконки встроены в файл: никаких внешних библиотек и зависимостей -->
+  <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.9" cy="10.9" r="7"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10m-7 6h4"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-in" viewBox="0 0 24 24"><path d="M6 6v9a3 3 0 0 0 3 3h9"/><path d="m13 13 5 5-5 5" transform="translate(0,-5)"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24"><path d="M18 18V9a3 3 0 0 0-3-3H6"/><path d="m11 11-5-5 5-5" transform="translate(0,5)"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.8 6.4.9-4.6 4.5 1.1 6.4L12 17.6l-5.7 3 1.1-6.4-4.6-4.5 6.4-.9L12 3Z"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6M19 5l-9 9"/><path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-8.7 8.7a5 5 0 0 1-7.1-7.1l9.1-9.1a3.3 3.3 0 0 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.4-8.4"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14.5c2 2.3 6 2.3 8 0M9 9.2h.01M15 9.2h.01"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m21 3-7.3 18-3.5-7.2L3 10.3 21 3Z"/><path d="m10.2 13.8 4.9-4.9"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.2 4.2L19 6.5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  </svg>
+
+  <div class="app" id="app">
+    <aside class="list-panel" aria-label="Список чатов">
+      <div class="list-top">
+        <div class="list-title-row">
+          <button class="back-button" id="pageBack" type="button" aria-label="Назад" title="Назад"><svg class="icon lg"><use href="#i-back"/></svg></button>
+          <div class="heading-block">
+            <div class="heading-line"><h1>Чаты</h1><span class="count-pill" id="pendingCount">4</span></div>
+            <p class="heading-caption">Клиенты, обращения и переписки</p>
+          </div>
+          <div class="sort-wrap">
+            <button class="round-btn" id="sortButton" type="button" aria-label="Сортировка чатов" aria-expanded="false" title="Сортировка"><svg class="icon lg"><use href="#i-filter"/></svg></button>
+            <div class="sort-menu" id="sortMenu" hidden>
+              <button class="menu-item active" type="button" data-sort="recent">Сначала новые</button>
+              <button class="menu-item" type="button" data-sort="pending">Сначала ждут ответа</button>
+              <button class="menu-item" type="button" data-sort="name">По имени А–Я</button>
+            </div>
+          </div>
+        </div>
+        <div class="search-wrap">
+          <svg class="icon lg"><use href="#i-search"/></svg>
+          <input id="searchInput" autocomplete="off" aria-label="Поиск чатов" placeholder="Поиск по имени, номеру, сообщению…">
+          <button type="button" class="search-clear" id="searchClear" aria-label="Очистить поиск"><svg class="icon sm"><use href="#i-close"/></svg></button>
+        </div>
+        <nav class="tabs" aria-label="Фильтры чатов" id="filterTabs"></nav>
+        <div class="list-caption"><span>Переписки</span><span id="visibleCount">9 чатов</span></div>
+      </div>
+      <div class="chat-list" id="chatList" role="list" aria-label="Чаты"></div>
+    </aside>
+
+    <main class="chat-panel" aria-label="Окно переписки">
+      <header class="conversation-head">
+        <div class="contact-line">
+          <button class="round-btn mobile-back" id="mobileBack" aria-label="К списку чатов" title="К чатам"><svg class="icon"><use href="#i-back"/></svg></button>
+          <div id="contactAvatar" class="avatar large a1 online">А</div>
+          <div class="contact-info">
+            <div class="contact-name" id="contactName">Артём</div>
+            <div class="contact-sub" id="contactSub"></div>
+          </div>
+          <div class="contact-actions">
+            <button type="button" id="favoriteButton" class="round-btn" title="В избранное" aria-label="В избранное"><svg class="icon lg"><use href="#i-star"/></svg></button>
+            <button type="button" id="crmButton" class="crm-btn">В Битрикс24 <svg class="icon sm"><use href="#i-external"/></svg></button>
+            <div class="more-wrap">
+              <button type="button" id="moreButton" class="round-btn" title="Действия с чатом" aria-label="Действия с чатом" aria-expanded="false"><svg class="icon lg"><use href="#i-more"/></svg></button>
+              <div class="more-menu" id="moreMenu" hidden>
+                <button class="menu-item" type="button" id="toggleStatus"></button>
+                <button class="menu-item" type="button" id="copyNumber">Скопировать номер</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tag-row" id="contactTags"></div>
+      </header>
+      <section class="conversation" id="conversation" aria-live="polite" aria-label="История сообщений"></section>
+      <footer class="composer">
+        <div class="compose-box">
+          <textarea id="messageText" rows="1" aria-label="Новое сообщение" placeholder="Напишите сообщение…"></textarea>
+          <div class="compose-actions">
+            <button type="button" class="compose-tool" id="attachButton" title="Прикрепить файл" aria-label="Прикрепить файл"><svg class="icon lg"><use href="#i-clip"/></svg></button>
+            <button type="button" class="compose-tool" id="emojiButton" title="Добавить смайлик" aria-label="Добавить смайлик"><svg class="icon lg"><use href="#i-smile"/></svg></button>
+            <button type="button" class="compose-tool" id="templateButton" title="Быстрый ответ" aria-label="Быстрый ответ" style="font-weight:800;font-size:10px">GIF</button>
+            <button type="button" class="send-btn" id="sendButton" aria-label="Отправить сообщение" title="Отправить"><svg class="icon lg"><use href="#i-send"/></svg></button>
+          </div>
+        </div>
+        <div class="composer-hint">Enter — отправить · Shift + Enter — новая строка</div>
+      </footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    // Данные демонстрационные. Здесь можно подключить API вашей CRM.
+    const chats = [
+      {id:1, name:'Артём', initials:'А', avatar:'a1', online:true, platform:'WhatsApp', phone:'+7 968 917-17-77', preview:'А дополнительное место сколько стоит?', direction:'in', status:'waiting', time:'21.10 · 19:57', weight:109, mine:true, favorite:false, tags:['Клиент','Парковка','Дом 3'], messages:[
+        {type:'in',author:'Артём',time:'19:32',text:'Добрый день! Подскажите, пожалуйста, как оформить пропуск на одно бесплатное парковочное место?'},
+        {type:'out',author:'Елена Агула',time:'19:40',text:'Здравствуйте! Для пропуска напишите номер и марку автомобиля. Одно парковочное место включено в стоимость.'},
+        {type:'in',author:'Артём',time:'19:57',text:'Спасибо! А дополнительное место сколько стоит?'}
+      ]},
+      {id:2, name:'Елена Агула', initials:'ЕА', avatar:'a2', online:false, platform:'Telegram', phone:'+7 916 220-48-17', preview:'Информацию отправила, спасибо!', direction:'out', status:'answered', time:'21.10 · 19:32', weight:108, mine:false, favorite:false, tags:['Новый клиент','Бронирование'], messages:[
+        {type:'in',author:'Елена Агула',time:'19:12',text:'Здравствуйте! Подскажите, пожалуйста, есть ли свободное время в воскресенье?'},
+        {type:'out',author:'Оператор',time:'19:32',text:'Добрый вечер! Да, свободное время есть. Информацию отправила, спасибо!'}
+      ]},
+      {id:3, name:'Максим Тармосин', initials:'МТ', avatar:'a3', online:true, platform:'Telegram', phone:'+7 999 364-25-18', preview:'А можете мне позвонить, пожалуйста?', direction:'in', status:'waiting', time:'21.10 · 18:21', weight:107, mine:true, favorite:false, tags:['Обратный звонок','Гость'], messages:[
+        {type:'out',author:'Оператор',time:'18:04',text:'Здравствуйте! Напишите, пожалуйста, какие даты вас интересуют.'},
+        {type:'in',author:'Максим Тармосин',time:'18:21',text:'А можете мне позвонить, пожалуйста?'}
+      ]},
+      {id:4, name:'Гость Instagram', initials:'IG', avatar:'a4', online:false, platform:'Instagram', phone:'@guest_alatyr', preview:'Добрый день! Готовы рассмотреть сотрудничество.', direction:'in', status:'answered', time:'21.10 · 17:45', weight:106, mine:false, favorite:false, tags:['Сотрудничество'], messages:[
+        {type:'in',author:'Гость Instagram',time:'17:45',text:'Добрый день! Готовы рассмотреть сотрудничество. Куда можно направить предложение?'},
+        {type:'out',author:'Оператор',time:'17:51',text:'Добрый день! Пришлите, пожалуйста, детали предложения в этот чат.'}
+      ]},
+      {id:5, name:'Алатырь Айти', initials:'АИ', avatar:'a5', online:true, platform:'Telegram', phone:'@alatyr_it', preview:'Да, вопрос по интеграции ещё актуален.', direction:'in', status:'waiting', time:'21.10 · 16:20', weight:105, mine:true, favorite:true, tags:['Технический вопрос'], messages:[
+        {type:'out',author:'Оператор',time:'16:10',text:'Коллеги, добрый день! Вопрос по интеграции всё ещё актуален?'},
+        {type:'in',author:'Алатырь Айти',time:'16:20',text:'Да, вопрос по интеграции ещё актуален.'}
+      ]},
+      {id:6, name:'Ольга Смирнова', initials:'ОС', avatar:'a6', online:false, platform:'Viber', phone:'+7 903 444-73-22', preview:'Будем рады видеть вас снова! 😊', direction:'out', status:'answered', time:'21.10 · 15:12', weight:104, mine:false, favorite:false, tags:['Постоянный клиент'], messages:[
+        {type:'in',author:'Ольга Смирнова',time:'15:02',text:'Спасибо большое! Всё было замечательно 😍'},
+        {type:'out',author:'Оператор',time:'15:12',text:'Будем рады видеть вас снова! 😊'}
+      ]},
+      {id:7, name:'Иван Петров', initials:'ИП', avatar:'a7', online:false, platform:'ВКонтакте', phone:'vk.com/id123456', preview:'Сколько стоит парковочное место?', direction:'in', status:'waiting', time:'21.10 · 14:03', weight:103, mine:true, favorite:false, tags:['Парковка'], messages:[
+        {type:'in',author:'Иван Петров',time:'14:03',text:'Здравствуйте! Сколько стоит парковочное место?'}
+      ]},
+      {id:8, name:'Клиент из Китая', initials:'中', avatar:'a8', online:false, platform:'WeChat', phone:'wechat_user_102', preview:'你好！请提供更多信息。', direction:'in', status:'answered', time:'21.10 · 12:16', weight:102, mine:false, favorite:false, tags:['Иностранные гости'], messages:[
+        {type:'in',author:'Клиент из Китая',time:'12:16',text:'你好！请提供更多信息。'},
+        {type:'out',author:'Оператор',time:'12:25',text:'您好！我们很乐意为您提供帮助。'}
+      ]},
+      {id:9, name:'Мария Белова', initials:'МБ', avatar:'a9', online:true, platform:'MAX', phone:'+7 952 301-80-65', preview:'Отправили вам подтверждение бронирования.', direction:'out', status:'answered', time:'20.10 · 20:40', weight:101, mine:false, favorite:false, tags:['Бронирование'], messages:[
+        {type:'in',author:'Мария Белова',time:'20:31',text:'Подскажите, бронь на субботу подтверждена?'},
+        {type:'out',author:'Оператор',time:'20:40',text:'Да! Отправили вам подтверждение бронирования.'}
+      ]}
+    ];
+
+    const $ = (selector) => document.querySelector(selector);
+    const icon = (name, extra='') => `<svg class="icon ${extra}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+    const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const platformSettings = {
+      'WhatsApp': {color:'#18be72', mark:'✆'},
+      'Telegram': {color:'#249fdf', mark:'➤'},
+      'Instagram': {color:'#e94a8d', mark:'◎', cls:'ig'},
+      'Viber': {color:'#8354c9', mark:'✆'},
+      'ВКонтакте': {color:'#1686e9', mark:'ᴠκ'},
+      'WeChat': {color:'#16bb64', mark:'☏'},
+      'MAX': {color:'#506df5', mark:'M'}
+    };
+    let selectedId = 1;
+    let activeFilter = 'all';
+    let sortBy = 'recent';
+    let nextWeight = 110;
+    let toastTimer;
+
+    const selected = () => chats.find(chat => chat.id === selectedId);
+    const messengerMarkup = (platform) => {
+      const info = platformSettings[platform] || {color:'#7e95bd',mark:'•'};
+      return `<span class="messenger"><span class="messenger-dot ${info.cls || ''}" style="--messenger:${info.color}"><span style="font-size:${platform === 'ВКонтакте' ? '9px' : '13px'};font-weight:850;line-height:1">${info.mark}</span></span><span class="messenger-label">${escapeHTML(platform)}</span></span>`;
+    };
+    const avatarMarkup = (chat, extra='') => `<span class="avatar ${chat.avatar} ${chat.online ? 'online' : ''} ${extra}">${escapeHTML(chat.initials)}</span>`;
+    const showToast = (message) => {
+      clearTimeout(toastTimer);
+      const toast = $('#toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 3400);
+    };
+    function renderTabs() {
+      const waiting = chats.filter(c => c.status === 'waiting').length;
+      const answered = chats.length - waiting;
+      const mine = chats.filter(c => c.mine).length;
+      $('#pendingCount').textContent = waiting;
+      const filters = [
+        ['all','Все',chats.length], ['waiting','Ждут ответа',waiting],
+        ['answered','Отвечены',answered], ['mine','Мои',mine]
+      ];
+      $('#filterTabs').innerHTML = filters.map(([key,label,count]) => `<button type="button" class="tab ${activeFilter === key ? 'active' : ''}" data-filter="${key}" aria-pressed="${activeFilter === key}">${label}<span class="tab-counter ${key === 'waiting' ? 'alert' : ''}">${count}</span></button>`).join('');
+    }
+    function getVisibleChats() {
+      const query = $('#searchInput').value.toLocaleLowerCase('ru').trim();
+      return chats.filter(c => {
+        if (activeFilter === 'waiting' && c.status !== 'waiting') return false;
+        if (activeFilter === 'answered' && c.status !== 'answered') return false;
+        if (activeFilter === 'mine' && !c.mine) return false;
+        const searchable = [c.name,c.phone,c.platform,c.preview,...c.tags].join(' ').toLocaleLowerCase('ru');
+        return !query || searchable.includes(query);
+      }).sort((a,b) => {
+        if (sortBy === 'name') return a.name.localeCompare(b.name,'ru');
+        if (sortBy === 'pending' && a.status !== b.status) return a.status === 'waiting' ? -1 : 1;
+        return b.weight - a.weight;
+      });
+    }
+    function renderList() {
+      const visible = getVisibleChats();
+      $('#visibleCount').textContent = `${visible.length} ${visible.length === 1 ? 'чат' : visible.length >= 2 && visible.length <= 4 ? 'чата' : 'чатов'}`;
+      $('#searchClear').classList.toggle('visible', !!$('#searchInput').value);
+      if (!visible.length) {
+        $('#chatList').innerHTML = `<div class="empty-state"><div class="empty-ico">${icon('search','lg')}</div><strong>Чаты не найдены</strong><p>Попробуйте изменить запрос или фильтр</p></div>`;
+        return;
+      }
+      $('#chatList').innerHTML = visible.map(c => `
+        <button type="button" class="chat-card ${c.id === selectedId ? 'selected' : ''}" data-chat="${c.id}" role="listitem" aria-current="${c.id === selectedId ? 'true' : 'false'}">
+          ${avatarMarkup(c)}
+          <span class="card-body">
+            <span class="card-heading"><span class="card-name">${escapeHTML(c.name)}${c.favorite ? ' <span style="color:#e5a62b">★</span>' : ''}</span><time class="card-time">${escapeHTML(c.time)}</time></span>
+            <span class="card-meta">${messengerMarkup(c.platform)}<span class="direction ${c.direction}">${icon(c.direction === 'in' ? 'in':'out','xs')} ${c.direction === 'in' ? 'Вх.' : 'Исх.'}</span></span>
+            <span class="card-bottom"><span class="preview" title="${escapeHTML(c.preview)}">${escapeHTML(c.preview)}</span><span class="status ${c.status}">${c.status === 'waiting' ? 'Ждёт ответ' : 'Отвечен'}</span></span>
+          </span>
+        </button>
+      `).join('');
+    }
+    function renderConversation() {
+      const c = selected();
+      if (!c) return;
+      $('#contactAvatar').className = `avatar large ${c.avatar} ${c.online ? 'online' : ''}`;
+      $('#contactAvatar').textContent = c.initials;
+      $('#contactName').textContent = c.name;
+      $('#contactSub').innerHTML = `${messengerMarkup(c.platform)}<span class="bullet">•</span><span class="phone">${escapeHTML(c.phone)}</span>`;
+      $('#favoriteButton').classList.toggle('starred',c.favorite);
+      $('#favoriteButton').setAttribute('aria-label',c.favorite ? 'Убрать из избранного':'В избранное');
+      $('#favoriteButton').title = c.favorite ? 'Убрать из избранного':'В избранное';
+      $('#toggleStatus').textContent = c.status === 'waiting' ? '✓ Отметить отвеченным' : '↶ Перевести в ожидание';
+      $('#contactTags').innerHTML = c.tags.map(t => `<span class="tag">${escapeHTML(t)}</span>`).join('') + `<button type="button" class="tag add-tag" id="addTag">＋ Добавить тег</button>`;
+      $('#conversation').innerHTML = `<div class="date-separator">21 октября 2026</div>` + c.messages.map(m => `
+        <div class="message-row ${m.type === 'out' ? 'out' : ''}">
+          ${m.type === 'in' ? `<span class="message-avatar ${c.avatar}">${escapeHTML(c.initials)}</span>` : ''}
+          <div class="bubble"><div class="bubble-meta"><strong>${escapeHTML(m.author)}</strong><time>${escapeHTML(m.time)}</time></div><div class="bubble-text">${escapeHTML(m.text)}</div>${m.type === 'out' ? '<div class="message-check">✓✓ Доставлено</div>' : ''}</div>
+          ${m.type === 'out' ? '<span class="message-avatar agent">ОП</span>' : ''}
+        </div>`).join('');
+      $('#conversation').scrollTop = $('#conversation').scrollHeight;
+      $('#moreMenu').hidden = true;
+      $('#moreButton').setAttribute('aria-expanded','false');
+    }
+    function render() { renderTabs(); renderList(); renderConversation(); }
+    function selectChat(id) {
+      if (!chats.some(c => c.id === id)) return;
+      selectedId = id;
+      renderList(); renderConversation();
+      $('#app').classList.add('mobile-chat-open');
+    }
+    function sendMessage() {
+      const input = $('#messageText');
+      const message = input.value.trim();
+      if (!message) { input.focus(); return; }
+      const c = selected();
+      const now = new Date();
+      const time = now.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+      const shortDate = now.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+      c.messages.push({type:'out',author:'Оператор',time,text:message});
+      c.preview = message; c.direction = 'out'; c.status = 'answered';
+      c.time = `${shortDate} · ${time}`; c.weight = nextWeight++;
+      input.value = ''; input.style.height = '27px';
+      render(); input.focus();
+      showToast('Сообщение добавлено в демо-переписку');
+    }
+    function setMenu(el,btn,isOpen) { el.hidden = !isOpen; btn.setAttribute('aria-expanded', String(isOpen)); }
+
+    $('#filterTabs').addEventListener('click',e => {
+      const button = e.target.closest('[data-filter]');
+      if (!button) return;
+      activeFilter = button.dataset.filter;
+      renderTabs(); renderList();
+    });
+    $('#chatList').addEventListener('click',e => {
+      const card = e.target.closest('[data-chat]');
+      if (card) selectChat(Number(card.dataset.chat));
+    });
+    $('#searchInput').addEventListener('input',renderList);
+    $('#searchClear').addEventListener('click',() => { $('#searchInput').value=''; renderList(); $('#searchInput').focus(); });
+    $('#sortButton').addEventListener('click',e => {
+      e.stopPropagation();
+      setMenu($('#sortMenu'),$('#sortButton'),$('#sortMenu').hidden);
+      setMenu($('#moreMenu'),$('#moreButton'),false);
+    });
+    $('#sortMenu').addEventListener('click',e => {
+      const button = e.target.closest('[data-sort]');
+      if (!button) return;
+      sortBy = button.dataset.sort;
+      document.querySelectorAll('[data-sort]').forEach(item => item.classList.toggle('active',item.dataset.sort === sortBy));
+      setMenu($('#sortMenu'),$('#sortButton'),false);
+      renderList();
+    });
+    $('#moreButton').addEventListener('click',e => {
+      e.stopPropagation();
+      setMenu($('#moreMenu'),$('#moreButton'),$('#moreMenu').hidden);
+      setMenu($('#sortMenu'),$('#sortButton'),false);
+    });
+    $('#toggleStatus').addEventListener('click',() => {
+      const c = selected();
+      c.status = c.status === 'waiting' ? 'answered' : 'waiting';
+      render(); showToast(c.status === 'waiting' ? 'Чат ждёт ответа' : 'Чат помечен отвеченным');
+    });
+    $('#copyNumber').addEventListener('click',async () => {
+      const value = selected().phone;
+      try { await navigator.clipboard.writeText(value); showToast('Контакт скопирован: ' + value); }
+      catch { showToast('Контакт: ' + value); }
+      setMenu($('#moreMenu'),$('#moreButton'),false);
+    });
+    $('#favoriteButton').addEventListener('click',() => {
+      const c = selected(); c.favorite = !c.favorite; render();
+    });
+    $('#contactTags').addEventListener('click',e => {
+      if (e.target.closest('#addTag')) {
+        const tag = prompt('Название нового тега:');
+        if (tag && tag.trim()) { selected().tags.push(tag.trim().slice(0,45)); renderConversation(); }
+      }
+    });
+    $('#crmButton').addEventListener('click',() => showToast('Для интеграции задайте ссылку на сделку в Битрикс24'));
+    $('#sendButton').addEventListener('click',sendMessage);
+    $('#messageText').addEventListener('keydown',e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+    $('#messageText').addEventListener('input',e => { e.target.style.height = '27px'; e.target.style.height = Math.min(e.target.scrollHeight,155) + 'px'; });
+    $('#emojiButton').addEventListener('click',() => { const input=$('#messageText'); input.value += ' 😊'; input.dispatchEvent(new Event('input')); input.focus(); });
+    $('#templateButton').addEventListener('click',() => { const input=$('#messageText'); input.value = 'Здравствуйте! Спасибо за обращение. Сейчас уточним информацию и вернёмся с ответом.'; input.dispatchEvent(new Event('input')); input.focus(); });
+    $('#attachButton').addEventListener('click',() => showToast('Прикрепление файлов доступно после подключения CRM'));
+    $('#mobileBack').addEventListener('click',() => $('#app').classList.remove('mobile-chat-open'));
+    $('#pageBack').addEventListener('click',() => {
+      if (window.history.length > 1) window.history.back();
+      else showToast('В вашем проекте эта стрелка вернёт на предыдущую страницу');
+    });
+    document.addEventListener('click',e => {
+      if (!e.target.closest('.sort-wrap')) setMenu($('#sortMenu'),$('#sortButton'),false);
+      if (!e.target.closest('.more-wrap')) setMenu($('#moreMenu'),$('#moreButton'),false);
+    });
+    window.addEventListener('keydown',e => {
+      if (e.key === 'Escape') {
+        setMenu($('#sortMenu'),$('#sortButton'),false); setMenu($('#moreMenu'),$('#moreButton'),false);
+      }
+    });
+    render();
+  </script>
+</body>
+</html>

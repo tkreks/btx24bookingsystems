@@ -1,3 +1,4 @@
+import { allowedBlocks } from '@btx24/shared';
 import { BadRequestException } from '@nestjs/common';
 import { DEFAULT_DASHBOARD } from '@btx24/shared';
 import type { PrismaService } from '../../prisma/prisma.service.js';
@@ -34,13 +35,25 @@ describe('DashboardLayoutService', () => {
     expect((await t.svc.get(user(8), false)).isDefault).toBe(true);
   });
 
-  it('«Активность сотрудников» — только администратору: остальным не сохранить и не показать', async () => {
+  it('сохраняет и читает ширины 1/5 и 1/6 без сброса раскладки', async () => {
     const t = setup();
-    await expect(t.svc.save(user(), false, { blocks: [{ id: 'x', type: 'activity', width: 'full' }] })).rejects.toBeInstanceOf(BadRequestException);
-    await t.svc.save(user(), true, { blocks: [{ id: 'x', type: 'activity', width: 'full' }, { id: 'y', type: 'alerts', width: 'quarter' }] });
-    expect((await t.svc.get(user(), true)).blocks.map((b) => b.type)).toEqual(['activity', 'alerts']);
+    const blocks = [{ id: 'a', type: 'alerts', width: 'fifth' }, { id: 'b', type: 'waiting', width: 'sixth' }];
+    expect((await t.svc.save(user(), false, { blocks })).blocks).toEqual(blocks);
+    expect((await t.svc.get(user(), false)).blocks).toEqual(blocks);
+  });
+
+  it.each(['activity', 'actionLog'])('Блок %s — только администратору: остальным не сохранить и не показать', async (type) => {
+    const t = setup();
+    await expect(t.svc.save(user(), false, { blocks: [{ id: 'x', type, width: 'full' }] })).rejects.toBeInstanceOf(BadRequestException);
+    await t.svc.save(user(), true, { blocks: [{ id: 'x', type, width: 'full' }, { id: 'y', type: 'alerts', width: 'quarter' }] });
+    expect((await t.svc.get(user(), true)).blocks.map((b) => b.type)).toEqual([type, 'alerts']);
     // Перестал быть администратором — блок не показывается.
     expect((await t.svc.get(user(), false)).blocks.map((b) => b.type)).toEqual(['alerts']);
     await expect(t.svc.save(user(), true, { blocks: [{ id: 'z', type: 'alerts', width: 'double' }] })).rejects.toBeInstanceOf(BadRequestException);
   });
+});
+
+it('личный журнал и смены доступны обычному сотруднику в каталоге', () => {
+  expect(allowedBlocks(false)).toContain('myActivity');
+  expect(allowedBlocks(false)).toContain('onShift');
 });

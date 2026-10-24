@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { todayIn, type ActionLogDto, type ActionLogEntryDto, type NamedBitrixItem } from '@btx24/shared';
+import { useDashboardQuery } from '../dashboard/DashboardSync.js';
+import { useCallback, useState } from 'react';
+import { ACTION_LOG_CATEGORIES, ACTION_LOG_CATEGORY_LABELS, ACTION_LOG_SEVERITIES, ACTION_LOG_SEVERITY_LABELS, classifyActionLog, todayIn, type ActionLogDto, type ActionLogEntryDto, type NamedBitrixItem } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime, shiftDate } from '../format.js';
@@ -29,62 +30,56 @@ const show = (v: unknown) =>
 
 /**
  * ⚙ → «Журнал действий»: кто, что, когда и откуда — вход, правки «было → стало», брони, оплаты,
- * настройки, действия системы и Битрикс24. Новые сверху, по 100.
+ * настройки, действия системы и Битрикс24. Новые сверху, по 5.
  */
-export function ActionLogPanel({ timezone, users }: { timezone: string; users: NamedBitrixItem[] }) {
+export function ActionLogPanel({ timezone, users, period }: { timezone: string; users: NamedBitrixItem[]; period?: { from: string; to: string } }) {
   const today = todayIn(timezone);
-  const [from, setFrom] = useState(shiftDate(today, -6));
-  const [to, setTo] = useState(today);
+  const [customFrom, setFrom] = useState(shiftDate(today, -6));
+  const [customTo, setTo] = useState(today);
+  const from = period?.from ?? customFrom;
+  const to = period?.to ?? customTo;
   const [object, setObject] = useState('');
   const [text, setText] = useState('');
   const [who, setWho] = useState('');
+  const [category, setCategory] = useState('');
+  const [severity, setSeverity] = useState('');
   const [applied, setApplied] = useState({ object: '', text: '' });
-  const [data, setData] = useState<{ key: string; items: ActionLogEntryDto[]; next: string | null } | null>(null);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
 
   const ent = parseEntity(applied.object);
   const query = new URLSearchParams({
     from,
     to,
+    ...(category ? { category } : {}),
+    ...(severity ? { severity } : {}),
     ...(ent.entityType ? { entityType: ent.entityType } : {}),
     ...(ent.entityId ? { entityId: ent.entityId } : {}),
     // Объект не разобрался как «сделка 678» — ищем этот текст в описании.
-    ...(who === 'errors' ? { q: 'bitrix.error' } : applied.text || (applied.object && !ent.entityId) ? { q: applied.text || applied.object } : {}),
-    ...(who === 'system' || who === 'bitrix' ? { actorKind: who } : who && who !== 'errors' ? { userId: who } : {}),
+    ...(applied.text || (applied.object && !ent.entityId) ? { q: applied.text || applied.object } : {}),
+    ...(who === 'system' || who === 'bitrix' ? { actorKind: who } : who ? { userId: who } : {}),
   }).toString();
 
-  // Первая страница — при смене фильтров; поздний ответ на старые фильтры отбрасывается.
-  useEffect(() => {
-    let active = true;
-    apiGet<ActionLogDto>(`/admin/action-log?${query}`).then(
-      (r) => {
-        if (!active) return;
-        setData({ key: query, items: r.items, next: r.nextCursor });
-        setError('');
-      },
-      (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить журнал'),
-    );
-    return () => {
-      active = false;
-    };
-  }, [query]);
-
-  /** «Показать ещё» — следующая (более старая) страница. */
-  const more = async (before: string) => {
-    setBusy(true);
-    try {
-      const r = await apiGet<ActionLogDto>(`/admin/action-log?${query}&before=${before}`);
-      setData((prev) => ({ key: query, items: prev?.key === query ? [...prev.items, ...r.items] : r.items, next: r.nextCursor }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось загрузить журнал');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const rows = data?.key === query ? data.items : null;
+  const [page, setPage] = useState({ query, count: 5 });
+  const count = page.query === query ? page.count : 5;
+  const loader = useCallback(async (): Promise<ActionLogDto> => {
+    const items: ActionLogEntryDto[] = [];
+    let cursor: string | null = null;
+    do {
+      const params = new URLSearchParams(query);
+      params.set('limit', String(Math.min(100, count - items.length)));
+      if (cursor) params.set('before', cursor);
+      const result = await apiGet<ActionLogDto>(`/admin/action-log?${params}`);
+      items.push(...result.items); cursor = result.nextCursor;
+      if (!result.items.length) break;
+    } while (cursor && items.length < count);
+    return { items, nextCursor: cursor };
+  }, [query, count]);
+  const resource = useDashboardQuery<ActionLogDto>(`/admin/action-log?${query}&loaded=${count}`, loader);
+  const [previous, setPrevious] = useState<{ query: string; data: ActionLogDto } | null>(null);
+  if (resource.data && previous?.data !== resource.data) setPrevious({ query, data: resource.data });
+  const data = resource.data ?? (previous?.query === query ? previous.data : null);
+  const error = resource.error; const busy = resource.fetching && !resource.data;
+  const rows = data?.items ?? null;
 
   return (
     <section className="action-log">
@@ -95,23 +90,32 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
           setApplied({ object, text });
         }}
       >
+        {!period && <>
         <label>
           с <input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} />
         </label>
         <label>
           по <input type="date" value={to} min={from} max={today} onChange={(e) => e.target.value && setTo(e.target.value)} />
         </label>
+        </>}
         <input aria-label="Объект" placeholder="сделка 678, бронь 555…" value={object} onChange={(e) => setObject(e.target.value)} />
         <select aria-label="Кто" value={who} onChange={(e) => setWho(e.target.value)}>
           <option value="">Все</option>
           <option value="system">Система</option>
           <option value="bitrix">Битрикс24</option>
-          <option value="errors">Ошибки запросов к Битрикс24</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}
             </option>
           ))}
+        </select>
+        <select aria-label="Категория" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">Все категории</option>
+          {ACTION_LOG_CATEGORIES.map((c) => <option key={c} value={c}>{ACTION_LOG_CATEGORY_LABELS[c]}</option>)}
+        </select>
+        <select aria-label="Критичность" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+          <option value="">Любая критичность</option>
+          {ACTION_LOG_SEVERITIES.map((v) => <option key={v} value={v}>{ACTION_LOG_SEVERITY_LABELS[v]}</option>)}
         </select>
         <input aria-label="Поиск" placeholder="Текст: «снял», «оплата»…" value={text} onChange={(e) => setText(e.target.value)} />
         <button className="primary" type="submit">
@@ -130,15 +134,16 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
           {rows.map((r) => {
             const changes = (r.details as { changes?: { label: string; before: unknown; after: unknown }[] } | null)?.changes;
             const expanded = open === r.id;
+            const classification = r.category && r.severity ? r : classifyActionLog(r);
             return (
-              <li key={r.id} className={`action-log-row ${r.actorKind}`}>
+              <li key={r.id} data-dashboard-anchor={`log:${r.id}`} className={`action-log-row ${r.actorKind}`}>
                 <button type="button" className="action-log-head" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : r.id)}>
                   <span className="action-log-time">{fmtDateTime(r.at, timezone)}</span>
                   <span className="action-log-who">
                     {r.actorName ?? '—'}
                     {ACTOR[r.actorKind] && <span className={`pill ${r.actorKind === 'system' ? 'waiting' : 'muted-pill'}`}>{ACTOR[r.actorKind]}</span>}
                   </span>
-                  <span className="action-log-what">{r.summary}</span>
+                  <span className="action-log-what"><span className="action-log-tags"><span className="audit-category">{ACTION_LOG_CATEGORY_LABELS[classification.category]}</span><span className={`audit-severity severity-${classification.severity}`} title="Критичность">{ACTION_LOG_SEVERITY_LABELS[classification.severity]}</span></span>{r.summary}</span>
                   <span className="action-log-via muted">{r.via ? (VIA[r.via] ?? r.via) : ''}</span>
                 </button>
                 {expanded && (
@@ -184,8 +189,8 @@ export function ActionLogPanel({ timezone, users }: { timezone: string; users: N
           })}
         </ol>
       )}
-      {data?.next && data.key === query && (
-        <button type="button" disabled={busy} onClick={() => void more(data.next!)}>
+      {data?.nextCursor && (
+        <button type="button" disabled={busy} onClick={() => setPage({ query, count: count + 5 })}>
           {busy ? 'Загрузка…' : 'Показать ещё'}
         </button>
       )}

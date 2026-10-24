@@ -159,7 +159,7 @@ export class OpenlineIndexService {
           connector: c.connector.slice(0, 64),
           checkedAt: now,
           // Среди последних сообщений нет человеческих — прежнюю дату не затираем.
-          ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind } : {}),
+          ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}),
           ...(c.title !== null ? { title: c.title.slice(0, 255) } : {}),
           crm: crmLinksOf(c.entityData2) as unknown as Prisma.InputJsonValue,
           ...(m.users?.length ? { clientAvatar: clientAvatarOf(m.users, portal.domain) } : {}),

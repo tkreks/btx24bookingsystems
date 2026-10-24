@@ -24,6 +24,8 @@ import { MessageContextService } from '../modules/bookings/message-context.servi
 import { DealPaymentsService } from '../modules/bookings/deal-payments.service.js';
 import { EventSyncJob } from './event-sync.job.js';
 import { DealPaymentsJob } from './deal-payments.job.js';
+import { CrmMirrorService } from '../modules/crm-mirror/crm-mirror.service.js';
+import { CrmMirrorJob } from './crm-mirror.job.js';
 
 // Фоновые задачи (обновление кэша календаря, контроль оплат по таймауту, рассылки) живут здесь,
 // а не в api: api отвечает на запросы, worker выполняет работу по расписанию.
@@ -50,6 +52,8 @@ import { DealPaymentsJob } from './deal-payments.job.js';
     DealPaymentsService,
     DealPaymentsJob,
     EventSyncJob,
+    CrmMirrorService,
+    CrmMirrorJob,
   ],
 })
 export class WorkerModule {}

@@ -1,3 +1,4 @@
+import { ColorLegend, type LegendItem } from '../ColorLegend.js';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { zonedDayRange, type CalendarBooking, type CalendarDay } from '@btx24/shared';
 import { fmtDateTime, fmtTime } from '../format.js';
@@ -38,7 +39,16 @@ export function DayGrid({
   if (!day.resources.length)
     return <div className="empty">В выбранной группе нет ресурсов. Откройте ⚙ и добавьте ресурсы в группу.</div>;
 
+  const legend: LegendItem[] = [
+    { label: 'Бронь', swatch: { background: 'linear-gradient(145deg, rgba(0, 122, 255, 0.95), rgba(88, 86, 214, 0.9))' } },
+    { label: 'Тех. окно', swatch: { background: 'linear-gradient(145deg, rgba(255, 177, 59, 0.92), rgba(248, 154, 29, 0.86))' }, title: 'Можно бронировать — с предупреждением' },
+    { label: 'Стоп ресурса', swatch: { borderColor: 'rgba(217, 45, 32, 0.45)', background: 'rgba(217, 45, 32, 0.12)' }, title: 'Ресурс закрыт для бронирования' },
+    ...(day.bookings.some((b) => b.missing) ? [{ label: 'Удалена в Битрикс24', swatch: { background: '#9ca3af' } }] : []),
+    ...(hasMine ? [{ label: 'Эта сделка', swatch: { borderColor: '#16a34a', background: 'rgba(0, 122, 255, 0.9)' } }] : []),
+  ];
   return (
+    <>
+    <ColorLegend items={legend} label="Обозначения календаря" className="block" />
     <div className={`grid-scroll${hasMine ? ' has-highlight' : ''}`}>
       <div className="grid" style={{ gridTemplateColumns: `56px repeat(${day.resources.length}, minmax(170px, 1fr))` }}>
         <div className="grid-corner" />
@@ -155,6 +165,7 @@ export function DayGrid({
         ))}
       </div>
     </div>
+    </>
   );
 }
 

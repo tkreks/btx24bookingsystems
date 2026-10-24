@@ -29,7 +29,6 @@ export interface DayScope {
   dealFields?: DealFieldConfig[];
 }
 
-const FIELDS_TTL_MS = 10 * 60_000;
 const BASE_DEAL_SELECT = ['ID', 'TITLE', 'CATEGORY_ID', 'STAGE_ID', 'OPPORTUNITY', 'CURRENCY_ID'];
 
 /**
@@ -39,7 +38,6 @@ const BASE_DEAL_SELECT = ['ID', 'TITLE', 'CATEGORY_ID', 'STAGE_ID', 'OPPORTUNITY
 @Injectable()
 export class CalendarService {
   /** portalId → описание полей сделки (`crm.deal.fields`). Подписи и варианты меняются редко. */
-  private readonly fieldMeta = new Map<string, { meta: Record<string, DealFieldMeta>; expiresAt: number }>();
 
   // Без БД (юнит-тесты дня) — без броней, пропавших в Битрикс24.
   constructor(@Optional() private readonly prisma?: PrismaService) {}
@@ -127,11 +125,8 @@ export class CalendarService {
   }
 
   private async dealFieldMeta(user: B24UserContext): Promise<Record<string, DealFieldMeta>> {
-    const cached = this.fieldMeta.get(user.portal.id);
-    if (cached && cached.expiresAt > Date.now()) return cached.meta;
     const res = await user.client.call<Record<string, DealFieldMeta>>('crm.deal.fields');
     const meta = res.result ?? {};
-    this.fieldMeta.set(user.portal.id, { meta, expiresAt: Date.now() + FIELDS_TTL_MS });
     return meta;
   }
 

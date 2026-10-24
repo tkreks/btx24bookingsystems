@@ -53,3 +53,10 @@ describe('groupOptionsSchema — значения по умолчанию и ф�
     expect(parse([f('OPPORTUNITY', { formula: '{OPPORTUNITY} * (2' })]).success).toBe(false);
   });
 });
+
+it('подтверждение принимает старые файлы Диска и копии вложений; отклоняет смешанные ссылки', () => {
+  const option = (file: unknown) => ({ dealFields: [], productSectionIds: [], resourceDefaults: {}, views: { desktop: '', mobile: '' }, payments: { prepayment: { stageId: '', moveStage: false, templateId: '' }, surcharge: { stageId: '', moveStage: false, templateId: '' }, timeoutMinutes: 90, successStageId: '', failStageId: '', successTemplateId: '', failTemplateId: '' }, bookingTypes: [{ id: 'r', title: 'Программа', keywords: ['баня'], dealTypeValue: '', program: '', confirmation: [{ text: '', files: [file] }] }] });
+  expect(groupOptionsSchema.safeParse(option({ id: 5, name: 'Правила.pdf' })).success).toBe(true);
+  expect(groupOptionsSchema.safeParse(option({ storedFileId: 'saved', name: 'Правила.pdf' })).success).toBe(true);
+  expect(groupOptionsSchema.safeParse(option({ id: 5, storedFileId: 'saved', name: 'bad' })).success).toBe(false);
+});

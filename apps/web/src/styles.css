@@ -25,6 +25,16 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
+  --status-work-bg: #bfdbfe;
+  --status-work-text: #1e3a8a;
+  --status-wait-bg: #fdba74;
+  --status-wait-text: #7c2d12;
+  --status-arrived-bg: #1d4ed8;
+  --status-arrived-text: #ffffff;
+  --status-done-bg: #bbf7d0;
+  --status-done-text: #14532d;
+  --status-fail-bg: #fee2e2;
+  --status-fail-text: #991b1b;
   color-scheme: light;
 }
 
@@ -193,6 +203,44 @@ input[type='date'] {
 main.loading {
   opacity: 0.55;
   transition: opacity 0.2s;
+}
+/* Календарь: пока нет ответа на выбранную дату — загрузчик поверх, сетка под ним недоступна. */
+main.cal-main {
+  position: relative;
+}
+main.cal-main.loading {
+  opacity: 1;
+}
+.cal-loading-space {
+  min-height: 240px;
+}
+.cal-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 72px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+  backdrop-filter: blur(1px);
+  cursor: progress;
+}
+.cal-loader-box {
+  position: sticky;
+  top: 72px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
 
 .empty {
@@ -4733,7 +4781,7 @@ input[role='switch']:checked::after {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-/* Цвет сделки для новой брони: 🔴 есть бронь, 🟠 брони нет, но поля брони заполнены, 🟢 пустая. */
+/* Цвет сделки для новой брони: 🔴 есть бронь, 🟡 брони нет, но поля брони заполнены, 🟢 пустая. */
 .wz-deal.tone-booked {
   border-color: #f04438;
   background: #fef3f2;
@@ -4742,11 +4790,11 @@ input[role='switch']:checked::after {
   box-shadow: 0 0 0 2px #f04438;
 }
 .wz-deal.tone-filled {
-  border-color: #f79009;
-  background: #fffaeb;
+  border-color: #eaaa08;
+  background: #fefbe8;
 }
 .wz-deal.tone-filled.selected {
-  box-shadow: 0 0 0 2px #f79009;
+  box-shadow: 0 0 0 2px #eaaa08;
 }
 .wz-deal.tone-empty {
   border-color: #47cd89;
@@ -4862,6 +4910,7 @@ input[role='switch']:checked::after {
 /* Дата и ресурс: лента дней, календарь группы и карточка слота. */
 .wz-daynav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
@@ -5205,7 +5254,8 @@ input[role='switch']:checked::after {
     position: static;
   }
   .sheet.bk .wz-daynav input[type='date'] {
-    display: none;
+    flex-basis: 100%;
+    width: 100%;
   }
   .pe-head {
     display: none;
@@ -5344,33 +5394,44 @@ input[role='switch']:checked::after {
   align-items: center;
   cursor: pointer;
 }
-.wz-res-ticks,
 .wz-res-row {
   display: grid;
   grid-template-columns: minmax(180px, 300px) minmax(0, 1fr);
   gap: 12px;
   align-items: center;
 }
-.wz-res-ticks {
-  padding: 0 9px;
-}
-.wz-res-ticks > div {
-  position: relative;
-  height: 16px;
-}
-.wz-res-ticks > div span {
+.wz-res-timeline { min-width: 0; }
+.wz-res-tick-labels { position: relative; height: 18px; margin-top: 3px; }
+.wz-res-tick-labels span {
   position: absolute;
   transform: translateX(-50%);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
-.wz-res-ticks > div span:first-child {
-  transform: none;
+.wz-res-tick-labels span:first-child { transform: none; }
+.wz-res-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--text);
+  opacity: 0.3;
+  pointer-events: none;
 }
-.wz-res-ticks > div span:last-child:not(:first-child) {
-  transform: translateX(-100%);
+.wz-time-dialog {
+  width: min(420px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  background: var(--surface);
+  color: var(--text);
 }
+.wz-time-dialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+.wz-time-dialog input { box-sizing: border-box; width: 100%; min-width: 0; }
+.wz-time-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .wz-res-list {
   display: grid;
   gap: 6px;
@@ -5567,22 +5628,25 @@ input[role='switch']:checked::after {
   min-width: 0;
   margin: 0;
 }
-/* Иконка блока — в правом верхнем углу самого блока (не у подписи). */
+/* Иконка блока — слева от заголовка. */
 .dash-tile,
 .dash-block {
   position: relative;
 }
 .dash-tile {
-  padding-right: 58px;
+  padding-left: 58px;
+  padding-right: 16px;
 }
 .dash-block > .dash-attention-title {
   min-height: 36px;
-  padding: 0 40px;
+  padding: 0 0 0 44px;
+  justify-content: flex-start;
 }
 .dash-badge {
   position: absolute;
   top: 12px;
-  right: 12px;
+  left: 12px;
+  right: auto;
   display: grid;
   place-items: center;
   width: 36px;
@@ -6719,24 +6783,24 @@ button.cert-row:hover {
   white-space: nowrap;
 }
 .deal-status.in_work {
-  background: var(--info-bg);
-  color: var(--info-text);
+  background: var(--status-work-bg);
+  color: var(--status-work-text);
 }
 .deal-status.waiting {
-  background: var(--warn-bg);
-  color: var(--warn-text);
+  background: var(--status-wait-bg);
+  color: var(--status-wait-text);
 }
 .deal-status.arrived {
-  background: var(--primary);
-  color: #fff;
+  background: var(--status-arrived-bg);
+  color: var(--status-arrived-text);
 }
 .deal-status.done {
-  background: var(--ok-bg);
-  color: var(--ok-text);
+  background: var(--status-done-bg);
+  color: var(--status-done-text);
 }
 .deal-status.failed {
-  background: var(--neutral-bg);
-  color: var(--muted);
+  background: var(--status-fail-bg);
+  color: var(--status-fail-text);
 }
 .deal-close {
   display: inline-flex;
@@ -7184,7 +7248,7 @@ button.cert-row:hover {
 /* ---------- Личный дашборд: сетка блоков ---------- */
 .dash-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: repeat(60, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
   margin: 12px 0;
@@ -7194,17 +7258,23 @@ button.cert-row:hover {
   flex-direction: column;
   min-width: 0;
 }
+.dash-cell.w-sixth {
+  grid-column: span 10;
+}
+.dash-cell.w-fifth {
+  grid-column: span 12;
+}
 .dash-cell.w-quarter {
-  grid-column: span 3;
+  grid-column: span 15;
 }
 .dash-cell.w-third {
-  grid-column: span 4;
+  grid-column: span 20;
 }
 .dash-cell.w-half {
-  grid-column: span 6;
+  grid-column: span 30;
 }
 .dash-cell.w-full {
-  grid-column: span 12;
+  grid-column: span 60;
 }
 .dash-cell-body {
   display: flex;
@@ -7229,16 +7299,20 @@ button.cert-row:hover {
 }
 /* Планшет: четверть и треть — по половине ряда; телефон — всё во всю ширину. */
 @media (max-width: 1100px) {
+  .dash-cell.w-sixth,
+  .dash-cell.w-fifth,
   .dash-cell.w-quarter,
   .dash-cell.w-third {
-    grid-column: span 6;
+    grid-column: span 30;
   }
 }
 @media (max-width: 700px) {
+  .dash-cell.w-sixth,
+  .dash-cell.w-fifth,
   .dash-cell.w-quarter,
   .dash-cell.w-third,
   .dash-cell.w-half {
-    grid-column: span 12;
+    grid-column: span 60;
   }
 }
 .dash-grid.editing .dash-cell {
@@ -7335,3 +7409,659 @@ button.cert-row:hover {
 .stop-row {
   cursor: default;
 }
+
+/* Карточка клиента звонка и единая вертикальная история. */
+.call-client-summary { display: grid; gap: 10px; }
+.call-phone { color: var(--muted); font-variant-numeric: tabular-nums; }
+.call-client-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.call-client-actions button { flex: 1 1 auto; }
+.client-timeline { margin: 0; padding: 0; }
+.client-event-day h5 { margin: 8px 0 3px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.client-event-day ol { list-style: none; margin: 0; padding: 0; }
+.client-event { border-bottom: 1px solid var(--line); }
+.client-event summary { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 14px; align-items: center; gap: 6px; min-height: 30px; padding: 4px 0; cursor: pointer; list-style: none; font-size: 12px; }
+.client-event summary::-webkit-details-marker { display: none; }
+.client-event-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.client-event-icon { text-align: center; font-size: 13px; }
+.client-event summary time { white-space: nowrap; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.client-event-arrow { text-align: center; transition: transform .15s; }
+.client-event[open] .client-event-arrow { transform: rotate(180deg); }
+.client-event-body { display: grid; gap: 6px; padding: 5px 4px 10px 24px; font-size: 12px; }
+.client-event-body p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.client-event-body strong { color: var(--primary); }
+.client-timeline-notes { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.call-bookings-dialog { width: min(640px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; box-sizing: border-box; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); }
+.call-bookings-dialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+.call-bookings-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.call-bookings-dialog h3 { margin: 0; }
+.call-bookings-dialog .cb-row { flex-wrap: wrap; }
+.wz-date-jump { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.wz-date-jump span { white-space: nowrap; }
+@media (max-width: 760px) {
+  .wz-date-jump { flex-basis: 100%; }
+  .sheet.bk .wz-date-jump input[type='date'] { flex: 1 1 150px; width: auto; }
+}
+
+.deal-status { border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+.needs-close-scope { align-self: flex-start; margin: 0 0 8px; }
+.source-donut { display: block; width: min(100%, 190px); max-height: 190px; margin: 8px auto 14px; flex: none; }
+.source-donut-total { fill: var(--text); font-size: 16px; font-weight: 700; }
+.source-donut-label { fill: var(--muted); font-size: 6px; }
+/* Прокрутка внутри доступной высоты окна звонка, независимо от ограничений родителя. */
+.call-page { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.call-page > .call-card { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.call-page .call-client-summary { flex: none; }
+.call-page .call-section { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.call-sheet .call-card { max-height: 75dvh; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Личные непрочитанные всегда видны числом; 0 отличается от требующих внимания. */
+.cl-badge { z-index: 2; }
+.cl-badge.empty { background: var(--neutral-bg); color: var(--muted); box-shadow: 0 0 0 2px var(--surface); }
+.dashboard > .toolbar .toolbar-controls > .settings-button:has(> .icon) { position: relative; width: 40px; height: 40px; min-width: 40px; padding: 0; display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--info-text); box-shadow: 0 2px 6px rgba(17,24,39,.06); }
+.dashboard > .toolbar .toolbar-controls > .settings-button:has(> .icon):hover { background: var(--info-bg); border-color: var(--primary); transform: translateY(-1px); }
+.dashboard .toolbar-controls > .settings-button > .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.cl-period { font-size: 11px; margin: 5px 0; }
+
+.dashboard .settings-button.has-badge > .badge { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; font-size: 10px; border-radius: 999px; background: var(--danger); color: var(--surface); }
+.dash-period-note { font-size: 11px; margin: 4px 0 8px; }
+.dashboard-action-log .action-log { padding: 0; }
+.dashboard-action-log { max-height: 640px; overflow: auto; }
+
+/* Направление — отдельный тег, переписка — отдельные сообщения. */
+.client-event summary { grid-template-columns: 18px minmax(0, 1fr) auto auto 14px; gap: 5px; }
+.event-direction { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 5px; }
+.event-direction .icon { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.event-direction.incoming { background: var(--status-fail-bg); color: var(--status-fail-text); }
+.event-direction.outgoing { background: var(--ok-bg); color: var(--ok-text); }
+.client-message { padding: 8px 10px; border-radius: 10px 10px 10px 2px; background: var(--surface-2); border-left: 3px solid var(--danger); max-width: 95%; }
+.client-message.outgoing { justify-self: end; background: var(--ok-bg); border-left: 0; border-right: 3px solid var(--ok-text); border-radius: 10px 10px 2px 10px; }
+.client-message-sender { display: block; color: var(--muted); font-size: 10px; margin-bottom: 4px; }
+.call-situation { flex: none; max-height: 230px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); padding-top: 8px; }
+.call-situation h4 { margin: 0 0 6px; font-size: 13px; }
+.call-situation-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 9px; margin-bottom: 5px; font-size: 12px; background: var(--surface); }
+.call-situation-row > div { display: grid; gap: 3px; }
+.call-situation-row.active { background: var(--ok-bg); border-color: var(--ok-text); }
+
+/* Два одинаково доступных источника вложений во всех редакторах сообщений. */
+.step > .attachment-controls { grid-column: 1 / -1; width: 100%; order: 3; }
+.attachment-controls { display: grid; gap: 5px; min-width: 0; }
+.attachment-sources { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.attachment-sources button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
+.attachment-sources button:hover:not(:disabled) { background: var(--surface-2); }
+.attachment-sources .icon { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.attachment-limit { font-size: 12px; font-weight: 400; }
+.attachment-controls p { margin: 0; }
+
+/* Единый масштаб содержимого дашборда; вес и цвет задают иерархию, размер не скачет. */
+.dash-cell { container-type: inline-size; }
+.dash-grid .dash-cell-body { font-size: 13px; line-height: 1.45; }
+.dash-grid .dash-cell-body :where(p, span, b, strong, small, time, button, input, select, label, th, td) { font-size: 13px; }
+.dash-grid .dash-cell-body :where(button, p, small, time) { line-height: 1.45; }
+.dash-grid .dash-cell-body :where(.dash-attention-title, h3, h4) { font-size: 14px; font-weight: 650; }
+.dash-grid .dash-cell-body .dash-tile-value { font-size: 28px; font-weight: 700; }
+.dash-grid .dash-cell-body .dash-tile-value small { font-size: 20px; }
+.dash-grid .dash-cell-body :where(.deal-status, .deal-close) { font-size: 13px; font-weight: 500; line-height: 1.4; }
+.dash-grid .dash-cell-body .dash-record { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px 12px; padding: 10px; border-radius: 12px; font-size: 13px; font-weight: 400; white-space: normal; }
+.dash-record-main { font-weight: 600; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dash-record-value { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dash-record-details, .dash-record-meta { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; min-width: 0; overflow-wrap: anywhere; }
+.dash-record-details { color: var(--text); }
+.dash-record-meta { color: var(--muted); font-weight: 400; }
+.dash-record-meta > span + span::before { content: '·'; margin-right: 10px; color: var(--muted); }
+.dash-record-person { display: inline-flex; align-items: center; gap: 4px; }
+.dash-record-link { color: var(--primary); }
+.dash-record .slot-chip { white-space: normal; }
+.dash-record .deal-status-wrap { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+@container (max-width: 420px) {
+  .dash-grid .dash-cell-body .dash-record { grid-template-columns: minmax(0, 1fr); }
+  .dash-record-value { text-align: left; }
+  .dash-record-details, .dash-record-meta { grid-column: 1; }
+}
+
+.dash-record .deal-close { white-space: normal; }
+
+/* Звонки: одна строка в любом блоке; на узкой ширине доступна горизонтальная прокрутка. */
+.call-inline-scroll { overflow-x: auto; min-width: 0; scrollbar-width: thin; }
+.call-inline-scroll .dt-rows { min-width: 670px; }
+.dash-grid .dash-cell-body .call-inline { display: grid; grid-template-columns: minmax(180px, 1fr) 118px minmax(180px, 1fr) max-content; gap: 10px; align-items: center; min-height: 44px; padding: 7px 10px; font-weight: 400; white-space: nowrap; border-radius: 10px; }
+.call-party { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.call-party .avatar { flex: 0 0 24px; }
+.call-party-name { min-width: 28px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.dash-grid .dash-cell-body .call-party-phone { font-size: 11px; color: var(--muted); font-weight: 400; white-space: nowrap; flex-shrink: 0; }
+.call-inline-type { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.call-inline-type .icon { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.call-inline { --call-edge: var(--status-work-text); }
+.call-inline.call-tone-in { --call-edge: var(--ok-text); }
+.call-inline.call-tone-missed, .call-inline.call-tone-lost { --call-edge: var(--status-fail-text); }
+.call-inline.call-tone-noanswer { --call-edge: var(--status-wait-text); }
+.call-inline-type { color: var(--call-edge); }
+.call-inline-time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dt-row.call-tone-lost { background: var(--status-fail-bg); border-color: var(--status-fail-text); }
+
+/* CALL_CARD — рабочая область встройки, мастер начинается сверху даже на узком экране. */
+.sheet-backdrop.call-booking-backdrop { align-items: flex-start; padding: 0; overflow: hidden; height: 100dvh; }
+.call-booking-backdrop > .sheet.bk.wz { margin: 0; height: 100%; max-height: 100%; max-width: none; border-radius: 0; flex: 1; min-height: 0; }
+.call-booking-backdrop .bk-head, .call-booking-backdrop .bk-steps, .call-booking-backdrop .bk-foot { flex-shrink: 0; }
+.call-booking-backdrop .bk-body { min-height: 0; overflow-y: auto; }
+
+/* Низ iframe CALL_CARD может быть обрезан самим порталом: переходы держим над шагом. */
+.call-booking-backdrop > .sheet.bk.wz { display: flex; flex-direction: column; }
+.call-booking-backdrop .bk-head { order: 0; padding-top: 12px; padding-bottom: 10px; }
+.call-booking-backdrop .bk-head > div { min-width: 0; flex: 1; }
+.call-booking-backdrop .bk-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-booking-backdrop .bk-foot { order: 1; position: sticky; top: 0; z-index: 2; padding: 8px 16px; border-top: 0; border-bottom: 1px solid var(--line); background: var(--surface); }
+.call-booking-backdrop .bk-summary { display: none; }
+.call-booking-backdrop .bk-actions { display: flex; width: 100%; gap: 8px; flex-wrap: wrap; }
+.call-booking-backdrop .bk-actions button { flex: 1; min-height: 36px; }
+.call-booking-backdrop .bk-steps { order: 2; overflow-x: auto; }
+.call-booking-backdrop .bk-body { order: 3; flex: 1 1 0; min-height: 0; overflow-y: scroll; scrollbar-gutter: stable; }
+.call-booking-backdrop .bk-body::-webkit-scrollbar { width: 9px; }
+.call-booking-backdrop .bk-body::-webkit-scrollbar-track { background: var(--surface-2); }
+.call-booking-backdrop .bk-body::-webkit-scrollbar-thumb { background: var(--muted); border: 2px solid var(--surface-2); border-radius: 6px; }
+
+body:has(.call-booking-backdrop.minimized) .minimized-dock { top: 8px; bottom: auto; }
+
+/* Тип звонка — иконка с доступным названием и подсказкой вместо текстовой колонки. */
+.call-inline-scroll .dt-rows { min-width: 560px; }
+.dash-grid .dash-cell-body .call-inline { grid-template-columns: minmax(180px, 1fr) 32px minmax(180px, 1fr) max-content; }
+.call-inline-type { justify-content: center; width: 32px; min-height: 24px; }
+
+/* Любая причина отказа/состояние отправки CALL_CARD видны у кнопки, не внизу длинного шага. */
+.bk-submit-feedback { flex-basis: 100%; margin: 0; max-height: 100px; overflow-y: auto; font-size: 13px; }
+.call-booking-backdrop .wz-modal-backdrop { place-items: start center; padding: 8px; overflow-y: auto; }
+.call-booking-backdrop .wz-modal > .form-actions { grid-row: 2; margin: 0; }
+.call-payment-backdrop { align-items: flex-start; padding: 8px; overflow-y: auto; }
+.call-payment-backdrop > .payment-dialog { max-width: none; margin: 0; max-height: calc(100dvh - 16px); overflow-y: auto; }
+body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: auto; }
+.pe-picker-add { white-space: nowrap; font-size: 13px; }
+.pe-picker-quantity { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.pe-picker-quantity button { padding: 4px 8px; min-width: 28px; min-height: 32px; border: 0; border-radius: 0; background: var(--surface-2); }
+.pe-picker-quantity input { width: 46px; min-width: 0; border: 0; border-radius: 0; padding: 5px 2px; text-align: center; font-size: 13px; }
+
+/* Звонки: имена без телефонов/аватарок, длительность рядом с направлением. */
+.call-inline-scroll .dt-rows { min-width: 540px; }
+.dash-grid .dash-cell-body .call-inline { grid-template-columns: 24px minmax(95px, 1fr) 88px minmax(95px, 1fr) max-content auto; gap: 8px; border: 0; box-shadow: none; background: transparent; }
+.call-inline > .call-inline-type { width: 24px; }
+.call-inline-duration { font-variant-numeric: tabular-nums; color: var(--muted); }
+.call-inline-actions { display: flex; gap: 4px; }
+.call-inline-actions button { min-height: 30px; padding: 3px 7px; border-radius: 7px; color: var(--primary); background: var(--surface-2); font-weight: 500; }
+.needs-close-count { display: inline-flex; justify-content: center; min-width: 23px; padding: 0 5px; margin-left: 4px; border-radius: 6px; background: color-mix(in srgb, currentColor 12%, transparent); font-variant-numeric: tabular-nums; }
+/* Карточки броней используют ширину своего блока, а не ширину окна. */
+.dash-today-bookings .booking-card-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.booking-card-grid > li { min-width: 0; display: flex; }
+.dash-grid .dash-cell-body .booking-card-grid .dash-record { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 9px; text-align: left; border-left-width: 3px; padding: 12px; }
+.booking-card-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.booking-card-head > b { flex: 1; min-width: 90px; overflow-wrap: anywhere; }
+.booking-card-time, .booking-card-client { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.booking-card-time { font-weight: 650; font-variant-numeric: tabular-nums; }
+.booking-card-client { color: var(--text); }
+.booking-card-grid .icon { flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+.booking-card-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 5px 10px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); padding-top: 8px; margin-top: auto; }
+.booking-card-foot b { white-space: nowrap; }
+.booking-card-grid .dt-empty { grid-column: 1 / -1; }
+@container (min-width: 560px) { .dash-today-bookings .booking-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* CALL_CARD: следующий шаг мастера — сумма и отправка сразу под заголовком, до истории счетов. */
+.call-payment-send { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.call-payment-send > label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+.call-payment-send > p, .call-payment-result > p { margin: 0; }
+.call-payment-send > .primary { min-height: 38px; width: 100%; }
+.call-payment-send .notice { padding: 7px 9px; font-size: 13px; }
+.call-payment-context { font-size: 12px; }
+.call-payment-result { display: grid; gap: 5px; max-height: 110px; overflow-y: auto; font-size: 13px; }
+.call-payment-backdrop > .payment-dialog { padding: 12px; gap: 10px; }
+.call-payment-backdrop .payment-history { border-top: 0; }
+
+/* Звонки повторяют аватары и кнопки действий блока последних сообщений. */
+.call-inline-actions .dash-icon-btn { display: grid; place-items: center; width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 9px; color: var(--muted); background: var(--surface); }
+.call-inline-actions .dash-icon-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--surface-2); }
+.call-inline .call-party { gap: 7px; min-width: 0; }
+.call-inline .avatar { flex-shrink: 0; box-shadow: none; }
+
+/* У блока звонков нет внешней рамки; строки также без рамок. */
+.dash-grid .dash-cell-body .dash-recent-calls { border: 0; box-shadow: none; }
+
+.action-log-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-right: 7px; }
+.audit-category, .audit-severity { display: inline-flex; padding: 1px 6px; border-radius: 6px; font-weight: 500; line-height: 1.5; }
+.audit-category { background: var(--surface-2); color: var(--muted); }
+.severity-info { background: var(--surface-2); color: var(--muted); }
+.severity-warning { background: var(--status-wait-bg); color: var(--status-wait-text); }
+.severity-high { background: var(--status-fail-bg); color: var(--status-fail-text); }
+.severity-critical { background: var(--status-fail-text); color: var(--surface); font-weight: 700; }
+
+.my-activity-block .client-timeline { max-height: 550px; overflow-y: auto; padding-right: 3px; }
+.my-activity-block .client-event summary { grid-template-columns: 22px minmax(0, 1fr) auto auto 16px; }
+.my-activity-block .client-event-title { min-width: 0; }
+@container (max-width: 420px) { .my-activity-block .client-event summary { grid-template-columns: 20px minmax(0, 1fr) auto 14px; } .my-activity-block .client-event summary > .event-direction { display: none; } }
+
+.on-shift-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.on-shift-list li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.on-shift-person { min-width: 0; flex: 1; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.on-shift-list .avatar { flex-shrink: 0; }
+.on-shift-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.on-shift-actions button { min-height: 36px; }
+
+.dashboard-sync-status { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; width: 100%; margin: 0 auto 8px; color: var(--muted); font-size: 12px; }
+.dashboard-sync-status time { font-variant-numeric: tabular-nums; }
+.dashboard-sync-status.has-error { color: var(--status-wait-text); }
+.dashboard-sync-status .sync-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--ok-text); }
+.dashboard-sync-status .sync-dot.active { background: var(--primary); animation: sync-pulse 1.2s ease-in-out infinite; }
+@keyframes sync-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .dashboard-sync-status .sync-dot.active { animation: none; } }
+
+/* Фоновая синхронизация не меняет высоту строки статуса и положение контента. */
+.dashboard-sync-status { height: 26px; min-height: 26px; flex-wrap: nowrap; overflow: hidden; }
+.dashboard-sync-status .sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-sync-status time { flex: none; min-width: 34px; }
+.dashboard-sync-status button { flex: none; }
+.dashboard-sync-status.has-error .sync-dot { background: var(--warn-text); }
+.page.dashboard { overflow-anchor: none; }
+/* Общая ширина колонок у каждой строки, независимо от имени и наличия кнопок. */
+.call-inline-scroll .dt-rows { min-width: 640px; }
+.dash-grid .dash-cell-body .call-inline { grid-template-columns: 48px minmax(100px, 1fr) 88px minmax(100px, 1fr) 136px 68px; }
+.call-inline > .call-inline-type { width: 48px; gap: 5px; }
+.call-inline-time { text-align: right; }
+.call-inline-actions { width: 68px; justify-content: flex-end; }
+.call-inline-type .icon { flex: none; }
+/* Имя занимает свою фактическую ширину, облако сразу за ним — оставшееся место. */
+.dash-attention .attention-row { display: flex; gap: 12px; padding: 12px 4px; min-height: 54px; }
+.dash-attention .attention-title { flex: 0 1 auto; max-width: 55%; min-width: 120px; overflow: visible; }
+.dash-attention .attention-name { max-width: 210px; min-width: 28px; }
+.attention-avatar { position: relative; flex: none; display: inline-flex; }
+/* Непрочитанные — маленький счётчик у правого верхнего угла аватарки. */
+.attention-unread { position: absolute; top: -4px; right: -5px; z-index: 2; min-width: 13px; height: 13px; padding: 0 3px; display: grid; place-items: center; border-radius: 7px; background: var(--primary); color: #fff; font-size: 8.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1.5px var(--surface); }
+.attention-message-space { flex: 1; min-width: 0; display: flex; align-items: center; padding-right: 6px; }
+.attention-message-stack { position: relative; display: inline-flex; min-width: 0; max-width: 100%; isolation: isolate; }
+.attention-preview, .attention-message-layer { background: #fff; border: 1px solid var(--line); border-radius: 9px; }
+.dash-attention .attention-preview { position: relative; display: block; z-index: 4; min-width: 0; padding: 6px 10px; color: var(--text); font-size: 13px; line-height: 18px; }
+.attention-message-layer { position: absolute; inset: 0; pointer-events: none; }
+.attention-message-layer:nth-child(1) { z-index: 3; }
+.attention-message-layer:nth-child(2) { z-index: 2; }
+.attention-message-layer:nth-child(3) { z-index: 1; }
+.dash-attention .attention-time { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 4px; flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+.dash-attention .attention-time small { font-size: 10px; }
+@media (max-width: 760px) {
+  .dash-attention .attention-row { gap: 8px; }
+  .dash-attention .attention-title { min-width: 74px; max-width: 45%; gap: 6px; }
+  .dash-attention .attention-title .cl-channel { width: auto; }
+  .dash-attention .cl-channel-label { display: none; }
+  .dash-attention .attention-time { flex-direction: column; gap: 0; align-items: flex-end; }
+  .dash-attention .attention-actions { padding-bottom: 4px; }
+}
+
+.dash-attention .attention-rows { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.dash-attention .attention-rows > li { min-width: 0; }
+@media (max-width: 760px) {
+  .dash-attention .attention-row { flex-basis: 100%; width: 100%; }
+}
+
+/* 59 межколоночных gap по 12px давали сетке минимум 708px даже на телефоне. */
+.dashboard .dash-grid { column-gap: 0; margin-inline: -6px; }
+.dashboard .dash-grid > .dash-cell { padding-inline: 6px; }
+
+/* Мастер брони: таймлайн ресурсов под загрузчиком, пока не пришла занятость на выбранные дни. */
+.wz-res-wrap {
+  position: relative;
+  min-height: 120px;
+}
+.wz-res-wrap > .cal-loader {
+  padding-top: 32px;
+}
+.wz-res-wrap > .cal-loader > .cal-loader-box {
+  top: 32px;
+}
+
+/* Мастер брони: клиент — аватарка, «Имя Фамилия» и номер тегом; клик — карточка в Битрикс24. */
+.bk-client {
+  align-items: center;
+}
+.bk-client-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bk-client-card:hover,
+.bk-client-card:focus-visible {
+  border-color: var(--primary);
+  background: rgba(0, 122, 255, 0.05);
+}
+.bk-client-card.static {
+  cursor: default;
+}
+.contact-name {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+.contact-name b {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.contact-id {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  top: -0.4em;
+}
+.cp-hits button.cp-contact {
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.cp-contact-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cp-contact-comms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+/* Легенда цветов сделок рядом с заголовком. */
+.wz-deals-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+.wz-deal-modifier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.wz-deal-modifier span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Легенда цветов (ColorLegend): образец и подпись, в строку с переносом. */
+.color-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.color-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.color-legend-item i {
+  flex: none;
+  width: 12px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1.5px solid transparent;
+}
+.color-legend.block {
+  display: flex;
+  margin: 0 0 8px;
+}
+
+/* Подпись блока дашборда: откуда данные — «из кэша · данные на 14:02 · обновляем…» / «обновлено 14:05».
+   Высота постоянная: смена подписи не сдвигает блоки. */
+.dash-cell-body > .dash-cell-sync {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  height: 16px;
+  margin: 3px 4px 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dash-cell-sync .sync-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok-text);
+}
+.dash-cell-sync.cache .sync-dot { background: var(--status-wait-text); }
+.dash-cell-sync.sync .sync-dot { background: var(--primary); animation: sync-pulse 1.2s ease-in-out infinite; }
+.dash-cell-sync.cache { color: var(--status-wait-text); }
+.dash-cell-sync.error .sync-dot { background: var(--warn-text); }
+@media (prefers-reduced-motion: reduce) { .dash-cell-sync.sync .sync-dot { animation: none; } }
+
+/* Блок в загрузке: заготовка строк и надпись поверх. */
+.block-loading {
+  position: relative;
+  min-height: 96px;
+}
+.block-loading-rows {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.block-loading-rows li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.block-loading-rows li > span {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+.sk-avatar,
+.sk-line {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--line) 0%, color-mix(in srgb, var(--line) 40%, transparent) 50%, var(--line) 100%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.4s linear infinite;
+}
+.sk-avatar {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+.sk-line {
+  height: 10px;
+}
+.sk-line.short {
+  width: 35%;
+}
+@keyframes sk-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sk-avatar, .sk-line { animation: none; } }
+.block-loading-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.block-loading-label::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+.block-loading-label { isolation: isolate; }
+/* Плитка без данных: значение — заготовкой, внизу — «Идёт загрузка данных…». */
+.dash-cell-body > .loading .dash-tile-value {
+  color: transparent;
+  width: 56px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--line) 0%, color-mix(in srgb, var(--line) 40%, transparent) 50%, var(--line) 100%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.4s linear infinite;
+}
+.dash-cell-body > .loading .dash-tile::after {
+  content: 'Идёт загрузка данных…';
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* ---------- настройки — отдельная страница; мессенджеры (ADR 0014) ---------- */
+.settings-page {
+  max-width: 960px;
+  margin: 0 auto;
+}
+.messenger-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.messenger-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.messenger-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.messenger-state {
+  margin-left: auto;
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.12);
+}
+.state-ready .messenger-state { background: rgba(22, 163, 74, 0.14); color: #166534; }
+.state-pairing .messenger-state,
+.state-qr .messenger-state,
+.state-starting .messenger-state,
+.state-authenticated .messenger-state { background: rgba(234, 170, 8, 0.16); color: #854d0e; }
+.state-failed .messenger-state,
+.state-logged_out .messenger-state,
+.state-disconnected .messenger-state,
+.state-unavailable .messenger-state { background: rgba(220, 38, 38, 0.12); color: #991b1b; }
+.messenger-login { margin: 8px 0; }
+.messenger-code {
+  font: 700 28px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 4px;
+  margin: 6px 0;
+}
+.messenger-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.messenger-kind-card {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 16px 8px;
+  border-radius: 12px;
+}
+.messenger-kind-icon { font-size: 28px; }
+.messenger-screen { max-width: 1320px; width: calc(100vw - 32px); }
+.messenger-vnc {
+  width: 100%;
+  height: min(75vh, 820px);
+  background: #111;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.messenger-shot { width: 100%; height: auto; border-radius: 8px; }
+
+/* ---------- переписка мессенджера (ADR 0014) ---------- */
+.mt { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.mt-list { flex: 1; min-height: 240px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+.mt-msg { max-width: 78%; align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.mt-msg.own { align-self: flex-end; background: rgba(37, 211, 102, 0.12); }
+.mt-msg.deleted .mt-body { text-decoration: line-through; opacity: 0.6; }
+.mt-body { white-space: pre-wrap; word-break: break-word; }
+.mt-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px; }
+.mt-edited { text-decoration: underline dotted; cursor: help; }
+.mt-deleted, .mt-error { color: #b91c1c; }
+.mt-read { color: #2563eb; }
+.mt-composer { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.mt-composer textarea { flex: 1; min-width: 200px; resize: vertical; }
+.mt-editing { width: 100%; font-size: 12px; }
+.messenger-chats { max-width: 1100px; width: calc(100vw - 32px); }
+.mc-layout { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: 10px; min-height: 60vh; }
+.mc-list { border-right: 1px solid var(--line); overflow-y: auto; max-height: 70vh; }
+.mc-list ul { list-style: none; margin: 0; padding: 0; }
+.mc-list li button { display: grid; grid-template-columns: 1fr auto; width: 100%; text-align: left; gap: 2px 6px; border-radius: 6px; }
+.mc-list li button.active { background: rgba(37, 99, 235, 0.1); }
+.mc-last { grid-column: 1 / -1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-time { grid-column: 1 / -1; font-size: 11px; }
+.mc-unread { background: #16a34a; color: #fff; border-radius: 999px; font-size: 11px; padding: 0 6px; }
+.mc-new { display: flex; gap: 4px; margin-bottom: 8px; }
+.mc-new input { flex: 1; min-width: 0; }
+.mc-thread { display: flex; flex-direction: column; min-width: 0; }
+@media (max-width: 720px) {
+  .mc-layout { grid-template-columns: 1fr; }
+  .mc-list { border-right: 0; max-height: 30vh; }
+}
+.messenger-groups { border: 0; padding: 0; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.messenger-groups legend { font-size: 13px; color: var(--muted, #6b7280); padding: 0; margin-bottom: 2px; }
+
+.mt-media { display: flex; flex-direction: column; gap: 6px; max-width: min(360px, 100%); margin-bottom: 6px; }
+.mt-media img, .mt-media video { display: block; max-width: 100%; max-height: 280px; border-radius: 10px; object-fit: contain; }
+.mt-media audio { max-width: 100%; width: 300px; }
+.mt-media .mt-download { align-self: flex-start; text-align: left; overflow-wrap: anywhere; white-space: normal; }
+.mt-media-error { color: var(--danger); font-size: 12px; }
+.mt-file-selection { width: 100%; grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
+.mt-composer:has(.mt-attach) { display: grid; grid-template-columns: auto minmax(0,1fr) auto; }
+.mt-attach { align-self: end; padding: 8px; min-width: 38px; }
+@media(max-width:600px) { .mt-composer:has(.mt-attach) { display: grid; grid-template-columns: auto minmax(0,1fr); } .mt-composer > .primary { grid-column: 1 / -1; } }
+
+.cl-channel-filter, .cv-channel-select { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
+.cl-channel-filter { padding: 8px 0; }
+.cl-channel-filter select, .cv-channel-select select { max-width: 100%; min-width: 0; padding: 5px 8px; border-radius: 9px; }
+
+.messenger-search-dialog { width: min(680px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: var(--surface); color: var(--text); }
+.messenger-search-dialog::backdrop { background: #0006; }
+.messenger-search-dialog > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.messenger-search-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.messenger-search-result p { margin: 5px 0; }
+
+.mc-context { display: flex; flex-wrap: wrap; gap: 10px 16px; padding: 12px; border-bottom: 1px solid var(--line); }
+.mc-context label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mc-context select { max-width: min(420px, 65vw); }
+.mc-context p { width: 100%; margin: 0; }

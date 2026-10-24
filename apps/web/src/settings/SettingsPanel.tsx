@@ -1,4 +1,3 @@
-import { ActionLogPanel } from './ActionLogPanel.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettingsDto, GroupDirectoryDto, GroupDto } from '@btx24/shared';
 import { apiGet, apiPut } from '../api.js';
@@ -12,17 +11,18 @@ import { SettingsCodes } from './SettingsCodes.js';
 import { fmtDateTime } from '../format.js';
 import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
-import { MinimizeButton } from '../Minimize.js';
+import { MessengersSection } from './MessengersSection.js';
 
-type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements' | 'log';
+type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements' | 'messengers';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'groups', label: 'Группы' },
   { key: 'resources', label: 'Ресурсы' },
   { key: 'app', label: 'Приложение' },
   { key: 'passwords', label: 'Прямая ссылка' },
   { key: 'placements', label: 'Встройки' },
-  { key: 'log', label: 'Журнал действий' },
+  { key: 'messengers', label: 'Мессенджеры' },
 ];
+/** Настройки — отдельная страница (решение владельца 2026-10-24), а не окно поверх дашборда. */
 export function SettingsPanel({
   onClose,
   onChanged,
@@ -50,7 +50,6 @@ export function SettingsPanel({
     saving.current = value;
     setBusy(value);
   };
-  const dialog = useRef<HTMLDivElement>(null);
   const canLeave = useCallback(
     () => !saving.current && (!dirty.current || confirm('Есть несохранённые изменения. Закрыть без сохранения?')),
     [],
@@ -83,36 +82,6 @@ export function SettingsPanel({
       active = false;
     };
   }, []);
-  useEffect(() => {
-    const previous = document.activeElement;
-    dialog.current?.focus();
-    const keydown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        close();
-      }
-      if (e.key === 'Tab') {
-        const items = dialog.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]',
-        );
-        if (!items?.length) return;
-        const first = items[0];
-        const last = items[items.length - 1];
-        if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === dialog.current)) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', keydown);
-    return () => {
-      document.removeEventListener('keydown', keydown);
-      if (previous instanceof HTMLElement) previous.focus();
-    };
-  }, [close]);
   useEffect(() => fitFrame(), [tab, groups, editing]);
   const refreshDirectory = () => {
     void apiGet<GroupDirectoryDto>('/admin/group-directory').then(
@@ -128,22 +97,14 @@ export function SettingsPanel({
     setSaved('');
   };
   return (
-    <div className="sheet-backdrop" onClick={close}>
-      <div
-        ref={dialog}
-        tabIndex={-1}
-        className="sheet settings-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header>
-          <h2 id="settings-title">Настройки</h2>
-          <MinimizeButton label="Настройки" />
-          <button aria-label="Закрыть настройки" disabled={busy} onClick={close}>
-            ×
-          </button>
+    <div className="page settings-page">
+        <header className="toolbar">
+          <div className="toolbar-title">
+            <button aria-label="Назад" disabled={busy} onClick={close}>
+              ‹
+            </button>
+            <h1 id="settings-title">Настройки</h1>
+          </div>
         </header>
         <nav className="settings-tabs" aria-label="Разделы настроек">
           {TABS.map((t) => (
@@ -305,8 +266,7 @@ export function SettingsPanel({
         )}
         {tab === 'resources' && <ResourceNames />}
         {tab === 'placements' && <PlacementSettings />}
-        {tab === 'log' && <ActionLogPanel timezone={timezone} users={directory?.users ?? []} />}
-      </div>
+        {tab === 'messengers' && <MessengersSection timezone={timezone} />}
     </div>
   );
 }

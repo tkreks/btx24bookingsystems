@@ -1,7 +1,7 @@
 import type { ChatSummary } from '@btx24/shared';
 import { connectorLabel } from './format.js';
 
-export type ChatTab = 'all' | 'waiting' | 'answered';
+export type ChatTab = 'all' | 'waiting' | 'mine';
 export type ChatSort = 'recent' | 'waiting' | 'name';
 
 export const CHAT_SORTS: { key: ChatSort; label: string }[] = [
@@ -19,7 +19,7 @@ export function visibleChats(items: ChatSummary[], tab: ChatTab, query: string, 
   const digits = phoneDigits(q);
   const shown = items.filter((c) => {
     if (tab === 'waiting' && !c.waitingReply) return false;
-    if (tab === 'answered' && c.waitingReply) return false;
+
     if (!q) return true;
     if (digits.length >= 3 && (c.phones ?? []).some((p) => phoneDigits(p).includes(digits))) return true;
     return [c.title, connectorLabel(c.connector), c.lastMessage?.preview ?? ''].join(' ').toLocaleLowerCase('ru').includes(q);

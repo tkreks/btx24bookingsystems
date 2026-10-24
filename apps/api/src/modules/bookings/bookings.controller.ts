@@ -58,8 +58,8 @@ export class BookingsController {
 
   /** Действующие и будущие стопы ресурсов моих групп (блок дашборда). */
   @Get('resource-stops')
-  stopsUpcoming(@B24User() user: B24UserContext): Promise<(ResourceStopDto & { resourceName: string })[]> {
-    return this.stops.upcoming(user);
+  stopsUpcoming(@B24User() user: B24UserContext, @Query() query: Record<string, unknown> = {}): Promise<(ResourceStopDto & { resourceName: string })[]> {
+    return this.stops.upcoming(user, query);
   }
 
   /** Стоп ресурса: брони и стопы в периоде — перед установкой. */
@@ -107,9 +107,9 @@ export class BookingsController {
   }
 
   @Get('booking-alerts')
-  async list(@B24User() user: B24UserContext, @Query('status') status?: string): Promise<BookingAlertListDto> {
+  async list(@B24User() user: B24UserContext, @Query('status') status?: string, @Query() query: Record<string, unknown> = {}): Promise<BookingAlertListDto> {
     await this.require(user, 'booking.details');
-    return this.alerts.list(user.portal, status);
+    return this.alerts.list(user.portal, status, query);
   }
 
   @Put('booking-alerts/:id')

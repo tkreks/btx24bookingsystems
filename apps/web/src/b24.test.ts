@@ -61,3 +61,36 @@ describe('screenFrameHeight', () => {
     expect(screenFrameHeight(600, 'CRM_DEAL_DETAIL_TAB')).toBe(560);
   });
 });
+
+
+describe('чат на конкретном сообщении и контекст CALL_CARD', () => {
+  it('сообщение открывает полным путём с IM_MESSAGE, а не обычным openMessenger', async () => {
+    const b24 = await load({ getAuth: () => false, refreshAuth: () => {} });
+    const openPath = vi.fn();
+    const openMessenger = vi.fn();
+    Object.assign(window.BX24!, { openPath, im: { openMessenger } });
+    const open = vi.fn();
+    Object.assign(window, { open });
+    b24.setPortalDomain('example.test');
+    b24.openMessenger(4396, 123456);
+    expect(open).toHaveBeenCalledWith('https://example.test/online/?IM_DIALOG=chat4396&IM_MESSAGE=123456', '_blank', 'noopener');
+    expect(openPath).not.toHaveBeenCalled();
+    expect(openMessenger).not.toHaveBeenCalled();
+  });
+  it('поздний контекст звонка читает через getStatus', async () => {
+    const b24 = await load({ getAuth: () => false, refreshAuth: () => {} });
+    const call = vi.fn((_command, _params, cb) => cb({ CALL_ID: 'new-call', PHONE_NUMBER: '+70000000000', CRM_ENTITY_TYPE: 'CONTACT', CRM_ENTITY_ID: 140 }));
+    Object.assign(window.BX24!, { placement: { call } });
+    expect(await b24.readCallContext(undefined)).toMatchObject({ callId: 'new-call', entityType: 'CONTACT', entityId: '140' });
+    expect(call).toHaveBeenCalledWith('getStatus', {}, expect.any(Function));
+  });
+  it('не оставляет ожидание навсегда, если getStatus не ответил', async () => {
+    vi.useFakeTimers();
+    const b24 = await load({ getAuth: () => false, refreshAuth: () => {} });
+    Object.assign(window.BX24!, { placement: { call: () => {} } });
+    const previous = { callId: 'initial', phone: null, entityType: null, entityId: null, direction: null };
+    const result = b24.readCallContext(previous);
+    await vi.advanceTimersByTimeAsync(2600);
+    expect(await result).toEqual(previous);
+  });
+});

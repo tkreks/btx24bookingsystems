@@ -2,6 +2,7 @@ import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { ClientBookingsService } from '../bookings/client-bookings.service.js';
+import type { ClientTimelineService } from './client-timeline.service.js';
 import { CallCardService } from './call-card.service.js';
 import type { ChatsService } from './chats.service.js';
 
@@ -17,13 +18,14 @@ function setup(openDeals: { id: number; createdAt: string }[]) {
   } as unknown as PrismaService;
   const access = { resolve: vi.fn(async () => ({ isAppAdmin: false, groups: [{ permissions: ['openlines.read'] }] })) } as unknown as AccessService;
   const chats = {
+    summariesByChat: vi.fn(async () => [{ chatId: 5, title: 'Чат', clientName: 'Иван', lastMessage: { date: '2026-10-23T09:00:00Z' } }]),
     searchByPhone: vi.fn(async () => ({ items: [{ chatId: 5, title: 'Чат', clientName: 'Иван', lastMessage: { date: '2026-10-23T09:00:00Z' } }] })),
     history: vi.fn(async () => ({ messages: [1, 2, 3, 4, 5, 6, 7, 8].map(msg) })),
   } as unknown as ChatsService;
   const clients = {
     forContact: vi.fn(async (_u: unknown, contactId: number | null) => ({ contactId, contact: { id: contactId, name: 'Иван' }, openDeals, upcoming: [], recent: [], won: { count: 0, avgCheck: null, currency: null }, past: 0 })),
   } as unknown as ClientBookingsService;
-  return { svc: new CallCardService(prisma, access, chats, clients), clients };
+  return { svc: new CallCardService(prisma, access, chats, clients, { get: vi.fn(async () => ({ events: [], notes: [] })) } as unknown as ClientTimelineService), clients, chats, access };
 }
 
 describe('CallCardService', () => {
@@ -40,7 +42,7 @@ describe('CallCardService', () => {
     const client = { call: vi.fn(async (m: string) => (m === 'crm.deal.get' ? { result: { CONTACT_ID: '140' } } : { result: {} })) };
     const card = await t.svc.card(user(client), { phone: '+79001234567', entityType: 'DEAL', entityId: '15' });
     expect(card.suggestedDealId).toBe(15);
-    expect(t.clients.forContact).toHaveBeenCalledWith(expect.anything(), 140, [15]);
+    expect(t.clients.forContact).toHaveBeenCalledWith(expect.anything(), 140, [15], expect.any(Date), true);
     expect(await t.svc.active(user(client))).toEqual([{ callId: 'c1', phone: '+79001234567', callType: 2, answeredAt: '2026-10-23T10:00:00.000Z' }]);
   });
 });

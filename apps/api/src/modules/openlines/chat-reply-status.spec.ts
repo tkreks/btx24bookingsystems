@@ -28,7 +28,7 @@ describe('«Не требует ответа» — общая отметка ч�
       dashboardHiddenChat: { findMany: vi.fn(async () => []) },
     } as unknown as PrismaService;
     const call = vi.fn(async () => ({
-      result: { messages: [{ id: 100, author_id: 55, date: '2026-10-22T09:00:00Z', text: 'Здравствуйте' }], users: [{ id: 55, connector: true }] },
+      result: { items: [], messages: [{ id: 100, author_id: 55, date: '2026-10-22T09:00:00Z', text: 'Здравствуйте' }], users: [{ id: 55, connector: true }] },
     }));
     const user = { portal: { id: 'p1' }, userId: 7, userName: 'Анна', client: { call } } as unknown as B24UserContext;
     return { svc: new ChatsService({} as FilesService, {} as OpenlineIndexService, prisma), user, update };
@@ -56,13 +56,15 @@ describe('«Не требует ответа» — общая отметка ч�
     expect(a.items.map((i) => i.chatId)).toEqual([50580]);
   });
 
-  it('каналы клиента: чаты того же контакта, кроме явно недоступных', async () => {
+  it('каналы клиента: только положительно разрешённые чаты того же контакта', async () => {
     const rows = [row({}), row({ chatId: 2, connector: 'whatsapp' }), row({ chatId: 3, crm: { contactId: 999 } }), row({ chatId: 4, connector: 'vk' })];
     const prisma = {
       openlineChat: { findUnique: vi.fn(async () => ({ crm: { contactId: 140 } })), findMany: vi.fn(async () => rows) },
       openlineChatAccess: { findMany: vi.fn(async () => [{ chatId: 4 }]) },
+      messengerMessage: { findFirst: vi.fn(async () => null) },
     } as unknown as PrismaService;
     const svc = new ChatsService({} as FilesService, {} as OpenlineIndexService, prisma);
+    vi.spyOn(svc, 'summariesByChat').mockImplementation(async (_user, ids) => rows.filter(r => ids.includes(r.chatId) && r.chatId !== 4).map(r => ({ chatId: r.chatId, connector: r.connector, title: r.title, lastMessage: null, waitingReply: false }) as never));
     const r = await svc.channels({ portal: { id: 'p1' }, userId: 7 } as unknown as B24UserContext, 50580);
     expect(r.map((c) => [c.chatId, c.connector])).toEqual([[50580, 'telegram'], [2, 'whatsapp']]);
   });

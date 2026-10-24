@@ -5,13 +5,14 @@ const call = (
   dir: 1 | 2,
   at: string,
   phone: string | null,
-  o: { missed?: boolean; responsible?: number; contact?: number; owner?: [number, number] } = {},
+  o: { missed?: boolean; responsible?: number; contact?: number; owner?: [number, number]; durationSec?: number } = {},
 ): CallActivity => ({
   ID: String(++id),
   OWNER_TYPE_ID: String(o.owner?.[0] ?? 2),
   OWNER_ID: String(o.owner?.[1] ?? 100),
   DIRECTION: String(dir),
   START_TIME: at,
+  END_TIME: new Date(Date.parse(at) + (o.durationSec ?? (o.missed ? 0 : 30)) * 1000).toISOString(),
   RESPONSIBLE_ID: String(o.responsible ?? 7),
   SETTINGS: o.missed ? ({ IS_DESCRIPTION_ONLY: true, MISSED_CALL: true } as never) : [],
   COMMUNICATIONS: phone ? [{ VALUE: phone, ...(o.contact ? { ENTITY_TYPE_ID: '3', ENTITY_ID: String(o.contact) } : {}) }] : [],
@@ -35,7 +36,7 @@ describe('callClients', () => {
     expect(r[0].incoming).toHaveLength(3);
   });
 
-  it('lost: last missed not followed by an answered incoming or an outgoing call (also after the period)', () => {
+  it('lost: last missed not followed by an answered incoming or a successful outgoing call (also after the period)', () => {
     const calls = [
       call(1, '2026-10-21T11:00:00Z', '+79853333333', { missed: true }),
       call(1, '2026-10-21T12:00:00Z', '+79853333333', { missed: true }),
@@ -61,6 +62,15 @@ describe('callClients', () => {
     expect(r[0].lost).toBe(false);
   });
 
+  it.each([0, 30])('исходящий разговор %s сек после пропущенного: неудачная попытка не снимает упущенного', (durationSec) => {
+    const rows = [call(1, '2026-10-21T09:00:00Z', '+79850000000', { missed: true }), call(2, '2026-10-22T10:00:00Z', '+79850000000', { durationSec, responsible: 8 })];
+    expect(callClients(rows, start, end, 7)[0].lost).toBe(durationSec === 0);
+  });
+  it('новый пропущенный после успешного разговора снова упущен', () => {
+    const rows = [call(1, '2026-10-21T09:00:00Z', '+79850000000', { missed: true }), call(2, '2026-10-21T10:00:00Z', '+79850000000'), call(1, '2026-10-21T11:00:00Z', '+79850000000', { missed: true }), call(2, '2026-10-21T12:00:00Z', '+79850000000', { durationSec: 0 })];
+    expect(callClients(rows, start, end, null)[0].lost).toBe(true);
+  });
+
   it('client key: contact, then phone, then CRM item', () => {
     expect(clientKey(call(1, '2026-10-21T10:00:00Z', '+79850000000', { contact: 9 }))).toBe('contact:9');
     expect(clientKey(call(1, '2026-10-21T10:00:00Z', '8 (985) 000-00-00'))).toBe('phone:9850000000');
@@ -78,6 +88,7 @@ describe('callStatus / callDurationSec', () => {
   it('outgoing without talk time — no answer', () => {
     expect(callStatus(call({ DIRECTION: '2', END_TIME: '2026-10-22T10:15:36+03:00' }))).toBe('no_answer');
     expect(callStatus(call({ DIRECTION: '2' }))).toBe('no_answer');
+    expect(callStatus(call({ DIRECTION: '2', SETTINGS: { MISSED_CALL: true }, END_TIME: '2026-10-22T10:16:42+03:00' }))).toBe('no_answer');
     expect(callStatus(call({ DIRECTION: '2', END_TIME: '2026-10-22T10:15:42+03:00' }))).toBe('success');
   });
 });

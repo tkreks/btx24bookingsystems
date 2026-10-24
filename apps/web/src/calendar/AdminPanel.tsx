@@ -27,6 +27,18 @@ const EVENT_LABELS: Record<string, string> = {
   ONCRMDEALADD: 'Событие: сделка создана',
   ONCRMDEALUPDATE: 'Событие: сделка изменена',
   ONCRMDEALDELETE: 'Событие: сделка удалена',
+  ONCRMACTIVITYADD: 'Событие: дело (звонок) создано',
+  ONCRMACTIVITYUPDATE: 'Событие: дело (звонок) изменено',
+  ONCRMACTIVITYDELETE: 'Событие: дело (звонок) удалено',
+  ONCRMCONTACTADD: 'Событие: контакт создан',
+  ONCRMCONTACTUPDATE: 'Событие: контакт изменён',
+  ONCRMCONTACTDELETE: 'Событие: контакт удалён',
+  ONCRMLEADADD: 'Событие: лид создан',
+  ONCRMLEADUPDATE: 'Событие: лид изменён',
+  ONCRMLEADDELETE: 'Событие: лид удалён',
+  ONCRMCOMPANYADD: 'Событие: компания создана',
+  ONCRMCOMPANYUPDATE: 'Событие: компания изменена',
+  ONCRMCOMPANYDELETE: 'Событие: компания удалена',
 };
 
 /** Встройки: показываются только администратору, регистрируются только по его явному действию. */

@@ -1,3 +1,4 @@
+import { selectedPeriod } from '../../common/period.js';
 import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import {
   ALERT_STATUSES,
@@ -70,17 +71,19 @@ export class BookingAlertsService {
     }
   }
 
-  async list(portal: Portal, status: unknown): Promise<BookingAlertListDto> {
+  async list(portal: Portal, status: unknown, query: { from?: unknown; to?: unknown } = {}): Promise<BookingAlertListDto> {
     const filter = status === undefined || status === '' ? undefined : (status as AlertStatus);
     if (filter && !ALERT_STATUSES.includes(filter))
       throw new BadRequestException({ code: 'INVALID_STATUS', message: 'status: new, viewed, resolved или ignored' });
+    const period = selectedPeriod(query, portal.timezone);
+    const dateFilter = period ? { createdAt: { gte: period.start, lt: period.end } } : {};
     const [rows, grouped, resources, settings] = await Promise.all([
       this.prisma.bookingAlert.findMany({
-        where: { portalId: portal.id, ...(filter ? { status: filter } : {}) },
+        where: { portalId: portal.id, ...dateFilter, ...(filter ? { status: filter } : {}) },
         orderBy: { createdAt: 'desc' },
         take: LIST_LIMIT,
       }),
-      this.prisma.bookingAlert.groupBy({ by: ['status'], where: { portalId: portal.id }, _count: true }),
+      this.prisma.bookingAlert.groupBy({ by: ['status'], where: { portalId: portal.id, ...dateFilter }, _count: true }),
       this.prisma.resource.findMany({ where: { portalId: portal.id } }),
       this.prisma.portalSettings.findUnique({ where: { portalId: portal.id } }),
     ]);

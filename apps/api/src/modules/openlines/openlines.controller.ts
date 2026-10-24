@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type {
+  DiskBrowseDto,
   DashboardLayoutDto,
   NeedsCloseDto,
   ActivityDayDto,
@@ -47,6 +48,8 @@ import { FilesService, MAX_FILE_BYTES, type UploadedFile as Upload } from './fil
 import { TemplatesService } from './templates.service.js';
 import { HeadDashboardService } from './head-dashboard.service.js';
 import { DashboardLayoutService } from './dashboard-layout.service.js';
+import { CACHE_TAGS, SwrCache, type CacheTag, type SwrOptions } from '../../common/swr-cache.js';
+import { requestContext } from '../../common/cache-invalidation.js';
 
 /** Воронки групп пользователя (уникальные, в порядке групп). */
 function funnelsOf(a: UserAccess): number[] {
@@ -57,6 +60,21 @@ function funnelsOf(a: UserAccess): number[] {
  * Открытые линии. Право — `openlines.read` / `openlines.send` хотя бы в одной группе (или
  * администратор приложения); что именно видно и можно — решает Битрикс24 по токену пользователя.
  */
+/** Блоки дашборда: 20 секунд — без пересчёта, до 10 минут — сразу, с пересчётом в фоне (ADR 0012). */
+const DASHBOARD_SWR: SwrOptions = { freshMs: 20_000, staleMs: 10 * 60_000 };
+/** Брони на дашборде и очередь закрытия — устаревший ответ не дольше 2 минут. */
+const BOOKINGS_SWR: SwrOptions = { freshMs: 15_000, staleMs: 2 * 60_000 };
+/** Ответы только из базы приложения — без кэша. */
+const FROM_DB = new Set(['chat-attention']);
+/** Из копии CRM, когда она загружена (иначе — запросы к порталу и кэш, как раньше). */
+const FROM_MIRROR = new Set(['dashboard', 'needs-close', 'calls', 'call-log', 'recent-calls', 'head-dashboard']);
+/** Разделы данных частей дашборда: base — брони, статусы сделок и ожидающие чаты. */
+const PART_TAGS: Record<string, readonly CacheTag[]> = { base: ['bookings', 'deals', 'chats'], calls: ['calls', 'deals', 'chats'], deals: ['deals', 'bookings'] };
+/** Звонки: статусы сделок и «упущенный» (был ли потом диалог в чате). */
+const CALL_TAGS: readonly CacheTag[] = ['calls', 'deals', 'chats'];
+/** Ответы блоков дашборда по сотруднику; права проверяются до кэша на каждом запросе. */
+const swr = new SwrCache<unknown>();
+
 @Controller()
 @UseGuards(B24AuthGuard)
 export class OpenlinesController {
@@ -73,12 +91,21 @@ export class OpenlinesController {
     private readonly layouts: DashboardLayoutService,
   ) {}
 
+  @Get('dashboard/my-activity')
+  async myActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>) {
+    const access = await this.access.resolve(user);
+    if (!access.isAppAdmin && !access.groups.length) throw new ForbiddenException('Нет доступа к приложению');
+    // Не принимаем userId/scope/portalId из запроса: администратор здесь также видит только себя.
+    const chats = access.isAppAdmin || access.groups.some((g) => g.permissions.includes('openlines.read'));
+    return this.cached(user, 'my-activity', [query.from, query.to, chats], CACHE_TAGS, () => this.activity.mine(user, { from: query.from, to: query.to }, chats));
+  }
+
   /** «Активность сотрудников» за день — блок дашборда только для администраторов приложения (решение владельца 2026-10-24). */
   @Get('dashboard/activity')
   async employeeActivity(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<ActivityDayDto> {
     if (!(await this.access.resolve(user)).isAppAdmin)
       throw new ForbiddenException({ code: 'ADMIN_ONLY', message: 'Активность сотрудников — только администраторам приложения' });
-    return this.activity.day(user, query);
+    return this.cached(user, 'activity', query, CACHE_TAGS, () => this.activity.day(user, query));
   }
 
   /**
@@ -90,7 +117,7 @@ export class OpenlinesController {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.head.get(user, query);
+    return this.cached(user, 'head-dashboard', query, ['deals', 'bookings', 'calls'], () => this.head.get(user, query));
   }
 
   @Get('dashboard')
@@ -105,14 +132,12 @@ export class OpenlinesController {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.get(
-      user,
-      { from, to, callsScope, callsFunnel, part },
-      await this.can(user, 'openlines.read'),
-      funnelsOf(a),
-      // Брони — по ресурсам групп сотрудника; администратору приложения — все.
-      a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))],
-    );
+    const openlines = await this.can(user, 'openlines.read');
+    // Брони — по ресурсам групп сотрудника; администратору приложения — все.
+    const resources = a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))];
+    const q = { from, to, callsScope, callsFunnel, part };
+    // Брони дашборда (part=base) — короче: календарь кэш не использует вовсе.
+    return this.cached(user, 'dashboard', [q, openlines, funnelsOf(a), resources], PART_TAGS[part ?? ''] ?? CACHE_TAGS, () => this.dashboard.get(user, q, openlines, funnelsOf(a), resources), part === 'base' || !part ? BOOKINGS_SWR : DASHBOARD_SWR);
   }
 
   /** Личный дашборд: блоки по порядку и ширина (у каждого сотрудника свои). */
@@ -133,13 +158,24 @@ export class OpenlinesController {
     return this.layouts.reset(user, (await this.access.resolve(user)).isAppAdmin);
   }
 
+  /** Счётчик и сообщения из той же серверной выборки, что вкладка чатов; без кэша всего дашборда. */
+  @Get('dashboard/chat-attention')
+  async chatAttention(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<NonNullable<DashboardDto['chats']>> {
+    await this.require(user, 'openlines.read');
+    return this.cached(user, 'chat-attention', query, ['chats'], async () => {
+      const result = await this.chats.attention(user, 50, query);
+      return { waitingReply: result.waiting, attention: result.items };
+    });
+  }
+
   /** «Сделки к закрытию»: бронь прошла, сделка в работе. */
   @Get('dashboard/needs-close')
-  async needsClose(@B24User() user: B24UserContext): Promise<NeedsCloseDto> {
+  async needsClose(@B24User() user: B24UserContext, @Query('scope') scope: unknown = 'mine', @Query() query: Record<string, unknown> = {}): Promise<NeedsCloseDto> {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.needsClose(user, a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))]);
+    const resources = a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))];
+    return this.cached(user, 'needs-close', [resources, scope, query], ['bookings', 'deals'], () => this.dashboard.needsClose(user, resources, scope, query), BOOKINGS_SWR);
   }
 
   /** Звонки выбранного вида за период (окно «сделки» на дашборде). */
@@ -148,7 +184,7 @@ export class OpenlinesController {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.callList(user, query, funnelsOf(a));
+    return this.cached(user, 'calls', [query, funnelsOf(a)], CALL_TAGS, () => this.dashboard.callList(user, query, funnelsOf(a)));
   }
 
   /** Журнал звонков дня (окно «Показать звонки» на дашборде). */
@@ -157,7 +193,7 @@ export class OpenlinesController {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.callLog(user, query);
+    return this.cached(user, 'call-log', query, CALL_TAGS, () => this.dashboard.callLog(user, query));
   }
 
   /** Последние звонки журнала (блок «Звонки» на дашборде). */
@@ -166,7 +202,8 @@ export class OpenlinesController {
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.length)
       throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Вы не состоите ни в одной группе приложения' });
-    return this.dashboard.recentCalls(user, query);
+    const chats = a.isAppAdmin || a.groups.some((g) => g.permissions.includes('openlines.read'));
+    return this.cached(user, 'recent-calls', [query, chats], CALL_TAGS, () => this.dashboard.recentCalls(user, query, chats));
   }
 
   @Get('openlines/chats')
@@ -329,6 +366,18 @@ export class OpenlinesController {
     return this.chats.send(user, chatId, body);
   }
 
+  @Get('openlines/disk')
+  async disk(@B24User() user: B24UserContext, @Query() query: unknown): Promise<DiskBrowseDto> {
+    await this.require(user, 'openlines.send');
+    return this.files.disk(user, query);
+  }
+
+  @Post('openlines/files/disk')
+  async importDisk(@B24User() user: B24UserContext, @Body() body: unknown): Promise<StoredFileDto> {
+    await this.require(user, 'openlines.send');
+    return this.files.importDisk(user, body);
+  }
+
   @Post('openlines/files')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_FILE_BYTES, files: 1 } }))
   async upload(@B24User() user: B24UserContext, @UploadedFile() file: Upload | undefined): Promise<StoredFileDto> {
@@ -380,6 +429,24 @@ export class OpenlinesController {
   /** Администратор приложения — меняет общие шаблоны. */
   private async isAdmin(user: B24UserContext): Promise<boolean> {
     return (await this.access.resolve(user)).isAppAdmin;
+  }
+
+  /** Ответ блока из кэша; откуда он — клиенту в заголовках `X-Cache` (fresh/stale/miss), `X-Cache-Age` (с), `X-Cache-Refreshing`. */
+  private async cached<T>(user: B24UserContext, name: string, params: unknown, tags: readonly CacheTag[], compute: () => Promise<T>, opts: SwrOptions = DASHBOARD_SWR): Promise<T> {
+    // Из базы приложения (чаты, копия CRM — ADR 0013) считается быстро: промежуточный кэш не нужен.
+    if (FROM_DB.has(name) || (FROM_MIRROR.has(name) && (await this.dashboard?.fromMirror?.(user)))) {
+      const res = requestContext.getStore()?.res;
+      if (res && !res.headersSent) res.setHeader('X-Cache', 'db');
+      return compute();
+    }
+    const { value, meta } = await swr.get(JSON.stringify([user.portal.id, user.userId, name, params]), compute, { ...opts, scope: user.portal.memberId, tags });
+    const res = requestContext.getStore()?.res;
+    if (res && !res.headersSent) {
+      res.setHeader('X-Cache', meta.state);
+      res.setHeader('X-Cache-Age', String(Math.round(meta.ageMs / 1000)));
+      if (meta.refreshing) res.setHeader('X-Cache-Refreshing', '1');
+    }
+    return value as T;
   }
 
   private async can(user: B24UserContext, permission: 'openlines.read' | 'openlines.send'): Promise<boolean> {

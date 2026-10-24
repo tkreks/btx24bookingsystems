@@ -49,9 +49,15 @@ describe('chat parsing', () => {
       ],
       users,
     );
-    expect(got).toMatchObject({ kind: 'client', human: true, message: { id: 2 } });
+    expect(got).toMatchObject({ kind: 'client', human: true, message: { id: 2 }, streak: 1 });
     expect(lastMeaningful([{ id: 1, author_id: 0, date: 'a' }], users)).toMatchObject({ kind: 'system', human: false });
     expect(lastMeaningful([], users)).toBeNull();
+  });
+  it('counts client messages after the last employee reply', () => {
+    const users = [{ id: 5, connector: true }, { id: 7 }];
+    const m = (id: number, author_id: number) => ({ id, author_id, date: String(id) });
+    expect(lastMeaningful([m(5, 5), m(4, 0), m(3, 5), m(2, 7), m(1, 5)], users)).toMatchObject({ kind: 'client', streak: 2 });
+    expect(lastMeaningful([m(2, 7), m(1, 5)], users)).toMatchObject({ kind: 'employee', streak: 0 });
   });
   it('strips messenger BB codes', () => {
     expect(plainText('[b]Здравствуйте[/b], [USER=7]Анна[/USER]! [URL=https://x.ru]ссылка[/URL]')).toBe(

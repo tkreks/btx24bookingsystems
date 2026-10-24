@@ -47,12 +47,12 @@ describe('activity', () => {
     expect(chatMinutes([t('10:00'), t('10:30')])).toBe(4);
   });
 
-  it('summarize buckets events by portal hours 9–22 and totals everything', () => {
+  it('summarize buckets events by all24 portal hours and totals everything', () => {
     const e = (hhmm: string, kind: 'call' | 'chat', durationSec: number | null = null) => ({ at: new Date(t(hhmm)).toISOString(), kind, text: '', durationSec, dealId: null, chatId: null });
     const s = summarize({ userId: 1, name: 'Анна', shift: null, photo: null }, [e('09:15', 'call', 125), e('09:40', 'chat'), e('21:59', 'chat'), e('23:10', 'chat')], 'Europe/Moscow');
-    expect(s.hours).toHaveLength(13);
-    expect(s.hours[0]).toMatchObject({ call: 1, chat: 1 });
-    expect(s.hours[12]).toMatchObject({ chat: 1 });
+    expect(s.hours).toHaveLength(24);
+    expect(s.hours[9]).toMatchObject({ call: 1, chat: 1 });
+    expect(s.hours[21]).toMatchObject({ chat: 1 });
     expect(s.totals).toMatchObject({ call: 1, chat: 3 });
     expect(s.callMinutes).toBe(2);
     expect(s.events[0].kind).toBe('call');

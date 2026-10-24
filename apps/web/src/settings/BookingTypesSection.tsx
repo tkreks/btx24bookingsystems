@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   PROGRAM_FROM_KEYWORD,
+  clientFileKey,
   renderTemplate,
   TEMPLATE_VARIABLES,
   unknownVariables,
@@ -9,7 +10,7 @@ import {
   type ClientMessageStep,
 } from '@btx24/shared';
 import { apiGet } from '../api.js';
-import { DiskPicker } from './DiskPicker.js';
+import { AttachmentButtons } from '../openlines/AttachmentButtons.js';
 import { VarTextarea } from './VarTextarea.js';
 import { move } from './group-form.js';
 import { Section } from './GroupOptions.js';
@@ -50,6 +51,7 @@ export function BookingTypesSection({
   onRequired,
   dealKinds = false,
   onDealKinds,
+  onUploadingChange,
 }: {
   rules: BookingTypeRule[];
   onChange: (rules: BookingTypeRule[]) => void;
@@ -59,12 +61,12 @@ export function BookingTypesSection({
   /** Шаг «Тип сделки» в мастере брони (сертификат / посещение / сертификатом / без оплаты). */
   dealKinds?: boolean;
   onDealKinds?: (v: boolean) => void;
+  onUploadingChange?: (busy: boolean) => void;
 }) {
   const [templateId, setTemplateId] = useState('270');
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const [picker, setPicker] = useState<{ rule: number; step: number } | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
 
   const patch = (i: number, p: Partial<BookingTypeRule>) => onChange(rules.map((r, j) => (j === i ? { ...r, ...p } : r)));
@@ -219,20 +221,18 @@ export function BookingTypesSection({
                   )}
                   <div className="step-files-row">
                     {s.files.map((f) => (
-                      <span key={f.id} className="pill">
+                      <span key={clientFileKey(f)} className="pill">
                         📎 {f.name}
                         <button
                           type="button"
                           aria-label={`Убрать файл ${f.name}`}
-                          onClick={() => patchStep(i, k, { files: s.files.filter((x) => x.id !== f.id) })}
+                          onClick={() => patchStep(i, k, { files: s.files.filter((x) => clientFileKey(x) !== clientFileKey(f)) })}
                         >
                           ×
                         </button>
                       </span>
                     ))}
-                    <button type="button" className="link" onClick={() => setPicker({ rule: i, step: k })}>
-                      + файл с Диска
-                    </button>
+                    <AttachmentButtons onBusyChange={onUploadingChange} remaining={10 - s.files.length} onAdd={(files) => patchStep(i, k, { files: [...s.files, ...files.map((f) => ({ storedFileId: f.id, name: f.name }))] })} />
                   </div>
                   <span className="row-actions">
                     <button type="button" aria-label="Выше" disabled={k === 0} onClick={() => patch(i, { confirmation: move(r.confirmation, k, -1) })}>
@@ -271,7 +271,7 @@ export function BookingTypesSection({
               {r.confirmation.map((s, k) => (
                 <div key={k} className="cv-bubble">
                   {s.files.map((f) => (
-                    <div key={f.id}>📎 {f.name}</div>
+                    <div key={clientFileKey(f)}>📎 {f.name}</div>
                   ))}
                   {s.text && (
                     <div className="cv-bubble-text">
@@ -298,16 +298,6 @@ export function BookingTypesSection({
         </ul>
       </details>
 
-      {picker && (
-        <DiskPicker
-          onClose={() => setPicker(null)}
-          onPick={(f) => {
-            const step = rules[picker.rule].confirmation[picker.step];
-            if (!step.files.some((x) => x.id === f.id)) patchStep(picker.rule, picker.step, { files: [...step.files, f].slice(0, 10) });
-            setPicker(null);
-          }}
-        />
-      )}
     </Section>
   );
 }

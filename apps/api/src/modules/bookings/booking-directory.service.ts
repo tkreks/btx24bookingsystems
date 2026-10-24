@@ -1,8 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, Optional } from '@nestjs/common';
-import type { BookingCatalogDto, CrmContactHit, CrmDealHit, CrmSearchDto, DealProductRowDto, GroupOptionsDto } from '@btx24/shared';
+import type { BookingCatalogDto, CrmContactHit, CrmDealHit, CrmDealModifier, CrmSearchDto, DealBookingTone, DealProductRowDto, GroupOptionsDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { phoneVariants } from '../openlines/chats.service.js';
+import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import { DealStatusService, type DealStageRow } from './deal-status.service.js';
 
 const CATALOG_TTL_MS = 10 * 60_000;
@@ -10,14 +11,22 @@ const HITS = 20;
 
 type Section = { ID: string; NAME: string; SECTION_ID?: string | null };
 type Product = { ID: string; NAME: string; PRICE?: string | null; CURRENCY_ID?: string | null; SECTION_ID?: string | null };
-type Contact = { ID: string; NAME?: string | null; LAST_NAME?: string | null; SECOND_NAME?: string | null; PHONE?: { VALUE?: string }[]; EMAIL?: { VALUE?: string }[] };
-type Deal = { ID: string; TITLE?: string | null; CATEGORY_ID?: string | null; CLOSED?: string | null; OPPORTUNITY?: string | null; CURRENCY_ID?: string | null; CONTACT_ID?: string | null; DATE_CREATE?: string | null; LAST_ACTIVITY_TIME?: string | null };
+type Contact = { ID: string; NAME?: string | null; LAST_NAME?: string | null; SECOND_NAME?: string | null; PHOTO?: unknown; PHONE?: { VALUE?: string }[]; EMAIL?: { VALUE?: string }[] };
+type Deal = { ID: string; TITLE?: string | null; CATEGORY_ID?: string | null; CLOSED?: string | null; OPPORTUNITY?: string | null; CURRENCY_ID?: string | null; CONTACT_ID?: string | null; DATE_CREATE?: string | null; LAST_ACTIVITY_TIME?: string | null; MODIFY_BY_ID?: string | null; DATE_MODIFY?: string | null };
 
-const CONTACT_SELECT = ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE', 'EMAIL'];
-const DEAL_SELECT = ['ID', 'TITLE', 'CATEGORY_ID', 'CLOSED', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', 'DATE_CREATE', 'LAST_ACTIVITY_TIME'];
+const CONTACT_SELECT = ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHOTO', 'PHONE', 'EMAIL'];
+const DEAL_SELECT = ['ID', 'TITLE', 'CATEGORY_ID', 'CLOSED', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', 'DATE_CREATE', 'LAST_ACTIVITY_TIME', 'MODIFY_BY_ID', 'DATE_MODIFY'];
 
 export const fullName = (c: Pick<Contact, 'NAME' | 'LAST_NAME' | 'SECOND_NAME'>) =>
   [c.LAST_NAME, c.NAME, c.SECOND_NAME].filter((x) => x && String(x).trim()).join(' ').trim();
+/** «Имя Фамилия» — как клиента показывает мастер брони. */
+export const shortName = (c: Pick<Contact, 'NAME' | 'LAST_NAME'>) =>
+  [c.NAME, c.LAST_NAME].filter((x) => x && String(x).trim()).join(' ').trim();
+/** Фото контакта: в ответе crm.contact.list — объект файла ({ showUrl }) или путь. */
+export function contactPhoto(v: unknown, domain: string): string | null {
+  const file = v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  return photoUrl(file?.showUrl ?? file?.url ?? v, domain);
+}
 
 /** Разделы группы вместе с вложенными (как в прототипе: раздел включает подразделы). */
 export function sectionsWithChildren(selected: string[], sections: { id: string; parentId: string | null }[]): Set<string> {
@@ -146,7 +155,13 @@ export class BookingDirectoryService {
   async search(user: B24UserContext, query: { kind?: unknown; q?: unknown; contactId?: unknown }): Promise<CrmSearchDto> {
     await this.canCreate(user);
     const contactId = Number(query.contactId);
-    if (Number.isSafeInteger(contactId) && contactId > 0) return { contacts: [], deals: await this.dealsOf(user, [contactId]) };
+    if (Number.isSafeInteger(contactId) && contactId > 0) {
+      const [contact, deals] = await Promise.all([
+        user.client.listAll<Contact>('crm.contact.list', { filter: { ID: contactId }, select: CONTACT_SELECT }, { max: 1 }).then((r) => r.map((c) => this.contactHit(user, c)), () => []),
+        this.dealsOf(user, [contactId]),
+      ]);
+      return { contacts: contact, deals };
+    }
     const q = typeof query.q === 'string' ? query.q.trim() : '';
     if (q.length < 2) throw new BadRequestException({ code: 'SHORT_QUERY', message: 'Введите хотя бы 2 символа' });
     if (query.kind === 'deal') return { contacts: [], deals: await this.findDeals(user, q) };
@@ -175,12 +190,29 @@ export class BookingDirectoryService {
         return words.every((w) => n.includes(w));
       });
     }
-    return rows.slice(0, HITS).map((c) => ({
+    return rows.slice(0, HITS).map((c) => this.contactHit(user, c));
+  }
+
+  private contactHit(user: B24UserContext, c: Contact): CrmContactHit {
+    return {
       id: Number(c.ID),
-      name: fullName(c) || `Контакт #${c.ID}`,
+      name: shortName(c) || fullName(c) || `Контакт #${c.ID}`,
+      photo: contactPhoto(c.PHOTO, user.portal.domain),
       phones: (c.PHONE ?? []).map((p) => p.VALUE ?? '').filter(Boolean),
       emails: (c.EMAIL ?? []).map((p) => p.VALUE ?? '').filter(Boolean),
-    }));
+    };
+  }
+
+  /** Имена и аватарки сотрудников (user.get); без доступа — без них. */
+  private async employees(user: B24UserContext, ids: number[]): Promise<Map<number, CrmDealModifier>> {
+    const unique = [...new Set(ids.filter((x) => x > 0))].slice(0, 50);
+    if (!unique.length) return new Map();
+    try {
+      const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string; PERSONAL_PHOTO?: string | null }>('user.get', { FILTER: { ID: unique } });
+      return new Map(rows.map((r) => [Number(r.ID), { id: Number(r.ID), name: [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `#${r.ID}`, photo: photoUrl(r.PERSONAL_PHOTO, user.portal.domain) }]));
+    } catch {
+      return new Map();
+    }
   }
 
   private async findDeals(user: B24UserContext, q: string): Promise<CrmDealHit[]> {
@@ -207,8 +239,11 @@ export class BookingDirectoryService {
   private async toHits(user: B24UserContext, rows: Deal[]): Promise<CrmDealHit[]> {
     const ids = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
     const contacts = ids.length ? await user.client.listAll<Contact>('crm.contact.list', { filter: { '@ID': ids }, select: ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME'] }) : [];
-    const names = new Map(contacts.map((c) => [Number(c.ID), fullName(c) || null]));
-    const tones = (await this.statuses?.tones(user.portal.id, rows as unknown as DealStageRow[]).catch(() => null)) ?? new Map();
+    const names = new Map(contacts.map((c) => [Number(c.ID), shortName(c) || fullName(c) || null]));
+    const [tones, modifiers] = await Promise.all([
+      (this.statuses?.tones(user.portal.id, rows as unknown as DealStageRow[]) ?? Promise.resolve(new Map<number, DealBookingTone>())).catch(() => new Map<number, DealBookingTone>()),
+      this.employees(user, rows.map((d) => Number(d.MODIFY_BY_ID) || 0)),
+    ]);
     return rows
       .map((d) => ({
         id: Number(d.ID),
@@ -221,6 +256,8 @@ export class BookingDirectoryService {
         createdAt: d.DATE_CREATE ? new Date(d.DATE_CREATE).toISOString() : null,
         lastActivityAt: d.LAST_ACTIVITY_TIME ? new Date(d.LAST_ACTIVITY_TIME).toISOString() : null,
         tone: tones.get(Number(d.ID)),
+        modifiedBy: modifiers.get(Number(d.MODIFY_BY_ID)) ?? null,
+        modifiedAt: d.DATE_MODIFY ? new Date(d.DATE_MODIFY).toISOString() : null,
       }))
       .sort((a, b) => Number(a.closed) - Number(b.closed) || b.id - a.id)
       .slice(0, HITS);

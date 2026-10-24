@@ -18,6 +18,8 @@ import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { GroupDirectoryService } from './group-directory.service.js';
 import { ExternalPasswordsService } from './external-passwords.service.js';
+import { FilesService } from '../openlines/files.service.js';
+import { groupSettingsSchema } from './groups.schemas.js';
 import { GroupsService } from './groups.service.js';
 
 /** Группы текущего пользователя: что он видит и может. */
@@ -42,7 +44,15 @@ export class GroupsAdminController {
     private readonly directory: GroupDirectoryService,
     private readonly passwords: ExternalPasswordsService,
     private readonly actions: ActionLogService,
+    private readonly files: FilesService,
   ) {}
+
+  private async checkFiles(user: B24UserContext, body: unknown): Promise<void> {
+    const parsed = groupSettingsSchema.safeParse(body);
+    if (!parsed.success) return; // Понятная ошибка полной схемы — в GroupsService.
+    const ids = [...new Set((parsed.data.options?.bookingTypes ?? []).flatMap((r) => r.confirmation.flatMap((s) => s.files.flatMap((f) => 'storedFileId' in f ? [f.storedFileId] : []))))];
+    await this.files.assertOwned(user, ids);
+  }
 
   @Get('group-directory')
   references(@B24User() user: B24UserContext): Promise<GroupDirectoryDto> {
@@ -87,6 +97,7 @@ export class GroupsAdminController {
 
   @Post('groups')
   async create(@B24User() user: B24UserContext, @Body() body: unknown): Promise<GroupDto> {
+    await this.checkFiles(user, body);
     const g = await this.groups.create(user.portal.id, body);
     await this.actions.user(user, { action: 'group.create', summary: `Создал группу «${g.name}»`, entityType: 'group', entityId: g.id, details: { after: g } });
     return g;
@@ -109,6 +120,7 @@ export class GroupsAdminController {
   @Put('groups/:id')
   async update(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<GroupDto> {
     const before = (await this.groups.list(user.portal.id)).find((g) => g.id === id) ?? null;
+    await this.checkFiles(user, body);
     const g = await this.groups.update(user.portal.id, id, body);
     // «Было → стало» по разделам группы; настройки направления (options) — по их блокам.
     const flat = (x: GroupDto | null) => (x ? { ...x, ...Object.fromEntries(Object.entries(x.options ?? {}).map(([k, v]) => [`options.${k}`, v])), options: undefined } : null);

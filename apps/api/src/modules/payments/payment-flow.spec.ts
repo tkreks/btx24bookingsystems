@@ -24,7 +24,7 @@ const options = {
 };
 const map = { prepaymentLink: 'UF_LINK', visitDateStart: 'UF_VD' };
 
-function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: string[]; closedSession?: boolean; payments?: { id: number; paid: string }[]; ownInvoice?: boolean; booking?: boolean } = {}) {
+function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: string[]; contactChats?: string[]; wrongContact?: boolean; closedSession?: boolean; payments?: { id: number; paid: string }[]; ownInvoice?: boolean; booking?: boolean } = {}) {
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
@@ -35,16 +35,18 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
     if (method === 'crm.contact.fields') return { result: { NAME: { type: 'string', title: 'Имя' } } };
     if (method === 'crm.deal.productrows.get') return { result: [{ PRODUCT_NAME: 'Программа «Алатырь»' }] };
     if (method === 'disk.file.get') return { result: { NAME: 'Правила.pdf', DOWNLOAD_URL: 'https://portal/x' } };
-    if (method === 'imopenlines.crm.chat.get') return { result: (o.chats ?? ['3301']).map((CHAT_ID) => ({ CHAT_ID })) };
+    if (method === 'imopenlines.crm.chat.get') return { result: (params.CRM_ENTITY_TYPE === 'contact' ? (o.contactChats ?? []) : (o.chats ?? ['3301'])).map((CHAT_ID) => ({ CHAT_ID })) };
+    if (method === 'imopenlines.crm.message.add' && params.CRM_ENTITY_TYPE === 'contact' && !o.sendFails) return { result: 42 };
     if (method === 'imopenlines.crm.message.add' && o.sendFails) throw new Bitrix24Error('ACCESS_DENIED', 'no');
     if (method === 'imopenlines.crm.message.add' && (params.CHAT_ID === 14034 || o.closedSession)) throw new Bitrix24Error('CHAT_NOT_IN_CRM', 'other deal');
-    if (method === 'imopenlines.dialog.get') return { result: { entity_data_2: `CONTACT|140|DEAL|${params.CHAT_ID === 4396 ? 678 : 2432}` } };
+    if (method === 'imopenlines.dialog.get') return { result: { entity_data_2: `CONTACT|${o.wrongContact ? 999 : 140}|DEAL|${params.CHAT_ID === 4396 ? 678 : 2432}` } };
     if (method === 'crm.item.payment.list') return { result: o.payments ?? [] };
     return { result: true };
   });
   const client = { call, download: vi.fn(async () => ({ data: Buffer.from('pdf'), contentType: null })) } as unknown as Bitrix24RestClient;
   let row: PaymentRequest;
   const prisma = {
+    storedFile: { findFirst: vi.fn(async () => ({ name: 'Правила.pdf', data: Buffer.from('pdf') })) },
     workGroup: { findUnique: vi.fn(async () => ({ options })), findMany: vi.fn(async () => [{ options }]) },
     bookingRecord: { findUnique: vi.fn(async () => null) },
     paymentRequest: { update: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { ...row, ...data } as PaymentRequest)) },
@@ -69,7 +71,7 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
       ...over,
     } as PaymentRequest);
   const ctx = { portal, client, actor: { kind: 'system' as const, name: 'test' } };
-  return { flow, calls, ctx, req, journal, row: () => row };
+  return { flow, calls, ctx, req, journal, prisma, row: () => row };
 }
 
 describe('PaymentFlow', () => {
@@ -114,6 +116,22 @@ describe('PaymentFlow', () => {
     expect(r.deadlineAt).toBeNull();
     expect(t.calls.filter((c) => c[0] === 'imopenlines.crm.message.add').map((c) => c[1].USER_ID)).toEqual([242, 236]);
     expect(r.warnings).toEqual([expect.stringContaining('отправьте ссылку вручную')]);
+  });
+
+  it('новая сделка без чата → сообщение через проверенный чат контакта (другая сделка чата допустима)', async () => {
+    const t = setup({ link: 'https://pay.example/x', chats: [], contactChats: ['14034'] });
+    const result = await t.flow.awaitLink(t.ctx, t.req());
+    expect(result.messageSentAt).not.toBeNull();
+    expect(result.deadlineAt).not.toBeNull();
+    expect(t.ctx.client.call).toHaveBeenCalledWith('imopenlines.crm.message.add', expect.objectContaining({ CRM_ENTITY_TYPE: 'contact', CRM_ENTITY: 140, CHAT_ID: 14034 }));
+  });
+
+  it('не отправляет ссылку в чат постороннего контакта даже если поиск его вернул', async () => {
+    const t = setup({ link: 'https://pay.example/x', chats: [], contactChats: ['14034'], wrongContact: true });
+    const result = await t.flow.awaitLink(t.ctx, t.req());
+    expect(result.messageSentAt).toBeNull();
+    expect(result.deadlineAt).toBeNull();
+    expect(t.calls.some(([m]) => m === 'imopenlines.crm.message.add' || m === 'im.message.add')).toBe(false);
   });
 
   it('paid invoice → paid, success stage, booking history', async () => {
@@ -172,5 +190,18 @@ describe('PaymentFlow', () => {
     const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60_000) }));
     expect(r.status).toBe('sent');
     expect(t.calls.map((c) => c[0])).toEqual(['crm.item.get']);
+  });
+});
+
+
+describe('Вложения системных цепочек', () => {
+  it('локальная копия подтверждения читается только в портале отправки и идёт после текста', async () => {
+    const t = setup({ chats: ['4396'] });
+    const warnings: string[] = [];
+    const result = await t.flow.sendChain(t.ctx, { dealId: 678, userId: 242, source: 'payment' }, null, [{ text: 'Ссылка на оплату', files: [{ storedFileId: 'f1', name: 'Правила.pdf' }] }, { text: 'Следующее сообщение', files: [] }], warnings);
+    expect(result).toBe(true);
+    expect(t.calls.filter(([m]) => ['imopenlines.crm.message.add', 'im.v2.File.upload'].includes(m)).map(([m,p]) => m === 'im.v2.File.upload' ? 'file' : p.MESSAGE)).toEqual(['Ссылка на оплату', 'file', 'Следующее сообщение']);
+    expect(t.prisma.storedFile.findFirst).toHaveBeenCalledWith({ where: { portalId: 'p1', id: 'f1' }, select: { name: true, data: true } });
+    expect(t.calls.find(([m]) => m === 'im.v2.File.upload')?.[1]).toMatchObject({ dialogId: 'chat4396', fields: { name: 'Правила.pdf', content: Buffer.from('pdf').toString('base64') } });
   });
 });

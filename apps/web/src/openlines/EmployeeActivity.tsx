@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useState } from 'react';
+import { BlockLoading } from '../dashboard/BlockLoading.js';
+import { Fragment, useState } from 'react';
 import { ACTIVITY_KINDS, ACTIVITY_KIND_LABELS, todayIn, type ActivityDayDto, type ActivityKind, type EmployeeActivityDto } from '@btx24/shared';
-import { apiGet } from '../api.js';
+import { useDashboardQuery } from '../dashboard/DashboardSync.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime, shiftDate } from '../format.js';
 import { Avatar } from './Avatar.js';
@@ -10,12 +11,12 @@ const ICON: Record<ActivityKind, string> = { call: '📞', chat: '💬', phone: 
 const sum = (h: Record<ActivityKind, number>) => ACTIVITY_KINDS.reduce((s, k) => s + h[k], 0);
 
 /**
- * «Активность сотрудников» (только администраторам приложения): кто что делал по часам 9–22 —
+ * «Активность сотрудников» (только администраторам приложения): кто что делал по всем 24 часам —
  * звонки, сообщения (свои и с телефона на смене), сделки, брони, действия в приложении. Смена —
  * по учёту рабочего времени Битрикс24 (незакрытый рабочий день тянется «до сейчас»); сообщения с телефона,
  * когда смены совпали, — строка «Совместное использование». Клик по сотруднику — лента его действий за день.
  */
-export function EmployeeActivity({ timezone, startDate }: { timezone: string; /** Сменился — показать этот день (начало периода дашборда). */ startDate?: string }) {
+export function EmployeeActivity({ timezone, startDate, endDate }: { timezone: string; /** Сменился — показать этот день (начало периода дашборда). */ startDate?: string; endDate?: string }) {
   const [date, setDate] = useState(() => startDate ?? todayIn(timezone));
   // Дашборд сменил период — переходим на его первый день; листать по дням можно и дальше.
   const [appliedStart, setAppliedStart] = useState(startDate);
@@ -23,20 +24,9 @@ export function EmployeeActivity({ timezone, startDate }: { timezone: string; /*
     setAppliedStart(startDate);
     if (startDate) setDate(startDate);
   }
-  const [res, setRes] = useState<{ date: string; data: ActivityDayDto | null; error: string } | null>(null);
+  const cur = useDashboardQuery<ActivityDayDto>(`/dashboard/activity?date=${date}`);
   const [open, setOpen] = useState<number | null>(null);
-  useEffect(() => {
-    let active = true;
-    apiGet<ActivityDayDto>(`/dashboard/activity?date=${date}`).then(
-      (data) => active && setRes({ date, data, error: '' }),
-      (e) => active && setRes({ date, data: null, error: e instanceof Error ? e.message : 'Не удалось загрузить активность' }),
-    );
-    return () => {
-      active = false;
-    };
-  }, [date]);
-  const cur = res?.date === date ? res : null;
-  const d = cur?.data;
+  const d = cur.data;
   const max = Math.max(1, ...(d?.employees ?? []).flatMap((e) => e.hours.map(sum)));
   const hours = d ? Array.from({ length: d.toHour - d.fromHour }, (_, i) => d.fromHour + i) : [];
 
@@ -45,11 +35,11 @@ export function EmployeeActivity({ timezone, startDate }: { timezone: string; /*
       <div className="act-head">
         <p className="dash-attention-title muted">Активность сотрудников</p>
         <span className="act-date">
-          <button type="button" aria-label="Предыдущий день" onClick={() => setDate(shiftDate(date, -1))}>
+          <button type="button" aria-label="Предыдущий день" disabled={!!startDate && date <= startDate} onClick={() => setDate(shiftDate(date, -1))}>
             ‹
           </button>
-          <input type="date" aria-label="День" value={date} max={todayIn(timezone)} onChange={(e) => e.target.value && setDate(e.target.value)} />
-          <button type="button" aria-label="Следующий день" disabled={date >= todayIn(timezone)} onClick={() => setDate(shiftDate(date, 1))}>
+          <input type="date" aria-label="День" value={date} min={startDate} max={endDate ?? todayIn(timezone)} onChange={(e) => e.target.value && setDate(e.target.value)} />
+          <button type="button" aria-label="Следующий день" disabled={date >= (endDate ?? todayIn(timezone))} onClick={() => setDate(shiftDate(date, 1))}>
             ›
           </button>
         </span>
@@ -62,7 +52,7 @@ export function EmployeeActivity({ timezone, startDate }: { timezone: string; /*
           </span>
         ))}
       </p>
-      {!cur && <p className="muted">Загрузка…</p>}
+      {!d && !cur.error && <BlockLoading rows={2} />}
       {cur?.error && <p className="notice error">{cur.error}</p>}
       {d && !d.employees.length && <p className="muted">В группах нет сотрудников.</p>}
       {d && d.employees.length > 0 && (

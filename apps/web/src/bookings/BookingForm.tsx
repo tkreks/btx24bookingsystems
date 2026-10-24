@@ -1,3 +1,4 @@
+import { freshPoll } from '../fresh-poll.js';
 import { useEffect, useMemo, useState } from 'react';
 import {
   canUsePaymentMode,
@@ -31,7 +32,10 @@ import {
 import { apiGet, apiPost } from '../api.js';
 import { fmtDate, fmtDateTime, fmtMoney, fmtTime, plusMonths, shiftDate } from '../format.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
-import { ClientPicker } from './ClientPicker.js';
+import { ClientPicker, ContactName } from './ClientPicker.js';
+import { Avatar } from '../openlines/Avatar.js';
+import { openCrm } from '../b24.js';
+import { ColorLegend, type LegendItem } from '../ColorLegend.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
 import { ProductsEditor, productsTotal, type ProductRow } from './ProductsEditor.js';
 import { isPastStart, SlotPicker, useNow } from './SlotPicker.js';
@@ -87,8 +91,10 @@ type DealCard = {
   createdAt?: string | null;
   /** Бронь по сделке (текущая или будущая) — карточка красная: вторую бронь, скорее всего, не сюда. */
   booking?: { start: string; end: string; resources: string[] } | null;
-  /** 🔴 есть бронь, 🟠 брони нет, но поля брони заполнены, 🟢 пустая. */
+  /** 🔴 есть бронь, 🟡 брони нет, но поля брони заполнены, 🟢 пустая. */
   tone?: DealBookingTone;
+  /** Кто последним изменил сделку. */
+  modifiedBy?: CrmDealHit['modifiedBy'];
 };
 /** Сделок клиента на шаге сразу и сколько добавляет «Показать ещё» (по 2 в строке). */
 const DEALS_STEP = 4;
@@ -156,12 +162,14 @@ export function BookingForm({
   groups,
   timezone,
   context,
+  callPlacement = false,
   onDone,
   onClose,
 }: {
   groups: MyGroupDto[];
   timezone: string;
   context: BookingFormContext;
+  callPlacement?: boolean;
   /** Создано: бронь или сертификат; `payment` — сразу предложить счёт (у кого есть право). */
   onDone: (r: WizardResult) => void;
   onClose: () => void;
@@ -172,7 +180,7 @@ export function BookingForm({
   );
   const group = allowed.find((g) => g.id === groupId);
   // Тип сделки (группы с `dealKinds`): от него — шаги, оплата и обязательные поля.
-  const [kind, setKind] = useState<DealKind | null>(null);
+  const [kind, setKind] = useState<DealKind | null>('visit');
   const [step, setStep] = useState<Step>(() => wizardSteps(context, allowed.length)[0]);
   const modes = useMemo(() => PAYMENT_MODES.filter((m) => canUsePaymentMode(group?.permissions ?? [], m)), [group]);
   // Календарь мог остаться на прошедшем дне (страницу открыли до полуночи) — бронь начинаем с сегодня.
@@ -185,6 +193,21 @@ export function BookingForm({
   const [client, setClient] = useState<{ contactId: number | null; name: string | null }>({ contactId: context.contactId ?? null, name: context.clientName ?? null });
   const [dealList, setDealList] = useState<DealCard[]>(context.openDeals ?? []);
   const [searching, setSearching] = useState(false);
+  // Карточка клиента (имя «Имя Фамилия», фото) — из поиска или подгружается по контакту.
+  const [clientCard, setClientCard] = useState<CrmContactHit | null>(null);
+  useEffect(() => {
+    const id = client.contactId;
+    if (!id || clientCard?.id === id) return;
+    let active = true;
+    apiGet<CrmSearchDto>(`/crm/search?contactId=${id}`).then(
+      (r) => active && r.contacts[0] && setClientCard(r.contacts[0]),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [client.contactId, clientCard?.id]);
+  const card = client.contactId && clientCard?.id === client.contactId ? clientCard : null;
   const deals = [...dealList].sort(
     (a, b) => Number(b.id === context.dealId) - Number(a.id === context.dealId) || Number(!!a.closed) - Number(!!b.closed) || b.id - a.id,
   );
@@ -248,15 +271,15 @@ export function BookingForm({
     if (!groupId) return;
     let active = true;
     const [gid, dates] = dayKey.split('|');
-    Promise.all(dates.split(',').map((date) => apiGet<CalendarDay>(`/calendar?date=${date}&groupId=${encodeURIComponent(gid)}`))).then(
+    const stop = freshPoll(() => Promise.all(dates.split(',').map((date) => apiGet<CalendarDay>(`/calendar?date=${date}&groupId=${encodeURIComponent(gid)}`))).then(
       (list) => active && setDay({ key: dayKey, data: mergeDays(list) }),
       () => active && setDay({ key: dayKey, data: null }),
-    );
-    return () => {
-      active = false;
-    };
+    ));
+    return () => { active = false; stop(); };
   }, [groupId, dayKey]);
   const dayData = day?.key === dayKey ? day.data : null;
+  // Новые дни ещё грузятся — таймлайн показывает прежние под загрузчиком (проверки — только по свежим).
+  const dayLoading = day?.key !== dayKey;
   const list = dayData?.resources ?? null;
 
   // Поля сделки группы (флаг «С»); у существующей сделки — с её текущими значениями.
@@ -427,6 +450,7 @@ export function BookingForm({
 
   const values = fieldState.values;
   const submit = async () => {
+    if (busy) return;
     if (kindsOn && kind === 'certificate') return sellCertificate();
     const p = periodToUtc(period, timezone);
     if ('error' in p) return setError(p.error);
@@ -493,6 +517,7 @@ export function BookingForm({
 
   /** «Покупка сертификата»: сделка + сертификат, затем окно оплаты на весь номинал. */
   const sellCertificate = async () => {
+    if (busy) return;
     const nominal = Number(cert.nominal.replace(',', '.').replace(/\s/g, ''));
     if (deal.mode !== 'existing' && deal.mode !== 'new') return setError('Выберите сделку или новую сделку на первом шаге');
     if (!(nominal > 0)) return setError('Укажите сумму сертификата');
@@ -538,6 +563,7 @@ export function BookingForm({
   // Выбран клиент поиском — его сделки (последняя открытая — первой); нет открытых — новая сделка.
   const chooseContact = async (c: CrmContactHit) => {
     setClient({ contactId: c.id, name: c.name });
+    setClientCard(c);
     setSearching(false);
     setDealsShown(DEALS_STEP);
     try {
@@ -616,6 +642,7 @@ export function BookingForm({
             {d.booking.resources.length ? ` · ${d.booking.resources.join(', ')}` : ''}
           </span>
         )}
+        <DealModifier by={d.modifiedBy} />
       </span>
     </button>
   );
@@ -624,20 +651,31 @@ export function BookingForm({
     <section className="bk-section">
       {client.contactId || client.name || dealList.length ? (
         <>
-          <p className="bk-client">
-            Клиент: <b>{client.name ?? `#${client.contactId}`}</b>
-            {client.contactId && <span className="muted"> · контакт #{client.contactId}</span>}
-            <button type="button" className="bk-more" onClick={() => setSearching(!searching)}>
-              Другой клиент или сделка
+          <div className="bk-client">
+            {client.contactId ? (
+              <button type="button" className="bk-client-card" title="Открыть карточку клиента в Битрикс24" onClick={() => openCrm('contact', client.contactId!)}>
+                <Avatar src={card?.photo} name={card?.name ?? client.name ?? '?'} size={36} />
+                <ContactName name={card?.name ?? client.name ?? `Контакт #${client.contactId}`} id={client.contactId} />
+              </button>
+            ) : (
+              <span className="bk-client-card static">
+                <Avatar name={client.name ?? '?'} size={36} />
+                <b>{client.name}</b>
+              </span>
+            )}
+            <button type="button" className="bk-more" aria-expanded={searching} onClick={() => setSearching(!searching)}>
+              Изменить
             </button>
             {!context.contactId && (
               <button type="button" className="bk-more" onClick={resetClient}>
                 Сбросить
               </button>
             )}
-          </p>
+          </div>
           {searching && <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />}
-          <h4 className="bk-title">Сделки клиента</h4>
+          <h4 className="bk-title wz-deals-title">
+            Сделки клиента <ToneLegend />
+          </h4>
           <div className="bk-choices wz-deals" role="radiogroup" aria-label="Сделка">
             {visibleDeals.map((d) => dealCardButton(d, d.id === context.dealId ? ' · открыта сейчас' : d.closed ? ' · закрыта' : ''))}
             {!dealCards.length && <p className="cp-hint">У клиента нет открытых сделок — создайте новую.</p>}
@@ -651,7 +689,9 @@ export function BookingForm({
       ) : (
         <>
           <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />
-          <h4 className="bk-title">Последняя активность</h4>
+          <h4 className="bk-title wz-deals-title">
+            Последняя активность <ToneLegend />
+          </h4>
           {!recent.deals && <p className="cp-hint">Загрузка сделок…</p>}
           {recent.error && <p className="cp-hint error">{recent.error}</p>}
           {recent.deals && !recent.deals.length && !recent.error && <p className="cp-hint">Открытых сделок нет.</p>}
@@ -670,6 +710,7 @@ export function BookingForm({
                 <span className="wz-deal-main">
                   <b>{d.title}</b>
                   <span className="wz-deal-sub">{[d.contact?.name, d.opportunity ? fmtMoney(d.opportunity, d.currency) : null, `#${d.id}`].filter(Boolean).join(' · ')}</span>
+                  <DealModifier by={d.modifiedBy} />
                 </span>
                 {d.lastActivityAt && <span className="wz-ago">{agoText(d.lastActivityAt)}</span>}
               </button>
@@ -784,7 +825,7 @@ export function BookingForm({
   );
 
   const slotStep = group ? (
-    <SlotPicker group={group} timezone={timezone} period={period} onPeriod={setPeriod} days={dayData} resourceIds={resourceIds} onResources={setResourceIds} />
+    <SlotPicker compact={callPlacement} group={group} timezone={timezone} period={period} onPeriod={setPeriod} days={dayData ?? day?.data ?? null} loading={dayLoading} resourceIds={resourceIds} onResources={setResourceIds} />
   ) : null;
 
   const detailsStep = (
@@ -966,13 +1007,25 @@ export function BookingForm({
   );
 
   return (
-    <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
+    <div className={`sheet-backdrop${callPlacement ? ' call-booking-backdrop' : ''}`} onClick={() => !busy && onClose()}>
       <form
         className="sheet bk wz"
         role="dialog"
         aria-modal="true"
         aria-label="Новая бронь"
         onClick={(e) => e.stopPropagation()}
+        onInvalidCapture={(e) => {
+          const input = e.target;
+          if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement || input instanceof HTMLTextAreaElement)) return;
+          // Браузер не вызовет onSubmit для невалидного поля; показываем причину возле кнопки.
+          e.preventDefault();
+          if (e.currentTarget.querySelector('input:invalid, select:invalid, textarea:invalid') !== input) return;
+          const label = input.getAttribute('aria-label') || input.closest('label')?.querySelector('.df-label')?.textContent?.replace('*', '').trim() || input.closest('label')?.firstChild?.textContent?.trim() || 'Поле формы';
+          setError(`Проверьте поле «${label}»: ${input.validationMessage}`);
+          const body = input.closest('.bk-body');
+          if (body) body.scrollTo({ top: body.scrollTop + input.getBoundingClientRect().top - body.getBoundingClientRect().top - 12 });
+          input.focus({ preventScroll: true });
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           if (step === steps[steps.length - 1]) void submit();
@@ -1007,7 +1060,7 @@ export function BookingForm({
             ))}
           </ol>
         )}
-        <div className="bk-body">
+        <div className="bk-body" tabIndex={callPlacement ? 0 : undefined} aria-label={callPlacement ? 'Содержимое шага бронирования' : undefined}>
           {!allowed.length ? (
             <p className="notice error">Нет права создавать брони ни в одной группе.</p>
           ) : (
@@ -1018,7 +1071,7 @@ export function BookingForm({
               {step === 'certificate' && certificateStep}
               {step === 'slot' && slotStep}
               {step === 'details' && detailsStep}
-              {error && (
+              {error && !callPlacement && (
                 <p className="notice error" role="alert">
                   {error}
                 </p>
@@ -1038,17 +1091,19 @@ export function BookingForm({
               <button type="button" disabled={busy} onClick={onClose}>
                 Отмена
               </button>
-              {step !== 'slot' && (
-                <button type="submit" className="primary" disabled={busy}>
-                  {step !== steps[steps.length - 1] ? 'Далее' : busy ? 'Создаю…' : step === 'certificate' ? 'Оформить сертификат' : 'Создать бронь'}
+              {(step !== 'slot' || callPlacement) && (
+                <button type="submit" className="primary" disabled={busy || (step === 'slot' && resourceIds.length === 0)} title={step === 'slot' && resourceIds.length === 0 ? 'Выберите ресурс и время на таймлайне' : undefined}>
+                  {step !== steps[steps.length - 1] ? 'Далее' : busy ? 'Создаю…' : step === 'certificate' ? 'Оформить сертификат' : callPlacement && effectiveMode === 'prepayment' && deal.mode !== 'service' ? 'Далее: предоплата' : 'Создать бронь'}
                 </button>
               )}
-              {step === 'slot' && resourceIds.length > 0 && (
+              {step === 'slot' && resourceIds.length > 0 && !callPlacement && (
                 <button type="submit" className="primary">
                   Далее
                 </button>
               )}
             </span>
+            {callPlacement && busy && <p className="bk-submit-feedback muted" role="status">{kind === 'certificate' ? 'Оформляем сертификат…' : 'Создаём бронь в Битрикс24…'}</p>}
+            {callPlacement && error && <p className="bk-submit-feedback notice error" role="alert">{error}</p>}
           </footer>
         )}
         {askFields && (
@@ -1080,10 +1135,30 @@ const toCard = (d: CrmDealHit): DealCard => ({
   opportunity: d.opportunity,
   lastActivityAt: d.lastActivityAt,
   tone: d.tone,
+  modifiedBy: d.modifiedBy,
 });
 
 /** Цвет сделки: с сервера; без него — по брони сделки. */
 const toneOf = (d: DealCard): DealBookingTone => d.tone ?? (d.booking ? 'booked' : 'empty');
+/** Что значит цвет сделки — рядом с заголовком списка. */
+const TONE_LEGEND: LegendItem[] = [
+  { label: 'есть бронь', swatch: { borderColor: '#f04438', background: '#fef3f2' }, title: 'По сделке уже есть бронь' },
+  { label: 'нет брони, заполнена', swatch: { borderColor: '#eaaa08', background: '#fefbe8' }, title: 'Брони нет, но в сделке остались заполнены поля брони' },
+  { label: 'нет брони, пустая', swatch: { borderColor: '#47cd89', background: '#f6fef9' }, title: 'Пустая сделка — подходит для новой брони' },
+];
+const ToneLegend = () => <ColorLegend items={TONE_LEGEND} label="Цвета сделок" />;
+
+/** Кто последним изменил сделку: аватарка и имя сотрудника. */
+function DealModifier({ by }: { by?: CrmDealHit['modifiedBy'] }) {
+  if (!by) return null;
+  return (
+    <span className="wz-deal-modifier" title="Последним изменял сделку">
+      <Avatar src={by.photo} name={by.name} size={18} />
+      <span>{by.name}</span>
+    </span>
+  );
+}
+
 const DEAL_TONE_TITLES: Record<DealBookingTone, string> = {
   booked: 'По сделке уже есть бронь',
   filled: 'Брони нет, но в сделке остались заполнены поля брони',

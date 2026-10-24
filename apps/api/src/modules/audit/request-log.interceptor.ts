@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import { CallHandler, ExecutionContext, HttpException, Injectable, NestInterceptor } from '@nestjs/common';
 import { catchError, tap, throwError, type Observable } from 'rxjs';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { ActionLogService } from './action-log.service.js';
@@ -32,6 +32,20 @@ const LABELS: Record<string, string> = {
   'POST /api/openlines/templates': 'Создал шаблон сообщения',
   'PUT /api/openlines/templates/:id': 'Изменил шаблон сообщения',
   'DELETE /api/openlines/templates/:id': 'Удалил шаблон сообщения',
+  'POST /api/admin/messengers': 'Добавил мессенджер',
+  'POST /api/admin/messengers/:id/restart': 'Перезапустил мессенджер',
+  'POST /api/admin/messengers/:id/stop': 'Остановил мессенджер',
+  'DELETE /api/admin/messengers/:id': 'Удалил мессенджер (выход из аккаунта)',
+  'POST /api/admin/messengers/:id/vnc-ticket': 'Открыл экран мессенджера',
+  'PUT /api/admin/messengers/:id/line': 'Изменил привязку мессенджера к открытой линии',
+  'PUT /api/admin/messengers/:id/groups': 'Изменил группы мессенджера',
+  'POST /api/admin/messengers/:id/send': 'Отправил сообщение через мессенджер',
+  'POST /api/admin/messengers/:id/messages/:messageId/edit': 'Изменил сообщение в мессенджере',
+  'DELETE /api/admin/messengers/:id/messages/:messageId': 'Удалил сообщение в мессенджере',
+  'POST /api/admin/messengers/:id/import': 'Загрузил историю мессенджера',
+  'POST /api/messengers/:id/send': 'Отправил сообщение через мессенджер',
+  'POST /api/messengers/:id/messages/:messageId/edit': 'Изменил сообщение в мессенджере',
+  'DELETE /api/messengers/:id/messages/:messageId': 'Удалил сообщение в мессенджере',
 };
 
 /**
@@ -40,6 +54,8 @@ const LABELS: Record<string, string> = {
  */
 const SKIP = new Set([
   'POST /api/activity/enter',
+  'POST /api/activity/error',
+  'PUT /api/admin/groups-order',
   'POST /api/bookings',
   'POST /api/bookings/:bookingId/cancel',
   'PUT /api/deals/:dealId/fields',
@@ -89,10 +105,10 @@ export class RequestLogInterceptor implements NestInterceptor {
     const req = ctx.switchToHttp().getRequest<Req>();
     const user = req.b24;
     const route = `${req.method} ${req.route?.path ?? ''}`;
-    if (!user || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || SKIP.has(route)) return next.handle();
+    if (!user || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next.handle();
     const params = req.params ?? {};
     const label = (LABELS[route] ?? route).replace(/:(\w+)/g, (_, k: string) => params[k] ?? `:${k}`);
-    const write = (ok: boolean, error?: unknown) =>
+    const write = (ok: boolean, error?: unknown, messageIds?: number[]) =>
       void this.log.user(user, {
         action: 'request',
         summary: ok ? label : `${label} — не удалось`,
@@ -101,14 +117,22 @@ export class RequestLogInterceptor implements NestInterceptor {
           route,
           params,
           body: sanitize(req.body),
-          ...(ok ? {} : { error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300) }),
+          ...(messageIds ? { messageIds } : {}),
+          ...(ok ? {} : { error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300), ...(error instanceof HttpException ? { httpStatus: error.getStatus() } : {}) }),
         },
         via: String(req.headers['x-btx24-placement'] ?? '') || 'app',
       });
     return next.handle().pipe(
-      tap(() => write(true)),
+      tap((result: unknown) => {
+        if (SKIP.has(route)) return;
+        if (route === 'POST /api/openlines/chats/:chatId/send' && result && typeof result === 'object') {
+          const sent = result as { messageIds?: unknown; error?: { message?: string } | null };
+          const ids = Array.isArray(sent.messageIds) ? sent.messageIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0) : [];
+          write(!sent.error, sent.error ? new Error(sent.error.message ?? 'Не удалось отправить сообщение') : undefined, ids);
+        } else write(true);
+      }),
       catchError((e: unknown) => {
-        write(false, e);
+        if (!['POST /api/openlines/chats/:chatId/render', 'POST /api/openlines/templates/preview'].includes(route)) write(false, e);
         return throwError(() => e);
       }),
     );

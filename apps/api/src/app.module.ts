@@ -12,6 +12,7 @@ import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { CertificatesModule } from './modules/certificates/certificates.module.js';
 import { GroupsModule } from './modules/groups/groups.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { MessengersModule } from './modules/messengers/messengers.module.js';
 import { OpenlinesModule } from './modules/openlines/openlines.module.js';
 import { WorkdayModule } from './modules/workday/workday.module.js';
 
@@ -30,6 +31,7 @@ import { WorkdayModule } from './modules/workday/workday.module.js';
     CertificatesModule,
     GroupsModule,
     HealthModule,
+    MessengersModule,
     OpenlinesModule,
     WorkdayModule,
   ],

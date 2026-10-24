@@ -54,6 +54,10 @@ export const envSchema = z.object({
    */
   B24_RATE_PER_SEC: z.coerce.number().positive().default(2),
   B24_RATE_BURST: z.coerce.number().int().positive().default(30),
+  /** Сервис мессенджеров (ADR 0014) — внутренний адрес в сети стенда. */
+  MESSENGER_URL: z.string().url().default('http://messenger:3090'),
+  /** Общий секрет api ↔ messenger (заголовок x-messenger-token); пусто — защищает только сеть стенда. */
+  MESSENGER_TOKEN: optionalString(z.string().min(16)),
 });
 
 const withSandbox = envSchema.transform((e) => {

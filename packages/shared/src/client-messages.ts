@@ -10,9 +10,14 @@ export interface DiskFileRef {
   name: string;
 }
 
+/** Снимок вложения, загруженного с устройства или Диска в приложение. */
+export interface StoredClientFileRef { storedFileId: string; name: string }
+export type ClientFileRef = DiskFileRef | StoredClientFileRef;
+export const clientFileKey = (f: ClientFileRef): string => 'storedFileId' in f ? f.storedFileId : `disk:${f.id}`;
+
 export interface ClientMessageStep {
   text: string;
-  files: DiskFileRef[];
+  files: ClientFileRef[];
 }
 
 /**
@@ -138,3 +143,6 @@ export interface BizprocImportDto {
   templateName: string;
   rules: BookingTypeRule[];
 }
+
+/** Страница доступных сотруднику объектов Диска. */
+export interface DiskBrowseDto { items: DiskItemDto[]; nextOffset: number | null }

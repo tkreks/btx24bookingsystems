@@ -51,6 +51,7 @@ export function GroupForm({
   onBusy: (busy: boolean) => void;
 }) {
   const [draft, setDraft] = useState<GroupSettingsDto>(() => (group ? groupSettings(group) : newGroup()));
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const refs = useGroupReferences(draft.dealCategoryId);
@@ -65,6 +66,7 @@ export function GroupForm({
   };
   const save = async (e: FormEvent) => {
     e.preventDefault();
+    if (uploading) return;
     setBusy(true);
     onBusy(true);
     setError('');
@@ -124,7 +126,7 @@ export function GroupForm({
           {error}
         </div>
       )}
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || uploading}>
         <Section title="Основные настройки">
           <div className="settings-grid">
             <label className="wide">
@@ -223,6 +225,7 @@ export function GroupForm({
         </Section>
 
         <BookingTypesSection
+          onUploadingChange={(v) => { setUploading(v); onBusy(v); }}
           rules={options.bookingTypes ?? []}
           onChange={(bookingTypes) => updateOptions({ bookingTypes })}
           required={options.bookingTypeRequired === true}

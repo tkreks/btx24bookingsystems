@@ -1,3 +1,5 @@
+import { messageChannel } from '@btx24/shared';
+import { connectorLabel } from './format.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   todayIn,
@@ -17,6 +19,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api.js';
 import { ChatView } from './ChatView.js';
 import {
   avatarTone,
+  dayKey,
   CHAT_SORTS,
   chatsCount,
   initials,
@@ -27,19 +30,15 @@ import {
 } from './chat-list.js';
 import { Channel } from './Channel.js';
 import { AUTHOR_PREFIX, clipName, shortTime } from './format.js';
+import { MessengersButton } from '../messengers/MessengersButton.js';
 import { Icon } from './icons.js';
 
-const SCOPES: { key: ChatScope; label: string }[] = [
-  { key: 'mine', label: 'Мои' },
-  { key: 'department', label: 'Отдел' },
-  { key: 'all', label: 'Все доступные' },
-];
 const TABS: { key: ChatTab; label: string }[] = [
   { key: 'all', label: 'Все' },
   { key: 'waiting', label: 'Ждут ответа' },
-  { key: 'answered', label: 'Отвечены' },
+  { key: 'mine', label: 'Мои' },
 ];
-/** Список чатов обновляем раз в 30 секунд, пока страница открыта. */
+/** Список чатов обновляем раз в 15 секунд, пока страница открыта. */
 const POLL_MS = 15_000;
 /** Чаты открытых линий: сверху — с самыми новыми сообщениями. Клик — открыть диалог. */
 export function ChatsPage({
@@ -47,6 +46,7 @@ export function ChatsPage({
   canSend,
   initialChatId,
   initialWaiting = false,
+  period: initialPeriod,
   onClose,
   groups = [],
   onOpenDay,
@@ -55,6 +55,7 @@ export function ChatsPage({
   canSend: boolean;
   initialChatId?: number | null;
   initialWaiting?: boolean;
+  period?: { from: string; to: string };
   onClose: () => void;
   /** Группы пользователя — для формы брони. */
   groups?: MyGroupDto[];
@@ -62,23 +63,29 @@ export function ChatsPage({
   onOpenDay?: (date: string) => void;
 }) {
   // По умолчанию — все доступные чаты и все статусы (решение владельца).
-  const [scope, setScope] = useState<ChatScope>('all');
   const [tab, setTab] = useState<ChatTab>(initialWaiting ? 'waiting' : 'all');
+  const scope: ChatScope = tab === 'mine' ? 'mine' : 'all';
+  const [period, setPeriod] = useState(initialPeriod);
   const [sort, setSort] = useState<ChatSort>('recent');
   const [query, setQuery] = useState('');
+  const [channel, setChannel] = useState('');
   const [menu, setMenu] = useState(false);
   // Открытая папка (null — общий список, папки в нём строками).
   const [folderId, setFolderId] = useState<string | null>(null);
   const [folders, setFolders] = useState<ChatFolderDto[] | null>(null);
   const [foldersRev, setFoldersRev] = useState(0);
   const [cardMenu, setCardMenu] = useState<number | null>(null);
-  const listKey = folderId ? `folder:${folderId}` : `scope:${scope}`;
-  const listUrl = `/openlines/chats?scope=${scope}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
+  const periodQuery = period ? `&from=${period.from}&to=${period.to}` : '';
+  const listKey = `${folderId ?? ''}|${scope}|${tab}|${periodQuery}`;
+  const listUrl = `/openlines/chats?scope=${scope}&status=${tab === 'waiting' ? 'waiting' : 'all'}${periodQuery}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
   const [list, setList] = useState<{
     key: string;
     items: ChatSummary[];
     nextOffset: number | null;
     exactOrder: boolean;
+    counts?: ChatListDto['counts'];
+    userId?: number;
+    channels?: string[];
   } | null>(null);
   const [error, setError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
@@ -113,22 +120,25 @@ export function ChatsPage({
     };
   }, [query, fullPhone]);
 
+  const activeKey = useRef(listKey);
+  activeKey.current = listKey;
+  const listRef = useRef(list);
+  useEffect(() => { listRef.current = list; }, [list]);
   const refresh = useCallback(async () => {
     try {
       const page = await apiGet<ChatListDto>(listUrl);
-      setList((prev) => {
-        // Обновление первой страницы не теряет подгруженные «ещё».
-        if (prev?.key !== listKey) return { key: listKey, ...page };
-        const fresh = new Set(page.items.map((c) => c.chatId));
-        const tail = prev.items.filter((c) => !fresh.has(c.chatId));
-        return {
-          key: listKey,
-          // Порядок задаёт сервер (как в списке диалогов Битрикс24) — не пересортировываем.
-          items: [...page.items, ...tail],
-          nextOffset: prev.nextOffset ?? page.nextOffset,
-          exactOrder: page.exactOrder,
-        };
-      });
+      const wanted = listRef.current?.key === listKey ? listRef.current.items.length : page.items.length;
+      let items = [...page.items];
+      let nextOffset = page.nextOffset;
+      while (nextOffset !== null && items.length < wanted) {
+        const next = await apiGet<ChatListDto>(`${listUrl}&offset=${nextOffset}`);
+        const seen = new Set(items.map((c) => c.chatId));
+        items = [...items, ...next.items.filter((c) => !seen.has(c.chatId))];
+        if (next.nextOffset === nextOffset) break;
+        nextOffset = next.nextOffset;
+      }
+      if (activeKey.current !== listKey) return;
+      setList({ key: listKey, ...page, items, nextOffset });
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить чаты');
@@ -234,6 +244,8 @@ export function ChatsPage({
         items: [...list.items, ...page.items.filter((c) => !known.has(c.chatId))],
         nextOffset: page.nextOffset,
         exactOrder: page.exactOrder,
+        counts: page.counts,
+        userId: page.userId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить чаты');
@@ -244,15 +256,16 @@ export function ChatsPage({
 
   const current = list?.key === listKey ? list : null;
   const all = current?.items ?? [];
-  const waiting = all.filter((c) => c.waitingReply).length;
-  const counts: Record<ChatTab, number> = { all: all.length, waiting, answered: all.length - waiting };
+  const counts: Record<ChatTab, number> = current?.counts ?? { all: all.length, waiting: all.filter((c) => c.waitingReply).length, mine: all.filter((c) => c.responsibleId === current?.userId).length };
+  const waiting = counts.waiting;
   const hits = fullPhone && phoneHits?.q === query.trim() ? phoneHits : null;
   // По номеру: найденные по всему порталу + совпавшие среди загруженных (без повторов).
   // Найденные сервером уже совпали по номеру — их фильтруем только по вкладке.
   const local = visibleChats(all, tab, query, sort);
+  const searched = (hits?.items ?? []).filter((c) => (!channel || messageChannel(c.connector) === channel) && (tab !== 'mine' || c.responsibleId === current?.userId) && (!period || (c.lastMessage && dayKey(c.lastMessage.date, timezone) >= period.from && dayKey(c.lastMessage.date, timezone) <= period.to)));
   const items = fullPhone
     ? [
-        ...visibleChats(hits?.items ?? [], tab, '', sort),
+        ...visibleChats(searched, tab, '', sort),
         ...local.filter((c) => !hits?.items?.some((h) => h.chatId === c.chatId)),
       ]
     : local;
@@ -278,6 +291,7 @@ export function ChatsPage({
                 {current?.exactOrder === false ? 'Порядок приблизительный' : 'Сначала новые сообщения'}
               </p>
             </div>
+            <MessengersButton timezone={timezone} />
             <button className="cl-btn" aria-label="Обновить" title="Обновить" onClick={() => void refresh()}>
               <Icon name="refresh" />
             </button>
@@ -406,20 +420,7 @@ export function ChatsPage({
               </span>
               )}
             </div>
-          ) : (
-          <div className="cl-scope" role="group" aria-label="Чьи чаты">
-            {SCOPES.map((s) => (
-              <button
-                key={s.key}
-                className={scope === s.key ? 'active' : ''}
-                aria-pressed={scope === s.key}
-                onClick={() => setScope(s.key)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          )}
+          ) : null}
 
           <nav className="cl-tabs" aria-label="Фильтр по статусу">
             {TABS.map((t) => (
@@ -436,6 +437,11 @@ export function ChatsPage({
               </button>
             ))}
           </nav>
+          {period && <p className="cl-period muted">Последнее сообщение: {period.from} — {period.to} <button type="button" className="link" onClick={() => setPeriod(undefined)}>Все даты</button></p>}
+          <label className="cl-channel-filter">Канал сообщений <select aria-label="Канал сообщений" value={channel} onChange={e=>{setChannel(e.target.value);setOpenId(null);}}>
+            <option value="">Все каналы</option>
+            {[...new Set([...(current?.channels ?? []), ...(current?.items ?? []).map(c=>messageChannel(c.connector)), ...(channel ? [channel] : [])])].sort().map(code=><option key={code} value={code}>{connectorLabel(code)}</option>)}
+          </select></label>
           <div className="cl-list-caption">
             <span>{fullPhone ? (hits?.items ? 'Найдено по номеру' : 'Ищем по номеру…') : 'Переписки'}</span>
             <span>{current ? chatsCount(items.length) : ''}</span>
@@ -458,20 +464,18 @@ export function ChatsPage({
             <div className="cl-empty">
               <strong>{query || tab !== 'all' ? 'Чаты не найдены' : 'Чатов нет'}</strong>
               {(query || tab !== 'all') && <p>Попробуйте изменить запрос или фильтр</p>}
-              {scope !== 'all' && <p>Чаты коллег — во вкладке «Все доступные».</p>}
+              {scope !== 'all' && <p>Чаты коллег — во вкладке «Все».</p>}
             </div>
           )}
-          {!folderId && !query && tab === 'all' && !!folders?.length && (
+          {!folderId && !query && !period && tab === 'all' && !!folders?.length && (
             <div className="cl-folders" aria-label="Папки">
               {folders.map((f) => (
                 <button key={f.id} className={`cl-folder${f.kind === 'favorites' ? ' fav' : ''}`} onClick={() => setFolderId(f.id)}>
                   <span className="cl-folder-icon" title={f.kind === 'favorites' ? 'Избранное' : f.global ? (f.mine ? 'Глобальная папка (ваша)' : 'Глобальная папка коллеги') : 'Папка'}>
                     <span aria-hidden="true">{folderIcon(f)}</span>
-                    {f.unread > 0 && (
-                      <span className="cl-unread cl-badge" title="Непрочитанных во всех чатах папки">
+                                          <span className={`cl-unread cl-badge${f.unread ? '' : ' empty'}`} title={`Непрочитанных в папке: ${f.unread}`}>
                         {f.unread > 99 ? '99+' : f.unread}
                       </span>
-                    )}
                   </span>
                   <span className="cl-card-body">
                     <span className="cl-card-heading">
@@ -673,11 +677,9 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
       {/* Непрочитанные — в правом верхнем углу аватарки («Не требует ответа» обнуляет). */}
       <span className="cl-avatar-wrap">
         <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(name)}</span>
-        {c.unread > 0 && (
-          <span className="cl-unread cl-badge" title="Непрочитанных сообщений">
+                  <span className={`cl-unread cl-badge${c.unread ? '' : ' empty'}`} title={`Непрочитанных сообщений: ${c.unread}`}>
             {c.unread > 99 ? '99+' : c.unread}
           </span>
-        )}
       </span>
       <span className="cl-card-body">
         <span className="cl-card-heading">

@@ -1,3 +1,4 @@
+import { selectedPeriod } from '../../common/period.js';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { isIsoDate, zonedDayRange, type ResourceStopCheckDto, type ResourceStopDto } from '@btx24/shared';
 import { z } from 'zod';
@@ -44,12 +45,16 @@ export class ResourceStopsService {
   }
 
   /** Действующие и будущие стопы ресурсов групп сотрудника (блок дашборда), с названиями ресурсов. */
-  async upcoming(user: B24UserContext): Promise<(ResourceStopDto & { resourceName: string })[]> {
+  async upcoming(user: B24UserContext, query: { from?: unknown; to?: unknown } = {}): Promise<(ResourceStopDto & { resourceName: string })[]> {
     const a = await this.access.resolve(user);
     const ids = a.isAppAdmin ? null : [...new Set(a.groups.flatMap((g) => g.group.resourceIds))];
     if (ids && !ids.length) return [];
     const now = new Date();
-    const stops = await this.between(user.portal.id, now, new Date(now.getTime() + 366 * 86_400_000), ids, user.portal.timezone);
+    const period = selectedPeriod(query, user.portal.timezone);
+    const stops = period ? (await this.prisma.resourceStop.findMany({
+      where: { portalId: user.portal.id, startsAt: { lt: period.end }, endsAt: { gt: period.start }, OR: [{ liftedAt: null }, { liftedAt: { gt: period.start } }], ...(ids ? { resourceId: { in: ids } } : {}) }, orderBy: { startsAt: 'asc' },
+    })).filter((r) => !r.liftedAt || r.startsAt < r.liftedAt).map((r) => toDto({ ...r, endsAt: r.liftedAt && r.liftedAt < r.endsAt ? r.liftedAt : r.endsAt }, user.portal.timezone))
+      : await this.between(user.portal.id, now, new Date(now.getTime() + 366 * 86_400_000), ids, user.portal.timezone);
     const names = new Map(
       (await this.prisma.resource.findMany({ where: { portalId: user.portal.id, resourceId: { in: stops.map((s) => s.resourceId) } } })).map((r) => [r.resourceId, r.name]),
     );

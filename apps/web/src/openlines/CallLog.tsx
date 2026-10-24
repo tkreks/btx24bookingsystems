@@ -16,8 +16,8 @@ type Dir = 'all' | 'incoming' | 'outgoing';
 const duration = (s: number) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—');
 
 /** Журнал звонков дня: дата и время, кто звонил, куда, тип, статус (страница «Звонки», под плитками). */
-export function CallLog({ scope, timezone }: { scope: CallScope; timezone: string }) {
-  const [date, setDate] = useState(() => todayIn(timezone));
+export function CallLog({ scope, timezone, period }: { scope: CallScope; timezone: string; period?: { from: string; to: string } }) {
+  const [date, setDate] = useState(() => period?.from ?? todayIn(timezone));
   const [data, setData] = useState<CallLogDto | null>(null);
   const [error, setError] = useState('');
   const [dir, setDir] = useState<Dir>('all');
@@ -55,7 +55,7 @@ export function CallLog({ scope, timezone }: { scope: CallScope; timezone: strin
         </header>
         <div className="call-log-bar">
           <div className="date-nav">
-            <button aria-label="Предыдущий день" onClick={() => setDate(shiftDate(date, -1))}>
+            <button aria-label="Предыдущий день" disabled={!!period && date <= period.from} onClick={() => setDate(shiftDate(date, -1))}>
               ‹
             </button>
             <input type="date" aria-label="Дата" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} />

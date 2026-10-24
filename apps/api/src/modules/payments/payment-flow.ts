@@ -14,7 +14,6 @@ import type { PaymentRequest, Portal, Prisma } from '../../generated/prisma/clie
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { dealOfBindings } from '../bitrix24/portals/portal.service.js';
 import { PaidAmountService } from './paid-amount.service.js';
 import { ActionLogService } from '../audit/action-log.service.js';
 import { BookingJournalService, SYSTEM } from '../bookings/booking-journal.service.js';
@@ -312,26 +311,19 @@ export class PaymentFlow {
    * ответственного за сделку. Не вышло — предупреждение (ссылку можно отправить вручную).
    */
   private async sendToClient(ctx: FlowContext, req: SendTarget, deal: Deal | null, text: string, warnings: string[]): Promise<boolean> {
-    let chats: number[] = [];
-    try {
-      const r = await ctx.client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, ACTIVE_ONLY: 'N' });
-      chats = [...new Set((Array.isArray(r.result) ? r.result : []).map((c) => Number(c.CHAT_ID) || 0).filter((x) => x > 0))].sort((a, b) => b - a);
-    } catch (e) {
-      warnings.push(`Чат сделки не найден: ${msg(e)}`);
-      return false;
-    }
-    if (!chats.length) {
-      warnings.push('У сделки нет чата открытой линии — ссылку нужно отправить клиенту вручную');
+    const targets = await this.chatTargets(ctx, req.dealId, Number(deal?.CONTACT_ID) || null);
+    if (!targets.length) {
+      warnings.push('У сделки и её контакта нет доступного чата открытой линии — ссылку нужно отправить клиенту вручную');
       return false;
     }
     const senders = [...new Set([req.userId ?? 0, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
     let last = '';
     // Чат клиента со временем переходит к его новой сделке: такой (CHAT_NOT_IN_CRM) пропускаем,
     // берём самый новый чат, который сейчас привязан к этой сделке.
-    for (const chatId of chats) {
+    for (const { chatId, type, entityId } of targets) {
       for (const userId of senders) {
         try {
-          const r = await ctx.client.call<unknown>('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: req.dealId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
+          const r = await ctx.client.call<unknown>('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: type, CRM_ENTITY: entityId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
           await this.markSystem(ctx, chatId, userId, r.result, req.source);
           return true;
         } catch (e) {
@@ -342,10 +334,10 @@ export class PaymentFlow {
     }
     // Сессия чата закрыта — `imopenlines.crm.message.add` отвечает CHAT_NOT_IN_CRM. Пишем как
     // оператор (`im.message.add`) в чат, который сейчас привязан к этой сделке.
-    for (const chatId of chats) {
+    for (const { chatId, type, entityId } of targets) {
       try {
         const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
-        if (dealOfBindings(d.result?.entity_data_2) !== req.dealId) continue;
+        if (bindingEntity(d.result?.entity_data_2, type) !== entityId) continue;
         const r = await ctx.client.call<unknown>('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
         await this.markSystem(ctx, chatId, null, r.result, req.source);
         return true;
@@ -407,6 +399,12 @@ export class PaymentFlow {
           let name = f.name;
           let data: Buffer;
           if ('data' in f) data = f.data;
+          else if ('storedFileId' in f) {
+            const stored = await this.prisma.storedFile.findFirst({ where: { portalId: ctx.portal.id, id: f.storedFileId }, select: { name: true, data: true } });
+            if (!stored) throw new Error('Вложение подтверждения не найдено');
+            name = stored.name;
+            data = Buffer.from(stored.data);
+          }
           else {
             const file = (await ctx.client.call<{ DOWNLOAD_URL?: string; NAME?: string }>('disk.file.get', { id: f.id })).result;
             data = (await ctx.client.download(String(file?.DOWNLOAD_URL ?? ''))).data;
@@ -436,17 +434,40 @@ export class PaymentFlow {
     }
   }
 
-  /** Самый новый чат открытой линии, который сейчас привязан к сделке. */
+  /** Кандидаты сделки и её контакта; контакт проверяем по текущим привязкам диалога. */
+  private async chatTargets(ctx: FlowContext, dealId: number, contactId: number | null = null): Promise<{ chatId: number; type: 'deal' | 'contact'; entityId: number }[]> {
+    const targets: { chatId: number; type: 'deal' | 'contact'; entityId: number }[] = [];
+    const lookup = async (type: 'deal' | 'contact', entityId: number) => {
+      try {
+        const r = await ctx.client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: type, CRM_ENTITY: entityId, ACTIVE_ONLY: 'N' });
+        const ids = [...new Set((Array.isArray(r.result) ? r.result : []).map((c) => Number(c.CHAT_ID)).filter((n) => Number.isSafeInteger(n) && n > 0))].sort((a, b) => b - a);
+        for (const chatId of ids) {
+          if (type === 'contact') {
+            try {
+              const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
+              if (bindingEntity(d.result?.entity_data_2, 'contact') !== entityId) continue;
+            } catch { continue; }
+          }
+          targets.push({ chatId, type, entityId });
+        }
+      } catch { this.logger.warn(`deal ${dealId}: ${type} chat lookup unavailable`); }
+    };
+    await lookup('deal', dealId);
+    if (!contactId) {
+      const d = await ctx.client.call<{ CONTACT_ID?: string }>('crm.deal.get', { id: dealId }).catch(() => null);
+      contactId = Number(d?.result?.CONTACT_ID) || null;
+    }
+    if (contactId) await lookup('contact', contactId);
+    return targets;
+  }
+
+  /** Чат для файлов той же цепочки: сделка или её контакт, только с подтверждённой привязкой. */
   private async boundChat(ctx: FlowContext, dealId: number): Promise<number | null> {
-    try {
-      const r = await ctx.client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: dealId, ACTIVE_ONLY: 'N' });
-      const chats = (Array.isArray(r.result) ? r.result : []).map((c) => Number(c.CHAT_ID) || 0).filter((x) => x > 0).sort((a, b) => b - a);
-      for (const chatId of chats) {
+    for (const { chatId, type, entityId } of await this.chatTargets(ctx, dealId)) {
+      try {
         const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
-        if (dealOfBindings(d.result?.entity_data_2) === dealId) return chatId;
-      }
-    } catch (e) {
-      this.logger.warn(`deal ${dealId}: chat lookup failed: ${msg(e)}`);
+        if (bindingEntity(d.result?.entity_data_2, type) === entityId) return chatId;
+      } catch { /* Недоступный диалог — пробуем следующий. */ }
     }
     return null;
   }
@@ -533,4 +554,11 @@ export class PaymentFlow {
   private close(req: PaymentRequest, status: 'cancelled', error: string): Promise<PaymentRequest> {
     return this.prisma.paymentRequest.update({ where: { id: req.id }, data: { status, error, closedAt: new Date() } });
   }
+}
+
+function bindingEntity(bindings: string | undefined, type: 'deal' | 'contact'): number | null {
+  const parts = String(bindings ?? '').split('|');
+  const at = parts.indexOf(type.toUpperCase());
+  const id = at >= 0 ? Number(parts[at + 1]) : 0;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }

@@ -1,3 +1,4 @@
+import { freshPoll } from '../fresh-poll.js';
 import { useCallback, useEffect, useState } from 'react';
 import type { ClientBookingDto, ClientBookingsDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
@@ -43,17 +44,16 @@ export function ClientBookings({
   );
   useEffect(() => {
     let active = true;
-    apiGet<ClientBookingsDto>(`/openlines/chats/${chatId}/bookings`).then(
+    setData(null);
+    const stop = freshPoll(() => apiGet<ClientBookingsDto>(`/openlines/chats/${chatId}/bookings`).then(
       (d) => {
         if (!active) return;
         setData(d);
         setError('');
       },
       (e) => active && setError(e instanceof Error ? e.message : 'Брони клиента недоступны'),
-    );
-    return () => {
-      active = false;
-    };
+    ));
+    return () => { active = false; stop(); };
   }, [chatId, revision]);
 
   const next = data?.upcoming[0];

@@ -71,7 +71,7 @@ export function CallsModal({
           </button>
         </header>
         {kind === 'lost' && (
-          <p className="muted">Пропущенные входящие, после которых клиенту не перезвонили и он сам не дозвонился.</p>
+          <p className="muted">Пропущенные входящие без последующего успешного звонка или диалога с сотрудником в чате. Перезвон без ответа остаётся упущенным.</p>
         )}
         {error && (
           <div className="notice error" role="alert">

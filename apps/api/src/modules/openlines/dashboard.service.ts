@@ -29,11 +29,11 @@ import { DealStatusService, type DealStageRow } from '../bookings/deal-status.se
 import { happened, isCertificatePurchase, outcomeSelect, paidSum } from '../bookings/deal-outcome.js';
 import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
-import { callClients, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
+import { callClients, reachedInChat, type ChatReach, callDurationSec, callStatus, isMissed, type CallActivity, type CallClient } from './call-stats.js';
 import { ChatsService } from './chats.service.js';
+import { callClientLinks } from './call-client-links.js';
+import { CrmMirrorReader } from '../crm-mirror/crm-mirror.reader.js';
 
-/** Готовый ответ дашборда живёт столько — снимает нагрузку с лимита запросов портала. */
-const CACHE_MS = 30_000;
 const DAY_MS = 86_400_000;
 /** Звонков с начала периода по сейчас — больше не разбираем (за 92 дня у комплекса — сотни-тысячи). */
 const MAX_CALLS = 5000;
@@ -52,10 +52,37 @@ export class DashboardService {
     private readonly fieldMap?: DealFieldMapService,
     private readonly payments?: DealPaymentsService,
     private readonly statuses?: DealStatusService,
+    /** Копия CRM (ADR 0013): когда загружена — сделки, звонки, клиенты и сотрудники из неё, с проверкой прав. */
+    private readonly mirror?: CrmMirrorReader,
   ) {}
 
-  /** Готовый дашборд сотрудника на 30 секунд: переключение периода и возврат — без новых запросов к порталу. */
-  private readonly cache = new Map<string, { expiresAt: number; value: Promise<Partial<DashboardDto>> }>();
+  /** Сделки — из копии, если она загружена и в ней есть `fields`; иначе — портал, как раньше. */
+  private async mirrorDeals(user: B24UserContext, fields: string[] = []): Promise<CrmMirrorReader | null> {
+    return this.mirror && (await this.mirror.ready(user.portal.id, 'deal', fields)) ? this.mirror : null;
+  }
+
+  private async mirrorCalls(user: B24UserContext): Promise<CrmMirrorReader | null> {
+    return this.mirror && (await this.mirror.ready(user.portal.id, 'call')) ? this.mirror : null;
+  }
+
+  /** Ответы дашборда строятся из копии CRM (сделки и звонки загружены) — без кэша ответов. */
+  async fromMirror(user: B24UserContext): Promise<boolean> {
+    return !!(await this.mirrorDeals(user)) && !!(await this.mirrorCalls(user));
+  }
+
+  /** Статусы сделок: строки из копии или запрос к порталу (`forDeals`) — правами сотрудника. */
+  private async dealStatuses(user: B24UserContext, ids: number[]): Promise<Map<number, DealStatusDto>> {
+    if (!this.statuses) return new Map();
+    const fields = await this.statuses.selectFields(user.portal.id);
+    const mirror = await this.mirrorDeals(user, fields);
+    if (!mirror) return this.statuses.forDeals(user.portal.id, user.client, ids);
+    const { rows, missing } = await mirror.dealsByIds(user, ids);
+    const late = missing.length ? await this.statuses.forDeals(user.portal.id, user.client, missing) : new Map<number, DealStatusDto>();
+    return new Map([...(await this.statuses.fromRows(user.portal.id, rows as DealStageRow[])), ...late]);
+  }
+
+  /** Только объединение одновременных запросов. Завершённые ответы не храним. */
+  private readonly cache = new Map<string, Promise<Partial<DashboardDto>>>();
 
   /** `query.part` — только эта часть (см. `DashboardPart`); без него — весь дашборд. */
   async get(
@@ -66,14 +93,12 @@ export class DashboardService {
     resourceIds: number[] | null = null,
   ): Promise<Partial<DashboardDto>> {
     const key = JSON.stringify([user.portal.id, user.userId, query.from, query.to, query.callsScope, query.callsFunnel, query.part, openlines, funnelIds, resourceIds]);
-    const now = Date.now();
     const hit = this.cache.get(key);
-    if (hit && hit.expiresAt > now) return hit.value;
-    if (this.cache.size > 500) for (const [k, v] of this.cache) if (v.expiresAt <= now) this.cache.delete(k);
+    if (hit) return hit;
     const value = this.compute(user, query, openlines, funnelIds, resourceIds);
-    this.cache.set(key, { expiresAt: now + CACHE_MS, value });
-    // Ошибку не кэшируем — следующий запрос попробует снова.
-    value.catch(() => this.cache.delete(key));
+    this.cache.set(key, value);
+    // Успех и ошибка освобождают ключ: следующий запрос всегда свежий.
+    void value.then(() => this.cache.delete(key), () => this.cache.delete(key));
     return value;
   }
 
@@ -102,7 +127,7 @@ export class DashboardService {
     );
     const [bookings, bookingDays, calls, callsTotal, newDeals, callFunnels, attention, paidDeals] = await Promise.all([
       want('base') ? this.bookings(user, start, end, callsScope, resourceIds) : undefined,
-      want('base') ? this.bookingDays(user, resourceIds) : undefined,
+      want('base') ? this.bookingDays(user, resourceIds, from, to) : undefined,
       want('calls') ? callRows.then((rows) => (rows ? this.callCounts(user, rows, start, end, callsScope, callsFunnel) : null)) : undefined,
       want('calls')
         ? callRows.then((rows) =>
@@ -112,7 +137,7 @@ export class DashboardService {
       want('deals') ? this.newDeals(user, start, end, callsScope, funnelIds) : undefined,
       this.funnelNames(user, funnelIds),
       // Чаты — из кэша (без запросов к порталу).
-      want('base') && openlines ? this.chats.attention(user) : null,
+      want('base') && openlines ? this.chats.attention(user, 50) : null,
       want('deals') ? this.paidDeals(user, start, end, callsScope, funnelIds) : undefined,
     ]);
     const out: Partial<DashboardDto> = { from, to, callsScope, callsFunnel, callFunnels };
@@ -123,32 +148,36 @@ export class DashboardService {
   }
 
   /**
-   * «Сделки к закрытию»: брони ресурсов групп сотрудника, закончившиеся за последние 60 дней, чья сделка в
+   * «Сделки к закрытию»: брони ресурсов групп сотрудника, закончившиеся за всё доступное время, чья сделка в
    * канбане ещё в работе, а новой брони нет (`needsClose`). Сделки — правами сотрудника.
    */
-  async needsClose(user: B24UserContext, resourceIds: number[] | null): Promise<NeedsCloseDto> {
-    if (!this.statuses) return { items: [] };
+  async needsClose(user: B24UserContext, resourceIds: number[] | null, scope: unknown = 'mine', _query: { from?: unknown; to?: unknown } = {}): Promise<NeedsCloseDto> {
+    if (scope !== 'mine' && scope !== 'all') throw new BadRequestException('Допустимы mine и all');
+    const empty = { items: [], counts: { mine: 0, all: 0 } };
+    if (!this.statuses) return empty;
     const now = new Date();
-    const ended = await this.journal.activeListBetween(user.portal.id, new Date(now.getTime() - 60 * DAY_MS), now, resourceIds);
-    const past = ended.filter((r) => r.dealId && r.endsAt <= now);
-    const ids = [...new Set(past.map((r) => r.dealId!))].slice(0, 200);
-    if (!ids.length) return { items: [] };
-    const [statuses, deals] = await Promise.all([this.statuses.forDeals(user.portal.id, user.client, ids), this.deals(user, ids)]);
+    // Это текущая очередь работы: даты дашборда и прежний предел 60 дней её не ограничивают.
+    const ended = await this.journal.endedForClosing(user.portal.id, now, resourceIds);
+    const ids = [...new Set(ended.filter((r) => r.dealId && r.endsAt <= now).map((r) => r.dealId!))];
+    if (!ids.length) return empty;
+    const deals = await this.deals(user, ids);
+    const visible = ids.filter((id) => deals.has(id));
+    const statuses = await this.dealStatuses(user, visible);
+    const all = visible.filter((id) => statuses.get(id)?.needsClose);
+    const mine = all.filter((id) => deals.get(id)?.responsibleId === user.userId);
     return {
-      items: ids
-        .filter((id) => statuses.get(id)?.needsClose && deals.has(id))
-        .map((id) => {
-          const d = deals.get(id)!;
-          return { dealId: id, title: d.title || `Сделка #${id}`, client: d.client, opportunity: d.opportunity, currency: d.currency, bookingEnd: statuses.get(id)!.bookingEnd ?? '' };
-        })
-        .sort((a, b) => b.bookingEnd.localeCompare(a.bookingEnd)),
+      counts: { mine: mine.length, all: all.length },
+      items: (scope === 'mine' ? mine : all).map((id) => {
+        const d = deals.get(id)!;
+        return { dealId: id, title: d.title || `Сделка #${id}`, client: d.client, opportunity: d.opportunity, currency: d.currency, bookingEnd: statuses.get(id)!.bookingEnd ?? '' };
+      }).sort((a, b) => b.bookingEnd.localeCompare(a.bookingEnd)),
     };
   }
 
   /** Активные брони на сегодня и на завтра (дни портала) — по ресурсам групп пользователя. */
-  private async bookingDays(user: B24UserContext, resourceIds: number[] | null): Promise<DashboardDto['bookingDays']> {
+  private async bookingDays(user: B24UserContext, resourceIds: number[] | null, from = todayIn(user.portal.timezone), to = from): Promise<DashboardDto['bookingDays']> {
     const tz = user.portal.timezone;
-    const today = zonedDayRange(todayIn(tz), tz);
+    const today = { start: zonedDayRange(from, tz).start, end: zonedDayRange(to, tz).end };
     // Завтра — следующий день портала (а не +24 часа: переход на летнее время).
     const tomorrow = zonedDayRange(todayIn(tz, today.end), tz);
     const [a, b] = await Promise.all([
@@ -159,7 +188,7 @@ export class DashboardService {
     const rows = await this.toRows(user, [...a, ...b], pending);
     // В счётчиках — только брони, которые есть в Битрикс24; пропавшие видны в списках с пометкой.
     const live = (list: BookingRecord[]) => list.filter((r) => !pending.has(r.bookingId)).length;
-    return { today: live(a), tomorrow: live(b), todayItems: rows.slice(0, a.length), tomorrowItems: rows.slice(a.length) };
+    return { from, to, nextDate: todayIn(tz, today.end), today: live(a), tomorrow: live(b), todayItems: rows.slice(0, a.length), tomorrowItems: rows.slice(a.length) };
   }
 
   /** Клиенты выбранного вида звонков за период — для окна со сделками. */
@@ -173,7 +202,7 @@ export class DashboardService {
     if (!CALL_KINDS.includes(kind))
       throw new BadRequestException({ code: 'INVALID_KIND', message: 'kind: incoming, new, repeat, answered, missed или lost' });
     const { rows, truncated } = await this.fetchCalls(user, start);
-    const clients = callClients(rows, start, end, parseScope(query.scope) === 'mine' ? user.userId : null);
+    const clients = await this.clientsWithReach(user, rows, start, end, parseScope(query.scope) === 'mine' ? user.userId : null);
     const repeat = await this.repeatClients(user, clients, pickFunnel(query.funnel, funnelIds));
     const chosen = clients.filter((c) => matches(c, kind, repeat));
     // Звонок для строки: для пропущенных/упущенных — последний пропущенный, для отвеченных — отвеченный.
@@ -233,10 +262,13 @@ export class DashboardService {
    * показывает по 5; с `from`/`to` — только звонки периода. Правами сотрудника: только звонки,
    * которые он видит в CRM.
    */
-  async recentCalls(user: B24UserContext, query: { scope?: unknown; from?: unknown; to?: unknown }): Promise<RecentCallsDto> {
+  async recentCalls(user: B24UserContext, query: { scope?: unknown; from?: unknown; to?: unknown }, canReadChats = false): Promise<RecentCallsDto> {
     const scope = parseScope(query.scope);
     const period = query.from === undefined ? null : parsePeriod(user.portal.timezone, query);
-    const res = await user.client.call<CallActivity[]>('crm.activity.list', {
+    const mirror = await this.mirrorCalls(user);
+    const res = mirror
+      ? { result: (await mirror.calls(user, { from: period?.start, to: period?.end, responsibleId: scope === 'mine' ? user.userId : undefined, desc: true }, 50)).rows as unknown as CallActivity[] }
+      : await user.client.call<CallActivity[]>('crm.activity.list', {
       filter: {
         TYPE_ID: 2,
         PROVIDER_ID: 'VOXIMPLANT_CALL',
@@ -246,20 +278,66 @@ export class DashboardService {
       order: { START_TIME: 'DESC' },
       select: ['ID', 'OWNER_ID', 'OWNER_TYPE_ID', 'DIRECTION', 'START_TIME', 'END_TIME', 'RESPONSIBLE_ID', 'SETTINGS', 'COMMUNICATIONS'],
     });
-    return { scope, ...(period ? { from: period.from, to: period.to } : {}), items: await this.logRows(user, res.result ?? []) };
+    const rows = [...(res.result ?? [])].sort((a, b) => Date.parse(b.START_TIME) - Date.parse(a.START_TIME) || Number(b.ID) - Number(a.ID));
+    const [items, lost] = await Promise.all([this.logRows(user, rows), this.lostCallIds(user, rows)]);
+    const linked = await callClientLinks(user, this.chats, items, canReadChats);
+    return { scope, ...(period ? { from: period.from, to: period.to } : {}), items: linked.map((c) => ({ ...c, lost: lost.has(c.activityId) })) };
+  }
+
+  /** Единое доказательство общения для строк звонков и обоих дашбордов. */
+  async chatReach(user: B24UserContext, since: Date, calls: CallActivity[]): Promise<ChatReach[]> {
+    const clients = callClients(calls, since, new Date(Date.now() + 1), null).filter((c) => c.lost);
+    return clients.length ? (this.chats.reachedSince?.(user, since, clients) ?? []) : [];
+  }
+
+  private async clientsWithReach(user: B24UserContext, rows: CallActivity[], start: Date, end: Date, responsible: number | null): Promise<CallClient[]> {
+    const clients = callClients(rows, start, end, responsible);
+    const reach = await this.chatReach(user, start, rows);
+    return clients.map((c) => ({ ...c, lost: c.lost && !reachedInChat(c, reach) }));
+  }
+
+  /** Как на показателе «Упущенные»: учитываем перезвон и после выбранного периода. */
+  private async lostCallIds(user: B24UserContext, rows: CallActivity[]): Promise<Set<number>> {
+    const missed = rows.filter((c) => String(c.DIRECTION) === '1' && isMissed(c));
+    if (!missed.length) return new Set();
+    const start = new Date(Math.min(...missed.map((c) => Date.parse(c.START_TIME))));
+    const end = new Date(Date.now() + 1);
+    try {
+      const all = await this.fetchCalls(user, start);
+      if (all.truncated) return new Set(); // Нельзя доказать отсутствие перезвона по неполной выборке.
+      return new Set((await this.clientsWithReach(user, all.rows, start, end, null)).filter((c) => c.lost).map((c) => Number(c.incoming.find(isMissed)!.ID)));
+    } catch { return new Set(); }
+  }
+
+  /** Статистика дополняет только уже доступные сотруднику дела CRM; без telephony номер пуст. */
+  private async callLines(user: B24UserContext, calls: CallActivity[]): Promise<Map<number, { phone: string | null; userId: number | null }>> {
+    const ids = [...new Set(calls.map((c) => Number(c.ID)).filter((id) => id > 0))].slice(0, 200);
+    if (!ids.length) return new Map();
+    const mirror = await this.mirrorCalls(user);
+    if (mirror) return mirror.callLines(user.portal.id, ids);
+    try {
+      const rows = await user.client.listAll<{ CRM_ACTIVITY_ID?: string; PORTAL_NUMBER?: string; PORTAL_USER_ID?: string }>('voximplant.statistic.get', { FILTER: { CRM_ACTIVITY_ID: ids }, SORT: 'ID', ORDER: 'DESC' }, { max: 200 });
+      const out = new Map<number, { phone: string | null; userId: number | null }>();
+      for (const r of rows) {
+        const id = Number(r.CRM_ACTIVITY_ID);
+        if (!ids.includes(id) || out.has(id)) continue;
+        const phone = String(r.PORTAL_NUMBER ?? '').trim();
+        out.set(id, { phone: /^\+?[\d ()-]{6,30}$/.test(phone) && phone.replace(/\D/g, '').length >= 6 ? phone : null, userId: Number(r.PORTAL_USER_ID) > 0 ? Number(r.PORTAL_USER_ID) : null });
+      }
+      return out;
+    } catch { return new Map(); }
   }
 
   private async logRows(user: B24UserContext, mine: CallActivity[]): Promise<CallLogRowDto[]> {
     const contactIds = mine.map((c) => Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0).filter((x) => x > 0);
-    const [titles, contacts, employees, statuses] = await Promise.all([
-      this.ownerTitles(user, mine),
-      this.contactNames(user, contactIds),
-      this.employees(user, mine.map((c) => Number(c.RESPONSIBLE_ID) || 0)),
-      this.callDealStatuses(user, mine),
+    const contactPhotos = new Map<number, string>();
+    const [titles, contacts, lines, statuses] = await Promise.all([
+      this.ownerTitles(user, mine), this.contactNames(user, contactIds, contactPhotos), this.callLines(user, mine), this.callDealStatuses(user, mine),
     ]);
+    const employees = await this.employees(user, mine.map((c) => lines.get(Number(c.ID))?.userId || Number(c.RESPONSIBLE_ID) || 0));
     return mine.map((c) => {
         const contactId = Number(c.COMMUNICATIONS?.find((x) => Number(x.ENTITY_TYPE_ID) === 3)?.ENTITY_ID) || 0;
-        const emp = Number(c.RESPONSIBLE_ID) || 0;
+        const emp = lines.get(Number(c.ID))?.userId || Number(c.RESPONSIBLE_ID) || 0;
         return {
           activityId: Number(c.ID),
           at: new Date(c.START_TIME).toISOString(),
@@ -267,8 +345,9 @@ export class DashboardService {
           direction: String(c.DIRECTION) === '1' ? 'incoming' : 'outgoing',
           status: callStatus(c),
           clientPhone: c.COMMUNICATIONS?.find((x) => x.VALUE)?.VALUE ?? null,
+          portalPhone: lines.get(Number(c.ID))?.phone ?? null,
           employee: emp ? { id: emp, name: employees.get(emp)?.name ?? null, photo: employees.get(emp)?.photo ?? null } : null,
-          contact: contactId ? { id: contactId, name: contacts.get(contactId) ?? null } : null,
+          contact: contactId ? { id: contactId, name: contacts.get(contactId) ?? null, photo: contactPhotos.get(contactId) ?? null } : null,
           owner: { typeId: Number(c.OWNER_TYPE_ID), id: Number(c.OWNER_ID), title: titles.get(`${c.OWNER_TYPE_ID}:${c.OWNER_ID}`) ?? null },
           dealStatus: Number(c.OWNER_TYPE_ID) === 2 ? (statuses.get(Number(c.OWNER_ID)) ?? null) : null,
         };
@@ -279,7 +358,7 @@ export class DashboardService {
   private async callDealStatuses(user: B24UserContext, calls: CallActivity[]): Promise<Map<number, DealStatusDto>> {
     if (!this.statuses) return new Map();
     const ids = calls.filter((c) => Number(c.OWNER_TYPE_ID) === 2).map((c) => Number(c.OWNER_ID));
-    return this.statuses.forDeals(user.portal.id, user.client, ids).catch(() => new Map<number, DealStatusDto>());
+    return this.dealStatuses(user, ids).catch(() => new Map<number, DealStatusDto>());
   }
 
   private async employeeNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
@@ -289,8 +368,14 @@ export class DashboardService {
   /** Имена и аватарки сотрудников (user.get). */
   private async employees(user: B24UserContext, ids: number[]): Promise<Map<number, { name: string; photo: string | null }>> {
     const out = new Map<number, { name: string; photo: string | null }>();
-    const unique = [...new Set(ids.filter((x) => x > 0))].slice(0, 200);
+    let unique = [...new Set(ids.filter((x) => x > 0))].slice(0, 200);
     if (!unique.length) return out;
+    if (this.mirror && (await this.mirror.hasEmployees(user.portal.id))) {
+      for (const [id, e] of await this.mirror.employees(user.portal.id, unique)) out.set(id, e);
+      // Новых (ещё не в копии) — у портала.
+      unique = unique.filter((id) => !out.has(id));
+      if (!unique.length) return out;
+    }
     try {
       const rows = await user.client.listAll<{ ID: string; NAME?: string; LAST_NAME?: string; PERSONAL_PHOTO?: string | null }>('user.get', { FILTER: { ID: unique } });
       for (const r of rows)
@@ -311,7 +396,7 @@ export class DashboardService {
     funnel: number | null,
   ): Promise<DashboardDto['calls']> {
     try {
-      const clients = callClients(rows, start, end, scope === 'mine' ? user.userId : null);
+      const clients = await this.clientsWithReach(user, rows, start, end, scope === 'mine' ? user.userId : null);
       const repeat = await this.repeatClients(user, clients, funnel);
       return Object.fromEntries(CALL_KINDS.map((k) => [k, clients.filter((c) => matches(c, k, repeat)).length])) as Record<
         CallKind,
@@ -340,37 +425,35 @@ export class DashboardService {
     type Row = Record<string, string | null>;
     const outcome = (await this.fieldMap?.outcome(user.portal.id, user.client).catch(() => null)) ?? { certificateTypeId: null };
     try {
-      const rows = await user.client.listAll<Row>(
-        'crm.deal.list',
-        {
-          filter: {
-            ...(ids ? { '@ID': ids } : { '>=DATE_CREATE': start.toISOString(), '<DATE_CREATE': end.toISOString() }),
-            ...(funnelIds.length ? { '@CATEGORY_ID': funnelIds } : {}),
-            ...(scope === 'mine' ? { ASSIGNED_BY_ID: user.userId } : {}),
-          },
-          order: { DATE_CREATE: 'DESC' },
-          select: [
-            'ID',
-            'TITLE',
-            'CATEGORY_ID',
-            'CONTACT_ID',
-            'DATE_CREATE',
-            'OPPORTUNITY',
-            'CURRENCY_ID',
-            'SOURCE_ID',
-            ...new Set([
-              ...outcomeSelect(outcome),
-              ...(outcome.paidAmount ? [outcome.paidAmount] : []),
-              ...((await this.statuses?.selectFields(user.portal.id)) ?? []),
-            ]),
-          ],
-        },
-        { max: MAX_NEW_DEALS },
-      );
+      const extra = [
+        ...new Set([...outcomeSelect(outcome), ...(outcome.paidAmount ? [outcome.paidAmount] : []), ...((await this.statuses?.selectFields(user.portal.id)) ?? [])]),
+      ];
+      const mirror = await this.mirrorDeals(user, extra);
+      const rows = mirror
+        ? ((await mirror.deals(
+            user,
+            { ...(ids ? { ids } : { createdFrom: start, createdTo: end }), categoryIds: funnelIds, ...(scope === 'mine' ? { assignedById: user.userId } : {}) },
+            MAX_NEW_DEALS,
+          )) as Row[])
+        : await user.client.listAll<Row>(
+            'crm.deal.list',
+            {
+              filter: {
+                ...(ids ? { '@ID': ids } : { '>=DATE_CREATE': start.toISOString(), '<DATE_CREATE': end.toISOString() }),
+                ...(funnelIds.length ? { '@CATEGORY_ID': funnelIds } : {}),
+                ...(scope === 'mine' ? { ASSIGNED_BY_ID: user.userId } : {}),
+              },
+              order: { DATE_CREATE: 'DESC' },
+              select: ['ID', 'TITLE', 'CATEGORY_ID', 'CONTACT_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID', 'SOURCE_ID', ...extra],
+            },
+            { max: MAX_NEW_DEALS },
+          );
       const contactIds = [...new Set(rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0))];
       // Сделки клиентов — пачками параллельно (темп держит ограничитель портала), имена — заодно.
       const [earlierChunks, names, bookingState, sources, slots, statuses] = await Promise.all([
-        Promise.all(
+        mirror
+          ? mirror.deals(user, { contactIds, notLost: true, createdTo: end }).then((r) => [r as Row[]])
+          : Promise.all(
           chunks(contactIds, CONTACT_CHUNK).map((ids) =>
             user.client.listAll<Row>(
               'crm.deal.list',
@@ -477,7 +560,10 @@ export class DashboardService {
     if (funnel === null || !contactIds.length) return out;
     const outcome = (await this.fieldMap?.outcome(user.portal.id, user.client)) ?? { certificateTypeId: null };
     type Row = { CONTACT_ID: string | null; CLOSEDATE: string | null; STAGE_SEMANTIC_ID: string | null } & Record<string, string | null>;
-    const deals = (
+    const mirror = await this.mirrorDeals(user, outcomeSelect(outcome));
+    const deals = mirror
+      ? ((await mirror.deals(user, { contactIds, categoryIds: [funnel], notLost: true })) as Row[])
+      : (
       await Promise.all(
         chunks(contactIds, CONTACT_CHUNK).map((ids) =>
           user.client.listAll<Row>(
@@ -530,20 +616,41 @@ export class DashboardService {
     return names;
   }
 
-  private async contactNames(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
+  private async contactNames(user: B24UserContext, ids: number[], photos?: Map<number, string>): Promise<Map<number, string>> {
     const out = new Map<number, string>();
-    const unique = [...new Set(ids)].slice(0, 200);
+    let unique = [...new Set(ids)].slice(0, 200);
     if (!unique.length) return out;
-    const rows = await user.client.listAll<{ ID: string; NAME?: string | null; LAST_NAME?: string | null }>('crm.contact.list', {
+    const mirror = await this.mirrorDeals(user);
+    if (mirror) {
+      const { found, missing } = await mirror.contacts(user, unique);
+      for (const [id, c] of found) {
+        out.set(id, c.name);
+        if (c.photo) photos?.set(id, c.photo);
+      }
+      // Каких в копии ещё нет (созданы только что) — у портала.
+      unique = missing;
+      if (!unique.length) return out;
+    }
+    const rows = await user.client.listAll<{ ID: string; NAME?: string | null; LAST_NAME?: string | null; PHOTO?: unknown }>('crm.contact.list', {
       filter: { '@ID': unique },
-      select: ['ID', 'NAME', 'LAST_NAME'],
+      select: ['ID', 'NAME', 'LAST_NAME', ...(photos ? ['PHOTO'] : [])],
     });
-    for (const r of rows) out.set(Number(r.ID), [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `Контакт #${r.ID}`);
+    for (const r of rows) {
+      out.set(Number(r.ID), [r.NAME, r.LAST_NAME].filter(Boolean).join(' ') || `Контакт #${r.ID}`);
+      const file = r.PHOTO && typeof r.PHOTO === 'object' ? r.PHOTO as Record<string, unknown> : null;
+      const url = photoUrl(file?.showUrl ?? file?.url ?? r.PHOTO, user.portal.domain);
+      if (url) photos?.set(Number(r.ID), url);
+    }
     return out;
   }
 
   /** Звонки телефонии с начала периода по сейчас — токеном пользователя (его права в CRM). */
   async fetchCalls(user: B24UserContext, start: Date, end?: Date): Promise<{ rows: CallActivity[]; truncated: boolean }> {
+    const mirror = await this.mirrorCalls(user);
+    if (mirror) {
+      const r = await mirror.calls(user, { from: start, to: end }, MAX_CALLS);
+      return { rows: r.rows as unknown as CallActivity[], truncated: r.truncated };
+    }
     const rows = await user.client.listAll<CallActivity>(
       'crm.activity.list',
       {
@@ -563,6 +670,8 @@ export class DashboardService {
   /** Названия сделок, лидов, контактов и компаний звонков — одним пакетом, правами пользователя. */
   private async ownerTitles(user: B24UserContext, calls: CallActivity[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
+    const mirror = await this.mirrorCalls(user);
+    if (mirror) return mirror.titles(user, calls.map((c) => ({ typeId: Number(c.OWNER_TYPE_ID), id: Number(c.OWNER_ID) })));
     const ids = (type: number) => [...new Set(calls.filter((c) => Number(c.OWNER_TYPE_ID) === type).map((c) => Number(c.OWNER_ID)))];
     const spec: [number, string, string[]][] = [
       [2, 'crm.deal.list', ['ID', 'TITLE']],
@@ -630,13 +739,25 @@ export class DashboardService {
   }
 
   /** Сделки, видимые пользователю в CRM; недоступные в ответ не попадают. */
-  private async deals(user: B24UserContext, ids: number[]): Promise<Map<number, DealInfo>> {
-    const out = new Map<number, DealInfo>();
+  private async deals(user: B24UserContext, ids: number[], responsibleId?: number): Promise<Map<number, DealInfo & { responsibleId: number | null }>> {
+    const out = new Map<number, DealInfo & { responsibleId: number | null }>();
     if (!ids.length) return out;
-    const rows = await user.client.listAll<Record<string, string | null>>('crm.deal.list', {
-      filter: { '@ID': ids },
-      select: ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', ...((await this.statuses?.selectFields(user.portal.id)) ?? [])],
-    });
+    const statusFields = (await this.statuses?.selectFields(user.portal.id)) ?? [];
+    const live = (list: number[]) =>
+      user.client.listAll<Record<string, string | null>>('crm.deal.list', {
+        filter: { '@ID': list, ...(responsibleId === undefined ? {} : { ASSIGNED_BY_ID: responsibleId }) },
+        select: ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', 'ASSIGNED_BY_ID', ...statusFields],
+      });
+    const mirror = await this.mirrorDeals(user, statusFields);
+    let rows: Record<string, string | null>[];
+    if (mirror) {
+      // Из копии — видимые сотруднику; только что созданных в копии ещё нет — их у портала.
+      const got = await mirror.dealsByIds(user, ids);
+      rows = [
+        ...(got.rows as Record<string, string | null>[]).filter((d) => responsibleId === undefined || Number(d.ASSIGNED_BY_ID) === responsibleId),
+        ...(got.missing.length ? await live(got.missing) : []),
+      ];
+    } else rows = await live(ids);
     const [names, statuses] = await Promise.all([
       this.contactNames(user, rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0)).catch(() => new Map<number, string>()),
       this.statuses?.fromRows(user.portal.id, rows as DealStageRow[]) ?? new Map<number, DealStatusDto>(),
@@ -644,6 +765,7 @@ export class DashboardService {
     for (const d of rows)
       out.set(Number(d.ID), {
         title: d.TITLE ?? '',
+        responsibleId: Number(d.ASSIGNED_BY_ID) || null,
         opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
         currency: d.CURRENCY_ID ?? null,
         client: names.get(Number(d.CONTACT_ID)) ?? null,
@@ -653,6 +775,8 @@ export class DashboardService {
   }
 
   private async resourceNames(user: B24UserContext): Promise<Map<number, string>> {
+    const known = this.mirror ? await this.mirror.resourceNames(user.portal.id) : new Map<number, string>();
+    if (known.size) return known;
     const list = await user.client.listAll<{ id: number; name?: string }>(
       'booking.v1.resource.list',
       {},

@@ -7,7 +7,7 @@ const member = z.object({ kind: z.enum(['USER', 'DEPARTMENT']), bitrixId: z.numb
 const view = z.enum(['', 'calendar', 'list', 'availability']);
 const diskFile = z.object({ id: z.number().int().positive(), name: z.string().max(255) }).strict();
 const messageStep = z
-  .object({ text: z.string().max(4000), files: z.array(diskFile).max(10) })
+  .object({ text: z.string().max(4000), files: z.array(z.union([diskFile, z.object({ storedFileId: z.string().min(1).max(40), name: z.string().max(255) }).strict()])).max(10) })
   .strict()
   .refine((st) => st.text.trim().length > 0 || st.files.length > 0, { message: 'Пустое сообщение' });
 /** Тип брони: ключевые слова в товарах, значение поля «Тип бронирования», программа, подтверждение. */

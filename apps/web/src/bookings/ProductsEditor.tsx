@@ -20,6 +20,25 @@ export const rowTotal = (r: ProductRow) => round(discountedPrice(r) * r.quantity
 export const productsTotal = (rows: ProductRow[]) => round(rows.reduce((s, r) => s + rowTotal(r), 0));
 const rub = (n: number) => fmtMoney(n, 'RUB');
 
+/** Изменение общего количества сохраняет цены/скидки существующих строк одного товара. */
+export function withProductQuantity(rows: ProductRow[], productId: number, quantity: number): ProductRow[] {
+  if (!Number.isFinite(quantity) || quantity < 0) return rows;
+  const next = round(quantity);
+  const indices = rows.flatMap((r, i) => r.productId === productId ? [i] : []);
+  if (!indices.length) return rows;
+  if (next === 0) return rows.filter((r) => r.productId !== productId);
+  const current = round(indices.reduce((n, i) => n + rows[i].quantity, 0));
+  if (next >= current) return rows.map((r, i) => i === indices[0] ? { ...r, quantity: round(r.quantity + next - current) } : r);
+  let remove = round(current - next);
+  const result = [...rows];
+  for (const i of [...indices].reverse()) {
+    const take = Math.min(result[i].quantity, remove);
+    result[i] = { ...result[i], quantity: round(result[i].quantity - take) };
+    remove = round(remove - take);
+  }
+  return result.filter((r) => r.productId !== productId || r.quantity > 0);
+}
+
 /**
  * Товары брони (макет `docs/prototype/ui/booking-wizard.html`): поиск товара группы с подсказками,
  * «Выбрать» — окно со всем каталогом группы, теги разделов (⚙ → группа → разделы с 👁) — окно с
@@ -132,6 +151,7 @@ export function ProductsEditor({
           section={picker.section}
           rows={rows}
           onAdd={add}
+          onQuantity={(id, quantity) => onChange(withProductQuantity(rows, id, quantity))}
           onClose={() => setPicker(null)}
         />
       )}
@@ -217,12 +237,14 @@ function ProductPicker({
   section,
   rows,
   onAdd,
+  onQuantity,
   onClose,
 }: {
   catalog: BookingCatalogDto;
   section: NonNullable<BookingCatalogDto['sections']>[number] | null;
   rows: ProductRow[];
   onAdd: (p: BookingCatalogDto['products'][number]) => void;
+  onQuantity: (productId: number, quantity: number) => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
@@ -260,9 +282,7 @@ function ProductPicker({
                 {!section && p.section && <span className="muted">{p.section}</span>}
               </span>
               <span className="pe-hit-price">{p.price !== null ? fmtMoney(p.price, p.currency) : 'без цены'}</span>
-              <button type="button" className={`pe-picker-add${count(p.id) ? ' added' : ''}`} aria-label={`Добавить: ${p.name}`} onClick={() => onAdd(p)}>
-                {count(p.id) ? `✓ ${count(p.id)}` : '+'}
-              </button>
+              {count(p.id) > 0 ? <PickerQuantity name={p.name} quantity={count(p.id)} onChange={(quantity) => onQuantity(p.id, quantity)} /> : <button type="button" className="pe-picker-add" aria-label={`Добавить: ${p.name}`} onClick={() => onAdd(p)}>Добавить +</button>}
             </li>
           ))}
           {!list.length && <li className="cp-hint">Товаров не найдено.</li>}
@@ -275,4 +295,19 @@ function ProductPicker({
       </div>
     </div>
   );
+}
+
+function PickerQuantity({ name, quantity, onChange }: { name: string; quantity: number; onChange: (quantity: number) => void }) {
+  const [draft, setDraft] = useState(String(quantity));
+  useEffect(() => setDraft(String(quantity)), [quantity]);
+  return <span className="pe-picker-quantity" role="group" aria-label={`Количество: ${name}`}>
+    <button type="button" aria-label={`Меньше: ${name}`} onClick={() => onChange(Math.max(0, round(quantity - 1)))}>−</button>
+    <input aria-label={`Количество: ${name}`} inputMode="decimal" value={draft} onChange={(e) => {
+      setDraft(e.target.value);
+      if (!e.target.value.trim()) return;
+      const value = Number(e.target.value.replace(',', '.'));
+      if (Number.isFinite(value) && value >= 0) onChange(round(value));
+    }} onBlur={() => setDraft(String(quantity))} />
+    <button type="button" aria-label={`Больше: ${name}`} onClick={() => onChange(round(quantity + 1))}>+</button>
+  </span>;
 }

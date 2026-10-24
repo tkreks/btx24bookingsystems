@@ -1,3 +1,5 @@
+export * from './audit-classification.js';
+import type { ActionLogCategory, ActionLogSeverity } from './audit-classification.js';
 /** Запись журнала действий (⚙ → «Журнал действий»): `GET /api/admin/action-log`. */
 export interface ActionLogEntryDto {
   id: string;
@@ -7,6 +9,8 @@ export interface ActionLogEntryDto {
   actorName: string | null;
   /** Код действия: `app.enter`, `deal.edit_open`, `deal.update`, `booking.cancelled`, `request` … */
   action: string;
+  category: ActionLogCategory;
+  severity: ActionLogSeverity;
   entityType: string | null;
   entityId: string | null;
   summary: string;

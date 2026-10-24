@@ -1,7 +1,7 @@
 import { ACTIVITY_KINDS, type ActivityEventDto, type ActivityKind, type EmployeeActivityDto } from '@btx24/shared';
 
-export const FROM_HOUR = 9;
-export const TO_HOUR = 22;
+export const FROM_HOUR = 0;
+export const TO_HOUR = 24;
 /** Сообщения с перерывом не больше этого — одна сессия работы в чатах. */
 const CHAT_GAP_MS = 10 * 60_000;
 /** Минимум на сессию (одно сообщение — тоже работа). */
