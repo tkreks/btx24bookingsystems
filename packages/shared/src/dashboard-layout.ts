@@ -40,6 +40,7 @@ export const DASHBOARD_BLOCK_TYPES = [
   'alerts',
   'certificates',
   'stops',
+  'messengers',
 ] as const;
 export type DashboardBlockType = (typeof DASHBOARD_BLOCK_TYPES)[number];
 
@@ -84,6 +85,7 @@ export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = 
   alerts: { title: 'Уведомления о бронях', hint: 'новые уведомления: расхождения с Битрикс24, найденные брони', group: 'Контроль', width: 'quarter' },
   certificates: { title: 'Сертификаты', hint: 'новые, срок прошёл — погасить', group: 'Контроль', width: 'quarter' },
   stops: { title: 'Стопы ресурсов', hint: 'ресурсы, закрытые для бронирования', group: 'Контроль', width: 'half' },
+  messengers: { title: 'Мессенджеры', hint: 'номера ваших групп: работают или с ошибкой; экран мессенджера и файлы для отправки', group: 'Контроль', width: 'quarter' },
 };
 
 export interface DashboardBlock {
@@ -114,6 +116,7 @@ export const DEFAULT_DASHBOARD: DashboardBlock[] = [
   block('needsClose', 'quarter'),
   block('alerts'),
   block('certificates'),
+  block('messengers'),
   block('attention'),
   block('deals'),
   block('recentCalls'),

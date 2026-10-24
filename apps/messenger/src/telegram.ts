@@ -557,6 +557,11 @@ export class TelegramInstance {
     return this.media.read(this.spec.id, fileId);
   }
 
+  /** Страница Telegram Web — подставить файл в окно выбора файла (`screen-files.ts`). */
+  filePage(): Page | null {
+    return this.status.state === 'ready' ? this.page : null;
+  }
+
   /** Снимок экрана Telegram Web (PNG) — когда VNC недоступен. */
   async screenshot(): Promise<Buffer | null> {
     if (!this.page) return null;

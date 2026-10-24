@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { vncPort } from './instance.js';
 import type { Manager } from './manager.js';
+import { FileOffers, type ScreenFiles } from './screen-files.js';
 import { ID_RE, isKind, normalizePhone } from './spec.js';
 
 const TOKEN_HEADER = 'x-messenger-token';
@@ -22,10 +23,13 @@ function sameToken(a: string, b: string): boolean {
  * DELETE /instances/:id · GET /instances/:id/screenshot (PNG) · WS /instances/:id/vnc (RFB) ·
  * POST /instances/:id/send {to, text, quotedId?} · POST /instances/:id/edit {id, text} ·
  * POST /instances/:id/delete {id, everyone?} · GET /instances/:id/history?chats=&perChat= ·
- * POST /instances/:id/media {id} (скачать вложение сообщения) · GET /instances/:id/media/:fileId.
+ * POST /instances/:id/media {id} (скачать вложение сообщения) · GET /instances/:id/media/:fileId ·
+ * GET|POST /instances/:id/screen-files (файлы для экрана, час) · DELETE …/screen-files/:fileId ·
+ * POST …/screen-files/:fileId/attach (подставить в следующее окно выбора файла на экране).
  * Сообщения и их правки/удаления приходят в api событиями (`messages.ts`, Outbox).
  */
-export function createMessengerServer(manager: Manager, token: string): Server {
+export function createMessengerServer(manager: Manager, token: string, files?: ScreenFiles): Server {
+  const offers = new FileOffers();
   const authorized = (req: IncomingMessage) => !token || sameToken(String(req.headers[TOKEN_HEADER] ?? ''), token);
   const json = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -48,6 +52,8 @@ export function createMessengerServer(manager: Manager, token: string): Server {
       res.writeHead(200, { 'content-type': got.meta.mime, 'content-length': got.data.length, 'x-file-name': encodeURIComponent(got.meta.name ?? 'file') });
       return res.end(got.data);
     }
+    const sf = /^\/instances\/([^/]+)\/screen-files(?:\/([0-9a-f]{24})(\/attach)?)?$/.exec(url.pathname);
+    if (sf && ID_RE.test(sf[1]) && files) return screenFiles(req, res, sf[1], sf[2], !!sf[3], files);
     const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact))?$/.exec(url.pathname);
     if (!m || !ID_RE.test(m[1])) return json(res, 404, { error: 'not found' });
     const [, id, action] = m;
@@ -128,6 +134,42 @@ export function createMessengerServer(manager: Manager, token: string): Server {
     if (req.method === 'GET' && !action) {
       const inst = manager.get(id);
       return inst ? json(res, 200, inst.info) : json(res, 404, { error: 'not found' });
+    }
+    return json(res, 405, { error: 'method not allowed' });
+  }
+
+  /** Файлы для экрана мессенджера: загрузить, список, удалить, подставить в окно выбора файла. */
+  async function screenFiles(req: IncomingMessage, res: ServerResponse, id: string, fileId: string | undefined, attach: boolean, files: ScreenFiles) {
+    const inst = manager.get(id);
+    if (!inst) return json(res, 404, { error: 'not found' });
+    const state = async () => ({ files: await files.list(id), offer: offers.current(id) });
+    if (req.method === 'GET' && !fileId) return json(res, 200, await state());
+    if (req.method === 'POST' && !fileId) {
+      const b = (await readJson(req, 96 * 1024 * 1024)) as { name?: unknown; mime?: unknown; data?: unknown };
+      if (typeof b.data !== 'string') return json(res, 400, { error: 'Нет файла' });
+      try {
+        await files.put(id, { name: b.name, mime: b.mime, data: b.data });
+      } catch (err) {
+        return json(res, 422, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return json(res, 200, await state());
+    }
+    if (req.method === 'DELETE' && fileId && !attach) {
+      if (offers.current(id)?.fileId === fileId) await offers.cancel(id);
+      await files.remove(id, fileId);
+      return json(res, 200, await state());
+    }
+    if (req.method === 'POST' && fileId && attach) {
+      const f = await files.get(id, fileId);
+      if (!f) return json(res, 404, { error: 'Файл удалён: прошёл час или его убрали' });
+      const page = inst.filePage();
+      if (!page) return json(res, 422, { error: 'Мессенджер не подключён' });
+      await offers.offer(id, page, fileId, files.path(id, f), () => files.markAttached(id, fileId));
+      return json(res, 200, await state());
+    }
+    if (req.method === 'DELETE' && !fileId) {
+      await offers.cancel(id);
+      return json(res, 200, await state());
     }
     return json(res, 405, { error: 'method not allowed' });
   }

@@ -19,10 +19,15 @@
 | `POST …/messages/:messageId/edit {text}`, `DELETE …/messages/:messageId` | изменить / удалить у всех своё |
 | `POST /api/admin/messengers/:id/import` | загрузить историю (в линию не передаётся) |
 | `GET /api/messengers`, `…/:id/chats`, `…/messages`, `POST …/send`, `…/edit`, `DELETE …` (B24AuthGuard; группы номера, `openlines.read`/`send`) | номера групп сотрудника; своя линия — с положительной проверкой каждого диалога |
+| `GET /api/messengers/status` (B24AuthGuard) | блок дашборда «Мессенджеры»: номера групп сотрудника (`openlines.read`), только `ready` и с ошибкой (`MESSENGER_ERROR_STATES`, с описанием); `canScreen` — право писать |
+| `POST /api/messengers/:id/vnc-ticket`, `GET …/:id/screenshot` (B24AuthGuard; группа номера с `openlines.send` или администратор приложения) | экран номера из дашборда |
+| `GET\|POST /api/messengers/:id/screen-files`, `DELETE …/:fileId`, `POST …/:fileId/attach`, `DELETE …/screen-files` (то же право) | файлы для отправки с экрана: хранятся в сервисе час; `attach` — подставить в следующее окно выбора файла (сотрудник жмёт 📎 на экране), `DELETE` без файла — отменить ожидание |
 | `POST /api/messengers/hook` (без B24AuthGuard: только сеть стенда, nginx закрывает снаружи; `MESSENGER_TOKEN`) | события сервиса: сообщения, правки, удаления, статусы |
 
 ## Инварианты
 - Подключение/экран/настройки — постоянные администраторы приложения; чужой портал — 404.
+- Экран номера (VNC) и файлы для него — тому, кто может писать с номера (`forUser(…, send=true)`):
+  администратор приложения или группа номера с `openlines.send`. Просмотр статуса — `openlines.read`.
 - WebSocket VNC — только с билетом (`vnc-tickets.ts`: одноразовый, 1 минута, выдан после проверки
   портала); без билета сервис не вызывается.
 - Сервис `messenger` — наш внутренний (не портал Битрикс24): ходим к нему `fetch` из

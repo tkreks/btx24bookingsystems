@@ -35,6 +35,8 @@
   --status-done-text: #14532d;
   --status-fail-bg: #fee2e2;
   --status-fail-text: #991b1b;
+  --status-lost-bg: #f3e8ff;
+  --status-lost-text: #7e22ce;
   color-scheme: light;
 }
 
@@ -7368,9 +7370,39 @@ button.cert-row:hover {
   color: var(--primary);
   border-color: var(--primary);
 }
-.dash-open-chats {
+/* «Открыть чаты»: заметная кнопка в цвет приложения (в тёмной теме — те же токены, светлый текст). */
+.dash-attention-title .dash-open-chats {
   margin-left: auto;
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px 0 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  background: linear-gradient(135deg, var(--primary), var(--primary2));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 35%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+.dash-attention-title .dash-open-chats:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+.dash-attention-title .dash-open-chats:focus-visible {
+  outline: 2px solid var(--primary2);
+  outline-offset: 2px;
+}
+.dash-open-chats .icon {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .dash-grid.editing .dash-cell-body {
   pointer-events: none;
@@ -7580,11 +7612,12 @@ button.cert-row:hover {
 .call-inline-type .icon { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .call-inline { --call-edge: var(--status-work-text); }
 .call-inline.call-tone-in { --call-edge: var(--ok-text); }
-.call-inline.call-tone-missed, .call-inline.call-tone-lost { --call-edge: var(--status-fail-text); }
+.call-inline.call-tone-missed { --call-edge: var(--status-fail-text); }
+.call-inline.call-tone-lost { --call-edge: var(--status-lost-text); }
 .call-inline.call-tone-noanswer { --call-edge: var(--status-wait-text); }
 .call-inline-type { color: var(--call-edge); }
 .call-inline-time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.dt-row.call-tone-lost { background: var(--status-fail-bg); border-color: var(--status-fail-text); }
+.dt-row.call-tone-lost { background: var(--status-lost-bg); border-color: var(--status-lost-text); }
 
 /* CALL_CARD — рабочая область встройки, мастер начинается сверху даже на узком экране. */
 .sheet-backdrop.call-booking-backdrop { align-items: flex-start; padding: 0; overflow: hidden; height: 100dvh; }
@@ -8265,4 +8298,58 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 }
 .msr-none {
   font-size: 12px;
+}
+
+/* «Звонки»: цвета категорий — кнопки фильтра (только категории, что есть за период). */
+.call-filter { gap: 6px; }
+.call-filter-item {
+  --tone: var(--status-work-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.call-filter-item i { width: 10px; height: 10px; border-radius: 50%; background: var(--tone); }
+.call-filter-item.in { --tone: var(--ok-text); }
+.call-filter-item.noanswer { --tone: var(--status-wait-text); }
+.call-filter-item.missed { --tone: var(--status-fail-text); }
+.call-filter-item.lost { --tone: var(--status-lost-text); }
+.call-filter-item:hover { border-color: var(--tone); }
+.call-filter-item.active { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, var(--surface)); font-weight: 600; }
+.call-filter-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.call-filter-item.active .call-filter-count { color: var(--text); }
+
+/* Блок «Мессенджеры»: работающие и с ошибкой номера, кнопка экрана. */
+.dash-messenger-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dash-messenger-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.dash-messenger-list li.failed { border-color: var(--status-fail-text); background: var(--status-fail-bg); }
+.dash-messenger-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dash-messenger-name b, .dash-messenger-name .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-messenger-name .muted { font-size: 12px; }
+.dash-messenger-error { color: var(--status-fail-text); font-size: 12px; overflow-wrap: anywhere; }
+.dash-messengers .pill.ok { background: var(--ok-bg); color: var(--ok-text); }
+.dash-messengers .pill.danger { background: var(--status-fail-text); color: var(--surface); }
+.dash-messenger-screen { flex: none; min-height: 30px; padding: 0 12px; border-radius: 8px; color: var(--primary); background: var(--surface-2); font-weight: 600; }
+
+/* Экран мессенджера: файлы для отправки (хранятся час). */
+.screen-files { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.screen-files-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.screen-files-head .primary { margin-left: auto; }
+.screen-files-offer { margin: 0; }
+.screen-files-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.screen-files-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.screen-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.screen-files-list li > .muted { font-size: 12px; white-space: nowrap; }
+.screen-files-list button.active { color: var(--primary); border-color: var(--primary); }
+@media (max-width: 640px) {
+  .screen-files-list li { flex-wrap: wrap; }
+  .screen-file-name { flex-basis: 100%; }
 }

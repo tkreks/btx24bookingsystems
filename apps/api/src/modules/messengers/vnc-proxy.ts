@@ -12,7 +12,8 @@ const PASS = ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-proto
 /**
  * Экран мессенджера по VNC (ADR 0014): `WS /api/messengers/vnc?ticket=…` → сервис messenger
  * `WS /instances/:id/vnc`. Билет одноразовый, выдан постоянному администратору портала этого
- * мессенджера (`POST /api/admin/messengers/:id/vnc-ticket`); без билета — 401, сервис не трогаем.
+ * мессенджера (`POST /api/admin/messengers/:id/vnc-ticket`) или сотруднику с правом писать с номера
+ * (`POST /api/messengers/:id/vnc-ticket`, блок дашборда); без билета — 401, сервис не трогаем.
  */
 export function attachVncProxy(server: Server, service: MessengerServiceClient): void {
   const log = new Logger('VncProxy');

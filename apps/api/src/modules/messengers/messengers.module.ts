@@ -5,6 +5,7 @@ import { MessengerServiceClient } from './messenger-service.client.js';
 import { MessengerCrmService } from './messenger-crm.service.js';
 import { MediaLinks } from './media-links.js';
 import { MessengerHookController, MessengerPublicFilesController, MessengersController, MessengerUserController } from './messengers.controller.js';
+import { MessengerScreenController } from './messenger-screen.controller.js';
 import { MessengerChatsService } from './messenger-chats.service.js';
 import { MessengerConnectorService } from './messenger-connector.service.js';
 import { MessengerInboxService } from './messenger-inbox.service.js';
@@ -13,7 +14,7 @@ import { MessengersService } from './messengers.service.js';
 /** Мессенджеры портала (ADR 0014): записи в базе + браузеры в сервисе messenger. */
 @Module({
   imports: [AccessModule, Bitrix24Module],
-  controllers: [MessengersController, MessengerHookController, MessengerUserController, MessengerPublicFilesController],
+  controllers: [MessengersController, MessengerHookController, MessengerUserController, MessengerPublicFilesController, MessengerScreenController],
   providers: [MessengerCrmService, MediaLinks, MessengerServiceClient, MessengersService, MessengerInboxService, MessengerConnectorService, MessengerChatsService],
   exports: [MessengerServiceClient],
 })

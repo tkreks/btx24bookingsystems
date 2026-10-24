@@ -63,6 +63,42 @@ export interface MessengerVncTicketDto {
   url: string;
 }
 
+/** Состояния «с ошибкой» — номер показывается в блоке дашборда «Мессенджеры» с описанием ошибки. */
+export const MESSENGER_ERROR_STATES: MessengerState[] = ['failed', 'disconnected', 'logged_out', 'unavailable'];
+
+/**
+ * `GET /api/messengers/status` — блок дашборда «Мессенджеры»: номера групп сотрудника, которые работают
+ * (`ready`) или с ошибкой; `canScreen` — можно открыть экран (VNC): право писать с номера.
+ */
+export interface MessengerStatusDto {
+  id: string;
+  kind: MessengerKind;
+  phone: string;
+  title: string | null;
+  state: MessengerState;
+  /** Описание ошибки для людей (только у номеров с ошибкой). */
+  error: string | null;
+  canScreen: boolean;
+}
+
+/** Файл для отправки с экрана мессенджера: хранится час, потом удаляется. */
+export interface MessengerScreenFileDto {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+  expiresAt: string;
+  /** Когда подставлен в окно выбора файла мессенджера. */
+  attachedAt: string | null;
+}
+
+/** `GET|POST /api/messengers/:id/screen-files`; `offer` — ждём нажатия 📎 на экране (до `until`). */
+export interface MessengerScreenFilesDto {
+  files: MessengerScreenFileDto[];
+  offer: { fileId: string; until: string } | null;
+}
+
 /** Номер телефона → только цифры с кодом страны (8XXXXXXXXXX и 9XXXXXXXXX → 7…); null — не похоже на номер. */
 export function normalizeMessengerPhone(input: unknown): string | null {
   return normalizeClientPhone(input);

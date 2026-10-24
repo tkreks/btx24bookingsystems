@@ -24,6 +24,7 @@ import {
 import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
 import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
+import { MessengersBlock } from '../dashboard/MessengersBlock.js';
 import { WorkdayControls } from '../workday/WorkdayControls.js';
 import { MyActivityBlock } from '../dashboard/MyActivityBlock.js';
 import { ActionLogBlock, AlertsBlock, CertificatesBlock, DealGapsBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
@@ -188,7 +189,8 @@ export function DashboardPage({
               Последние сообщения клиентов без ответа
               {d?.chats && <span className={`pill${waiting ? ' waiting' : ''}`}>{waiting}</span>}
               {/* Все доступные чаты, без ограничения датой дашборда (бывший блок «Чатов ждут ответа»). */}
-              <button type="button" className="link dash-open-chats" onClick={() => onChats({})}>
+              <button type="button" className="dash-open-chats" onClick={() => onChats({})}>
+                <Icon name="chats" size={18} />
                 Открыть чаты
               </button>
             </p>
@@ -268,6 +270,8 @@ export function DashboardPage({
         return <CertificatesBlock period={range} onOpen={onCertificates} />;
       case 'stops':
         return <StopsBlock period={range} />;
+      case 'messengers':
+        return <MessengersBlock />;
       default:
         return (HEAD_BLOCKS as readonly string[]).includes(type) ? (
           <HeadBlock type={type as HeadBlockType} d={head} vs={versus(preset, head, (x) => fmtDay(x, tz))} word={word} periodText={periodText} tz={tz} />

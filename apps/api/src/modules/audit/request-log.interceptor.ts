@@ -46,6 +46,9 @@ const LABELS: Record<string, string> = {
   'POST /api/messengers/:id/send': 'Отправил сообщение через мессенджер',
   'POST /api/messengers/:id/messages/:messageId/edit': 'Изменил сообщение в мессенджере',
   'DELETE /api/messengers/:id/messages/:messageId': 'Удалил сообщение в мессенджере',
+  'POST /api/messengers/:id/vnc-ticket': 'Открыл экран мессенджера',
+  'POST /api/messengers/:id/screen-files': 'Загрузил файл на экран мессенджера',
+  'POST /api/messengers/:id/screen-files/:fileId/attach': 'Прикрепил файл на экране мессенджера',
 };
 
 /**

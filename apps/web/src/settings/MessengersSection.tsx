@@ -136,7 +136,7 @@ export function MessengersSection({ timezone }: { timezone: string }) {
           }}
         />
       )}
-      {screen && <MessengerScreen id={screen} onClose={() => setScreen(null)} />}
+      {screen && <MessengerScreen id={screen} files onClose={() => setScreen(null)} />}
       {chatsOf && <MessengerChatsDialog messenger={chatsOf} timezone={timezone} onClose={() => setChatsOf(null)} />}
       {linkOf && (
         <MessengerLinkDialog

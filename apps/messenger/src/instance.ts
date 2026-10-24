@@ -1,5 +1,6 @@
 import { cachedMediaFromBrowser } from './browser-media.js';
 import { rm } from 'node:fs/promises';
+import type { Page } from 'puppeteer';
 import wwebjs from 'whatsapp-web.js';
 import { ensureSerializedId, isClientChat, toWire, type WireEvent, type WireMessage } from './messages.js';
 import { defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
@@ -331,6 +332,11 @@ export class Instance {
     this.readyTimer = null;
   }
 
+  /** Страница браузера — подставить файл в окно выбора файла (`screen-files.ts`); null — не подключён. */
+  filePage(): Page | null {
+    return this.status.state === 'ready' ? ((this.client?.pupPage as Page | undefined) ?? null) : null;
+  }
+
   private async stopClient(): Promise<void> {
     this.clearReadyTimer();
     const client = this.client;
@@ -340,4 +346,4 @@ export class Instance {
 }
 
 /** Что сервис умеет с экземпляром любого мессенджера (WhatsApp — `Instance`, Telegram — `TelegramInstance`). */
-export type MessengerInstance = Pick<Instance, 'spec' | 'info' | 'start' | 'stop' | 'logout' | 'contact' | 'send' | 'edit' | 'remove' | 'history' | 'screenshot' | 'mediaOf' | 'readMedia'>;
+export type MessengerInstance = Pick<Instance, 'spec' | 'info' | 'start' | 'stop' | 'logout' | 'contact' | 'send' | 'edit' | 'remove' | 'history' | 'screenshot' | 'mediaOf' | 'readMedia' | 'filePage'>;

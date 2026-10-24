@@ -49,6 +49,14 @@ export class MessengerChatsService {
     return rows.filter((m) => groupIdsOf(m).some((g) => mine.has(g)));
   }
 
+  /** Номера из `rows`, с которых сотрудник может писать (группа номера с `openlines.send`). */
+  async sendable(user: B24UserContext, rows: Messenger[]): Promise<Set<string>> {
+    const a = await this.access.resolve(user);
+    if (a.isAppAdmin) return new Set(rows.map((m) => m.id));
+    const mine = new Set(a.groups.filter((g) => g.permissions.includes('openlines.send')).map((g) => g.group.id));
+    return new Set(rows.filter((m) => groupIdsOf(m).some((g) => mine.has(g))).map((m) => m.id));
+  }
+
   /**
    * Номер для работы сотрудника: доступен по группе; привязан к линии — только администратору (права на
    * чаты линии решает Битрикс24, сотрудники работают в «Чатах»); `send` — нужно `openlines.send` в группе.

@@ -1,5 +1,6 @@
 import { Injectable, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { MessengerScreenFilesDto } from '@btx24/shared';
 import type { Env } from '../../config/env.js';
 
 /** Состояние экземпляра, как его отдаёт сервис messenger (`apps/messenger/src/spec.ts`). */
@@ -129,6 +130,23 @@ export class MessengerServiceClient {
   }
   history(id: string, chats = 30, perChat = 30): Promise<WireMessage[]> {
     return this.request('GET', `/instances/${id}/history?chats=${chats}&perChat=${perChat}`);
+  }
+
+  screenFiles(id: string): Promise<MessengerScreenFilesDto> {
+    return this.request('GET', `/instances/${id}/screen-files`);
+  }
+  uploadScreenFile(id: string, f: { mime: string; name: string; data: Buffer }): Promise<MessengerScreenFilesDto> {
+    return this.request('POST', `/instances/${id}/screen-files`, { mime: f.mime, name: f.name, data: f.data.toString('base64') }, 120_000);
+  }
+  removeScreenFile(id: string, fileId: string): Promise<MessengerScreenFilesDto> {
+    return this.request('DELETE', `/instances/${id}/screen-files/${fileId}`);
+  }
+  /** Подставить файл в следующее окно выбора файла на экране мессенджера. */
+  offerScreenFile(id: string, fileId: string): Promise<MessengerScreenFilesDto> {
+    return this.request('POST', `/instances/${id}/screen-files/${fileId}/attach`);
+  }
+  cancelScreenOffer(id: string): Promise<MessengerScreenFilesDto> {
+    return this.request('DELETE', `/instances/${id}/screen-files`);
   }
 
   async screenshot(id: string): Promise<Buffer | null> {

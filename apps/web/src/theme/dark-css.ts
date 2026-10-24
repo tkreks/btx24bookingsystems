@@ -43,6 +43,8 @@ export const DARK_TOKENS = `:root${DARK_ATTR} {
   --status-done-text: #86efac;
   --status-fail-bg: #310f16;
   --status-fail-text: #fca5a5;
+  --status-lost-bg: #2a1640;
+  --status-lost-text: #d8b4fe;
   color-scheme: dark;
 }
 `;

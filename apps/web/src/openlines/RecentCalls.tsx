@@ -1,6 +1,5 @@
 import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { BlockLoading } from '../dashboard/BlockLoading.js';
-import { ColorLegend, type LegendItem } from '../ColorLegend.js';
 import { useState } from 'react';
 import { type CallLogRowDto, type CallScope, type RecentCallsDto, todayIn } from '@btx24/shared';
 import { useDashboardQuery } from '../dashboard/DashboardSync.js';
@@ -21,12 +20,15 @@ export function callTone(c: Pick<CallLogRowDto, 'direction' | 'status' | 'lost'>
   return c.direction === 'incoming' ? 'in' : 'out';
 }
 
-/** Цвет трубки — вид звонка (те же переменные темы, что у строк). */
-const CALL_LEGEND: LegendItem[] = [
-  { label: 'входящий', swatch: { background: 'var(--ok-text)' } },
-  { label: 'исходящий', swatch: { background: 'var(--status-work-text)' } },
-  { label: 'не дозвонились', swatch: { background: 'var(--status-wait-text)' }, title: 'Исходящий — клиент не ответил' },
-  { label: 'пропущенный / упущенный', swatch: { background: 'var(--status-fail-text)' }, title: 'Упущенный — не перезвонили и не ответили в чате' },
+type CallTone = ReturnType<typeof callTone>;
+
+/** Цвет трубки — вид звонка (те же переменные темы, что у строк); упущенные — отдельной категорией. */
+const CALL_LEGEND: { tone: CallTone; label: string; title?: string }[] = [
+  { tone: 'in', label: 'входящие' },
+  { tone: 'out', label: 'исходящие' },
+  { tone: 'noanswer', label: 'не дозвонились', title: 'Исходящий — клиент не ответил' },
+  { tone: 'missed', label: 'пропущенные', title: 'Входящий без ответа — перезвонили или ответили в чате' },
+  { tone: 'lost', label: 'упущенные', title: 'Пропущенный, а клиенту не перезвонили и не ответили в чате' },
 ];
 
 export function callTypeLabel(c: Pick<CallLogRowDto, 'direction' | 'status' | 'lost'>): string {
@@ -58,22 +60,48 @@ export function callTimeText(at: string, timezone: string, from: string, to: str
 /**
  * Блок «Звонки» на дашборде: последние звонки периода дашборда из журнала звонков (дела CRM), к
  * которым у сотрудника есть доступ, — по 5, «Показать ещё». Цвет — по направлению и статусу,
- * длительность разговора; время слева от кнопок: сегодня — ЧЧ:ММ, вчера — с подписью, иначе с датой. Кнопки — последняя сделка и чат клиента внутри приложения.
+ * длительность разговора; цвета — только те, что есть за период, нажатие на цвет оставляет только эту
+ * категорию (ещё раз — все); время слева от кнопок: сегодня — ЧЧ:ММ, вчера — с подписью, иначе с датой. Кнопки — последняя сделка и чат клиента внутри приложения.
  */
 export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: CallScope; timezone: string; from: string; to: string; onOpenChat: (chatId: number) => void }) {
   const { data, error } = useDashboardQuery<RecentCallsDto>(`/dashboard/recent-calls?scope=${scope}&from=${from}&to=${to}`);
-  const key = `${scope}|${from}|${to}`;
+  const [filter, setFilter] = useState<{ key: string; tone: CallTone } | null>(null);
+  const base = `${scope}|${from}|${to}`;
+  // Смена «Все / Мои» или периода — снова все категории.
+  const tone = filter?.key === base ? filter.tone : null;
+  const key = `${base}|${tone ?? ''}`;
   // «Показать ещё» — в пределах выбранных «Все / Мои» и периода; смена — снова 5.
   const [more, setMore] = useState({ key, n: STEP });
   const shown = more.key === key ? more.n : STEP;
 
 
-  const items = data ? [...data.items].sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.activityId - a.activityId) : null;
+  const all = data ? [...data.items].sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.activityId - a.activityId) : null;
+  const counts = new Map<CallTone, number>();
+  for (const c of all ?? []) counts.set(callTone(c), (counts.get(callTone(c)) ?? 0) + 1);
+  const items = all && tone ? all.filter((c) => callTone(c) === tone) : all;
+  const legend = CALL_LEGEND.filter((l) => counts.has(l.tone));
   return (
     <section className="day-panel dash-block dash-recent-calls">
       <DashBadge name="phone" />
       <p className="dash-attention-title muted">Звонки</p>
-      <ColorLegend items={CALL_LEGEND} label="Цвета звонков" className="block" />
+      {legend.length > 0 && (
+        <div className="color-legend block call-filter" role="group" aria-label="Категории звонков: показать только выбранную">
+          {legend.map((l) => (
+            <button
+              key={l.tone}
+              type="button"
+              className={`call-filter-item ${l.tone}${tone === l.tone ? ' active' : ''}`}
+              aria-pressed={tone === l.tone}
+              title={tone === l.tone ? 'Показать все звонки' : (l.title ?? `Показать только: ${l.label}`)}
+              onClick={() => setFilter(tone === l.tone ? null : { key: base, tone: l.tone })}
+            >
+              <i aria-hidden="true" />
+              {l.label}
+              <span className="call-filter-count">{counts.get(l.tone)}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {error && <p className="muted">{error}</p>}
       {!items && !error && <BlockLoading rows={4} />}
       {items && !items.length && <p className="muted">Звонков за период нет.</p>}
