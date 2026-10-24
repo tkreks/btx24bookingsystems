@@ -4,18 +4,19 @@ import { apiGet } from '../api.js';
 import { openMessenger } from '../b24.js';
 import { MessengerChatsDialog } from './MessengerChatsDialog.js';
 
-/** Проверка доступных каналов без пробного сообщения клиенту. */
-export function MessengerSearchDialog({ phone, timezone, onClose, onOpenChat }: { phone: string; timezone: string; onClose: () => void; onOpenChat?: (id: number) => void }) {
+/** Проверка доступных каналов без пробного сообщения клиенту; `initial` — уже готовый результат (без повторного поиска). */
+export function MessengerSearchDialog({ phone, timezone, onClose, onOpenChat, initial }: { phone: string; timezone: string; onClose: () => void; onOpenChat?: (id: number) => void; initial?: MessengerContactSearchDto | null }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [data, setData] = useState<MessengerContactSearchDto | null>(null);
+  const [data, setData] = useState<MessengerContactSearchDto | null>(initial ?? null);
   const [error, setError] = useState('');
   const [writing, setWriting] = useState<MessengerContactSearchDto['results'][number] | null>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
   useEffect(() => {
+    if (initial) return;
     let alive = true;
     apiGet<MessengerContactSearchDto>(`/messengers/search?phone=${encodeURIComponent(phone)}`).then(d => { if (alive) setData(d); }, e => { if (alive) setError(e instanceof Error ? e.message : 'Не удалось проверить мессенджеры'); });
     return () => { alive = false; };
-  }, [phone]);
+  }, [phone, initial]);
   return <dialog ref={ref} className="messenger-search-dialog" aria-label="Поиск в мессенджерах" onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => e.stopPropagation()}>
     <header><h3>Поиск в мессенджерах</h3><button type="button" aria-label="Закрыть поиск" onClick={onClose}>×</button></header>
     <p className="muted">{phone}</p>

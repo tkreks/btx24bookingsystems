@@ -4,7 +4,7 @@ import { apiGet } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtMoney, fmtTime } from '../format.js';
 import { dayKey } from '../openlines/chat-list.js';
-import { MessengerSearchDialog } from '../messengers/MessengerSearchDialog.js';
+import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { ClientSituation } from './ClientSituation.js';
 import { ClientTimeline } from './ClientTimeline.js';
 
@@ -22,7 +22,6 @@ export function CallCard({ call, timezone, onCreate, canCreate }: {
 }) {
   const [card, setCard] = useState<CallCardDto | null>(null);
   const [error, setError] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const [bookingsOpen, setBookingsOpen] = useState(false);
   const [shown, setShown] = useState(25);
   const key = JSON.stringify(call);
@@ -51,7 +50,7 @@ export function CallCard({ call, timezone, onCreate, canCreate }: {
       <div className="call-client-actions">
         <button type="button" disabled={!card.contact} onClick={() => card.contact && openCrm('contact', card.contact.id)}>Открыть контакт</button>
         <button type="button" disabled={!c} onClick={() => setBookingsOpen(true)}>Список броней</button>
-        {!card.chats.length && card.phone && <button type="button" onClick={() => setSearchOpen(true)}>Поиск в мессенджерах</button>}
+        {!card.chats.length && card.phone && <MessengerSearchButton phone={card.phone} timezone={timezone} withLabel />}
         {canCreate && <button type="button" className="primary" onClick={() => onCreate(card)}>+ Создать бронь</button>}
       </div>
     </div>
@@ -64,7 +63,6 @@ export function CallCard({ call, timezone, onCreate, canCreate }: {
       {events.length > 25 && <button type="button" className="list-more" onClick={() => setShown(shown < events.length ? shown + 25 : 25)}>{shown < events.length ? `Показать ещё · ${Math.min(shown, events.length)} из ${events.length}` : 'Свернуть'}</button>}
       {!!card.timeline?.notes.length && <details className="client-timeline-notes"><summary>Об истории событий</summary>{card.timeline.notes.map((n) => <p key={n}>{n}</p>)}</details>}
     </section>
-    {searchOpen && card.phone && <MessengerSearchDialog phone={card.phone} timezone={timezone} onClose={() => setSearchOpen(false)} />}
     {bookingsOpen && c && <CallBookingsDialog data={c} timezone={timezone} onClose={() => setBookingsOpen(false)} />}
   </div>;
 }

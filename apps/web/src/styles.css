@@ -1509,93 +1509,87 @@ main.cal-main.loading {
 
 /* ---------- рабочий день ---------- */
 
-.workday {
+.workday-controls {
   position: relative;
-}
-
-.workday-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-weight: 650;
+  gap: 2px;
+}
+
+/* Компактные кнопки без фона: значок + слово. */
+.workday-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
   white-space: nowrap;
 }
-
-.workday-chip.off {
-  font-size: 12px;
-  color: var(--muted);
-  border: 1px dashed var(--line);
-  padding: 6px 10px;
+.workday-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
 }
-
-.workday-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #9aa3b2;
+.workday-btn .icon {
+  display: block;
+  flex: none;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-
-.workday-chip.opened {
-  color: #127a52;
-  background: #e3f8ee;
-  border-color: rgba(22, 154, 104, 0.35);
+.workday-btn.start {
+  color: var(--ok);
 }
-
-.workday-chip.opened .workday-dot {
-  background: #19b37a;
-  box-shadow: 0 0 0 3px rgba(25, 179, 122, 0.2);
-}
-
-.workday-chip.paused {
-  color: #9a6400;
-  background: #fff4dc;
-  border-color: rgba(221, 160, 30, 0.4);
-}
-
-.workday-chip.paused .workday-dot {
-  background: #e3a21a;
-}
-
-.workday-chip.expired {
-  color: #c2272d;
-  background: #ffe9ea;
-}
-
-.workday-chip.expired .workday-dot {
-  background: #e5484d;
-}
-
-.workday-time {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  opacity: 0.8;
+.workday-btn.stop {
+  color: var(--danger);
 }
 
 .workday-menu {
   position: absolute;
   z-index: 20;
-  right: 0;
-  top: calc(100% + 8px);
-  min-width: 240px;
+  left: 0;
+  top: calc(100% + 6px);
+  width: min(320px, calc(100vw - 32px));
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 8px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 16px 35px rgba(28, 51, 95, 0.17);
+  font-weight: 400;
 }
-
 .workday-menu p {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 13px;
 }
-
-.workday-menu button.danger {
-  color: #c2272d;
-  border-color: rgba(194, 39, 45, 0.35);
+.workday-menu label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.workday-menu textarea {
+  width: 100%;
+  resize: vertical;
+}
+.workday-menu .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.workday-error {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--danger);
 }
 
 /* ---------- кнопка настроек и временный доступ ---------- */
@@ -8065,3 +8059,143 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 .mc-context label { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mc-context select { max-width: min(420px, 65vw); }
 .mc-context p { width: 100%; margin: 0; }
+
+/* ---------- поиск клиента в мессенджерах: значки со статусом ---------- */
+.msr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+.msr-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.msr-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+}
+.msr-icon:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+.msr-icon.missing .messenger-kind-glyph {
+  opacity: 0.45;
+}
+.msr-icon .icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.messenger-kind-glyph circle {
+  fill: #8a96a8;
+}
+.messenger-kind-glyph path {
+  fill: #fff;
+}
+.messenger-kind-glyph.whatsapp circle {
+  fill: #25d366;
+}
+.messenger-kind-glyph.telegram circle {
+  fill: #2aabee;
+}
+.messenger-kind-glyph.max circle {
+  fill: #7b3fe4;
+}
+/* Значок-уведомление в правом верхнем углу. */
+.msr-badge {
+  position: absolute;
+  top: -2px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.msr-badge.found {
+  background: #e5484d;
+  color: #fff;
+}
+.msr-badge.missing {
+  background: #e5484d;
+}
+.msr-badge.missing path {
+  stroke: #fff;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+/* Ищем: точки появляются по одной («. .. ...») и пропадают. */
+.msr-badge.searching {
+  gap: 1px;
+  background: var(--surface);
+  color: var(--muted);
+}
+.msr-badge.searching i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0;
+  animation: msr-dots 1.2s infinite steps(1, end);
+}
+.msr-badge.searching i:nth-child(2) {
+  animation-name: msr-dots-2;
+}
+.msr-badge.searching i:nth-child(3) {
+  animation-name: msr-dots-3;
+}
+@keyframes msr-dots {
+  0%, 100% { opacity: 0; }
+  25%, 75% { opacity: 1; }
+}
+@keyframes msr-dots-2 {
+  0%, 25%, 100% { opacity: 0; }
+  50%, 75% { opacity: 1; }
+}
+@keyframes msr-dots-3 {
+  0%, 50%, 100% { opacity: 0; }
+  75% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msr-badge.searching i {
+    animation: none;
+    opacity: 1;
+  }
+}
+.msr-again {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+.msr-again .icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.msr-none {
+  font-size: 12px;
+}

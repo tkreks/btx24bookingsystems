@@ -36,7 +36,8 @@ export class WorkdayService {
     }
   }
 
-  async act(user: B24UserContext, action: string): Promise<WorkdayDto> {
+  /** `report` — комментарий сотрудника к завершению дня (`timeman.close` REPORT). */
+  async act(user: B24UserContext, action: string, report?: unknown): Promise<WorkdayDto> {
     if (action !== 'open' && action !== 'pause' && action !== 'close')
       throw new BadRequestException({ code: 'INVALID_ACTION', message: 'action: open, pause или close' });
     const current = await this.status(user);
@@ -52,6 +53,8 @@ export class WorkdayService {
         params.REPORT = 'Рабочий день не был закрыт вовремя — закрыт из приложения бронирования';
       }
     }
+    const comment = action === 'close' && typeof report === 'string' ? report.trim().slice(0, 1000) : '';
+    if (comment) params.REPORT = comment;
     return toDto((await user.client.call<RawWorkday>(`timeman.${action}`, params)).result);
   }
 }

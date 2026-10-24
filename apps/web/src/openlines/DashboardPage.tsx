@@ -24,6 +24,7 @@ import {
 import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
 import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
+import { WorkdayControls } from '../workday/WorkdayControls.js';
 import { MyActivityBlock } from '../dashboard/MyActivityBlock.js';
 import { ActionLogBlock, AlertsBlock, CertificatesBlock, DealGapsBlock, NeedsCloseBlock, StopsBlock } from '../dashboard/control-blocks.js';
 import { HEAD_BLOCKS, HeadBlock, versus, type HeadBlockType } from '../dashboard/head-blocks.js';
@@ -56,6 +57,8 @@ const CANCEL_REASON: Record<NonNullable<DashboardBookingRow['cancelReason']>, st
 /** «сегодня» / «вчера» / «за период» — подпись плиток по выбранному периоду. */
 /** «Требуют внимания»: сколько чатов показывать сразу и сколько добавляет «Показать ещё». */
 const ATTENTION_STEP = 5;
+/** Выбор периода пока скрыт (владелец, 2026-10-24): дашборд — за текущий день; переключение остаётся в коде. */
+const SHOW_PERIOD_PICKER = false;
 const periodWord = (p: PeriodPreset) => (p === 'today' ? 'сегодня' : p === 'yesterday' ? 'вчера' : 'за период');
 
 /**
@@ -347,14 +350,16 @@ export function DashboardPage({
 
   const periodBar = (
     <div className="period-bar">
-      <div className="segmented period-presets" role="group" aria-label="Период">
-        {PERIOD_PRESETS.map((p) => (
-          <button key={p.key} className={preset === p.key ? 'active' : ''} onClick={() => choose(p.key)}>
-            {p.label}
-          </button>
-        ))}
-      </div>
-      {preset === 'custom' && (
+      {SHOW_PERIOD_PICKER && (
+        <div className="segmented period-presets" role="group" aria-label="Период">
+          {PERIOD_PRESETS.map((p) => (
+            <button key={p.key} className={preset === p.key ? 'active' : ''} onClick={() => choose(p.key)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {SHOW_PERIOD_PICKER && preset === 'custom' && (
         <form
           className="period-custom"
           onSubmit={(e) => {
@@ -463,11 +468,11 @@ export function DashboardPage({
           <button className="dash-calendar-btn" aria-label="К календарю" title="Календарь броней" onClick={onBack}>
             <Icon name="calendar" size={20} />
           </button>
-          <h1>Мой дашборд</h1>
           <span className="muted toolbar-user">
             <Avatar src={session.user.photo} name={session.user.name} size={26} />
             {session.user.name}
           </span>
+          <WorkdayControls timezone={tz} />
         </div>
         <div className="toolbar-controls">
           <ThemeToggle />

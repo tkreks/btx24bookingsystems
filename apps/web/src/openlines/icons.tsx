@@ -41,6 +41,10 @@ const PATHS = {
   eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
   hourglass:
     'M5 22h14M5 2h14m-2 20v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2',
+  // Рабочий день: начать / пауза / завершить.
+  play: 'M7 4.5v15l12-7.5Z',
+  pause: 'M8 5v14M16 5v14',
+  stop: 'M6 6h12v12H6Z',
 } as const;
 
 export type IconName = keyof typeof PATHS;

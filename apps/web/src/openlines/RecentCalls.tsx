@@ -1,4 +1,4 @@
-import { MessengerSearchDialog } from '../messengers/MessengerSearchDialog.js';
+import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { BlockLoading } from '../dashboard/BlockLoading.js';
 import { ColorLegend, type LegendItem } from '../ColorLegend.js';
 import { useState } from 'react';
@@ -63,7 +63,6 @@ export function callTimeText(at: string, timezone: string, from: string, to: str
 export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: CallScope; timezone: string; from: string; to: string; onOpenChat: (chatId: number) => void }) {
   const { data, error } = useDashboardQuery<RecentCallsDto>(`/dashboard/recent-calls?scope=${scope}&from=${from}&to=${to}`);
   const key = `${scope}|${from}|${to}`;
-  const [searchPhone, setSearchPhone] = useState<string | null>(null);
   // «Показать ещё» — в пределах выбранных «Все / Мои» и периода; смена — снова 5.
   const [more, setMore] = useState({ key, n: STEP });
   const shown = more.key === key ? more.n : STEP;
@@ -95,7 +94,7 @@ export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: 
                 <time className="attention-time call-inline-time" dateTime={c.at} title={fmtDateTime(c.at, timezone)}>{callTimeText(c.at, timezone, from, to)}</time>
                 <span className="call-inline-actions">
                   {c.latestDealId && <button type="button" className="dash-icon-btn" aria-label="Открыть сделку" title="Последняя созданная сделка клиента" onClick={() => openCrm('deal', c.latestDealId!)}><Icon name="handshake" size={18} /></button>}
-                  {!c.latestChatId && c.clientPhone && <button type="button" className="dash-icon-btn" aria-label="Поиск в мессенджерах" title="Найти клиента в доступных мессенджерах" onClick={() => setSearchPhone(c.clientPhone!)}><Icon name="mail" size={18} /></button>}
+                  {!c.latestChatId && c.clientPhone && <MessengerSearchButton phone={c.clientPhone} timezone={timezone} onOpenChat={onOpenChat} />}
                   {c.latestChatId && <button type="button" className="dash-icon-btn" aria-label="Перейти в чат" title="Чат клиента с последней активностью" onClick={() => onOpenChat(c.latestChatId!)}><Icon name="chat" size={18} /></button>}
                 </span>
               </div>
@@ -103,7 +102,6 @@ export function RecentCalls({ scope, timezone, from, to, onOpenChat }: { scope: 
           );
         })}
       </ul></div>
-      {searchPhone && <MessengerSearchDialog phone={searchPhone} timezone={timezone} onClose={() => setSearchPhone(null)} onOpenChat={onOpenChat} />}
       {items && <ListMore total={items.length} shown={shown} step={STEP} onShow={(n) => setMore({ key, n })} />}
     </section>
   );

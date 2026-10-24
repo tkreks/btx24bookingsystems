@@ -48,4 +48,12 @@ describe('WorkdayService', () => {
       REPORT: expect.stringContaining('приложения бронирования'),
     });
   });
+
+  it('close passes the employee comment as REPORT (only for close)', async () => {
+    const call = vi.fn(async (method: string) => (method === 'timeman.status' ? day('OPENED') : day('CLOSED')));
+    await new WorkdayService().act(user(call), 'close', '  Ушёл к клиенту  ');
+    expect(call).toHaveBeenLastCalledWith('timeman.close', { REPORT: 'Ушёл к клиенту' });
+    await new WorkdayService().act(user(call), 'pause', 'не нужен');
+    expect(call).toHaveBeenLastCalledWith('timeman.pause', {});
+  });
 });
