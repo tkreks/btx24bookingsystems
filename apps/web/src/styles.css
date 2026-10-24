@@ -7281,6 +7281,41 @@ button.cert-row:hover {
 .dash-cell.h-2 {
   grid-row: span 2;
 }
+/* ✎ — заменить блок: в углу, виден при наведении (на сенсорных экранах — всегда, приглушённо). */
+.dash-cell {
+  position: relative;
+}
+.dash-cell-edit {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.dash-cell:hover > .dash-cell-edit,
+.dash-cell-edit:focus-visible {
+  opacity: 1;
+}
+.dash-grid.editing .dash-cell-edit {
+  top: 40px;
+  opacity: 1;
+}
+@media (hover: none) {
+  .dash-cell-edit {
+    opacity: 0.6;
+  }
+}
 .dash-cell-body {
   display: flex;
   flex: 1;

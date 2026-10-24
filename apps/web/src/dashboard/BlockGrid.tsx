@@ -10,6 +10,7 @@ import {
 } from '@btx24/shared';
 import { MinimizeButton } from '../Minimize.js';
 import { BlockSync } from './DashboardSync.js';
+import { replaceBlock } from './replace-block.js';
 
 const WIDTH_ICONS: Record<BlockWidth, string> = { sixth: '⅙', fifth: '⅕', quarter: '¼', third: '⅓', half: '½', full: '▭' };
 const GROUPS: DashboardBlockGroup[] = ['Показатели', 'Списки', 'По дням и сравнение', 'Контроль'];
@@ -26,6 +27,7 @@ export function BlockGrid({
   render,
   sources,
   onChange,
+  onCommit,
 }: {
   blocks: DashboardBlock[];
   editing: boolean;
@@ -35,8 +37,11 @@ export function BlockGrid({
   /** Запросы страницы, из которых блок взял данные — подпись «из кэша / обновлено». */
   sources?: (b: DashboardBlock) => string[];
   onChange: (blocks: DashboardBlock[]) => void;
+  /** Сохранить сразу (замена блока вне режима настройки). */
+  onCommit?: (blocks: DashboardBlock[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const [replacing, setReplacing] = useState<DashboardBlock | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const move = (from: number, to: number) => {
     if (to < 0 || to >= blocks.length || from === to) return;
@@ -110,6 +115,11 @@ export function BlockGrid({
                   </button>
                 </div>
               )}
+              {(editing || onCommit) && (
+                <button type="button" className="dash-cell-edit" aria-label={`Заменить блок «${DASHBOARD_BLOCKS[b.type].title}»`} title="Заменить на другой блок" onClick={() => setReplacing(b)}>
+                  ✎
+                </button>
+              )}
               <div className="dash-cell-body">{content ? <BlockSync paths={sources?.(b)}>{content}</BlockSync> : <p className="muted dash-cell-empty">Блок недоступен: нет прав или данных.</p>}</div>
             </div>
           );
@@ -120,6 +130,19 @@ export function BlockGrid({
           </button>
         )}
       </div>
+      {replacing && (
+        <ReplaceBlock
+          block={replacing}
+          blocks={blocks}
+          available={available}
+          onClose={() => setReplacing(null)}
+          onPick={(type) => {
+            const next = replaceBlock(blocks, replacing.id, type);
+            setReplacing(null);
+            (editing || !onCommit ? onChange : onCommit)(next);
+          }}
+        />
+      )}
       {adding && (
         <BlockCatalog
           available={available.filter((t) => !used.has(t))}
@@ -185,6 +208,58 @@ function BlockCatalog({ available, onAdd, onClose }: { available: DashboardBlock
             </section>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** Окно «Заменить блок»: выведенные — поменяться местами и размерами; не выведенные — встать на место. */
+function ReplaceBlock({ block, blocks, available, onPick, onClose }: { block: DashboardBlock; blocks: DashboardBlock[]; available: DashboardBlockType[]; onPick: (t: DashboardBlockType) => void; onClose: () => void }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+  const shown = blocks.filter((b) => b.id !== block.id && available.includes(b.type));
+  const used = new Set(blocks.map((b) => b.type));
+  const hidden = available.filter((t) => !used.has(t));
+  const row = (t: DashboardBlockType, action: string, hint: string) => (
+    <li key={t}>
+      <span className="block-catalog-main">
+        <b>{DASHBOARD_BLOCKS[t].title}</b>
+        <span className="muted">{hint}</span>
+      </span>
+      <button type="button" className="primary" onClick={() => onPick(t)}>
+        {action}
+      </button>
+    </li>
+  );
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet block-catalog" role="dialog" aria-modal="true" aria-label="Заменить блок" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h2>Заменить «{DASHBOARD_BLOCKS[block.type].title}»</h2>
+          <button aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        {!!shown.length && (
+          <section className="block-catalog-group">
+            <h3>На панели — поменяться местами и размерами</h3>
+            <ul>{shown.map((b) => row(b.type, 'Поменять', `${BLOCK_WIDTH_LABELS[b.width].toLowerCase()}${b.rows === 2 ? ', два ряда' : ''}`))}</ul>
+          </section>
+        )}
+        {GROUPS.map((g) => {
+          const list = hidden.filter((t) => DASHBOARD_BLOCKS[t].group === g);
+          if (!list.length) return null;
+          return (
+            <section key={g} className="block-catalog-group">
+              <h3>Не выведены · {g}</h3>
+              <ul>{list.map((t) => row(t, 'Заменить', DASHBOARD_BLOCKS[t].hint))}</ul>
+            </section>
+          );
+        })}
+        {!shown.length && !hidden.length && <p className="muted">Других блоков нет.</p>}
       </div>
     </div>
   );

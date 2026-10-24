@@ -30,6 +30,15 @@ export interface InstanceConfig {
 export { SCREEN, vncPort } from './screen.js';
 
 /**
+ * Вход есть, а «готов» не наступил за это время — клиент перезапускается (сессия сохраняется).
+ * whatsapp-web.js иногда зависает после входа на подключении слушателей страницы (экран WhatsApp
+ * загружен, но событий и отправки нет).
+ */
+export const READY_TIMEOUT_MS = 90_000;
+/** Перезапусков подряд без «готов», после которых — `failed` (не крутить бесконечно). */
+const MAX_READY_RESTARTS = 3;
+
+/**
  * Один мессенджер: виртуальный экран Xvfb `:N`, VNC к нему (только localhost — наружу отдаёт мост
  * через api), Chromium с WhatsApp Web (whatsapp-web.js), сессия — в `dataDir/sessions/<id>`
  * (переживает перезапуск: повторный вход не нужен).
@@ -39,6 +48,8 @@ export class Instance {
   private client: InstanceType<typeof Client> | null = null;
   private status: InstanceStatus;
   private readonly media: MediaStore;
+  private readyTimer: NodeJS.Timeout | null = null;
+  private readyRestarts = 0;
 
   constructor(
     readonly spec: InstanceSpec,
@@ -98,8 +109,15 @@ export class Instance {
       });
       client.on('code', (code: string) => this.set('pairing', { code }));
       client.on('qr', (qr: string) => this.set('qr', { qr }));
-      client.on('authenticated', () => this.set('authenticated'));
-      client.on('ready', () => this.set('ready', { account: client.info?.wid?._serialized ?? null }));
+      client.on('authenticated', () => {
+        this.set('authenticated');
+        this.watchReady(client);
+      });
+      client.on('ready', () => {
+        this.clearReadyTimer();
+        this.readyRestarts = 0;
+        this.set('ready', { account: client.info?.wid?._serialized ?? null });
+      });
       // Переписка: и входящие, и отправленные (в том числе с телефона) — `message_create`.
       const id = this.spec.id;
       client.on('message_create', (m) => {
@@ -290,7 +308,31 @@ export class Instance {
     return Buffer.from(await page.screenshot({ type: 'png' }));
   }
 
+  /** Сторож «готов» после входа: см. `READY_TIMEOUT_MS`. */
+  private watchReady(client: InstanceType<typeof Client>) {
+    this.clearReadyTimer();
+    this.readyTimer = setTimeout(() => {
+      this.readyTimer = null;
+      if (this.client !== client || this.status.state !== 'authenticated') return;
+      if (++this.readyRestarts > MAX_READY_RESTARTS) {
+        this.readyRestarts = 0;
+        this.set('failed', { error: 'WhatsApp Web не перешёл в «готов» после входа' });
+        void this.stop(false);
+        return;
+      }
+      this.log(`[${this.spec.id}] нет «готов» ${READY_TIMEOUT_MS / 1000} с после входа — перезапуск (${this.readyRestarts}/${MAX_READY_RESTARTS})`);
+      void this.stopClient().then(() => this.start());
+    }, READY_TIMEOUT_MS);
+    this.readyTimer.unref?.();
+  }
+
+  private clearReadyTimer() {
+    if (this.readyTimer) clearTimeout(this.readyTimer);
+    this.readyTimer = null;
+  }
+
   private async stopClient(): Promise<void> {
+    this.clearReadyTimer();
     const client = this.client;
     this.client = null;
     await client?.destroy().catch(() => undefined);

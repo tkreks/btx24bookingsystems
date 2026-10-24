@@ -500,6 +500,7 @@ export function DashboardPage({
         editing={editing}
         available={allowedBlocks(session.canManageApp)}
         onChange={setDraft2}
+        onCommit={(next) => void saveLayout(next)}
         render={(b) => renderBlock(b.type)}
         sources={(b) => sourcesOf(b.type)}
       />
