@@ -45,7 +45,8 @@ export class MessengersService {
     const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 255) : null;
     if (await this.prisma.messenger.findUnique({ where: { portalId_kind_phone: { portalId, kind: kind.kind, phone } } }))
       throw new ConflictException({ code: 'MESSENGER_EXISTS', message: `${kind.label} с номером +${phone} уже добавлен` });
-    const auth = body.auth === 'qr' ? 'qr' : 'code';
+    // Telegram: вход только на экране браузера (QR или номер и код там же).
+    const auth = kind.kind === 'telegram' || body.auth === 'qr' ? 'qr' : 'code';
     const row = await this.prisma.messenger.create({ data: { portalId, kind: kind.kind, phone, auth, title, createdByUserId: userId } });
     const inst = await this.service.ensure(row.id, { kind: row.kind, phone, auth }).catch((err: unknown) => {
       this.logger.warn(`messenger ${row.id}: ${err instanceof Error ? err.message : String(err)}`);

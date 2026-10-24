@@ -36,9 +36,10 @@ describe('Мессенджеры портала', () => {
     expect(t.service.ensure).toHaveBeenCalledWith(m.id, { kind: 'whatsapp', phone: '79991234567', auth: 'code' });
   });
 
-  it('Telegram и MAX пока не подключаются; неверный номер и повтор — ошибка', async () => {
+  it('MAX пока не подключается; Telegram — только вход на экране; неверный номер и повтор — ошибка', async () => {
     const t = setup();
-    await expect(t.svc.create('p1', 7, { kind: 'telegram', phone: '79991234567' })).rejects.toMatchObject({ response: { code: 'KIND_NOT_READY' } });
+    await expect(t.svc.create('p1', 7, { kind: 'max', phone: '79991234567' })).rejects.toMatchObject({ response: { code: 'KIND_NOT_READY' } });
+    expect(await t.svc.create('p1', 7, { kind: 'telegram', phone: '79990000001', auth: 'code' })).toMatchObject({ kind: 'telegram', auth: 'qr' });
     await expect(t.svc.create('p1', 7, { kind: 'whatsapp', phone: '12' })).rejects.toMatchObject({ response: { code: 'INVALID_PHONE' } });
     await t.svc.create('p1', 7, { kind: 'whatsapp', phone: '79991234567' });
     await expect(t.svc.create('p1', 7, { kind: 'whatsapp', phone: '+7 999 123 45 67' })).rejects.toMatchObject({ response: { code: 'MESSENGER_EXISTS' } });

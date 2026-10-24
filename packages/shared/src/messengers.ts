@@ -1,8 +1,8 @@
 import { normalizeClientPhone } from './phones.js';
-/** Мессенджеры для связи с клиентом первым (ADR 0014). Сейчас подключается WhatsApp; остальные — следующими. */
+/** Мессенджеры для связи с клиентом первым (ADR 0014). Подключаются WhatsApp и Telegram; MAX — следующим. */
 export const MESSENGER_KINDS = [
   { kind: 'whatsapp', label: 'WhatsApp', available: true },
-  { kind: 'telegram', label: 'Telegram', available: false },
+  { kind: 'telegram', label: 'Telegram', available: true },
   { kind: 'max', label: 'MAX', available: false },
 ] as const;
 export type MessengerKind = (typeof MESSENGER_KINDS)[number]['kind'];

@@ -25,7 +25,7 @@ export function MessengerSearchDialog({ phone, timezone, onClose, onOpenChat }: 
     {!!data?.existingChats?.length && <section><h4>Продолжить существующий диалог</h4>{data.existingChats.map(c => <button type="button" key={c.chatId} onClick={() => { onClose(); if (onOpenChat) onOpenChat(c.chatId); else openMessenger(c.chatId); }}>{c.title}</button>)}</section>}
     {!!data?.results.length && <h4>Написать через подключённый номер</h4>}
     {data?.results.map(r => <div className="messenger-search-result" key={r.messenger.id}>
-      <div><b>{r.messenger.title || 'WhatsApp'} · +{r.messenger.phone}</b><p>{r.status === 'found' ? 'Клиент найден' : r.status === 'not_found' ? 'Не найден' : 'Проверка недоступна'}</p>{r.note && <small className="muted">{r.note}</small>}</div>
+      <div><b>{r.messenger.title || (r.messenger.kind === 'telegram' ? 'Telegram' : 'WhatsApp')} · +{r.messenger.phone}</b><p>{r.status === 'found' ? 'Клиент найден' : r.status === 'not_found' ? 'Не найден' : 'Проверка недоступна'}</p>{r.note && <small className="muted">{r.note}</small>}</div>
       {r.status === 'found' && r.canSend && <button type="button" className="primary" onClick={() => {
         if (r.openlineChatId) { const id = r.openlineChatId; onClose(); if (onOpenChat) onOpenChat(id); else openMessenger(id); }
         else setWriting(r);

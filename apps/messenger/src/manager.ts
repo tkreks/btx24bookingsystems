@@ -1,7 +1,8 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { Instance, type InstanceConfig } from './instance.js';
+import { Instance, type InstanceConfig, type MessengerInstance } from './instance.js';
 import type { WireEvent } from './messages.js';
 import type { AuthMode, InstanceSpec, InstanceStatus, MessengerKind } from './spec.js';
+import { TelegramInstance } from './telegram.js';
 
 /** Первый номер виртуального экрана; дальше — по порядку создания. */
 export const FIRST_DISPLAY = 10;
@@ -15,11 +16,12 @@ let emit: (e: WireEvent) => void = () => undefined;
 export const setEventSink = (sink: (e: WireEvent) => void) => void (emit = sink);
 
 export class Manager {
-  private readonly items = new Map<string, Instance>();
+  private readonly items = new Map<string, MessengerInstance>();
 
   constructor(
     private readonly config: InstanceConfig,
-    private readonly make: (spec: InstanceSpec) => Instance = (spec) => new Instance(spec, config, undefined, (e) => emit(e)),
+    private readonly make: (spec: InstanceSpec) => MessengerInstance = (spec) =>
+      spec.kind === 'telegram' ? new TelegramInstance(spec, config, undefined, (e) => emit(e)) : new Instance(spec, config, undefined, (e) => emit(e)),
   ) {}
 
   private get file() {
@@ -41,7 +43,7 @@ export class Manager {
     return [...this.items.values()].map((i) => i.info);
   }
 
-  get(id: string): Instance | undefined {
+  get(id: string): MessengerInstance | undefined {
     return this.items.get(id);
   }
 

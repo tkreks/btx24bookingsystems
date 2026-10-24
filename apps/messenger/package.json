@@ -4,7 +4,7 @@
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
-  "description": "Сервис мессенджеров: браузер на каждый подключённый мессенджер (WhatsApp Web), экран по VNC.",
+  "description": "Сервис мессенджеров: браузер на каждый подключённый мессенджер (WhatsApp Web, Telegram Web), экран по VNC.",
   "scripts": {
     "build": "node scripts/patch-whatsapp.mjs && tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "puppeteer": "24.38.0",
     "whatsapp-web.js": "1.34.7",
     "ws": "^8.18.3"
   },

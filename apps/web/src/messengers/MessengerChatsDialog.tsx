@@ -158,7 +158,7 @@ export function MessengerChatsDialog({ messenger, timezone, onClose, admin = tru
             </div>}
 
             {api ? (
-              <MessengerThread key={`${current}:${view}`} api={api} timezone={timezone} canSend={!!ctx && !ctx.needsChoice && !choosing && (view === 'all' || view === (ctx.activeDealId == null ? 'general' : String(ctx.activeDealId))) && (admin ? messenger.state === 'ready' : true)} label="WhatsApp" />
+              <MessengerThread key={`${current}:${view}`} api={api} timezone={timezone} kind={messenger.kind} canSend={!!ctx && !ctx.needsChoice && !choosing && (view === 'all' || view === (ctx.activeDealId == null ? 'general' : String(ctx.activeDealId))) && (admin ? messenger.state === 'ready' : true)} label="WhatsApp" />
             ) : (
               <p className="muted pad">Выберите чат слева.</p>
             )}

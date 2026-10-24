@@ -1,13 +1,17 @@
 # apps/messenger
 
 Сервис мессенджеров (ADR 0014): на каждый номер — Xvfb `:N` + x11vnc (`5900+N`, только localhost) +
-Chromium с WhatsApp Web (whatsapp-web.js, сессия — `LocalAuth` в `/data/sessions`). Вызывает только
-api по внутренней сети стенда.
+Chromium с WhatsApp Web (whatsapp-web.js, сессия — `LocalAuth` в `/data/sessions`) или с Telegram Web K
+(`telegram.ts`, профиль браузера — `/data/sessions/session-<id>`). Вызывает только api по внутренней
+сети стенда.
 
 | Файл | Что |
 |---|---|
 | `src/spec.ts` | виды, состояния, нормализация номера (копия `normalizeMessengerPhone` из shared — сервис собирается без shared) |
-| `src/instance.ts` | один номер: экран, VNC, браузер, события входа |
+| `src/screen.ts` | виртуальный экран Xvfb и x11vnc (общие для всех мессенджеров) |
+| `src/instance.ts` | один номер WhatsApp: браузер, события входа; `MessengerInstance` — общий интерфейс |
+| `src/telegram.ts` | один номер Telegram: Chromium с Telegram Web K, вызовы Telegram API через страницу |
+| `src/telegram-wire.ts` | объекты Telegram API → `WireMessage`/`WireEvent` (чистые функции, тесты) |
 | `src/manager.ts` | реестр `/data/instances.json`, номера экранов, запуск после перезапуска |
 | `src/server.ts` | HTTP `/instances…` и WebSocket `/instances/:id/vnc` → x11vnc |
 
@@ -19,7 +23,7 @@ WhatsApp Web `wwebjs-cache`) — в `/data`; после перезапуска �
 Chromium (`Singleton*`), иначе браузер не стартует.
 
 Проверки: `npm run test -w @btx24/messenger` (без браузера — экземпляры подменяются).
-Новый мессенджер (Telegram, MAX) — новый `kind` в `spec.ts` и свой класс экземпляра.
+Новый мессенджер (MAX) — новый `kind` в `spec.ts` и свой класс экземпляра (`MessengerInstance`).
 
 ## Файлы
 `media.ts`: MediaStore, детерминированный SHA1(instanceId:messageId), байты и JSON в томе
@@ -45,4 +49,26 @@ Chromium (`Singleton*`), иначе браузер не стартует.
 `message.__x_id` перед созданием outgoing Msg (WA MediaModel иначе затирает корректный id).
 Patch идемпотентный, при изменении upstream маркера сборка останавливается для проверки.
 Владелец подтвердил доставку файла из Битрикс24 и приложения; исправление включено в образ.
-Telegram отложен по указанию владельца до завершения текущего этапа, kind не включён.
+## Telegram (`kind: telegram`)
+Готовой библиотеки вроде whatsapp-web.js для Telegram Web нет, а разбирать разметку страницы хрупко.
+Поэтому сервис вызывает **Telegram API (MTProto) клиентом самой страницы**:
+`window.rootScope.managers.apiManager.invokeApi(method, params, options)` (Telegram Web K; флаги `true`
+— в `pFlags`, long — строками; файлы: `upload.getFile` с `{dcId, fileDownload: true}`,
+`upload.save(Big)FilePart` с `{fileUpload: true}`). Зависимость от внутренностей страницы — только эта.
+- **Вход** — на экране (QR или номер + код + облачный пароль); сервис раз в 10 с проверяет
+  `updates.getState`: `AUTH_KEY_UNREGISTERED` → `qr` (после входа — `logged_out`), успех → `ready`,
+  `account` — `<номер>@c.us`. Вошли не тем номером — `ready` с предупреждением в `error`.
+- **Изменения** — `updates.getDifference` со своим `pts/date/qts` в `/data/telegram-<id>.json`
+  (там же `access_hash` собеседников — без него не написать): после перезапуска пропущенное дочитывается,
+  `differenceTooLong` — с текущего места. Сразу — по событиям страницы (обёртка `rootScope.dispatchEvent`
+  → `__btxNotify`), иначе раз в 10 с.
+- **ID**: сообщение — `tg_<номер>` (в личных чатах и группах номер уникален на аккаунт: правка,
+  удаление, вложение — по нему одному); собеседник — `<userId>@lid`, номер — в `phone`, если виден;
+  группа — `<chatId>@g.us`. Каналы, супергруппы, боты, «Избранное» и служебная учётка `777000` (коды
+  входа!) в приложение не попадают.
+- **Отправка** на `<номер>@c.us`: известный собеседник → `contacts.resolvePhone` → (номер скрыт
+  приватностью) `contacts.importContacts` — номер **появляется в контактах** аккаунта. Текст — без
+  разметки (BBCode линии превращается в простой текст в api). Фото jpeg/png/webp — фото, прочее — файлом.
+- Удаление в Telegram приходит без чата — чат берётся из памяти сервиса (сообщения после запуска и
+  загруженной истории); неизвестное удаление пропускается. Прочтение собеседником — `ack` 3.
+- Отправленное через API не появляется на экране Telegram Web до обновления страницы — только вид.

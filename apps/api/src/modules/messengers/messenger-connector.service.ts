@@ -28,13 +28,17 @@ type ConnectorItem = { im?: { chat_id?: number; message_id?: number }; message?:
 /** Файл оператора не больше — скачиваем и отправляем клиенту. */
 const MAX_OPERATOR_FILE = 64 * 1024 * 1024;
 
-/** Текст оператора из открытой линии (BBCode) → разметка WhatsApp. */
-export function bbToMessenger(text: string): string {
+/**
+ * Текст оператора из открытой линии (BBCode) → разметка WhatsApp. Telegram — простым текстом: сервис
+ * отправляет его без разметки, и `*…*` остались бы звёздочками.
+ */
+export function bbToMessenger(text: string, kind = 'whatsapp'): string {
+  const plain = kind === 'telegram';
   return text
     .replace(/\[br\]/gi, '\n')
-    .replace(/\[b\]([\s\S]*?)\[\/b\]/gi, '*$1*')
-    .replace(/\[i\]([\s\S]*?)\[\/i\]/gi, '_$1_')
-    .replace(/\[s\]([\s\S]*?)\[\/s\]/gi, '~$1~')
+    .replace(/\[b\]([\s\S]*?)\[\/b\]/gi, plain ? '$1' : '*$1*')
+    .replace(/\[i\]([\s\S]*?)\[\/i\]/gi, plain ? '$1' : '_$1_')
+    .replace(/\[s\]([\s\S]*?)\[\/s\]/gi, plain ? '$1' : '~$1~')
     .replace(/\[url=([^\]]+)\]([\s\S]*?)\[\/url\]/gi, '$2 ($1)')
     .replace(/\[\/?[a-z]+(?:=[^\]]*)?\]/gi, '')
     .trim();
@@ -263,7 +267,7 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
       if (event === 'ONIMCONNECTORMESSAGEADD') {
         // Повтор события: уже отправлено — только подтверждаем доставку. Первое сообщение из приложения
         // (`firstContact`) линия может прислать эхом — узнаём его по чату и тексту, второй раз не шлём.
-        const text = bbToMessenger(item.message?.text ?? '');
+        const text = bbToMessenger(item.message?.text ?? '', m.kind);
         const done =
           (b24MessageId ? await this.prisma.messengerMessage.findFirst({ where: { messengerId: m.id, b24MessageId } }) : null) ??
           (await this.echoOfFirstContact(m, chatId, Number(item.im?.chat_id) || null, text, b24MessageId, !!item.message?.files?.length));
@@ -274,7 +278,7 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
         const ids = ([] as string[]).concat(item.message?.id ?? []).filter(Boolean);
         for (const externalId of ids) {
           if (event === 'ONIMCONNECTORMESSAGEUPDATE') {
-            const w = await this.service.edit(m.id, externalId, bbToMessenger(item.message?.text ?? ''));
+            const w = await this.service.edit(m.id, externalId, bbToMessenger(item.message?.text ?? '', m.kind));
             await this.inbox.edit(m, externalId, w.body, '', Math.floor(Date.now() / 1000));
           } else {
             await this.service.deleteMessage(m.id, externalId, true);

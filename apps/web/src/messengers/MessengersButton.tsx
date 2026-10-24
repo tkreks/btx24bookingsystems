@@ -26,7 +26,7 @@ export function MessengersButton({ timezone }: { timezone: string }) {
         <div className="cl-menu" role="menu">
           {items.map((m) => (
             <button key={m.id} role="menuitem" onClick={() => { setOpen(false); setCurrent(m); }}>
-              {m.title ?? 'WhatsApp'} +{m.phone}
+              {m.title ?? (m.kind === 'telegram' ? 'Telegram' : 'WhatsApp')} +{m.phone}
             </button>
           ))}
         </div>

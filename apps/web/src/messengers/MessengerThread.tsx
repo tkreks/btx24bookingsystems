@@ -15,16 +15,16 @@ export interface ThreadApi {
 
 const ACK = ['🕓', '✓', '✓✓', '✓✓'] as const;
 const SOURCE: Record<MessengerMessageDto['source'], string> = { messenger: '', app: 'из приложения', bitrix: 'из открытой линии' };
-/** WhatsApp разрешает менять своё сообщение в течение 15 минут. */
-const EDIT_MS = 15 * 60_000;
+/** Сколько можно менять своё сообщение: WhatsApp — 15 минут, Telegram — 48 часов. */
+const EDIT_MS: Record<string, number> = { whatsapp: 15 * 60_000, telegram: 48 * 3600_000 };
 const POLL_MS = 4000;
 
 /**
  * Переписка мессенджера (ADR 0014): сообщения из базы приложения, новые подтягиваются каждые 4 с.
  * Изменённое — с пометкой и прежним текстом во всплывающей подсказке; удалённое — зачёркнуто, с
- * пометкой «удалено» (текст сохраняется). Своё можно изменить (15 минут) и удалить у всех.
+ * пометкой «удалено» (текст сохраняется). Своё можно изменить (WhatsApp — 15 минут, Telegram — 48 часов) и удалить у всех.
  */
-export function MessengerThread({ api, timezone, canSend = true, label }: { api: ThreadApi; timezone: string; canSend?: boolean; label: string }) {
+export function MessengerThread({ api, timezone, canSend = true, label, kind = 'whatsapp' }: { api: ThreadApi; timezone: string; canSend?: boolean; label: string; kind?: string }) {
   const [items, setItems] = useState<MessengerMessageDto[] | null>(null);
   const [error, setError] = useState('');
   const [text, setText] = useState('');
@@ -128,7 +128,7 @@ export function MessengerThread({ api, timezone, canSend = true, label }: { api:
         )}
         {items?.map((m) => {
           const own = m.fromMe;
-          const canEdit = own && !m.deletedAt && now - Date.parse(m.sentAt) < EDIT_MS && m.type === 'chat';
+          const canEdit = own && !m.deletedAt && now - Date.parse(m.sentAt) < (EDIT_MS[kind] ?? EDIT_MS.whatsapp) && m.type === 'chat';
           return (
             <Fragment key={m.id}>
               <div className={`mt-msg${own ? ' own' : ''}${m.deletedAt ? ' deleted' : ''}`}>

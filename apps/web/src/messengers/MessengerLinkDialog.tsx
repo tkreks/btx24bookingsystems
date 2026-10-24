@@ -9,7 +9,7 @@ import { apiPut } from '../api.js';
  * приложение доставляет сообщения через номер. Без привязки номер работает только в приложении.
  */
 export function MessengerLinkDialog({ messenger, onClose, onSaved }: { messenger: MessengerDto; onClose: () => void; onSaved: (m: MessengerDto) => void }) {
-  const [name, setName] = useState(`WhatsApp +${messenger.phone}`);
+  const [name, setName] = useState(`${messenger.kind === 'telegram' ? 'Telegram' : 'WhatsApp'} +${messenger.phone}`);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 

@@ -1,11 +1,9 @@
 import { cachedMediaFromBrowser } from './browser-media.js';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { setTimeout as delay } from 'node:timers/promises';
 import wwebjs from 'whatsapp-web.js';
 import { ensureSerializedId, isClientChat, toWire, type WireEvent, type WireMessage } from './messages.js';
 import { defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
+import { SCREEN, VirtualScreen } from './screen.js';
 import type { InstanceSpec, InstanceState, InstanceStatus } from './spec.js';
 
 const { Client, LocalAuth, MessageMedia } = wwebjs;
@@ -29,8 +27,7 @@ export interface InstanceConfig {
   proxy?: string;
 }
 
-export const SCREEN = { width: 1280, height: 800 } as const;
-export const vncPort = (display: number) => 5900 + display;
+export { SCREEN, vncPort } from './screen.js';
 
 /**
  * Один мессенджер: виртуальный экран Xvfb `:N`, VNC к нему (только localhost — наружу отдаёт мост
@@ -38,8 +35,7 @@ export const vncPort = (display: number) => 5900 + display;
  * (переживает перезапуск: повторный вход не нужен).
  */
 export class Instance {
-  private xvfb: ChildProcess | null = null;
-  private vnc: ChildProcess | null = null;
+  private readonly screen = new VirtualScreen();
   private client: InstanceType<typeof Client> | null = null;
   private status: InstanceStatus;
   private readonly media: MediaStore;
@@ -70,7 +66,7 @@ export class Instance {
     try {
       const env: NodeJS.ProcessEnv = { ...process.env };
       if (this.config.display) {
-        await this.startDisplay();
+        await this.screen.start(this.spec.display);
         env.DISPLAY = `:${this.spec.display}`;
       }
       // Блокировка профиля от прежнего процесса (контейнер перезапущен) — иначе Chromium не стартует.
@@ -145,9 +141,7 @@ export class Instance {
   /** Остановить браузер и экран; `resetState: false` — не затирать итоговое состояние (logged_out, failed). */
   async stop(resetState = true): Promise<void> {
     await this.stopClient();
-    this.vnc?.kill('SIGTERM');
-    this.xvfb?.kill('SIGTERM');
-    this.vnc = this.xvfb = null;
+    this.screen.stop();
     if (resetState) this.set('stopped');
   }
 
@@ -301,15 +295,7 @@ export class Instance {
     this.client = null;
     await client?.destroy().catch(() => undefined);
   }
-
-  private async startDisplay(): Promise<void> {
-    const n = this.spec.display;
-    if (!this.xvfb) {
-      this.xvfb = spawn('Xvfb', [`:${n}`, '-screen', '0', `${SCREEN.width}x${SCREEN.height}x24`, '-nolisten', 'tcp'], { stdio: 'ignore' });
-      for (let i = 0; i < 50 && !existsSync(`/tmp/.X11-unix/X${n}`); i++) await delay(100);
-    }
-    if (!this.vnc)
-      // Только localhost и без пароля: снаружи к нему не подключиться, доступ — через мост api по билету администратора.
-      this.vnc = spawn('x11vnc', ['-display', `:${n}`, '-rfbport', String(vncPort(n)), '-localhost', '-nopw', '-forever', '-shared', '-quiet'], { stdio: 'ignore' });
-  }
 }
+
+/** Что сервис умеет с экземпляром любого мессенджера (WhatsApp — `Instance`, Telegram — `TelegramInstance`). */
+export type MessengerInstance = Pick<Instance, 'spec' | 'info' | 'start' | 'stop' | 'logout' | 'contact' | 'send' | 'edit' | 'remove' | 'history' | 'screenshot' | 'mediaOf' | 'readMedia'>;
