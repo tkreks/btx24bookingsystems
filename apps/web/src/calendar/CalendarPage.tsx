@@ -246,10 +246,15 @@ export function CalendarPage({
     ? [...(dealBookingsInfo?.upcoming ?? []), ...(dealBookingsInfo?.recent ?? [])].find((b) => b.dealId === placement.dealId && b.bookingId !== null) ?? null
     : null;
   const dealChecked = dealBookingsInfo !== null || dealBookingsFailed;
-  // Проверка закончилась, пока открыто окно, и брони нет — сразу в календарь.
+  // «Новая бронь» из встройки сделки — мастер брони поверх календаря.
+  const startBooking = () => {
+    setScreen({ name: 'calendar' });
+    setBookingForm({ date });
+  };
+  // Проверка закончилась, пока открыто окно, и брони нет — сразу мастер брони.
   if (dealWarning && dealChecked && !dealBooking) {
     setDealWarning(false);
-    setScreen({ name: 'calendar' });
+    startBooking();
   }
   const createDeal = async () => {
     if (!placement.dealId) return;
@@ -272,11 +277,12 @@ export function CalendarPage({
         <DealHome
           dealId={placement.dealId}
           timezone={tz}
+          canBook={session.canManageApp || permissions.has('booking.create')}
           onOpenChat={(chatId) => setScreen({ name: 'chats', deal: true, chatId })}
           onOpen={(target) => {
-            if (target === 'chat') setScreen({ name: 'chats', deal: true });
-            else if (target === 'deal') setScreen({ name: 'deal' });
-            else if (dealChecked && !dealBooking) setScreen({ name: 'calendar' });
+            if (target === 'chats') setScreen({ name: 'chats', deal: true });
+            else if (target === 'calendar') setScreen({ name: 'calendar' });
+            else if (dealChecked && !dealBooking) startBooking();
             else {
               setNewDealError('');
               setDealWarning(true);
@@ -293,7 +299,7 @@ export function CalendarPage({
             onCreate={() => void createDeal()}
             onIgnore={() => {
               setDealWarning(false);
-              setScreen({ name: 'calendar' });
+              startBooking();
             }}
             onClose={() => !creatingDeal && setDealWarning(false)}
           />
@@ -388,7 +394,7 @@ export function CalendarPage({
       <header className="toolbar">
         <div className="toolbar-title">
           {placement.dealId && (
-            <button className="deal-back" title="К меню сделки: чат, сделка, календарь" onClick={() => setScreen({ name: 'deal-home' })}>
+            <button className="deal-back" title="К меню сделки: чат, календарь, новая бронь" onClick={() => setScreen({ name: 'deal-home' })}>
               ‹ Сделка
             </button>
           )}

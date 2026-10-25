@@ -245,13 +245,13 @@ export function DashboardPage({
                         disabled={!c.dealId}
                         onClick={() => c.dealId && openCrm('deal', c.dealId)}
                       >
-                        <Icon name="handshake" size={18} />
+                        <Icon name="deal" size={18} />
                       </button>
                       <button className="dash-icon-btn" title="Перейти в чат" aria-label="Перейти в чат" onClick={() => onChats({ chatId: c.chatId })}>
-                        <Icon name="chat" size={18} />
+                        <Icon name="gochat" size={18} />
                       </button>
                       <button className="dash-icon-btn" title="Скрыть чат с дашборда" aria-label="Скрыть чат с дашборда" onClick={() => setHiding(c)}>
-                        <Icon name="eye" size={18} />
+                        <Icon name="hide" size={18} />
                       </button>
                     </span>
                   </li>
@@ -879,7 +879,7 @@ function DealsCreated({ d, tz, word, oneDay }: { d: Partial<DashboardDto> | null
 }
 
 /** 👁: скрыть чат с дашборда этого сотрудника — после подтверждения. */
-function HideChatDialog({ chat, onClose, onHidden }: { chat: AttentionChatDto; onClose: () => void; onHidden: (chatId: number) => void }) {
+export function HideChatDialog({ chat, onClose, onHidden }: { chat: AttentionChatDto; onClose: () => void; onHidden: (chatId: number) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {

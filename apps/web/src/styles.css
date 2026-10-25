@@ -8750,12 +8750,16 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .channels-modal .attention-rows li { padding-right: 4px; }
 .cv-channel, .cv-channel-stack { height: 24px; box-sizing: border-box; }
 
-/* Встройка сделки: ошибка канала Wazzup — четвёртый шаг красным «Отправить клиенту сообщение». */
-.deal-home-tiles:has(.deal-home-tile.recover) { grid-template-columns: repeat(4, minmax(0, 200px)); }
-.deal-home-tile.recover { border-color: #fda29b; background: #fef3f2; }
-.deal-home-tile.recover:hover { border-color: #f04438; }
-.deal-home-tile.recover .deal-home-icon { background: linear-gradient(135deg, #f97066, #d92d20); }
-.deal-home-tile.recover .deal-home-title { color: #b42318; }
-.deal-recover { max-width: 640px; }
-@media (max-width: 860px) { .deal-home-tiles:has(.deal-home-tile.recover) { grid-template-columns: repeat(2, minmax(0, 220px)); } }
-@media (max-width: 600px) { .deal-home-tiles:has(.deal-home-tile.recover) { grid-template-columns: 1fr; } }
+/* Встройка сделки (2026-10-26): блок «Чат с клиентом» как «Последние сообщения» дашборда, ниже — «Календарь» и «Новая бронь». */
+.deal-home { justify-content: flex-start; gap: 18px; }
+.deal-home-caption { margin: 0; }
+.deal-home-chats { width: min(820px, 100%); margin: 0; }
+.deal-home-chats-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.deal-home-chats-head h2 { margin: 0; font-size: 16px; }
+.deal-home-chats-head .link { margin-left: auto; }
+.deal-home-more { margin-top: 6px; }
+.deal-home-broken { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 6px 0 8px; padding: 10px 12px; border: 1px solid #fda29b; border-radius: 12px; background: #fef3f2; color: #b42318; font-size: 13px; }
+.deal-home-broken > .icon { flex: none; }
+.deal-home-broken > span { flex: 1 1 260px; }
+.deal-home-tiles { grid-template-columns: repeat(2, minmax(0, 260px)); }
+.deal-home-tile.booking .deal-home-icon { background: linear-gradient(135deg, #22c55e, #16a34a); }

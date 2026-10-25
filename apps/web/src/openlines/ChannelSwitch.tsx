@@ -115,10 +115,10 @@ export function ChannelSwitch({
                         disabled={!c.dealId}
                         onClick={() => c.dealId && openCrm('deal', c.dealId)}
                       >
-                        <Icon name="handshake" size={18} />
+                        <Icon name="deal" size={18} />
                       </button>
                       <button className="dash-icon-btn" title={c.chatId === current ? 'Этот чат уже открыт' : 'Перейти в чат'} aria-label="Перейти в чат" disabled={c.chatId === current} onClick={go}>
-                        <Icon name="chat" size={18} />
+                        <Icon name="gochat" size={18} />
                       </button>
                     </span>
                   </li>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MessengerContactSearchDto, MessengerDto, MessengerKind } from '@btx24/shared';
 import { groupByKind, StartChatFlow, type SearchResult } from './by-kind.js';
 import { apiGet } from '../api.js';
@@ -50,24 +50,29 @@ function Badge({ state }: { state: 'searching' | 'found' | 'missing' }) {
  * значок поиска; после — один значок на мессенджер (не на аккаунт) со статусом. Найден — нажатие
  * открывает переписку (несколько аккаунтов — сначала выбор аккаунта); иначе — подробности поиска.
  */
-export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel = false }: { phone: string; timezone: string; onOpenChat?: (chatId: number) => void; withLabel?: boolean }) {
+export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel = false, autoStart = false }: { phone: string; timezone: string; onOpenChat?: (chatId: number) => void; withLabel?: boolean; /** Искать сразу, без нажатия (встройка сделки при ошибке канала). */ autoStart?: boolean }) {
   const [list, setList] = useState<MessengerDto[] | null>(null);
   const [data, setData] = useState<MessengerContactSearchDto | null>(null);
   const [error, setError] = useState('');
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(autoStart);
   const [details, setDetails] = useState(false);
   const [writing, setWriting] = useState<SearchResult[] | null>(null);
 
-  const start = () => {
-    setStarted(true);
-    setError('');
-    setData(null);
+  const load = () => {
     // Список номеров приходит быстро — значки видны сразу, пока идёт проверка в мессенджерах.
     apiGet<MessengerDto[]>('/messengers').then(setList, () => setList([]));
     apiGet<MessengerContactSearchDto>(`/messengers/search?phone=${encodeURIComponent(phone)}`).then(setData, (e) =>
       setError(e instanceof Error ? e.message : 'Не удалось проверить мессенджеры'),
     );
   };
+  const start = () => {
+    setStarted(true);
+    setError('');
+    setData(null);
+    load();
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- поиск один раз при показе
+  useEffect(() => { if (autoStart) load(); }, [autoStart, phone]);
 
   if (!started)
     return (

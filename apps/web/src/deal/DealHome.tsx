@@ -1,51 +1,142 @@
 import { useEffect, useState } from 'react';
-import type { ChatChannelDto, ChatSummary, DealChatsDto } from '@btx24/shared';
-import { apiGet } from '../api.js';
-import { ChannelRecovery } from '../openlines/ChannelRecovery.js';
+import { normalizeMessengerPhone, type AttentionChatDto, type ChatFlagDto, type ChatSummary, type DealChatsDto } from '@btx24/shared';
+import { apiGet, apiPut } from '../api.js';
+import { openCrm } from '../b24.js';
+import { AttentionMessage } from '../dashboard/AttentionMessage.js';
+import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
+import { HideChatDialog } from '../openlines/DashboardPage.js';
 import { Icon, type IconName } from '../openlines/icons.js';
-import { MinimizeButton } from '../Minimize.js';
 
-export type DealHomeTarget = 'chat' | 'deal' | 'calendar';
+export type DealHomeTarget = 'chats' | 'calendar' | 'booking';
 
-const TILES: { key: DealHomeTarget; icon: IconName; title: string; hint: string }[] = [
-  { key: 'chat', icon: 'chats', title: 'Чат', hint: 'Переписка с клиентом сделки' },
-  { key: 'deal', icon: 'history', title: 'Сделка', hint: 'Карточка и действия сотрудников' },
-  { key: 'calendar', icon: 'calendar', title: 'Календарь', hint: 'Бронирование ресурсов' },
+const TILES: { key: Exclude<DealHomeTarget, 'chats'>; icon: IconName; title: string; hint: string }[] = [
+  { key: 'calendar', icon: 'calendar', title: 'Календарь', hint: 'Брони ресурсов по дням' },
+  { key: 'booking', icon: 'plus', title: 'Новая бронь', hint: 'Мастер бронирования по сделке' },
 ];
+/** Чатов в блоке; остальные — «Все чаты». */
+const CHATS_SHOWN = 3;
 
 /** Чат клиента сделки, где Wazzup сообщил «канал выключен» (по последнему сообщению). */
 export function brokenChat(items: ChatSummary[]): ChatSummary | null {
   return items.find((c) => hasDisabledWazzupChannel(c.connector, c.lastMessage?.preview)) ?? null;
 }
 
+/** Чат клиента — строкой «Последних сообщений» дашборда. */
+export function chatRow(c: ChatSummary): AttentionChatDto {
+  return {
+    chatId: c.chatId,
+    unread: c.unread,
+    title: c.title,
+    clientName: c.clientName,
+    clientAvatar: c.clientAvatar ?? null,
+    connector: c.connector,
+    lastMessageAt: c.lastMessage?.date ?? '',
+    preview: c.lastMessage?.preview ?? '',
+    hasFiles: c.lastMessage?.hasFiles ?? false,
+    dealId: c.crm.dealId,
+    contactId: c.crm.contactId,
+    responsibleId: c.responsibleId,
+    flag: c.flag ?? null,
+  };
+}
+
 /**
- * Встройка сделки: стартовый экран — три большие кнопки (решение владельца 2026-10-25). Если в чате
- * клиента ошибка канала Wazzup — четвёртый шаг красным «Отправить клиенту сообщение» (2026-10-26):
- * окно восстановления канала (перейти в чат приложения, начать новый, найти клиента).
+ * Встройка сделки (решение владельца 2026-10-26): блок «Чат с клиентом» — число чатов и строки как в
+ * «Последних сообщениях» дашборда (те же кнопки), ниже — «Календарь» и «Новая бронь» (мастер брони).
+ * Ошибка канала Wazzup — предупреждение в блоке чата и сразу поиск клиента по мессенджерам.
  */
-export function DealHome({ dealId, timezone, onOpen, onOpenChat }: { dealId: number; timezone: string; onOpen: (target: DealHomeTarget) => void; onOpenChat: (chatId: number) => void }) {
-  const [broken, setBroken] = useState<{ chat: ChatSummary; channels: ChatChannelDto[] } | null>(null);
-  const [recovering, setRecovering] = useState(false);
+export function DealHome({ dealId, timezone, canBook, onOpen, onOpenChat }: { dealId: number; timezone: string; /** Право создавать брони (проверит и сервер). */ canBook: boolean; onOpen: (target: DealHomeTarget) => void; onOpenChat: (chatId: number) => void }) {
+  const [data, setData] = useState<DealChatsDto | null>(null);
+  const [error, setError] = useState('');
+  const [hiding, setHiding] = useState<AttentionChatDto | null>(null);
+  const [flagError, setFlagError] = useState('');
   useEffect(() => {
     let active = true;
-    void apiGet<DealChatsDto>(`/openlines/deal-chats/${dealId}`)
-      .then(async (d) => {
-        const chat = brokenChat(d.items);
-        if (!chat || !active) return;
-        const channels = await apiGet<ChatChannelDto[]>(`/openlines/chats/${chat.chatId}/channels`).catch(() => []);
-        if (active) setBroken({ chat, channels });
-      })
-      .catch(() => undefined);
+    void apiGet<DealChatsDto>(`/openlines/deal-chats/${dealId}`).then(
+      (d) => active && setData(d),
+      (e) => active && setError(e instanceof Error ? e.message : 'Чаты клиента недоступны'),
+    );
     return () => {
       active = false;
     };
   }, [dealId]);
+  const items = data?.items ?? [];
+  const broken = brokenChat(items);
+  const phone = broken ? broken.phones.map((p) => normalizeMessengerPhone(p)).find((p): p is string => !!p) ?? null : null;
+  const toggleFlag = (c: AttentionChatDto) =>
+    apiPut<ChatFlagDto>(`/openlines/chats/${c.chatId}/flag`, { on: !c.flag }).then(
+      (r) => {
+        setFlagError('');
+        setData((d) => (d ? { ...d, items: d.items.map((x) => (x.chatId === r.chatId ? { ...x, flag: r.flag } : x)) } : d));
+      },
+      (e) => setFlagError(e instanceof Error ? e.message : 'Не удалось поставить «!»'),
+    );
   return (
     <div className="page deal-home">
       <p className="deal-home-caption muted">Сделка #{dealId}</p>
-      <nav className="deal-home-tiles" aria-label="Раздел приложения">
-        {TILES.map((t) => (
+      <section className="day-panel dash-block dash-attention deal-home-chats">
+        <header className="deal-home-chats-head">
+          <h2>Чат с клиентом</h2>
+          {data && <span className="pill">{items.length}</span>}
+          {items.length > 0 && (
+            <button type="button" className="link" onClick={() => onOpen('chats')}>
+              Все чаты
+            </button>
+          )}
+        </header>
+        {!data && !error && <p className="muted">Загрузка чатов…</p>}
+        {error && <p className="notice error" role="alert">{error}</p>}
+        {flagError && <p className="notice error" role="alert">{flagError}</p>}
+        {data && !items.length && <p className="muted">Чатов с клиентом сделки нет.</p>}
+        {broken && (
+          <div className="deal-home-broken" role="alert">
+            <Icon name="alert" size={18} />
+            <span>
+              <b>Канал Wazzup выключен</b> — сообщения клиенту не доходят.{' '}
+              {phone ? 'Ищем клиента в мессенджерах:' : 'Номера клиента нет — поиск в мессенджерах недоступен.'}
+            </span>
+            {phone && <MessengerSearchButton phone={phone} timezone={timezone} onOpenChat={onOpenChat} autoStart />}
+          </div>
+        )}
+        <ul className="attention-rows">
+          {items.slice(0, CHATS_SHOWN).map((s) => {
+            const c = chatRow(s);
+            return (
+              <li key={c.chatId} className={c.flag ? 'flagged' : undefined}>
+                <AttentionMessage chat={c} timezone={timezone} onOpen={() => onOpenChat(c.chatId)} />
+                <span className="attention-actions">
+                  <button
+                    className={`dash-icon-btn cl-flag${c.flag ? ' on' : ''}`}
+                    aria-pressed={!!c.flag}
+                    title={c.flag ? `«!» — ${c.flag.byName ?? 'сотрудник'}; снимется, когда менеджер ответит клиенту. Нажмите — снять` : '«!» — видно всем, пока менеджер не ответит клиенту'}
+                    aria-label={c.flag ? 'Снять «!»' : 'Отметить «!»'}
+                    onClick={() => void toggleFlag(c)}
+                  >
+                    !
+                  </button>
+                  <button className="dash-icon-btn" title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'} aria-label="Открыть сделку" disabled={!c.dealId} onClick={() => c.dealId && openCrm('deal', c.dealId)}>
+                    <Icon name="deal" size={18} />
+                  </button>
+                  <button className="dash-icon-btn" title="Перейти в чат" aria-label="Перейти в чат" onClick={() => onOpenChat(c.chatId)}>
+                    <Icon name="gochat" size={18} />
+                  </button>
+                  <button className="dash-icon-btn" title="Скрыть чат с дашборда" aria-label="Скрыть чат с дашборда" onClick={() => setHiding(c)}>
+                    <Icon name="hide" size={18} />
+                  </button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        {items.length > CHATS_SHOWN && (
+          <button type="button" className="link deal-home-more" onClick={() => onOpen('chats')}>
+            Ещё чатов: {items.length - CHATS_SHOWN}
+          </button>
+        )}
+      </section>
+      <nav className="deal-home-tiles" aria-label="Бронирование">
+        {TILES.filter((t) => t.key !== 'booking' || canBook).map((t) => (
           <button key={t.key} type="button" className={`deal-home-tile ${t.key}`} onClick={() => onOpen(t.key)}>
             <span className="deal-home-icon" aria-hidden="true">
               <Icon name={t.icon} size={34} />
@@ -54,39 +145,8 @@ export function DealHome({ dealId, timezone, onOpen, onOpenChat }: { dealId: num
             <span className="deal-home-hint">{t.hint}</span>
           </button>
         ))}
-        {broken && (
-          <button type="button" className="deal-home-tile recover" onClick={() => setRecovering(true)}>
-            <span className="deal-home-icon" aria-hidden="true">
-              <Icon name="alert" size={34} />
-            </span>
-            <span className="deal-home-title">Отправить клиенту сообщение</span>
-            <span className="deal-home-hint">Канал Wazzup выключен — сообщения не доходят</span>
-          </button>
-        )}
       </nav>
-      {recovering && broken && (
-        <div className="sheet-backdrop" onClick={() => setRecovering(false)}>
-          <div className="sheet deal-recover" role="dialog" aria-modal="true" aria-label="Отправить клиенту сообщение" onClick={(e) => e.stopPropagation()}>
-            <header>
-              <h3>Отправить клиенту сообщение</h3>
-              <MinimizeButton label="Сообщение клиенту" />
-              <button aria-label="Закрыть" onClick={() => setRecovering(false)}>
-                ×
-              </button>
-            </header>
-            <ChannelRecovery
-              connector={broken.chat.connector}
-              channels={broken.channels}
-              phones={broken.chat.phones}
-              timezone={timezone}
-              onOpen={(id) => {
-                setRecovering(false);
-                onOpenChat(id);
-              }}
-            />
-          </div>
-        </div>
-      )}
+      {hiding && <HideChatDialog chat={hiding} onClose={() => setHiding(null)} onHidden={() => setHiding(null)} />}
     </div>
   );
 }

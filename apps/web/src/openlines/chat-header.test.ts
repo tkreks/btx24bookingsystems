@@ -32,3 +32,11 @@ describe('встройка сделки: ошибка канала Wazzup', () =
     expect(brokenChat([chat(1, 'wz_whatsapp', 'Спасибо')])).toBeNull();
   });
 });
+
+describe('встройка сделки: строка чата', () => {
+  it('сводка чата — строка «Последних сообщений» с «!» и сделкой', async () => {
+    const { chatRow } = await import('../deal/DealHome.js');
+    const s = { chatId: 3, unread: 1, title: 'Чат', clientName: 'Анна', clientAvatar: null, connector: 'btx24_telegram', responsibleId: 5, lastMessage: { id: 1, date: '2026-10-26T09:00:00Z', author: 'client', preview: 'Есть баня?', hasFiles: false }, crm: { leadId: null, contactId: 140, companyId: null, dealId: 77 }, flag: { byName: 'Ира', at: '2026-10-26T09:01:00Z' } } as unknown as ChatSummary;
+    expect(chatRow(s)).toMatchObject({ chatId: 3, unread: 1, preview: 'Есть баня?', dealId: 77, contactId: 140, flag: { byName: 'Ира' } });
+  });
+});
