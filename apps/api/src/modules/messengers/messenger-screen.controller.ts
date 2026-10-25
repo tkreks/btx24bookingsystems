@@ -24,7 +24,7 @@ export class MessengerScreenController {
     private readonly service: MessengerServiceClient,
   ) {}
 
-  /** Только работающие и с ошибкой (с описанием) — остальные (запускается, ждёт входа) не показываем. */
+  /** Все номера групп сотрудника в любом состоянии; у номеров с ошибкой — описание ошибки. */
   @Get('status')
   async status(@B24User() user: B24UserContext): Promise<MessengerStatusDto[]> {
     const rows = await this.chats.available(user);
@@ -32,14 +32,14 @@ export class MessengerScreenController {
     const [live, sendable] = await Promise.all([this.messengers.list(user.portal.id), this.chats.sendable(user, rows)]);
     const visible = new Set(rows.map((r) => r.id));
     return live
-      .filter((m) => visible.has(m.id) && (m.state === 'ready' || MESSENGER_ERROR_STATES.includes(m.state)))
+      .filter((m) => visible.has(m.id))
       .map((m) => ({
         id: m.id,
         kind: m.kind,
         phone: m.phone,
         title: m.title,
         state: m.state,
-        error: m.state === 'ready' ? null : m.error || MESSENGER_STATE_LABELS[m.state],
+        error: MESSENGER_ERROR_STATES.includes(m.state) ? m.error || MESSENGER_STATE_LABELS[m.state] : null,
         canScreen: sendable.has(m.id),
       }));
   }

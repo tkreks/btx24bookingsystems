@@ -22,6 +22,14 @@ describe('Read-only messenger discovery and OL permissions',()=>{
   const t=setup();Object.assign(t.mine,{lineMode:'own',lineId:14});t.user.client.call.mockRejectedValueOnce(new Error('ACCESS_ERROR'));
   await expect(t.svc.forUser(t.user as never,'m1',false,'x@lid')).rejects.toThrow('ACCESS_ERROR');expect(t.user.client.call).toHaveBeenCalledWith('imopenlines.dialog.get',{CHAT_ID:99});
  });
+ it('login search checks only Telegram numbers, by login, without CRM phone lookup',async()=>{
+  const t=setup();const tg={...t.mine,id:'m3',kind:'telegram',phone:'79895793606'};t.db.messenger.findMany.mockResolvedValueOnce([t.mine,tg] as never);
+  (t.service as unknown as {contactByLogin:unknown}).contactByLogin=vi.fn(async()=>({exists:true,chatId:'555@lid'}));
+  const d=await t.svc.search(t.user as never,undefined,'@Ivan_Petrov');
+  expect(d).toMatchObject({phone:'',login:'Ivan_Petrov'});expect(d.results.map(r=>r.messenger.id)).toEqual(['m3']);expect(d.results[0]).toMatchObject({status:'found',chatId:'555@lid'});
+  expect(t.service.contact).not.toHaveBeenCalled();expect(t.db.messengerChat.findFirst).not.toHaveBeenCalled();
+  await expect(t.svc.search(t.user as never,'abc')).rejects.toMatchObject({status:400});
+ });
  it('foreign portal messenger is not found even for a known ID',async()=>{
   const t=setup();t.db.messenger.findFirst.mockResolvedValueOnce(null as never);await expect(t.svc.own('foreign','m1')).rejects.toMatchObject({status:404});
   expect(t.db.messenger.findFirst).toHaveBeenCalledWith({where:{id:'m1',portalId:'foreign'}});

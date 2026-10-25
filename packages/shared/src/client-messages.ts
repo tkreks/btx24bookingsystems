@@ -146,3 +146,21 @@ export interface BizprocImportDto {
 
 /** Страница доступных сотруднику объектов Диска. */
 export interface DiskBrowseDto { items: DiskItemDto[]; nextOffset: number | null }
+
+/** Шаг пути в выборе файла: подпись и запрос `?storageId=` / `?folderId=`. */
+export interface DiskPlaceDto { label: string; query: string }
+
+/**
+ * `GET /api/openlines/disk/start` — откуда открыть выбор файла: папка шаблонов на общем диске
+ * (`DISK_TEMPLATES_PATH`) или, если её нет или нет доступа, диск пользователя. Оба места переключаются.
+ */
+export interface DiskStartDto {
+  initial: 'shared' | 'user';
+  /** Общий диск и найденная часть пути к папке шаблонов; null — общий диск недоступен. */
+  shared: DiskPlaceDto[] | null;
+  /** Мой диск; null — недоступен. */
+  user: DiskPlaceDto[] | null;
+}
+
+/** Папка шаблонов на общем диске (решение владельца 2026-10-26). */
+export const DISK_TEMPLATES_PATH = ['БК Алатырь', 'Шаблоны сообщений', 'Шаблоны приложения'] as const;

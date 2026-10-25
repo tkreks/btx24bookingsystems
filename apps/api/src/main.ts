@@ -5,7 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { Bitrix24ErrorFilter } from './modules/bitrix24/http/bitrix24-error.filter.js';
 import { invalidate } from './common/swr-cache.js';
-import { requestContext, tagsForEvent, tagsForRequest } from './common/cache-invalidation.js';
+import { requestContext, restSummary, startRestMinuteLog, tagsForEvent, tagsForRequest, type RestStats } from './common/cache-invalidation.js';
 import { MessengerServiceClient } from './modules/messengers/messenger-service.client.js';
 import { attachVncProxy } from './modules/messengers/vnc-proxy.js';
 
@@ -17,8 +17,10 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.use((_req: Request, res: Response, next: NextFunction) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   const http = new Logger('Http');
+  startRestMinuteLog((line) => new Logger('Bitrix24Rest').warn(line));
   app.use((req: Request, res: Response, next: NextFunction) => {
     const started = Date.now();
+    const rest: RestStats = { calls: 0, waitMs: 0, methods: new Map() };
     res.on('finish', () => {
       // Изменение сбрасывает только свои разделы кэша дашборда своего портала (вне фрейма портал не
       // известен до проверки сессии — сбрасываем разделы у всех порталов).
@@ -32,10 +34,10 @@ async function bootstrap() {
       const ms = Date.now() - started;
       if (ms >= SLOW_MS) {
         const part = typeof req.query.part === 'string' ? `?part=${req.query.part.slice(0, 20)}` : '';
-        http.warn(`slow ${req.method} ${req.path}${part} ${res.statusCode} ${ms}ms`);
+        http.warn(`slow ${req.method} ${req.path}${part} ${res.statusCode} ${ms}ms${restSummary(rest)}`);
       }
     });
-    requestContext.run({ res }, next);
+    requestContext.run({ res, rest }, next);
   });
   app.enableShutdownHooks();
   app.useGlobalFilters(new Bitrix24ErrorFilter());

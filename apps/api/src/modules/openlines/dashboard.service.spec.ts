@@ -285,4 +285,30 @@ describe('DashboardService — новые сделки за период', () =>
       filter: { '>=DATE_CREATE': '2026-10-20T21:00:00.000Z', '<DATE_CREATE': '2026-10-21T21:00:00.000Z', '@CATEGORY_ID': [0], ASSIGNED_BY_ID: 7 },
     });
   });
+
+  it('текущие брони: сделка, клиент с фото, сумма и внесённая оплата; ближайшие — только ещё не начавшиеся', async () => {
+    const now = new Date('2026-10-25T09:00:00Z');
+    const rec = (bookingId: number, start: string, end: string, dealId: number | null) => ({ bookingId, startsAt: new Date(start), endsAt: new Date(end), dealId, resourceIds: [5], title: null });
+    const journal = {
+      ...emptyJournal,
+      activeListBetween: vi.fn(async () => [rec(1, '2026-10-25T08:00:00Z', '2026-10-25T10:00:00Z', 42), rec(2, '2026-10-25T12:00:00Z', '2026-10-25T14:00:00Z', null)]),
+      pendingRemoval: vi.fn(async () => new Set<number>()),
+    } as unknown as BookingJournalService;
+    const fieldMap = { outcome: vi.fn(async () => ({ paidAmount: 'UF_PAID' })) } as unknown as DealFieldMapService;
+    const listAll = vi.fn(async (method: string) => {
+      if (method === 'crm.deal.list') return [{ ID: '42', TITLE: 'Баня Иванов', OPPORTUNITY: '12000', CURRENCY_ID: 'RUB', CONTACT_ID: '9', UF_PAID: '5000|RUB' }];
+      if (method === 'crm.contact.list') return [{ ID: '9', NAME: 'Иван', LAST_NAME: 'Иванов', PHOTO: { showUrl: '/upload/9.jpg' } }];
+      if (method === 'booking.v1.resource.list') return [{ id: 5, name: 'Баня' }];
+      return [];
+    });
+    const user = { portal: { id: 'p1', timezone: 'Europe/Moscow', domain: 'x.bitrix24.ru' }, userId: 7, client: { call: vi.fn(), listAll } } as unknown as B24UserContext;
+    const svc = new DashboardService({} as ChatsService, journal, fieldMap);
+    const current = await svc.liveBookings(user, null, 'current', now);
+    expect(current.items[0]).toMatchObject({ bookingId: 1, title: 'Баня Иванов', resources: ['Баня'], amount: 12000, paid: 5000, client: { id: 9, name: 'Иван Иванов' } });
+    expect(current.items[0].client?.photo).toContain('/upload/9.jpg');
+    expect(current.items[1]).toMatchObject({ bookingId: 2, dealId: null, client: null, amount: null, title: 'Бронь #2' });
+    const upcoming = await svc.liveBookings(user, null, 'upcoming', now);
+    expect(upcoming.items.map((b) => b.bookingId)).toEqual([2]);
+    await expect(svc.liveBookings(user, null, 'all', now)).rejects.toThrow();
+  });
 });

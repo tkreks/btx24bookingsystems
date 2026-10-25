@@ -54,7 +54,7 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
     }
     const sf = /^\/instances\/([^/]+)\/screen-files(?:\/([0-9a-f]{24})(\/attach)?)?$/.exec(url.pathname);
     if (sf && ID_RE.test(sf[1]) && files) return screenFiles(req, res, sf[1], sf[2], !!sf[3], files);
-    const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact))?$/.exec(url.pathname);
+    const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact|avatar))?$/.exec(url.pathname);
     if (!m || !ID_RE.test(m[1])) return json(res, 404, { error: 'not found' });
     const [, id, action] = m;
     if (req.method === 'PUT' && !action) {
@@ -74,10 +74,26 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
     if (req.method === 'POST' && action === 'contact') {
       const inst = manager.get(id);
       if (!inst) return json(res, 404, { error: 'not found' });
-      const b = await readJson(req) as { phone?: unknown };
+      const b = await readJson(req) as { phone?: unknown; login?: unknown };
+      if (typeof b.login === 'string') {
+        // Логин — только Telegram; правила логина Telegram: 5–32 символа, латиница, цифры, `_`.
+        if (!/^[a-z][a-z0-9_]{4,31}$/i.test(b.login)) return json(res, 400, { error: 'Некорректный логин' });
+        if (!inst.contactByLogin) return json(res, 400, { error: 'Поиск по логину есть только в Telegram' });
+        try { return json(res, 200, await inst.contactByLogin(b.login)); }
+        catch { return json(res, 422, { error: 'Не удалось проверить контакт: мессенджер недоступен' }); }
+      }
       if (typeof b.phone !== 'string' || !/^\d{11,15}$/.test(b.phone)) return json(res, 400, { error: 'Некорректный номер' });
       try { return json(res, 200, await inst.contact(b.phone)); }
       catch { return json(res, 422, { error: 'Не удалось проверить контакт: мессенджер недоступен' }); }
+    }
+    if (req.method === 'POST' && action === 'avatar') {
+      const inst = manager.get(id);
+      if (!inst) return json(res, 404, { error: 'not found' });
+      const b = (await readJson(req)) as { chat?: unknown };
+      if (typeof b.chat !== 'string' || !/^[\w.:-]{1,80}@(c\.us|lid)$/.test(b.chat)) return json(res, 400, { error: 'Некорректный чат' });
+      if (!inst.avatar) return json(res, 200, { media: null });
+      try { return json(res, 200, { media: await inst.avatar(b.chat) }); }
+      catch { return json(res, 200, { media: null }); }
     }
     if (req.method === 'POST' && (action === 'send'  || action === 'edit' || action === 'delete' || action === 'media')) {
       const inst = manager.get(id);

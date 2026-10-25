@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { StoredFileDto, DiskItemDto, DiskBrowseDto, GroupOptionsDto } from '@btx24/shared';
+import { DISK_TEMPLATES_PATH, type StoredFileDto, type DiskItemDto, type DiskBrowseDto, type DiskPlaceDto, type DiskStartDto, type GroupOptionsDto } from '@btx24/shared';
 import { z } from 'zod';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** Разовые вложения (не в шаблоне) живут сутки — потом удаляются при следующей загрузке. */
 const ORPHAN_TTL_MS = 24 * 3600_000;
+/** Где открыть выбор файла — запоминаем на 10 минут: поиск папки — несколько запросов к Диску. */
+const DISK_START_TTL_MS = 10 * 60_000;
 
 export interface UploadedFile {
   originalname: string;
@@ -21,6 +23,8 @@ export interface UploadedFile {
 @Injectable()
 export class FilesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly diskStarts = new Map<string, { at: number; v: DiskStartDto }>();
 
   async upload(user: B24UserContext, file: UploadedFile | undefined): Promise<StoredFileDto> {
     if (!file?.buffer?.length) throw new BadRequestException({ code: 'FILE_REQUIRED', message: 'Файл не передан' });
@@ -53,6 +57,43 @@ export class FilesService {
       const rows = res.result ?? [];
       return { nextOffset: res.next ?? null, items: rows.filter((r) => !r.DELETED_TYPE || r.DELETED_TYPE === '0').map((r): DiskItemDto => ({ id: Number(r.ID), name: r.NAME ?? `#${r.ID}`, kind: !folderId && !storageId ? 'storage' : r.TYPE === 'folder' ? 'folder' : 'file', size: r.SIZE === undefined ? null : Number(r.SIZE) })).sort((a,b) => Number(b.kind === 'folder') - Number(a.kind === 'folder') || a.name.localeCompare(b.name, 'ru', { numeric: true })) };
     } catch (err) { throw this.diskError(err); }
+  }
+
+  /**
+   * Откуда открыть выбор файла (правами сотрудника): папка шаблонов на общем диске
+   * (`DISK_TEMPLATES_PATH`), а если её нет или к ней нет доступа — «Мой диск». Для переключателя
+   * отдаём оба места: общий диск — с той частью пути, что удалось открыть.
+   */
+  async diskStart(user: B24UserContext): Promise<DiskStartDto> {
+    const key = `${user.portal.id}:${user.userId}`;
+    const hit = this.diskStarts.get(key);
+    if (hit && Date.now() - hit.at < DISK_START_TTL_MS) return hit.v;
+    type Storage = { ID: string; NAME?: string; ENTITY_ID?: string };
+    const storages = async (filter: Record<string, unknown>) => (await user.client.call<Storage[]>('disk.storage.getList', { filter }).catch(() => ({ result: [] as Storage[] }))).result ?? [];
+    const [common, mine] = await Promise.all([storages({ ENTITY_TYPE: 'common' }), storages({ ENTITY_TYPE: 'user', ENTITY_ID: user.userId })]);
+    const shared = common.find((x) => x.ENTITY_ID?.startsWith('shared_files')) ?? common[0];
+    let sharedPath: DiskPlaceDto[] | null = null;
+    let complete = false;
+    if (shared) {
+      sharedPath = [{ label: shared.NAME || 'Общий диск', query: `?storageId=${shared.ID}` }];
+      let parent: { method: string; id: string } = { method: 'disk.storage.getChildren', id: shared.ID };
+      complete = true;
+      for (const name of DISK_TEMPLATES_PATH) {
+        const rows = await user.client.call<{ ID: string; NAME?: string; TYPE?: string }[]>(parent.method, { id: parent.id, filter: { NAME: name, TYPE: 'folder' } }).then((r) => r.result ?? [], () => []);
+        const folder = rows.find((r) => r.TYPE === 'folder' && r.NAME === name);
+        if (!folder) { complete = false; break; }
+        sharedPath.push({ label: name, query: `?folderId=${folder.ID}` });
+        parent = { method: 'disk.folder.getChildren', id: folder.ID };
+      }
+    }
+    const user0 = mine[0];
+    const v: DiskStartDto = {
+      initial: complete || !user0 ? 'shared' : 'user',
+      shared: sharedPath,
+      user: user0 ? [{ label: 'Мой диск', query: `?storageId=${user0.ID}` }] : null,
+    };
+    this.diskStarts.set(key, { at: Date.now(), v });
+    return v;
   }
 
   /** Сохраняем копию: автоматическая отправка не зависит от прав будущего отправителя на Диск. */

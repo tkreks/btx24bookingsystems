@@ -16,7 +16,10 @@ export function StepsEditor({
   variables = false,
   paymentVariables = false,
   onUploadingChange,
+  compact = false,
 }: {
+  /** Чат: без «＋ ещё сообщение», вложения — значками в правом верхнем углу поля. */
+  compact?: boolean;
   steps: ChainStep[];
   onChange: (steps: ChainStep[]) => void;
   disabled?: boolean;
@@ -45,7 +48,7 @@ export function StepsEditor({
     onChange(steps.map((s) => (s.key === key ? { ...s, ...p } : s)));
 
   return (
-    <div className="steps-editor">
+    <div className={`steps-editor${compact ? ' compact' : ''}`}>
       {steps.map((s, i) => (
         <div className="step" key={s.key}>
           {steps.length > 1 && <span className="step-number">{i + 1}</span>}
@@ -69,6 +72,7 @@ export function StepsEditor({
                 }
               }}
             />
+            {compact && <AttachmentButtons compact disabled={disabled || uploading !== null} remaining={10 - s.files.length} onBusyChange={(busy) => { setUploading(busy ? s.key : null); onUploadingChange?.(busy); }} onAdd={(files) => patch(s.key, { files: [...s.files, ...files] })} />}
             {variables && (
               <VariableMenu
                 payment={paymentVariables}
@@ -98,7 +102,7 @@ export function StepsEditor({
               </ul>
             )}
           </div>
-          <AttachmentButtons disabled={disabled || uploading !== null} remaining={10 - s.files.length} onBusyChange={(busy) => { setUploading(busy ? s.key : null); onUploadingChange?.(busy); }} onAdd={(files) => patch(s.key, { files: [...s.files, ...files] })} />
+          {!compact && <AttachmentButtons disabled={disabled || uploading !== null} remaining={10 - s.files.length} onBusyChange={(busy) => { setUploading(busy ? s.key : null); onUploadingChange?.(busy); }} onAdd={(files) => patch(s.key, { files: [...s.files, ...files] })} />}
           <div className="step-actions">
             {steps.length > 1 && (
               <>
@@ -131,14 +135,16 @@ export function StepsEditor({
           </div>
         </div>
       ))}
-      <button
-        type="button"
-        className="link"
-        disabled={disabled || uploading !== null || steps.length >= 20}
-        onClick={() => onChange([...steps, newStep()])}
-      >
-        + ещё сообщение в цепочку
-      </button>
+      {!compact && (
+        <button
+          type="button"
+          className="link"
+          disabled={disabled || uploading !== null || steps.length >= 20}
+          onClick={() => onChange([...steps, newStep()])}
+        >
+          + ещё сообщение в цепочку
+        </button>
+      )}
     </div>
   );
 }

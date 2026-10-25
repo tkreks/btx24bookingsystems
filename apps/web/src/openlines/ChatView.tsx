@@ -5,14 +5,18 @@ import { openCrm, openMessenger } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { avatarTone, dayKey, initials } from './chat-list.js';
-import { MessengerDealSelector } from '../messengers/MessengerDealSelector.js';
+import { ChatDealCard } from './ChatDealCard.js';
+import { Avatar } from './Avatar.js';
 import { ChannelSwitch } from './ChannelSwitch.js';
 import { clipName } from './format.js';
 import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
+import { TemplatesPicker } from './TemplatesPicker.js';
 import { InvoicesBadge } from '../bookings/InvoicesBadge.js';
 import { ChatFile } from './ChatFile.js';
+import { ChannelRecovery } from './ChannelRecovery.js';
+import { hasDisabledWazzupChannel } from './channel-error.js';
 
 /** Новые сообщения открытого чата подтягиваем раз в 15 секунд. */
 const POLL_MS = 15_000;
@@ -46,7 +50,7 @@ export function ChatView({
   /** Брони клиента и «Создать бронирование» (рендерит страница чатов — у неё группы). */
   bookings?: ReactNode;
   /** Статус из списка чатов: ждёт ответа / «Не требует ответа» (общий для всех). */
-  status?: Pick<ChatSummary, 'waitingReply' | 'noReply' | 'sessionClosed' | 'clientName'>;
+  status?: Pick<ChatSummary, 'waitingReply' | 'noReply' | 'sessionClosed' | 'clientName'> & Partial<Pick<ChatSummary, 'phones' | 'lastMessage' | 'clientAvatar'>>;
   onStatus?: (r: ChatReplyStatusDto) => void;
   /** Открыть другой чат (канал того же клиента). */
   onOpenChat?: (chatId: number) => void;
@@ -87,10 +91,8 @@ export function ChatView({
     }
   };
   const [chain, setChain] = useState<ChainStep[]>(() => [newStep()]);
-  const [templatesOpen, setTemplatesOpen] = useState<'list' | 'save' | null>(null);
-  // Шаблоны оплаты отправляет автоматизация (со ссылкой) — в чат их не вставляем.
-  const chatTemplates = templates?.filter((t) => t.purpose === 'chat');
-  const [templatePick, setTemplatePick] = useState('');
+  // Окно «Шаблоны» (выбор по частоте); управление и новый шаблон — в TemplatesManager.
+  const [templatesOpen, setTemplatesOpen] = useState<'pick' | 'list' | 'new' | null>(null);
   const list = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -153,6 +155,11 @@ export function ChatView({
 
   // Шаблон с переменными — сразу подставляем данные сделки чата: сотрудник видит готовый текст.
   const insertTemplate = async (t: MessageTemplateDto) => {
+    // Частота для сортировки окна «Шаблоны»; сбой учёта вставку не мешает.
+    void apiPost(`/openlines/templates/${t.id}/use`).then(
+      () => templates && onTemplates(templates.map((x) => (x.id === t.id ? { ...x, uses30d: (x.uses30d ?? 0) + 1 } : x))),
+      () => undefined,
+    );
     try {
       const r = await apiPost<{ texts: string[]; unresolved: string[] }>(`/openlines/chats/${chatId}/render`, { texts: t.steps.map((s) => s.text) });
       setChain(appendTemplate(chain, { ...t, steps: t.steps.map((s, i) => ({ ...s, text: r.texts[i] ?? s.text })) }));
@@ -208,20 +215,18 @@ export function ChatView({
       <ChatHeader
         chatId={chat.chatId}
         title={status?.clientName || chat.title}
+        avatar={status?.clientAvatar}
         onTitle={crm.contactId ? () => openCrm('contact', crm.contactId!) : undefined}
         subtitle={
           <>
-            {chat.connector.startsWith('btx24_') && <MessengerDealSelector chatId={chatId} timezone={timezone} />}
             <ChannelSwitch channels={channels} current={chat.chatId} connector={chat.connector} timezone={timezone} onOpen={onOpenChat} />
-            {crm.dealId && (
-              <>
-                <span className="cv-sep">|</span>
-                <button className="link cv-deal" onClick={() => openCrm('deal', crm.dealId!)}>
-                  Сделка #{crm.dealId}
-                </button>
-                {onPayment && <InvoicesBadge dealId={crm.dealId} revision={paymentRevision} onOpen={() => onPayment(crm.dealId!)} />}
-              </>
-            )}
+            <ChatDealCard
+              chatId={chatId}
+              dealId={crm.dealId}
+              appChat={chat.connector.startsWith('btx24_')}
+              timezone={timezone}
+              extra={crm.dealId && onPayment ? <InvoicesBadge dealId={crm.dealId} revision={paymentRevision} onOpen={() => onPayment(crm.dealId!)} /> : undefined}
+            />
           </>
         }
         onBack={onBack}
@@ -254,6 +259,10 @@ export function ChatView({
           <Icon name="external" size={15} />
         </button>
       </ChatHeader>
+
+      {(hasDisabledWazzupChannel(chat.connector, status?.lastMessage?.preview) || chat.messages.some(m => hasDisabledWazzupChannel(chat.connector, m.text))) && (
+        <ChannelRecovery key={chat.chatId} connector={chat.connector} channels={channels} phones={status?.phones ?? []} timezone={timezone} onOpen={onOpenChat} />
+      )}
 
       <div className="cv-conversation" ref={list} aria-live="polite" aria-label="История сообщений">
         {chat.hasMore && (
@@ -301,51 +310,40 @@ export function ChatView({
               Отправляем сообщение, ожидайте…
             </div>
           )}
-          <div className="composer-tools">
-            <select
-              aria-label="Шаблон"
-              value={templatePick}
-              disabled={busy || uploading || !chatTemplates?.length}
-              onChange={(e) => {
-                const t = chatTemplates?.find((x) => x.id === e.target.value);
-                setTemplatePick('');
-                if (t) void insertTemplate(t);
-              }}
-            >
-              <option value="">{chatTemplates?.length ? 'Вставить шаблон…' : 'Шаблонов нет'}</option>
-              {chatTemplates?.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.steps.length})
-                </option>
-              ))}
-            </select>
-            <button type="button" onClick={() => setTemplatesOpen('list')}>
-              Мои шаблоны
-            </button>
-            <button type="button" disabled={chain.every(isEmpty)} onClick={() => setTemplatesOpen('save')}>
-              Сохранить как шаблон
-            </button>
-          </div>
-          <StepsEditor onUploadingChange={setUploading} steps={chain} onChange={setChain} disabled={busy} onSubmitShortcut={() => void send()} />
-          <div className="form-actions">
-            <button className="primary" disabled={busy || uploading || chain.every(isEmpty)} onClick={() => void send()}>
-              {busy
-                ? 'Отправка…'
-                : toSteps(chain).length > 1
-                  ? `Отправить цепочку (${toSteps(chain).length})`
-                  : 'Отправить'}
-            </button>
-            <span className="muted hint-desktop">Ctrl+Enter — отправить</span>
+          <div className="cv-composer-row">
+            <StepsEditor compact onUploadingChange={setUploading} steps={chain} onChange={setChain} disabled={busy} onSubmitShortcut={() => void send()} />
+            <div className="cv-composer-side">
+              <button className="primary" disabled={busy || uploading || chain.every(isEmpty)} onClick={() => void send()} title="Ctrl+Enter — отправить">
+                {busy
+                  ? 'Отправка…'
+                  : toSteps(chain).length > 1
+                    ? `Отправить (${toSteps(chain).length})`
+                    : 'Отправить'}
+              </button>
+              <button type="button" className="cv-templates-btn" disabled={busy || uploading || !templates} onClick={() => setTemplatesOpen('pick')}>
+                Шаблоны
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {templatesOpen && templates && (
+      {templatesOpen === 'pick' && templates && (
+        <TemplatesPicker
+          templates={templates}
+          onPick={(t) => {
+            setTemplatesOpen(null);
+            void insertTemplate(t);
+          }}
+          onCreate={() => setTemplatesOpen('new')}
+          onManage={() => setTemplatesOpen('list')}
+          onClose={() => setTemplatesOpen(null)}
+        />
+      )}
+      {(templatesOpen === 'list' || templatesOpen === 'new') && templates && (
         <TemplatesManager
           templates={templates}
-          initial={
-            templatesOpen === 'save' ? chain.filter((s) => !isEmpty(s)).map((s) => newStep(s.text, s.files)) : undefined
-          }
+          initial={templatesOpen === 'new' ? [newStep()] : undefined}
           onChanged={onTemplates}
           onClose={() => setTemplatesOpen(null)}
         />
@@ -357,6 +355,7 @@ export function ChatView({
 function ChatHeader({
   chatId,
   title,
+  avatar,
   onTitle,
   subtitle,
   details,
@@ -365,6 +364,8 @@ function ChatHeader({
 }: {
   chatId: number;
   title: string;
+  /** Фото клиента из Битрикс24 (у чатов приложения — из мессенджера). */
+  avatar?: string | null;
   /** Имя клиента — ссылка на контакт в CRM. */
   onTitle?: () => void;
   subtitle?: ReactNode;
@@ -380,7 +381,7 @@ function ChatHeader({
         <button className="cl-btn chat-back" aria-label="К списку чатов" title="К чатам" onClick={onBack}>
           <Icon name="back" />
         </button>
-        <span className={`avatar large a${avatarTone(chatId)}`}>{initials(title)}</span>
+        <Avatar src={avatar} name={title} size={null} tone={avatarTone(chatId)} className="large" />
         <div className="cv-contact-info">
           {onTitle ? (
             <button type="button" className="cv-contact-name link" title={`${title} — открыть контакт в CRM`} onClick={onTitle}>

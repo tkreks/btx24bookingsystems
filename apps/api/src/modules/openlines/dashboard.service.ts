@@ -18,6 +18,8 @@ import {
   type DashboardDto,
   type DashboardNewDeal,
   type DealStatusDto,
+  type LiveBookingDto,
+  type LiveBookingsDto,
   type NeedsCloseDto,
 } from '@btx24/shared';
 import type { BookingRecord } from '../../generated/prisma/client.js';
@@ -41,6 +43,9 @@ const MAX_CALLS = 5000;
 /** Новых сделок за период в ответе (плитка считает все, список — первые). */
 const MAX_NEW_DEALS = 500;
 const OWNER_LABELS: Record<number, string> = { 1: 'Лид', 2: 'Сделка', 3: 'Контакт', 4: 'Компания' };
+/** «Ближайшие брони»: на сколько дней вперёд и сколько строк. */
+const UPCOMING_DAYS = 14;
+const LIVE_LIMIT = 30;
 
 type DealInfo = NonNullable<DashboardBookingRow['deal']>;
 
@@ -179,6 +184,59 @@ export class DashboardService {
         return { dealId: id, title: d.title || `Сделка #${id}`, client: d.client, opportunity: d.opportunity, currency: d.currency, bookingEnd: statuses.get(id)!.bookingEnd ?? '' };
       }).sort((a, b) => b.bookingEnd.localeCompare(a.bookingEnd)),
     };
+  }
+
+  /**
+   * «Текущие брони» (идут сейчас) и «Ближайшие» (начнутся в ближайшие 14 дней, до 30) по ресурсам групп
+   * сотрудника. Брони — журнал приложения; сделки, клиенты с фото и «внесённые оплаты» — копия CRM
+   * (только видимые сотруднику), недостающее — у портала его правами.
+   */
+  async liveBookings(user: B24UserContext, resourceIds: number[] | null, kind: unknown, now = new Date()): Promise<LiveBookingsDto> {
+    if (kind !== 'current' && kind !== 'upcoming') throw new BadRequestException({ code: 'INVALID_KIND', message: 'kind: current или upcoming' });
+    const portalId = user.portal.id;
+    const records =
+      kind === 'current'
+        ? await this.journal.activeListBetween(portalId, now, new Date(now.getTime() + 1), resourceIds)
+        : (await this.journal.activeListBetween(portalId, now, new Date(now.getTime() + UPCOMING_DAYS * DAY_MS), resourceIds)).filter((r) => r.startsAt > now).slice(0, LIVE_LIMIT);
+    if (!records.length) return { kind, items: [] };
+    const outcome = this.fieldMap ? await this.fieldMap.outcome(portalId, user.client).catch(() => null) : null;
+    const paidField = outcome?.paidAmount ?? null;
+    const dealIds = [...new Set(records.flatMap((r) => (r.dealId ? [r.dealId] : [])))];
+    const select = ['ID', 'TITLE', 'OPPORTUNITY', 'CURRENCY_ID', 'CONTACT_ID', ...(paidField ? [paidField] : [])];
+    const live = (ids: number[]) => (ids.length ? user.client.listAll<Record<string, unknown>>('crm.deal.list', { filter: { '@ID': ids }, select }) : Promise.resolve([]));
+    const mirror = dealIds.length ? await this.mirrorDeals(user, paidField ? [paidField] : []) : null;
+    let rows: Record<string, unknown>[] = [];
+    if (mirror) {
+      const got = await mirror.dealsByIds(user, dealIds);
+      rows = [...got.rows, ...(await live(got.missing))];
+    } else rows = await live(dealIds);
+    const deals = new Map(rows.map((d) => [Number(d.ID), d]));
+    const photos = new Map<number, string>();
+    const [names, resources, pending] = await Promise.all([
+      this.contactNames(user, rows.map((d) => Number(d.CONTACT_ID) || 0).filter((x) => x > 0), photos).catch(() => new Map<number, string>()),
+      this.resourceNames(user),
+      this.journal.pendingRemoval(portalId, records.map((r) => r.bookingId)),
+    ]);
+    const items = records.map((r): LiveBookingDto => {
+      const d = r.dealId ? deals.get(r.dealId) : undefined;
+      const contactId = Number(d?.CONTACT_ID) || 0;
+      const resourceIds = (r.resourceIds as number[]).map(Number);
+      return {
+        bookingId: r.bookingId,
+        dealId: r.dealId,
+        title: (d?.TITLE as string | undefined) || r.title || (r.dealId ? `Сделка #${r.dealId}` : `Бронь #${r.bookingId}`),
+        start: r.startsAt.toISOString(),
+        end: r.endsAt.toISOString(),
+        resources: resourceIds.map((id) => resources.get(id) ?? `Ресурс ${id}`),
+        resourceIds,
+        client: contactId ? { id: contactId, name: names.get(contactId) ?? `Контакт #${contactId}`, photo: photos.get(contactId) ?? null } : null,
+        amount: d && d.OPPORTUNITY !== null && d.OPPORTUNITY !== undefined && d.OPPORTUNITY !== '' ? Number(d.OPPORTUNITY) : null,
+        currency: (d?.CURRENCY_ID as string | undefined) ?? null,
+        paid: d && paidField ? paidSum(d[paidField]) : null,
+        pendingRemoval: pending.has(r.bookingId),
+      };
+    });
+    return { kind, items };
   }
 
   /** Активные брони на сегодня и на завтра (дни портала) — по ресурсам групп пользователя. */

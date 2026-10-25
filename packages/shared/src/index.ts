@@ -20,5 +20,6 @@ export * from './calls.js';
 export * from './dashboard-layout.js';
 export * from './deal-kanban.js';
 export * from './messengers.js';
+export * from './deal-hub.js';
 
 export * from './phones.js';

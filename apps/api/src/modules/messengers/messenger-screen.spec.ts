@@ -20,17 +20,18 @@ function setup(permissions = ['openlines.read', 'openlines.send']) {
 }
 
 describe('Блок «Мессенджеры» и экран для сотрудника', () => {
-  it('только номера групп сотрудника, работающие или с ошибкой (с описанием)', async () => {
+  it('все номера групп сотрудника в любом состоянии; описание — только у ошибки', async () => {
     const t = setup();
     expect(await t.ctl.status(t.user)).toEqual([
       expect.objectContaining({ id: 'm1', state: 'ready', error: null, canScreen: true }),
       expect.objectContaining({ id: 'm2', state: 'failed', error: 'Вход не удался', canScreen: true }),
+      expect.objectContaining({ id: 'm3', state: 'starting', error: null, canScreen: true }),
     ]);
   });
 
   it('без права писать — статус виден, экран и файлы недоступны', async () => {
     const t = setup(['openlines.read']);
-    expect((await t.ctl.status(t.user)).map((m) => m.canScreen)).toEqual([false, false]);
+    expect((await t.ctl.status(t.user)).map((m) => m.canScreen)).toEqual([false, false, false]);
     await expect(t.ctl.vncTicket(t.user, 'm1')).rejects.toMatchObject({ status: 403 });
     await expect(t.ctl.files(t.user, 'm1')).rejects.toMatchObject({ status: 403 });
     expect(t.messengers.vncTicket).not.toHaveBeenCalled();

@@ -8,11 +8,13 @@
 | `GET /api/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD`              | любая группа     | свои показатели за дни `[from, to]` (≤92, по умолчанию сегодня): с кем общались, брони из журнала — сделки с бронью и отменённые; ожидания за всё доступное время, состояние на сейчас |
 | `GET /api/dashboard/calls?kind=incoming\|new\|repeat\|answered\|missed\|lost&from=&to=&scope=all\|mine&funnel=` | любая группа | клиенты вида за период — окно со сделками (`call-stats.ts`) |
 | `GET /api/dashboard/activity?date=YYYY-MM-DD`                 | руководитель или администратор приложения | «Активность сотрудников» за день по всем24часам (`activity.service.ts`, см. ниже) |
+| `GET /api/dashboard/live-bookings?kind=upcoming\|current` | `calendar.view` | «Ближайшие / Текущие брони»: журнал броней ресурсов групп + сделки, клиенты с фото и оплата из копии CRM (`DashboardService.liveBookings`), см. `docs/features/dashboard-timeline.md` |
 | `POST /api/dashboard/hidden-chats/:chatId`                     | `openlines.read` | 👁 скрыть чат с **своего** дашборда (`DashboardHiddenChat`); в списке чатов он остаётся |
 | `GET /api/openlines/chats?scope=all\|mine&status=all\|waiting\|booked\|payment&from=&to=&offset=` | `openlines.read` | список чатов, сверху — с самыми новыми сообщениями                                        |
 | `GET/POST /api/openlines/folders`, `PUT/DELETE /api/openlines/folders/:id` | `openlines.read` | **личные папки** чатов (охрана, ресепшн, АХО…) со сводкой: число чатов, непрочитанные, последнее сообщение |
 | `PUT /api/openlines/folders/:id/chats/:chatId`, `DELETE /api/openlines/folder-chats/:chatId` | `openlines.read` | положить / перенести чат в папку, вернуть в общий список |
 | `GET /api/openlines/chats/search?q=<номер>`                    | `openlines.read` | поиск по телефону клиента по всему порталу: `crm.duplicate.findbycomm` → `imopenlines.crm.chat.get` |
+| `GET /api/openlines/deal-chats/:dealId`                        | `openlines.read` | встройка сделки, вкладка с именем клиента: чаты сделки и её контактов (`imopenlines.crm.chat.get` правами сотрудника) |
 | `GET /api/openlines/chats/:chatId/messages?beforeId=`          | `openlines.read` | история (50 сообщений, старее — по `beforeId`)                                            |
 | `POST /api/openlines/chats/:chatId/join`                       | `openlines.send` | войти в диалог (`imopenlines.session.join`)                                               |
 | `POST /api/openlines/chats/:chatId/send`                       | `openlines.send` | цепочка сообщений по порядку                                                              |
@@ -324,6 +326,9 @@ IM_MESSAGE), а не BX24.openPath: в слайдере звонка /online/ о
   `active` со сделкой, пересекает сегодня (день в поясе портала); `payment` — `PaymentRequest`
   `link_pending|sent`, не закрыт. Чат подходит, если его сделка из списка или его контакт — клиент этих
   сделок (контакт сделки — из копии CRM `CrmDeal`). Фильтр — до счётчиков и пагинации (`counts.booked/payment`).
+- Вид вкладок (2026-10-25, позже): «Все» — значок ∞; категории «Без ответа», «Брони», «Оплата»
+  с подписью и счётчиком — пока помещаются в ряд; не поместившиеся — за кнопкой ⇅ (окно со
+  списком категорий и количеством), совсем мало места — все три за ней (`web/openlines/StatusTabs.tsx`).
 - «!» у чата: `PUT /api/openlines/chats/:chatId/flag {on}` (`openlines.read` + положительная проверка
   `imopenlines.dialog.get` клиентом сотрудника), поля `OpenlineChat.flag*`, видна всем; снимается сама,
   когда после отметки последним написал сотрудник (`flagOf`). В `attention` отмеченные — первыми.
@@ -353,6 +358,8 @@ IM_MESSAGE), а не BX24.openPath: в слайдере звонка /online/ о
 - AttachmentButtons используется StepsEditor (личные/общие/системные payment/auto шаблоны и
   чат) и редактором подтверждений. Две явные кнопки: Из устройства / Из Битрикса. До 10 файлов
   на сообщение и 10 МБ каждый; сохранение шаблона/отправка чата блокируется до конца загрузки.
+- GET openlines/disk/start — откуда открыть выбор файла: папка `DISK_TEMPLATES_PATH` на общем диске или
+  «Мой диск» (если папки нет/нет доступа); оба места для переключателя. Токен сотрудника, кэш 10 мин.
 - GET openlines/disk?storageId=&folderId=&offset=&q= — страница Диска сотрудника
   ({items,nextOffset}), по 50, поиск по названию в текущей папке/списке хранилищ; POST openlines/files/disk {fileId:number} — проверка disk.file.get токеном
   сотрудника, ограниченное скачивание клиентом bitrix24, сохранение копии в StoredFile.
@@ -486,3 +493,12 @@ ChatSummary) и `OpenlineChat.clientStreak` — сообщений клиент�
 фильтр до counts/offset; доступные channels из всей разрешённой популяции. В телефонном поиске
 применяется тот же фильтр. ChannelSwitch показывает только summariesByChat с положительными правами;
 sibling chats собственного коннектора также определяются по MessengerMessage remote/deal context.
+
+## Телефоны в «Сделках без ОЛ» (2026-10-25)
+DashboardGapsService дополняет уже отфильтрованные доступные сделки `phones` из их контакта/
+компании (`crm.contact.get`/`crm.company.get`, исключительно user.client). Результаты CRM с ошибкой
+не используются; дубли телефонов нормализуются, недоступные/отсутствующие телефоны дают пустой
+массив. Общий сбой дополнительного batch не прячет сделки и добавляет notes. Веб показывает
+поиск клиента как в блоке звонков: выбор телефона → явный поиск → выбор канала → редактор.
+Открытие существующего диалога идёт внутри приложения. Сам поиск не отправляет сообщение.
+Подробнее [дашборд и шкала](../../../../../docs/features/dashboard-timeline.md).

@@ -1,8 +1,9 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import type { InstanceConfig, OutgoingMedia } from './instance.js';
+import { BROWSER_IGNORE_ARGS, configureMessengerBrowser, messengerBrowserArgs, prepareBrowserProfile } from './browser.js';
 import type { WireEvent, WireMessage } from './messages.js';
-import { defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
+import { AVATAR_TTL_MS, avatarKey, defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
 import {
   contactOfChat,
   decodeFrame,
@@ -22,7 +23,7 @@ import {
   type MaxContact,
   type MaxMessage,
 } from './max-wire.js';
-import { SCREEN, VirtualScreen } from './screen.js';
+import { VirtualScreen } from './screen.js';
 import type { InstanceSpec, InstanceState, InstanceStatus } from './spec.js';
 
 export const MAX_URL = 'https://web.max.ru/';
@@ -159,7 +160,7 @@ export class MaxInstance {
         env.DISPLAY = `:${this.spec.display}`;
       }
       await mkdir(this.profile, { recursive: true });
-      for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) await rm(`${this.profile}/${f}`, { force: true });
+      await prepareBrowserProfile(this.profile);
       this.state = await readFile(this.stateFile, 'utf8').then((s) => JSON.parse(s) as SavedState, () => null);
       for (const c of Object.values(this.state?.contacts ?? {}))
         this.contacts.set(c.id, { id: Number(c.id), phone: c.phone, names: c.name ? [{ name: c.name }] : [], flags: c.flags });
@@ -170,7 +171,8 @@ export class MaxInstance {
         env,
         defaultViewport: null,
         // MAX доступен с сервера напрямую — без прокси мессенджеров (он для WhatsApp и Telegram).
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', `--window-size=${SCREEN.width},${SCREEN.height}`, '--window-position=0,0'],
+        ignoreDefaultArgs: BROWSER_IGNORE_ARGS,
+        args: messengerBrowserArgs('max'),
       });
       this.browser = browser;
       browser.on('disconnected', () => {
@@ -181,6 +183,7 @@ export class MaxInstance {
       });
       const page = (await browser.pages())[0] ?? (await browser.newPage());
       this.page = page;
+      await configureMessengerBrowser(browser, page, 'max');
       await page.exposeFunction('__btxFrame', (b64: string) => void this.onFrame(b64));
       await page.evaluateOnNewDocument(pageHook);
       page.on('load', () => (this.loadedAt = Date.now()));
@@ -594,6 +597,19 @@ export class MaxInstance {
 
   readMedia(fileId: string) {
     return this.media.read(this.spec.id, fileId);
+  }
+
+  /** Фото профиля собеседника — по ссылке из данных контакта (MAX доступен без прокси); нет — null. */
+  async avatar(chatId: string): Promise<WireMedia | null> {
+    const have = await this.media.recent(this.spec.id, avatarKey(chatId), AVATAR_TTL_MS);
+    if (have) return have;
+    const url = this.contacts.get(contactOfChat(chatId) ?? '')?.baseUrl;
+    if (!url?.startsWith('https://')) return null;
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    if (!res?.ok) return null;
+    const data = Buffer.from(await res.arrayBuffer());
+    if (!data.length || data.length > 5 * 1024 * 1024) return null;
+    return this.media.save(this.spec.id, avatarKey(chatId), { mimetype: res.headers.get('content-type') || 'image/jpeg', data: data.toString('base64'), filename: 'avatar.jpg' });
   }
 
   /** Страница MAX — подставить файл в окно выбора файла (`screen-files.ts`). */

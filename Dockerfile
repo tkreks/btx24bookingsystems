@@ -26,7 +26,7 @@ RUN npm run build -w @btx24/shared \
  && npm run build -w @btx24/api \
  && npm run build -w @btx24/web \
  && npm run build -w @btx24/messenger \
- && npm prune --omit=dev
+ && npm prune --omit=dev --offline --no-audit --no-fund
 
 # ---------- api / worker ----------
 FROM ${NODE_IMAGE} AS api
@@ -62,7 +62,7 @@ EXPOSE 8080
 # Браузер на каждый подключённый мессенджер: Xvfb (виртуальный экран), x11vnc (экран по VNC, только
 # localhost контейнера — наружу через мост api), Chromium. Сессии — в томе /data.
 FROM ${NODE_IMAGE} AS messenger
-RUN apt-get update && apt-get install -y --no-install-recommends chromium xvfb x11vnc fonts-liberation fonts-noto-color-emoji ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends chromium chromium-l10n xvfb x11vnc fonts-liberation fonts-noto-color-emoji ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /data /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix && chown node:node /data
 ENV NODE_ENV=production \
@@ -74,6 +74,7 @@ COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/package.json ./package.json
 COPY --from=build /repo/apps/messenger/package.json ./apps/messenger/package.json
 COPY --from=build /repo/apps/messenger/dist ./apps/messenger/dist
+COPY docker/messenger/browser-policy.json /etc/chromium/policies/managed/booking.json
 USER node
 WORKDIR /repo/apps/messenger
 EXPOSE 3090

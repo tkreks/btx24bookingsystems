@@ -9,6 +9,8 @@ import type {
   DealProductRowDto,
   RecentDealsDto,
   BookingAlertListDto,
+  BookingInfoDto,
+  GroupOptionsDto,
   BookingHistoryDto,
   BookingStateDto,
   CancelBookingResultDto,
@@ -17,9 +19,12 @@ import type {
   CreateBookingResultDto,
   DealFieldMapDto,
   DealFormDto,
+  DealOverviewDto,
+  NewDealResultDto,
   Permission,
 } from '@btx24/shared';
 import { z } from 'zod';
+import { SwrCache, type SwrOptions } from '../../common/swr-cache.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
 import { AppAdminGuard } from '../access/app-admin.guard.js';
@@ -29,12 +34,21 @@ import { BookingAlertsService } from './booking-alerts.service.js';
 import { BookingRestoreService } from './booking-restore.service.js';
 import { BookingCancelService } from './booking-cancel.service.js';
 import { BookingDirectoryService } from './booking-directory.service.js';
+import { BookingInfoService } from './booking-info.service.js';
 import { BookingCreateService } from './booking-create.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { DealFormService } from './deal-form.service.js';
+import { DealHubService } from './deal-hub.service.js';
 import { ResourceStopsService } from './resource-stops.service.js';
+
+/**
+ * Брони клиента чата и сделки: панель чата и встройка сделки перечитывают их при каждом открытии и опросе.
+ * Кэш сбрасывается любым изменением броней/сделок портала (и событиями Битрикс24).
+ */
+const clientBookingsCache = new SwrCache<ClientBookingsDto>();
+const CLIENT_BOOKINGS_SWR: SwrOptions = { freshMs: 20_000, staleMs: 2 * 60_000 };
 
 /**
  * Уведомления о бронях и история броней. Видеть — право `booking.details` хотя бы в одной группе;
@@ -54,6 +68,8 @@ export class BookingsController {
     private readonly directory: BookingDirectoryService,
     private readonly restore: BookingRestoreService,
     private readonly stops: ResourceStopsService,
+    private readonly hub: DealHubService,
+    private readonly bookingInfo: BookingInfoService,
   ) {}
 
   /** Действующие и будущие стопы ресурсов моих групп (блок дашборда). */
@@ -189,14 +205,44 @@ export class BookingsController {
   @Get('deals/:dealId/bookings')
   async dealBookings(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<ClientBookingsDto> {
     await this.require(user, 'calendar.view');
-    return this.clients.forDeal(user, dealId);
+    return this.clientBookings(user, `deal:${dealId}`, () => this.clients.forDeal(user, dealId));
+  }
+
+  /**
+   * Карточка брони с дашборда: право `booking.details` в группе, где есть ресурс брони (администратор —
+   * любая); поля сделки — по настройке этой группы.
+   */
+  @Get('bookings/:bookingId/info')
+  async bookingInfoCard(@B24User() user: B24UserContext, @Param('bookingId', ParseIntPipe) bookingId: number): Promise<BookingInfoDto> {
+    const record = await this.journal.findAny(user.portal.id, bookingId);
+    if (!record) throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: `Бронь #${bookingId} не найдена` });
+    const a = await this.access.resolve(user);
+    const resources = (record.resourceIds as number[]).map(Number);
+    const group = a.groups.find((g) => g.permissions.includes('booking.details') && g.group.resourceIds.some((id) => resources.includes(id)));
+    if (!group && !a.isAppAdmin) throw new ForbiddenException({ code: 'NO_BOOKING_ACCESS', message: 'Нет доступа к данным этой брони' });
+    const fields = (group?.group.options as GroupOptionsDto | null)?.dealFields ?? [];
+    return this.bookingInfo.info(user, record.bookingId, fields);
+  }
+
+  /** Встройка сделки, «Сделка»: карточка и таймлайн действий сотрудников (правами сотрудника в CRM). */
+  @Get('deals/:dealId/overview')
+  async dealOverview(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<DealOverviewDto> {
+    await this.require(user, 'calendar.view');
+    return this.hub.overview(user, dealId);
+  }
+
+  /** Встройка сделки: по сделке уже есть бронь — новая сделка с тем же клиентом. */
+  @Post('deals/:dealId/new-deal')
+  async newDeal(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<NewDealResultDto> {
+    await this.require(user, 'booking.create');
+    return this.hub.newDeal(user, dealId);
   }
 
   /** Брони клиента чата открытой линии. */
   @Get('openlines/chats/:chatId/bookings')
   async chatBookings(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<ClientBookingsDto> {
     await this.require(user, 'openlines.read');
-    return this.clients.forChat(user, chatId);
+    return this.clientBookings(user, `chat:${chatId}`, () => this.clients.forChat(user, chatId));
   }
 
   /** История брони (аудит): кто, что, как и когда. */
@@ -223,6 +269,12 @@ export class BookingsController {
         details: r.details ?? null,
       })),
     };
+  }
+
+  /** Ответ — свой у каждого сотрудника (права в CRM), права приложения проверены до кэша. */
+  private async clientBookings(user: B24UserContext, key: string, compute: () => Promise<ClientBookingsDto>): Promise<ClientBookingsDto> {
+    const { value } = await clientBookingsCache.get(JSON.stringify([user.portal.id, user.userId, key]), compute, { ...CLIENT_BOOKINGS_SWR, scope: user.portal.memberId, tags: ['bookings', 'deals'] });
+    return value;
   }
 
   private async require(user: B24UserContext, permission: Permission): Promise<void> {

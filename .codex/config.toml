@@ -6,3 +6,6 @@ args = ["tools/mcp-server/src/server.mjs"]
 # Официальная документация REST API Битрикс24 (только чтение, без авторизации).
 [mcp_servers.bitrix24-docs]
 url = "https://mcp-dev.bitrix24.com/mcp"
+
+[mcp_servers.bitrix24-docs.tools.bitrix-search]
+approval_mode = "approve"

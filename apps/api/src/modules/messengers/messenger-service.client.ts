@@ -111,8 +111,17 @@ export class MessengerServiceClient {
     return this.request('POST', `/instances/${id}/contact`, { phone });
   }
 
+  /** Telegram: собеседник по логину (`contacts.resolveUsername`), без отправки сообщения. */
+  contactByLogin(id: string, login: string): Promise<{ exists: boolean; chatId: string | null }> {
+    return this.request('POST', `/instances/${id}/contact`, { login });
+  }
+
   send(id: string, to: string, text: string, quotedId?: string, media?: { mime: string; name: string; data: Buffer }): Promise<WireMessage> {
     return this.request('POST', `/instances/${id}/send`, { to, text, quotedId, ...(media ? { media: { mime: media.mime, name: media.name, data: media.data.toString('base64') } } : {}) }, media ? 120_000 : undefined);
+  }
+  /** Фото профиля собеседника в хранилище сервиса (для аватара в открытой линии); нет — null. */
+  async avatar(id: string, chatId: string): Promise<WireMedia | null> {
+    return (await this.request<{ media: WireMedia | null }>('POST', `/instances/${id}/avatar`, { chat: chatId }, 25_000)).media;
   }
   /** Вложение сообщения (скачать в хранилище сервиса, если ещё нет). */
   mediaOf(id: string, messageId: string): Promise<WireMedia> {

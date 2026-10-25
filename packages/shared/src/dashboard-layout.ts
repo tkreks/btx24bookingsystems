@@ -43,6 +43,9 @@ export const DASHBOARD_BLOCK_TYPES = [
   'messengers',
   'kpiGrid',
   'resourceTimeline',
+  'upcomingBookings',
+  'currentBookings',
+  'resourceTimelineNow',
 ] as const;
 export type DashboardBlockType = (typeof DASHBOARD_BLOCK_TYPES)[number];
 
@@ -88,8 +91,11 @@ export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = 
   certificates: { title: 'Сертификаты', hint: 'новые, срок прошёл — погасить', group: 'Контроль', width: 'quarter' },
   stops: { title: 'Стопы ресурсов', hint: 'ресурсы, закрытые для бронирования', group: 'Контроль', width: 'half' },
   kpiGrid: { title: 'Показатели (таблица)', hint: 'до 6 чисел на выбор: сделки, оплаты, брони, звонки; по числу — канбан сделок', group: 'Показатели', width: 'half' },
-  resourceTimeline: { title: 'Брони сегодня (шкала)', hint: 'занятость ресурсов группы от сейчас до конца периода; по свободному — новая бронь', group: 'Списки', width: 'full' },
-  messengers: { title: 'Мессенджеры', hint: 'номера ваших групп: работают или с ошибкой; экран мессенджера и файлы для отправки', group: 'Контроль', width: 'quarter' },
+  resourceTimeline: { title: 'Брони (шкала)', hint: 'часы выбранного дня или занятость по дням периода; выбор ресурсов, даты и стопы', group: 'Списки', width: 'full' },
+  upcomingBookings: { title: 'Ближайшие брони', hint: 'брони ваших групп на 14 дней: время, ресурс, клиент, сумма и оплата; по клику — подробности', group: 'Списки', width: 'half' },
+  currentBookings: { title: 'Текущие брони', hint: 'брони, которые идут сейчас: ресурс, клиент, сумма и оплата; по клику — подробности', group: 'Списки', width: 'half' },
+  resourceTimelineNow: { title: 'Брони (шкала, текущие)', hint: 'шкала сегодняшнего дня: только ресурсы с идущей сейчас бронью', group: 'Списки', width: 'full' },
+  messengers: { title: 'Мессенджеры', hint: 'все номера ваших групп и их состояние; экран мессенджера и файлы для отправки', group: 'Контроль', width: 'quarter' },
 };
 
 export interface DashboardBlock {
@@ -101,7 +107,7 @@ export interface DashboardBlock {
   rows?: 1 | 2;
   /** Только у `kpiGrid`: таблица показателей. */
   kpi?: KpiGridConfig;
-  /** Только у `resourceTimeline`: группы для выбора в блоке (пусто — все группы сотрудника). */
+  /** Только у `resourceTimeline` и `resourceTimelineNow`: группы для выбора в блоке (пусто — все группы сотрудника). */
   groupIds?: string[];
 }
 
@@ -172,24 +178,17 @@ export interface DashboardLayoutDto {
 
 const block = (type: DashboardBlockType, width: BlockWidth = DASHBOARD_BLOCKS[type].width): DashboardBlock => ({ id: type, type, width });
 
-/** Раскладка по умолчанию — как был дашборд менеджера, плюс блоки контроля. */
+/** Снимок дашборда Максима Тармосина на 2026-10-25 (решение владельца): общий стартовый вид.
+ * Дальнейшие личные изменения Максима не меняют дашборды других сотрудников.
+ */
 export const DEFAULT_DASHBOARD: DashboardBlock[] = [
-  block('onShift'),
-  block('bookingDays'),
-  block('callsTotal'),
-  block('newDeals'),
-  block('repeatClients'),
-  block('needsClose', 'quarter'),
-  block('alerts'),
-  block('certificates'),
-  block('messengers'),
-  block('attention'),
-  block('deals'),
+  { ...block('attention'), rows: 2 },
+  block('messengers', 'quarter'),
   block('recentCalls'),
-  block('todayBookings'),
-  block('dealSources'),
-  block('newBookings'),
-  block('removedBookings'),
+  { ...block('kpiGrid', 'quarter'), kpi: { cols: 3, rows: 2, items: ['bookingsToday', 'paidDeals', 'callsLost', 'newBookings', 'removedBookings', 'callsNew'] } },
+  block('myActivity', 'third'),
+  block('noOpenline', 'third'),
+  block('needsClose', 'third'),
 ];
 
 /** Блоки, которые сотрудник может видеть и добавлять. */
@@ -206,6 +205,6 @@ export interface NeedsCloseDto {
 
 export interface DashboardGapsDto {
   kind: 'chat' | 'contact';
-  items: { dealId: number; title: string; contactId: number | null; createdAt: string | null; opportunity: number | null; currency: string | null }[];
+  items: { dealId: number; title: string; contactId: number | null; phones?: string[]; createdAt: string | null; opportunity: number | null; currency: string | null }[];
   notes: string[];
 }

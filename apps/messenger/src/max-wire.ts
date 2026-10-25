@@ -124,6 +124,8 @@ export interface MaxContact {
   names?: { name?: string; firstName?: string; lastName?: string; type?: string }[];
   /** Битовые флаги: 1 — официальный аккаунт, 2 — бот. */
   flags?: number;
+  /** Фото профиля (ссылка CDN MAX), если есть. */
+  baseUrl?: string;
 }
 export interface MaxAttach {
   _type: string;

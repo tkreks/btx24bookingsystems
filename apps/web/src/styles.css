@@ -7722,23 +7722,23 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 .dash-attention .attention-name { max-width: 210px; min-width: 28px; }
 .attention-avatar { position: relative; flex: none; display: inline-flex; }
 /* Непрочитанные — маленький счётчик у правого верхнего угла аватарки. */
-.attention-unread { position: absolute; top: -4px; right: -5px; z-index: 2; min-width: 13px; height: 13px; padding: 0 3px; display: grid; place-items: center; border-radius: 7px; background: var(--primary); color: #fff; font-size: 8.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1.5px var(--surface); }
+.attention-unread { position: absolute; top: -7px; right: -7px; z-index: 6; min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; border-radius: 8px; background: var(--primary); color: #fff; font-size: 10px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface); }
 .attention-message-space { flex: 1; min-width: 0; display: flex; align-items: center; padding-right: 6px; }
 .attention-message-stack { position: relative; display: inline-flex; min-width: 0; max-width: 100%; isolation: isolate; }
-.attention-preview, .attention-message-layer { background: #fff; border: 1px solid var(--line); border-radius: 9px; }
-.dash-attention .attention-preview { position: relative; display: block; z-index: 4; min-width: 0; padding: 6px 10px; color: var(--text); font-size: 13px; line-height: 18px; }
+/* Пузырь сообщения клиента — тёплый «слоновая кость», чтобы не сливаться с белым блоком. */
+.attention-preview, .attention-message-layer { background: #fcf6e8; border: 1px solid #ecdfbf; border-radius: 10px; }
+.dash-attention .attention-preview { position: relative; display: flex; align-items: flex-end; gap: 8px; z-index: 4; min-width: 0; padding: 6px 10px; color: var(--text); font-size: 13px; line-height: 18px; }
+.attention-preview-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attention-stamp { flex: none; font-size: 9.5px; line-height: 12px; color: #9a8a66; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .attention-message-layer { position: absolute; inset: 0; pointer-events: none; }
 .attention-message-layer:nth-child(1) { z-index: 3; }
 .attention-message-layer:nth-child(2) { z-index: 2; }
 .attention-message-layer:nth-child(3) { z-index: 1; }
-.dash-attention .attention-time { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 4px; flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
-.dash-attention .attention-time small { font-size: 10px; }
 @media (max-width: 760px) {
   .dash-attention .attention-row { gap: 8px; }
   .dash-attention .attention-title { min-width: 74px; max-width: 45%; gap: 6px; }
   .dash-attention .attention-title .cl-channel { width: auto; }
   .dash-attention .cl-channel-label { display: none; }
-  .dash-attention .attention-time { flex-direction: column; gap: 0; align-items: flex-end; }
   .dash-attention .attention-actions { padding-bottom: 4px; }
 }
 
@@ -8068,7 +8068,7 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 .mt-msg.own { align-self: flex-end; background: rgba(37, 211, 102, 0.12); }
 .mt-msg.deleted .mt-body { text-decoration: line-through; opacity: 0.6; }
 .mt-body { white-space: pre-wrap; word-break: break-word; }
-.mt-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px; }
+.mt-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 2px; }
 .mt-edited { text-decoration: underline dotted; cursor: help; }
 .mt-deleted, .mt-error { color: #b91c1c; }
 .mt-read { color: #2563eb; }
@@ -8092,7 +8092,7 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
   .mc-list { border-right: 0; max-height: 30vh; }
 }
 .messenger-groups { border: 0; padding: 0; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
-.messenger-groups legend { font-size: 13px; color: var(--muted, #6b7280); padding: 0; margin-bottom: 2px; }
+.messenger-groups legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 2px; }
 
 .mt-media { display: flex; flex-direction: column; gap: 6px; max-width: min(360px, 100%); margin-bottom: 6px; }
 .mt-media img, .mt-media video { display: block; max-width: 100%; max-height: 280px; border-radius: 10px; object-fit: contain; }
@@ -8307,8 +8307,11 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 .dash-messenger-name b, .dash-messenger-name .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-messenger-name .muted { font-size: 12px; }
 .dash-messenger-error { color: var(--status-fail-text); font-size: 12px; overflow-wrap: anywhere; }
-.dash-messengers .pill.ok { background: var(--ok-bg); color: var(--ok-text); }
-.dash-messengers .pill.danger { background: var(--status-fail-text); color: var(--surface); }
+.dash-messenger-status { flex: none; padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; line-height: 1.4; }
+.dash-messenger-status.ok { background: var(--ok-bg); color: var(--ok-text); }
+.dash-messenger-status.danger { background: var(--status-fail-bg); color: var(--status-fail-text); }
+.dash-messenger-status.login { background: var(--warn-bg); color: #b54708; }
+.dash-messenger-status.other { background: var(--neutral-bg); color: var(--muted); }
 .dash-messenger-screen { flex: none; min-height: 30px; padding: 0 12px; border-radius: 8px; color: var(--primary); background: var(--surface-2); font-weight: 600; }
 
 /* Экран мессенджера: файлы для отправки (хранятся час). */
@@ -8332,33 +8335,37 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 
 /* «Показатели (таблица)»: до 6 чисел; по числу — канбан сделок. */
 .dash-kpi-setup { margin-left: auto; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 8px; color: var(--muted); }
-.kpi-grid { display: grid; gap: 8px; flex: 1; grid-auto-rows: minmax(76px, 1fr); }
+/* Блок — колонка: таблица занимает всю свободную высоту ячейки дашборда, числа растут вместе с ячейкой. */
+.dash-kpi-grid { display: flex; flex-direction: column; }
+.kpi-grid { display: grid; gap: 8px; flex: 1; min-height: 0; grid-auto-rows: minmax(76px, 1fr); }
 .kpi-cell {
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
+  container-type: size;
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface-2);
   color: var(--text);
-  text-align: left;
+  text-align: center;
   cursor: pointer;
   transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 button.kpi-cell:not(:disabled):hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: 0 6px 16px color-mix(in srgb, var(--primary) 18%, transparent); }
 button.kpi-cell:disabled { cursor: default; opacity: 0.75; }
-.kpi-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--primary); }
-.kpi-label { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kpi-value { font-size: clamp(26px, min(42cqh, 30cqw), 64px); font-weight: 750; line-height: 1; font-variant-numeric: tabular-nums; color: var(--primary); }
+.kpi-label { font-size: 11px; line-height: 1.25; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .kpi-callsMissed .kpi-value { color: var(--status-fail-text); }
 .kpi-callsLost .kpi-value { color: var(--status-lost-text); }
 .kpi-paidDeals .kpi-value, .kpi-callsAnswered .kpi-value { color: var(--ok-text); }
 .kpi-setup { max-width: 640px; display: flex; flex-direction: column; gap: 10px; }
 .kpi-sizes { flex-wrap: wrap; }
 .kpi-grid-setup { grid-auto-rows: auto; }
-.kpi-grid-setup .kpi-cell { cursor: default; }
+.kpi-grid-setup .kpi-cell { cursor: default; container-type: normal; align-items: stretch; text-align: left; }
 .kpi-grid-setup select { width: 100%; }
 .kpi-setup .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
@@ -8438,7 +8445,7 @@ button.kanban-card:hover { box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14); }
 .attention-rows li.flagged { background: var(--flag-bg); box-shadow: inset 3px 0 0 var(--flag-line); }
 .dash-icon-btn.cl-flag { width: 32px; height: 32px; font-size: 17px; }
 .dash-icon-btn.cl-flag.on { color: #fff; background: var(--flag-line); }
-.cl-tab.icon { padding: 8px 10px; gap: 5px; }
+.cl-tab.cl-tab-icon { padding: 8px 10px; gap: 5px; }
 
 /* «Брони сегодня (шкала)»: от сейчас до конца периода; зелёное — свободно, красное — бронь. */
 .dash-timeline-group { margin-left: 8px; max-width: 220px; }
@@ -8466,3 +8473,289 @@ button.tl-piece.free:hover { filter: brightness(1.06); }
   .timeline-axis { margin-left: 0; }
   .timeline-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
 }
+
+/* Ошибка провайдера и явный переход в собственную ОЛ. */
+/* Ошибка канала Wazzup: плашка в чате и тег «Ошибка» в списке. */
+.error-triangle { flex: none; color: #e5484d; display: block; }
+.channel-error-tag { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px 2px 5px; border-radius: 7px; background: #fee4e2; color: #b42318; border: 1px solid #fecdca; font-size: 11px; font-weight: 700; line-height: 1.3; letter-spacing: .01em; }
+.channel-error-tag .error-triangle { color: #d92d20; }
+.channel-recovery { flex: none; max-height: 40vh; overflow: auto; margin: 10px 12px; padding: 14px 16px; border-radius: var(--radius); background: linear-gradient(135deg, #fff1f0, #fee4e2); border: 1px solid #fda29b; border-left: 5px solid #d92d20; box-shadow: 0 8px 22px rgba(217, 45, 32, .16); animation: recovery-in .35s ease-out; }
+.channel-recovery-head { display: flex; gap: 12px; align-items: flex-start; }
+.channel-recovery-head b { display: block; color: #912018; font-size: 15px; }
+.channel-recovery-head p { margin: 3px 0 0; color: #7a271a; font-size: 13px; line-height: 1.4; }
+.channel-recovery-head .error-triangle { color: #d92d20; animation: recovery-pulse 1.6s ease-in-out 3; }
+.channel-recovery-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 0 42px; }
+.channel-recovery-actions select { max-width: 100%; border-radius: 10px; border: 1px solid #fda29b; padding: 7px 10px; background: var(--surface); }
+.channel-recovery-start { background: #d92d20; color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(217, 45, 32, .28); }
+.channel-recovery-start:hover { background: #b42318; }
+.channel-recovery-open { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border-color: #fda29b; }
+@keyframes recovery-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes recovery-pulse { 50% { transform: scale(1.18); } }
+@media (max-width: 560px) { .channel-recovery-actions { margin-left: 0; } .channel-recovery-actions > * { flex: 1 1 100%; } }
+
+/* Часы поверх каждого ресурса; длинная шкала сохраняет читаемый шаг. */
+.timeline-rows { display: block; overflow-x: auto; }
+.timeline-grid { display: grid; gap: 6px; }
+.timeline-axis { height: 36px; }
+.timeline-axis .timeline-tick { top: 18px; font-size: 10px; white-space: nowrap; }
+.timeline-axis .timeline-tick small { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 10px; }
+.timeline-axis .timeline-tick.midnight { font-weight: 750; }
+.timeline-hour { position: absolute; top: 0; bottom: 0; z-index: 2; border-left: 1px solid rgba(17, 24, 39, .35); pointer-events: none; }
+.timeline-midnight { z-index: 2; }
+.timeline-resource { position: sticky; left: 0; z-index: 3; background: var(--surface); }
+
+/* Управление датой/ресурсами шкалы и стопы; высота дорожки уменьшена с30до21px. */
+.timeline-heading, .timeline-controls, .timeline-date-nav, .timeline-modes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.timeline-heading { gap: 10px; margin-bottom: 10px; padding-left: 44px; }
+.timeline-heading .dash-attention-title { margin: 0; }
+.timeline-resources-trigger { display: inline-flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); cursor: pointer; }
+.timeline-resources-trigger span { color: var(--muted); font-size: 12px; }
+.timeline-controls { margin-bottom: 10px; gap: 8px 12px; }
+.timeline-controls button, .timeline-controls input, .timeline-all-resources { border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text); padding: 5px 8px; font-size: 12px; }
+.timeline-date-nav button { cursor: pointer; min-width: 28px; }
+.timeline-modes { gap: 3px; }
+.timeline-modes button { cursor: pointer; }
+.timeline-modes button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.timeline-until { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.timeline-bar, .timeline-period-bar { height: 21px; border-radius: 6px; }
+.timeline-grid { gap: 4px; }
+.tl-piece { font-size: 10px; }
+.tl-piece.stopped, .timeline-period-cell.stop { background: repeating-linear-gradient(135deg, #b4bac4, #b4bac4 5px, #d9dde3 5px, #d9dde3 10px); color: #283142; cursor: not-allowed; font-weight: 750; }
+.timeline-period-bar { display: flex; gap: 3px; }
+.timeline-period-cell { flex: 1; min-width: 0; padding: 0 2px; border: 0; border-radius: 4px; font-size: 11px; font-weight: 750; cursor: pointer; }
+.timeline-period-cell.free { background: var(--ok-bg); color: var(--ok-text); }
+.timeline-period-cell.booked { background: #ee3f4d; color: #fff; }
+.timeline-period-cell.has-stop.booked { box-shadow: inset 0 -4px #727b88; }
+.timeline-period-cell.stop { cursor: pointer; }
+.timeline-day-axis { margin-left: 140px; display: flex; gap: 3px; font-size: 11px; color: var(--muted); }
+.timeline-day-axis span { flex: 1; text-align: center; }
+.timeline-legend { margin: 8px 0 0; font-size: 11px; }
+.timeline-picker { width: min(620px, calc(100vw - 24px)); padding: 18px; }
+.timeline-picker .wz-groups { margin-bottom: 12px; }
+.timeline-picker .wz-resources { margin: 10px 0; }
+.deal-gap-row { display: flex; align-items: center; gap: 8px; }
+.deal-gap-row .dt-row { flex: 1; min-width: 0; }
+.deal-gap-messenger { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; flex: none; max-width: 45%; }
+.deal-gap-messenger select { max-width: 120px; font-size: 11px; }
+@media (max-width: 640px) { .timeline-day-axis { margin-left: 0; } .timeline-resources-trigger { max-width: 100%; flex-wrap: wrap; } }
+
+.timeline-picker .wz-resource.has-stop { border-style: dashed; }
+.timeline-picker .wz-resource.has-stop small { display: block; color: var(--muted); font-size: 11px; }
+
+/* «Чаты»: зелёная «Добавить» — новый диалог по номеру или логину. */
+.cl-add { flex: none; height: 42px; padding: 0 14px; border-radius: 14px; border: 0; color: #fff; background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 5px 12px rgba(22, 163, 74, .25); white-space: nowrap; }
+.cl-add:hover { background: linear-gradient(135deg, #16a34a, #15803d); }
+.cl-tab-client { max-width: 100%; }
+.cl-tab-client-name { overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.cl-tab.cl-tab-client:not(.active) { background: #e6f4ea; color: #166534; border-color: #bbe5c8; }
+
+/* Новый диалог: проверка клиента в мессенджерах. */
+.new-dialog { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; border: 1px solid var(--line); border-radius: 20px; padding: 18px 20px 20px; background: var(--surface); color: var(--text); box-shadow: 0 24px 60px rgba(15, 23, 42, .25); }
+.new-dialog::backdrop { background: rgba(15, 23, 42, .45); backdrop-filter: blur(2px); }
+.new-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.new-dialog-head h3 { margin: 0; font-size: 18px; }
+.new-dialog-close { width: 34px; height: 34px; padding: 0; border-radius: 50%; font-size: 20px; line-height: 1; color: var(--muted); }
+.new-dialog-form { display: flex; gap: 8px; }
+.new-dialog-form input { flex: 1; min-width: 0; font-size: 16px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.new-dialog-form input:focus { outline: 2px solid rgba(0, 122, 255, .35); border-color: var(--primary); background: var(--surface); }
+.new-dialog-hint { margin: 6px 2px 0; font-size: 12px; }
+.new-dialog-target { margin: 0 0 4px; font-size: 15px; font-weight: 700; }
+.new-dialog-checks { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.new-dialog-check { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); transition: border-color .2s, background .2s; }
+.new-dialog-check.found { border-color: #86efac; background: #f0fdf4; }
+.new-dialog-check.not_found, .new-dialog-check.unavailable, .new-dialog-check.denied { opacity: .75; }
+.new-dialog-check-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.new-dialog-check-name .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-dialog-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); text-align: right; }
+.new-dialog-status .spinner { width: 14px; height: 14px; }
+.new-dialog-status.not_found { color: var(--muted); }
+.new-dialog-status.unavailable, .new-dialog-status.denied { color: var(--warn-text); }
+.new-dialog-start { flex: none; background: linear-gradient(135deg, #22c55e, #16a34a); }
+.new-dialog-empty { margin: 12px 2px 0; font-size: 13px; }
+.new-dialog-existing { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+.new-dialog-existing h4 { flex: 1 1 100%; margin: 0 0 2px; font-size: 13px; color: var(--muted); }
+
+/* Встройка сделки: «Чат · Сделка · Календарь». */
+.deal-home { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: min(560px, 90dvh); padding: 24px 16px; }
+.deal-home-caption { margin: 0 0 18px; font-size: 13px; letter-spacing: .02em; }
+.deal-home-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 220px)); gap: 18px; width: 100%; justify-content: center; }
+.deal-home-tile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 30px 16px 26px; border-radius: 22px; border: 1px solid var(--line); background: var(--surface); box-shadow: 0 10px 28px rgba(15, 23, 42, .07); transition: transform .15s, box-shadow .15s, border-color .15s; }
+.deal-home-tile:hover { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(15, 23, 42, .12); border-color: rgba(0, 122, 255, .35); }
+.deal-home-icon { width: 70px; height: 70px; border-radius: 20px; display: grid; place-items: center; color: #fff; }
+.deal-home-tile.chat .deal-home-icon { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.deal-home-tile.deal .deal-home-icon { background: linear-gradient(135deg, var(--primary2), #7c3aed); }
+.deal-home-tile.calendar .deal-home-icon { background: linear-gradient(135deg, var(--primary), #3b82f6); }
+.deal-home-title { font-size: 20px; font-weight: 700; }
+.deal-home-hint { font-size: 12.5px; font-weight: 500; color: var(--muted); text-align: center; }
+@media (max-width: 600px) { .deal-home-tiles { grid-template-columns: 1fr; max-width: 360px; } .deal-home-tile { flex-direction: row; padding: 16px; text-align: left; } .deal-home-icon { width: 52px; height: 52px; } .deal-home-hint { text-align: left; } }
+.deal-back { flex: none; }
+
+.deal-warning-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, .45); backdrop-filter: blur(2px); }
+.deal-warning { width: min(440px, 100%); padding: 24px 22px 20px; border-radius: 20px; background: var(--surface); box-shadow: 0 24px 60px rgba(15, 23, 42, .3); text-align: center; animation: recovery-in .25s ease-out; }
+.deal-warning h2 { margin: 10px 0 6px; font-size: 18px; }
+.deal-warning p { margin: 6px 0; }
+.deal-warning-icon { display: inline-grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--warn-bg); color: #dc6803; }
+.deal-warning-booking { font-weight: 600; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); }
+.deal-warning-checking { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 8px 0; }
+.deal-warning-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+.deal-warning-actions button { flex: 1 1 160px; padding: 10px 14px; }
+
+/* Встройка сделки → «Сделка»: карточка и таймлайн. */
+.deal-overview { max-width: 860px; margin: 0 auto; }
+.deal-overview-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.deal-overview-heading { flex: 1; min-width: 0; }
+.deal-overview-heading h1 { margin: 0; font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deal-overview-heading p { margin: 2px 0 0; font-size: 12.5px; }
+.deal-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.deal-fact { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); min-width: 0; }
+.deal-fact-label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.deal-fact-value { font-weight: 600; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.deal-fact-value .link { padding: 0; font-weight: 600; text-align: left; }
+.deal-fact-sub { font-size: 12px; font-weight: 500; }
+.deal-stage { display: inline-block; padding: 3px 9px; border-radius: 8px; font-size: 12.5px; }
+.deal-stage.work { background: var(--status-work-bg); color: var(--status-work-text); }
+.deal-stage.won { background: var(--status-done-bg); color: var(--status-done-text); }
+.deal-stage.lost { background: var(--status-fail-bg); color: var(--status-fail-text); }
+.deal-timeline h2 { font-size: 16px; margin: 0 0 10px; }
+.deal-timeline ol { list-style: none; margin: 0; padding: 0; position: relative; }
+.deal-timeline ol::before { content: ''; position: absolute; left: 15px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+.deal-tl-item { position: relative; display: flex; gap: 12px; padding: 0 0 14px; }
+.deal-tl-icon { position: relative; z-index: 1; flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--surface); }
+.deal-tl-icon.ok { background: var(--ok-bg); color: var(--ok-text); }
+.deal-tl-icon.info { background: var(--info-bg); color: var(--info-text); }
+.deal-tl-icon.warn { background: var(--warn-bg); color: var(--warn-text); }
+.deal-tl-icon.neutral { background: var(--neutral-bg); color: var(--muted); }
+.deal-tl-icon.app { background: #ede9fe; color: #6d28d9; }
+.deal-tl-body { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.deal-tl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-size: 13px; }
+.deal-tl-head time { margin-left: auto; font-size: 12px; }
+.deal-tl-text { margin: 4px 0 2px; font-size: 13px; white-space: pre-line; overflow-wrap: anywhere; }
+.deal-tl-actor { font-size: 12px; }
+.cl-card-heading .channel-error-tag { align-self: center; margin: 0 auto 0 -4px; }
+
+/* «Ближайшие / Текущие брони»: одна строка — название, время, ресурс, клиент, сумма, оплата. */
+.dash-live-bookings { display: flex; flex-direction: column; min-height: 0; }
+.live-booking-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; }
+.live-booking-list li + li { border-top: 1px solid var(--line); }
+.live-booking {
+  display: grid;
+  grid-template-columns: minmax(90px, 1.6fr) minmax(64px, auto) minmax(60px, 1fr) minmax(90px, 1.4fr) minmax(60px, auto) minmax(60px, auto);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.live-booking:hover { background: var(--hover); }
+.live-booking.removed { opacity: .55; text-decoration: line-through; }
+.live-booking > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-booking-title { font-weight: 600; }
+.live-booking-time { font-variant-numeric: tabular-nums; }
+.live-booking-resource { color: var(--muted); }
+.live-booking-client { display: flex; align-items: center; gap: 6px; }
+.live-booking-client > span { overflow: hidden; text-overflow: ellipsis; }
+.live-booking-amount, .live-booking-paid { text-align: right; font-variant-numeric: tabular-nums; }
+.live-booking-paid.full { color: var(--ok); }
+.live-booking-paid.part { color: #b45309; }
+.live-booking-paid.none { color: var(--danger); }
+@media (max-width: 640px) {
+  .live-booking { grid-template-columns: 1fr auto; }
+  .live-booking-resource, .live-booking-client { grid-column: 1; }
+}
+.booking-info-client { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.booking-info-products { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.booking-info-products th, .booking-info-products td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+.booking-info-products th:not(:first-child), .booking-info-products td:not(:first-child) { text-align: right; }
+.booking-info-products tfoot td { font-weight: 600; border-bottom: 0; }
+.timeline-now-line { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #2563eb; z-index: 2; pointer-events: none; }
+.timeline-bar.live { background: var(--surface-2); }
+
+/* Вкладки статусов чатов: ∞ «Все», категории — пока помещаются в ряд, остальные — за кнопкой ⇅. */
+.cl-status-tabs { position: relative; flex-wrap: nowrap; overflow: hidden; }
+.cl-status-tabs .cl-tab { flex: none; }
+.cl-status-tabs .cl-tab-client { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.cl-tab-category { padding: 8px 10px; gap: 5px; }
+.cl-tabs-measure { position: absolute; left: 0; top: 0; display: flex; gap: inherit; visibility: hidden; pointer-events: none; }
+.cl-category-menu ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cl-category-menu li button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.cl-category-menu li button:hover { background: var(--hover); }
+.cl-category-menu li button.active { border-color: var(--primary); background: var(--info-bg); }
+.cl-category-menu li button span { flex: 1; }
+.cl-category-menu li button b { min-width: 28px; padding: 2px 8px; border-radius: 100px; background: var(--surface-2); text-align: center; }
+.cl-category-menu li button b.alert { color: var(--status-fail-text); background: var(--status-fail-bg); }
+.channel-recovery-find { background: var(--surface); border-color: #fda29b; }
+.channel-recovery-checking { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.first-message-form { display: flex; flex-direction: column; gap: 10px; }
+.first-message-form textarea { width: 100%; resize: vertical; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); }
+
+/* Редактор сообщения в чате: поле с вложениями-значками в правом верхнем углу; справа «Отправить» и «Шаблоны». */
+.cv-composer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.cv-composer-side { display: flex; flex-direction: column; gap: 6px; }
+.cv-composer-side button { width: 100%; white-space: nowrap; }
+.cv-templates-btn { font-size: 12.5px; }
+.steps-editor.compact .step-body { position: relative; }
+.steps-editor.compact .step-body textarea { padding-right: 72px; }
+.attachment-controls.compact { position: absolute; top: 5px; right: 6px; }
+.attachment-controls.compact .attachment-sources { display: flex; gap: 2px; align-items: center; }
+.attachment-controls.compact .attachment-sources button { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.attachment-controls.compact .attachment-sources button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.attachment-controls.compact .error { position: absolute; top: 100%; right: 0; margin: 2px 0 0; white-space: nowrap; font-size: 12px; }
+.b24-glyph { display: block; }
+.templates-picker-new { width: 100%; margin-bottom: 10px; }
+.templates-picker-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow: auto; }
+.templates-picker-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); text-align: left; font: inherit; font-weight: 400; cursor: pointer; }
+.templates-picker-list button:hover { background: var(--hover); }
+.templates-picker-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.templates-picker-text { font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.templates-picker-meta { font-size: 12px; }
+.templates-picker-manage { margin-top: 8px; }
+@media (max-width: 550px) {
+  .cv-composer-row { grid-template-columns: 1fr; }
+  .cv-composer-side { flex-direction: row; }
+}
+
+/* Сделка в шапке чата — как выбранная сделка в мастере брони; ⇅ — сменить сделку входящих сообщений. */
+/* Сделка в шапке чата — одной строкой, как теги каналов: название · сумма · дата; ⇅ внутри. */
+.cv-deal-card { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.cv-deal-chip { display: inline-flex; align-items: center; min-width: 0; height: 24px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12px; overflow: hidden; }
+.cv-deal-open { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 9px; border: 0; border-radius: 0; background: none; color: var(--text); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.cv-deal-open b { font-weight: 600; }
+.cv-deal-open:hover { background: var(--surface-2); color: var(--primary); }
+.cv-deal-switch { flex: none; display: inline-grid; place-items: center; width: 24px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; color: #5c6a80; }
+.cv-deal-switch:hover { background: var(--surface-2); color: var(--primary); }
+.cv-deal-warn { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--status-fail-bg); color: var(--status-fail-text); font-weight: 800; font-size: 11px; }
+.cv-deal-pick { padding: 0 9px; color: var(--muted); white-space: nowrap; }
+.cv-deal-options { display: grid; gap: 8px; max-height: 60vh; overflow: auto; }
+.cv-contact-sub { flex-wrap: wrap; gap: 6px; }
+
+/* Теги клиента (сделки, ср. чек, брони, ближайшая) — в том же виде, что каналы и сделка. */
+.cb-stats { gap: 6px; }
+.cb-tag { height: 24px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: #5c6a80; font-size: 12px; font-weight: 400; }
+.cb-tag b { font-weight: 600; }
+.cb-tag .icon { color: #8a96a8; }
+button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); color: var(--primary); }
+.cb-tag.cb-next { border-color: var(--line); background: var(--surface); }
+.cb-tag.cb-next.now { border-color: var(--line); background: var(--surface); }
+.cb-tag.cb-next.now b { color: #d5444b; }
+.cb-add { width: 24px; height: 24px; font-size: 17px; box-shadow: none; }
+
+/* «Чаты клиента» (кружок +N в шапке чата): строки как «Последние сообщения» дашборда, справа «Сделка» и «Перейти в чат». */
+.channels-modal.dash-attention { max-width: 720px; margin-bottom: 0; }
+.channels-modal .attention-rows li.current { background: var(--surface-2, #f6f8fb); box-shadow: inset 3px 0 0 var(--primary); }
+.channels-modal .attention-rows li { padding-right: 4px; }
+.cv-channel, .cv-channel-stack { height: 24px; box-sizing: border-box; }
+
+/* Встройка сделки: ошибка канала Wazzup — четвёртый шаг красным «Отправить клиенту сообщение». */
+.deal-home-tiles:has(.deal-home-tile.recover) { grid-template-columns: repeat(4, minmax(0, 200px)); }
+.deal-home-tile.recover { border-color: #fda29b; background: #fef3f2; }
+.deal-home-tile.recover:hover { border-color: #f04438; }
+.deal-home-tile.recover .deal-home-icon { background: linear-gradient(135deg, #f97066, #d92d20); }
+.deal-home-tile.recover .deal-home-title { color: #b42318; }
+.deal-recover { max-width: 640px; }
+@media (max-width: 860px) { .deal-home-tiles:has(.deal-home-tile.recover) { grid-template-columns: repeat(2, minmax(0, 220px)); } }
+@media (max-width: 600px) { .deal-home-tiles:has(.deal-home-tile.recover) { grid-template-columns: 1fr; } }

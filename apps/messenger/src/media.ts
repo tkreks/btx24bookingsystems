@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 
 /** Вложение сообщения: где лежит у сервиса и что это. */
 export interface WireMedia {
@@ -47,6 +47,15 @@ export class MediaStore {
     try { return JSON.parse(await readFile(`${this.dir(instanceId)}/${fileId}.json`, 'utf8')) as WireMedia; } catch { return null; }
   }
 
+  /** Файл по ключу (например, аватар собеседника), если сохранён не раньше `maxAgeMs` назад. */
+  async recent(instanceId: string, key: string, maxAgeMs: number, now = Date.now()): Promise<WireMedia | null> {
+    const fileId = this.fileIdOf(instanceId, key);
+    const meta = await this.meta(instanceId, fileId);
+    if (!meta) return null;
+    const st = await stat(`${this.dir(instanceId)}/${fileId}`).catch(() => null);
+    return st && now - st.mtimeMs < maxAgeMs ? meta : null;
+  }
+
   async read(instanceId: string, fileId: string): Promise<{ meta: WireMedia; data: Buffer } | null> {
     const meta = await this.meta(instanceId, fileId);
     if (!meta) return null;
@@ -61,3 +70,7 @@ export function defaultName(mime: string, type: string): string {
   const base = type === 'ptt' ? 'voice' : type === 'image' ? 'photo' : type === 'video' ? 'video' : type === 'sticker' ? 'sticker' : 'file';
   return `${base}.${ext}`;
 }
+
+/** Аватар собеседника перечитываем раз в неделю (ключ в хранилище — `avatar:<чат>`). */
+export const AVATAR_TTL_MS = 7 * 24 * 3600_000;
+export const avatarKey = (chatId: string) => `avatar:${chatId}`;

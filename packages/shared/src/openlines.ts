@@ -147,6 +147,8 @@ export interface MessageTemplateDto {
   canEdit: boolean;
   steps: (TemplateStepDto & { files: StoredFileDto[] })[];
   updatedAt: string;
+  /** Сколько раз я вставлял шаблон в чат за 30 дней (сортировка окна «Шаблоны»). */
+  uses30d?: number;
 }
 
 export type MessageTemplatePurpose = 'chat' | 'payment' | 'auto';
@@ -413,6 +415,13 @@ export interface ChatChannelDto {
   title: string;
   lastMessageAt: string | null;
   waitingReply: boolean;
+  /** Для окна «Чаты клиента» (как «Последние сообщения» дашборда): клиент, аватар, превью, непрочитанные, сделка. */
+  clientName?: string | null;
+  clientAvatar?: string | null;
+  preview?: string;
+  hasFiles?: boolean;
+  unread?: number;
+  dealId?: number | null;
 }
 
 /**

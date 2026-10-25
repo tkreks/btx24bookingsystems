@@ -4,8 +4,21 @@ import { apiPost, apiUpload } from '../api.js';
 import { DiskPicker } from '../settings/DiskPicker.js';
 import { Icon } from './icons.js';
 
-/** Одинаковые источники вложений для чата, шаблонов оплаты, рассылки и подтверждений. */
-export function AttachmentButtons({ remaining, onAdd, disabled = false, onBusyChange }: { remaining: number; onAdd: (files: StoredFileDto[]) => void; disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
+/** Значок Битрикс24 (облако в фирменном цвете) — источник «файл с Диска портала». */
+export function Bitrix24Icon({ size = 16 }: { size?: number }) {
+  return (
+    <svg className="b24-glyph" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="12" fill="#2fc6f6" />
+      <text x="12" y="16" textAnchor="middle" fontSize="10.5" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">24</text>
+    </svg>
+  );
+}
+
+/**
+ * Одинаковые источники вложений для чата, шаблонов оплаты, рассылки и подтверждений. `compact` — только
+ * значки (скрепка — с устройства, Битрикс24 — с Диска) без подписей и строки о лимитах (чат).
+ */
+export function AttachmentButtons({ remaining, onAdd, disabled = false, onBusyChange, compact = false }: { remaining: number; onAdd: (files: StoredFileDto[]) => void; disabled?: boolean; onBusyChange?: (busy: boolean) => void; compact?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const addRef = useRef(onAdd); addRef.current = onAdd;
   const busyRef = useRef(onBusyChange); busyRef.current = onBusyChange;
@@ -21,7 +34,7 @@ export function AttachmentButtons({ remaining, onAdd, disabled = false, onBusyCh
     catch (e) { setError(e instanceof Error ? e.message : 'Не удалось прикрепить файл'); }
     finally { setBusy(false); onBusyChange?.(false); if (input.current) input.current.value = ''; }
   };
-  return <div className="attachment-controls">
+  return <div className={`attachment-controls${compact ? ' compact' : ''}`}>
     <input ref={input} type="file" multiple hidden aria-label="Файлы из устройства" onChange={(e) => {
       const files = Array.from(e.target.files ?? []);
       if (!files.length) return;
@@ -35,11 +48,11 @@ export function AttachmentButtons({ remaining, onAdd, disabled = false, onBusyCh
       });
     }} />
     <div className="attachment-sources">
-      <button type="button" disabled={disabled || busy || remaining <= 0} onClick={() => input.current?.click()}><Icon name="clip" size={16} />Из устройства</button>
-      <button type="button" disabled={disabled || busy || remaining <= 0} onClick={() => { setError(''); setPicker(true); }}><Icon name="folder" size={16} />Из Битрикса</button>
-      {busy && <span role="status" className="muted">Загрузка…</span>}
+      <button type="button" disabled={disabled || busy || remaining <= 0} onClick={() => input.current?.click()} title="Файл с устройства (до 10 файлов, до 10 МБ каждый)" aria-label="Прикрепить файл с устройства"><Icon name="clip" size={16} />{!compact && 'Из устройства'}</button>
+      <button type="button" disabled={disabled || busy || remaining <= 0} onClick={() => { setError(''); setPicker(true); }} title="Файл с Диска Битрикс24" aria-label="Прикрепить файл из Битрикс24">{compact ? <Bitrix24Icon size={17} /> : <><Icon name="folder" size={16} />Из Битрикса</>}</button>
+      {busy && <span role="status" className="muted">{compact ? <span className="spinner" aria-label="Загрузка" /> : 'Загрузка…'}</span>}
     </div>
-    <span className="attachment-limit muted">До 10 файлов в сообщении · до 10 МБ каждый</span>
+    {!compact && <span className="attachment-limit muted">До 10 файлов в сообщении · до 10 МБ каждый</span>}
     {error && <p className="error" role="alert">{error}</p>}
     {picker && <DiskPicker endpoint="/openlines/disk" onClose={() => setPicker(false)} onPick={(f) => {
       setPicker(false);

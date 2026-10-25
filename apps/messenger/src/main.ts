@@ -4,6 +4,9 @@ import { ScreenFiles } from './screen-files.js';
 import { createMessengerServer } from './server.js';
 
 // Точка входа контейнера messenger (ADR 0014): браузеры мессенджеров и их экраны.
+// Слушатель `response` whatsapp-web.js читает тело index.html без обработки ошибки: при перезагрузке
+// страницы CDP отвечает «No data found…», и необработанный отказ ронял весь сервис со всеми номерами.
+process.on('unhandledRejection', (err) => console.error(`unhandled rejection: ${err instanceof Error ? err.stack ?? err.message : String(err)}`));
 const dataDir = process.env.MESSENGER_DATA_DIR ?? '/data';
 const manager = new Manager({
   dataDir,

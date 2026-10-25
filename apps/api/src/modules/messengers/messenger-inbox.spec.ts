@@ -78,6 +78,20 @@ describe('Своя открытая линия (коннектор)', () => {
     } finally { svc.onApplicationShutdown(); }
   });
 
+  it('фото клиента уходит в линию аватаром (user.picture); нет фото — без него, сервис спрашиваем раз в сутки', async () => {
+    const db=fakeDb();const inbox=new MessengerInboxService(db.prisma);const call=vi.fn(async()=>({result:{SUCCESS:true}}));
+    const avatar=vi.fn(async()=>({fileId:'b'.repeat(40),mime:'image/jpeg',name:'avatar.jpg',size:3}));
+    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>({call})} as never,{avatar} as never,inbox,{} as never,{url:(_m:string,f:string)=>`https://app.test/${f}`} as never);
+    await svc.onModuleInit();
+    try {
+      await inbox.apply([{type:'message',instanceId:'m1',message:wire('a1','Привет')}]);
+      await inbox.apply([{type:'message',instanceId:'m1',message:wire('a2','Ещё')}]);
+      expect(call).toHaveBeenCalledWith('imconnector.send.messages',expect.objectContaining({MESSAGES:[expect.objectContaining({user:expect.objectContaining({picture:{url:`https://app.test/${'b'.repeat(40)}`}})})]}));
+      expect(avatar).toHaveBeenCalledTimes(1);
+      expect(await svc.pictureOf({id:'m1'} as never,'x@g.us')).toBeUndefined();
+    } finally { svc.onApplicationShutdown(); }
+  });
+
   it('повтор после сбоя второго файла не отправляет первый ещё раз', async () => {
     const db=fakeDb();vi.mocked(db.prisma.messengerMessage.findMany).mockImplementation((async () => db.msgs.filter(m=>m.source==='bitrix')) as never);
     const inbox=new MessengerInboxService(db.prisma);const call=vi.fn(async()=>({result:{SUCCESS:true}}));

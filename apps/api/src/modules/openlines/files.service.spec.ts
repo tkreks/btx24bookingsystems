@@ -46,6 +46,30 @@ describe('Вложения из Диска', () => {
     expect(t.client.call).toHaveBeenCalledWith('disk.folder.getChildren', { id: 6, order: { NAME: 'ASC', ID: 'ASC' }, start: 50, filter: { NAME: '%Правила%' } });
     await expect(t.svc.disk(t.user, { folderId: 6, storageId: 9 })).rejects.toThrow();
   });
+  it('выбор файла открывается в папке шаблонов общего диска, без доступа — на «Моём диске»', async () => {
+    const t = setup();
+    const folders: Record<string, { ID: string; NAME: string; TYPE: string }> = { 'БК Алатырь': { ID: '11', NAME: 'БК Алатырь', TYPE: 'folder' }, 'Шаблоны сообщений': { ID: '12', NAME: 'Шаблоны сообщений', TYPE: 'folder' }, 'Шаблоны приложения': { ID: '13', NAME: 'Шаблоны приложения', TYPE: 'folder' } };
+    const call = async (method: string, p: { filter?: { ENTITY_TYPE?: string; NAME?: string } }) => {
+      if (method === 'disk.storage.getList') return { result: p.filter?.ENTITY_TYPE === 'common' ? [{ ID: '1', NAME: 'Общий диск', ENTITY_ID: 'shared_files_s1' }] : [{ ID: '5', NAME: 'Иван' }] };
+      const f = folders[p.filter?.NAME ?? ''];
+      return { result: f ? [f] : [] };
+    };
+    t.client.call.mockImplementation(call as never);
+    expect(await t.svc.diskStart(t.user)).toEqual({
+      initial: 'shared',
+      shared: [{ label: 'Общий диск', query: '?storageId=1' }, { label: 'БК Алатырь', query: '?folderId=11' }, { label: 'Шаблоны сообщений', query: '?folderId=12' }, { label: 'Шаблоны приложения', query: '?folderId=13' }],
+      user: [{ label: 'Мой диск', query: '?storageId=5' }],
+    });
+    expect(t.client.call).toHaveBeenCalledWith('disk.storage.getList', { filter: { ENTITY_TYPE: 'user', ENTITY_ID: 7 } });
+    const n = t.client.call.mock.calls.length;
+    await t.svc.diskStart(t.user);
+    expect(t.client.call.mock.calls.length).toBe(n);
+
+    const u = setup('p2');
+    delete folders['Шаблоны сообщений'];
+    u.client.call.mockImplementation(call as never);
+    expect(await u.svc.diskStart(u.user)).toMatchObject({ initial: 'user', shared: [{ label: 'Общий диск' }, { label: 'БК Алатырь' }] });
+  });
   it('копия подтверждения в группе не удаляется как разовое вложение', async () => {
     const t = setup();
     t.prisma.workGroup.findMany.mockResolvedValue([{ options: { bookingTypes: [{ confirmation: [{ files: [{ storedFileId: 'kept', name: 'Прайс' }] }] }] } }] as never);

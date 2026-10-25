@@ -113,7 +113,7 @@ services:
     image: btx24booking-messenger:local
     restart: unless-stopped
     environment:
-      TZ: UTC
+      TZ: Europe/Moscow
       MESSENGER_TOKEN: ${MESSENGER_TOKEN:-}
       # WhatsApp и Telegram с сервера напрямую недоступны — через HTTP-прокси (владелец, 2026-10-24).
       MESSENGER_PROXY: ${MESSENGER_PROXY:-http://62.233.57.133:1081}

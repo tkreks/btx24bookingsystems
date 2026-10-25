@@ -28,6 +28,7 @@ import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
 import { MessengersBlock } from '../dashboard/MessengersBlock.js';
 import { KpiGridBlock } from '../dashboard/KpiGridBlock.js';
+import { LiveBookingsBlock } from '../dashboard/LiveBookingsBlock.js';
 import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
 import { WorkdayControls } from '../workday/WorkdayControls.js';
 import { MyActivityBlock } from '../dashboard/MyActivityBlock.js';
@@ -287,7 +288,7 @@ export function DashboardPage({
       case 'activity':
         return session.canManageApp ? <EmployeeActivity key={`${range.from}|${range.to}`} timezone={tz} startDate={range.from} endDate={range.to} /> : null;
       case 'noOpenline':
-        return <DealGapsBlock period={range} kind="chat" tz={tz} />;
+        return <DealGapsBlock period={range} kind="chat" tz={tz} onOpenChat={(chatId) => onChats({ chatId })} />;
       case 'noContact':
         return <DealGapsBlock period={range} kind="contact" tz={tz} />;
       case 'onShift':
@@ -306,12 +307,17 @@ export function DashboardPage({
         return <StopsBlock period={range} />;
       case 'messengers':
         return <MessengersBlock />;
+      case 'upcomingBookings':
+        return <LiveBookingsBlock kind="upcoming" timezone={tz} />;
+      case 'currentBookings':
+        return <LiveBookingsBlock kind="current" timezone={tz} />;
       case 'resourceTimeline':
+      case 'resourceTimelineNow':
         return (
           <ResourceTimelineBlock
+            live={type === 'resourceTimelineNow'}
             groups={groups}
             config={block?.groupIds}
-            to={range.to}
             timezone={tz}
             onConfigure={(groupIds) => {
               const apply = (list: DashboardBlock[]) => list.map((x) => (x.id === block?.id ? { ...x, groupIds: groupIds.length ? groupIds : undefined } : x));

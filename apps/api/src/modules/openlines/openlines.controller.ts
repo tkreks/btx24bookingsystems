@@ -25,6 +25,7 @@ import type {
   NeedsCloseDto,
   ActivityDayDto,
   ChatChannelDto,
+  DiskStartDto,
   ChatReplyStatusDto,
   CallListDto,
   CallLogDto,
@@ -33,6 +34,8 @@ import type {
   ChatFolderDto,
   ChatHistoryDto,
   ChatListDto,
+  DealChatsDto,
+  LiveBookingsDto,
   DashboardDto,
   MessageTemplateDto,
   SendResultDto,
@@ -220,6 +223,17 @@ export class OpenlinesController {
     return this.cached(user, 'needs-close', [resources, scope, query], ['bookings', 'deals'], () => this.dashboard.needsClose(user, resources, scope, query), BOOKINGS_SWR);
   }
 
+  /** «Ближайшие брони» / «Текущие брони» — по ресурсам групп сотрудника (`calendar.view`). */
+  @Get('dashboard/live-bookings')
+  async liveBookings(@B24User() user: B24UserContext, @Query('kind') kind: unknown): Promise<LiveBookingsDto> {
+    const a = await this.access.resolve(user);
+    const groups = a.groups.filter((g) => g.permissions.includes('calendar.view'));
+    if (!a.isAppAdmin && !groups.length)
+      throw new ForbiddenException({ code: 'NO_GROUP_ACCESS', message: 'Нет доступа к календарю ни в одной группе' });
+    const resources = a.isAppAdmin ? null : [...new Set(groups.flatMap((g) => g.group.resourceIds))];
+    return this.cached(user, 'live-bookings', [resources, kind], ['bookings', 'deals'], () => this.dashboard.liveBookings(user, resources, kind), BOOKINGS_SWR);
+  }
+
   /** Звонки выбранного вида за период (окно «сделки» на дашборде). */
   @Get('dashboard/calls')
   async calls(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<CallListDto> {
@@ -330,6 +344,13 @@ export class OpenlinesController {
     return this.chats.searchByPhone(user, query);
   }
 
+  /** Встройка сделки: чаты сделки и её клиента (вкладка с именем клиента). */
+  @Get('openlines/deal-chats/:dealId')
+  async dealChats(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<DealChatsDto> {
+    await this.require(user, 'openlines.read');
+    return this.chats.byDeal(user, dealId);
+  }
+
   @Get('openlines/chats/:chatId/messages')
   async history(
     @B24User() user: B24UserContext,
@@ -418,6 +439,12 @@ export class OpenlinesController {
     return this.chats.send(user, chatId, body);
   }
 
+  @Get('openlines/disk/start')
+  async diskStart(@B24User() user: B24UserContext): Promise<DiskStartDto> {
+    await this.require(user, 'openlines.send');
+    return this.files.diskStart(user);
+  }
+
   @Get('openlines/disk')
   async disk(@B24User() user: B24UserContext, @Query() query: unknown): Promise<DiskBrowseDto> {
     await this.require(user, 'openlines.send');
@@ -459,6 +486,13 @@ export class OpenlinesController {
   async templateCreate(@B24User() user: B24UserContext, @Body() body: unknown): Promise<MessageTemplateDto> {
     await this.require(user, 'openlines.send');
     return this.templates.create(user, body, await this.isAdmin(user));
+  }
+
+  @Post('openlines/templates/:id/use')
+  @HttpCode(204)
+  async templateUse(@B24User() user: B24UserContext, @Param('id') id: string): Promise<void> {
+    await this.require(user, 'openlines.send');
+    await this.templates.markUsed(user, id);
   }
 
   @Put('openlines/templates/:id')

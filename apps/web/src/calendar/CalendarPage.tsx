@@ -9,10 +9,13 @@ import {
   type ClientBookingDto,
   type ClientBookingsDto,
   type MyGroupDto,
+  type NewDealResultDto,
   type SessionInfo,
 } from '@btx24/shared';
-import { apiGet, ApiRequestError } from '../api.js';
-import { fitFrame, type PlacementContext } from '../b24.js';
+import { apiGet, apiPost, ApiRequestError } from '../api.js';
+import { fitFrame, openCrm, type PlacementContext } from '../b24.js';
+import { DealBookingWarning, DealHome } from '../deal/DealHome.js';
+import { DealOverviewPage } from '../deal/DealOverviewPage.js';
 import { fmtDateTime, fmtDayTitle, fmtTime, shiftDate } from '../format.js';
 import { ChatsPage } from '../openlines/ChatsPage.js';
 import { BookingAlertsPage } from '../bookings/BookingAlertsPage.js';
@@ -87,7 +90,9 @@ export function CalendarPage({
   const [screen, setScreen] = useState<
     | { name: 'calendar' }
     | { name: 'dashboard' }
-    | { name: 'chats'; chatId?: number; waiting?: boolean; from?: string; to?: string }
+    | { name: 'deal-home' }
+    | { name: 'deal' }
+    | { name: 'chats'; chatId?: number; waiting?: boolean; from?: string; to?: string; deal?: boolean }
     | { name: 'alerts'; alertId?: string | null }
     | { name: 'templates' }
     | { name: 'certificates' }
@@ -95,9 +100,14 @@ export function CalendarPage({
   >(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
     if (alertId) return { name: 'alerts', alertId };
-    // Открыли не из сделки — сначала дашборд (руководителю — свой); из карточки сделки — календарь.
-    return placement.dealId ? { name: 'calendar' } : { name: 'dashboard' };
+    // Открыли не из сделки — сначала дашборд (руководителю — свой); из карточки сделки — «Чат · Сделка · Календарь».
+    return placement.dealId ? { name: 'deal-home' } : { name: 'dashboard' };
   });
+  // Встройка сделки → «Календарь»: по сделке уже есть бронь — предупреждение (новая сделка или игнорировать).
+  const [dealWarning, setDealWarning] = useState(false);
+  const [dealBookingsFailed, setDealBookingsFailed] = useState(false);
+  const [creatingDeal, setCreatingDeal] = useState(false);
+  const [newDealError, setNewDealError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -182,7 +192,7 @@ export function CalendarPage({
         }
         setDealBookings(r);
       },
-      () => undefined,
+      () => active && setDealBookingsFailed(true),
     );
     return () => {
       active = false;
@@ -230,6 +240,68 @@ export function CalendarPage({
             start ? { date: dayKey(start, tz), time: fmtTime(start, tz), resourceId } : { date, resourceId },
           )
       : undefined;
+
+  // Бронь этой сделки, которая есть в модуле бронирования (известная только по полям сделки — снята/удалена).
+  const dealBooking = placement.dealId
+    ? [...(dealBookingsInfo?.upcoming ?? []), ...(dealBookingsInfo?.recent ?? [])].find((b) => b.dealId === placement.dealId && b.bookingId !== null) ?? null
+    : null;
+  const dealChecked = dealBookingsInfo !== null || dealBookingsFailed;
+  // Проверка закончилась, пока открыто окно, и брони нет — сразу в календарь.
+  if (dealWarning && dealChecked && !dealBooking) {
+    setDealWarning(false);
+    setScreen({ name: 'calendar' });
+  }
+  const createDeal = async () => {
+    if (!placement.dealId) return;
+    setCreatingDeal(true);
+    setNewDealError('');
+    try {
+      const r = await apiPost<NewDealResultDto>(`/deals/${placement.dealId}/new-deal`, {});
+      setDealWarning(false);
+      openCrm('deal', r.id);
+    } catch (e) {
+      setNewDealError(e instanceof Error ? e.message : 'Не удалось создать сделку');
+    } finally {
+      setCreatingDeal(false);
+    }
+  };
+
+  if (screen.name === 'deal-home' && placement.dealId)
+    return (
+      <>
+        <DealHome
+          dealId={placement.dealId}
+          timezone={tz}
+          onOpenChat={(chatId) => setScreen({ name: 'chats', deal: true, chatId })}
+          onOpen={(target) => {
+            if (target === 'chat') setScreen({ name: 'chats', deal: true });
+            else if (target === 'deal') setScreen({ name: 'deal' });
+            else if (dealChecked && !dealBooking) setScreen({ name: 'calendar' });
+            else {
+              setNewDealError('');
+              setDealWarning(true);
+            }
+          }}
+        />
+        {dealWarning && (
+          <DealBookingWarning
+            booking={dealBooking ? `${fmtDateTime(dealBooking.start, tz)} — ${fmtDateTime(dealBooking.end, tz)}${dealBooking.resources.length ? ` · ${dealBooking.resources.join(', ')}` : ''}` : null}
+            checking={!dealChecked}
+            creating={creatingDeal}
+            error={newDealError}
+            canCreate={session.canManageApp || permissions.has('booking.create')}
+            onCreate={() => void createDeal()}
+            onIgnore={() => {
+              setDealWarning(false);
+              setScreen({ name: 'calendar' });
+            }}
+            onClose={() => !creatingDeal && setDealWarning(false)}
+          />
+        )}
+      </>
+    );
+
+  if (screen.name === 'deal' && placement.dealId) return <DealOverviewPage dealId={placement.dealId} timezone={tz} onBack={() => setScreen({ name: 'deal-home' })} />;
 
   if (screen.name === 'alerts')
     return (
@@ -301,7 +373,8 @@ export function CalendarPage({
         initialChatId={screen.chatId}
         initialWaiting={screen.waiting}
         period={screen.from && screen.to ? { from: screen.from, to: screen.to } : undefined}
-        onClose={() => setScreen({ name: 'dashboard' })}
+        deal={screen.deal && placement.dealId ? { id: placement.dealId } : undefined}
+        onClose={() => setScreen(screen.deal ? { name: 'deal-home' } : { name: 'dashboard' })}
         groups={groups ?? []}
         onOpenDay={(d) => {
           setDate(d);
@@ -314,6 +387,11 @@ export function CalendarPage({
     <div className="page">
       <header className="toolbar">
         <div className="toolbar-title">
+          {placement.dealId && (
+            <button className="deal-back" title="К меню сделки: чат, сделка, календарь" onClick={() => setScreen({ name: 'deal-home' })}>
+              ‹ Сделка
+            </button>
+          )}
           <h1>Бронирование</h1>
           {groups && groups.length > 1 && (
             <select

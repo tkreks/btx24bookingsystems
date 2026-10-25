@@ -9,6 +9,7 @@ import {
   type ChatScope,
   type ChatSummary,
   type ClientBookingsDto,
+  type DealChatsDto,
   type MessageTemplateDto,
   type MyGroupDto,
 } from '@btx24/shared';
@@ -23,25 +24,23 @@ import {
   dayKey,
   CHAT_SORTS,
   chatsCount,
-  initials,
   isFullPhone,
   visibleChats,
   type ChatSort,
   type ChatTab,
 } from './chat-list.js';
 import { Channel } from './Channel.js';
+import { hasDisabledWazzupChannel } from './channel-error.js';
 import { ChannelFilter } from './ChannelFilter.js';
 import { AUTHOR_PREFIX, clipName, shortTime } from './format.js';
-import { MessengersButton } from '../messengers/MessengersButton.js';
-import { Icon, type IconName } from './icons.js';
+import { NewDialogDialog } from '../messengers/NewDialogDialog.js';
+import { ChannelErrorTag } from './ChannelErrorTag.js';
+import { Icon } from './icons.js';
+import { StatusTabs } from './StatusTabs.js';
+import { Avatar } from './Avatar.js';
 
-/** Вкладки (решение владельца 2026-10-25): «Все», ⌛ ждут ответа, 📅 бронь сегодня, монета — ждём оплату; «Мои» убраны. */
-const TABS: { key: ChatTab; label: string; icon?: IconName; title: string }[] = [
-  { key: 'all', label: 'Все', title: 'Все чаты' },
-  { key: 'waiting', label: '', icon: 'hourglass', title: 'Ждут ответа' },
-  { key: 'booked', label: '', icon: 'calendar', title: 'Активная бронь на сегодня' },
-  { key: 'payment', label: '', icon: 'coin', title: 'Ждём оплату' },
-];
+/** Вкладка клиента сделки (только из встройки сделки) — поверх вкладок статусов. */
+type ViewTab = ChatTab | 'deal';
 /** Список чатов обновляем раз в 15 секунд, пока страница открыта. */
 const POLL_MS = 15_000;
 /** Чаты открытых линий: сверху — с самыми новыми сообщениями. Клик — открыть диалог. */
@@ -54,6 +53,7 @@ export function ChatsPage({
   onClose,
   groups = [],
   onOpenDay,
+  deal,
 }: {
   timezone: string;
   canSend: boolean;
@@ -65,9 +65,16 @@ export function ChatsPage({
   groups?: MyGroupDto[];
   /** Открыть день в календаре. */
   onOpenDay?: (date: string) => void;
+  /** Открыто из встройки сделки: вкладка с именем клиента (чаты сделки и клиента), открыта по умолчанию. */
+  deal?: { id: number };
 }) {
-  // По умолчанию — все доступные чаты и все статусы (решение владельца).
-  const [tab, setTab] = useState<ChatTab>(initialWaiting ? 'waiting' : 'all');
+  // По умолчанию — все доступные чаты и все статусы (решение владельца); из сделки — чаты её клиента.
+  const [tab, setTab] = useState<ViewTab>(deal ? 'deal' : initialWaiting ? 'waiting' : 'all');
+  // Список статусов грузится и под вкладкой клиента — переключение на «Все» без ожидания.
+  const listTab: ChatTab = tab === 'deal' ? 'all' : tab;
+  const [dealChats, setDealChats] = useState<DealChatsDto | null>(null);
+  const [dealError, setDealError] = useState('');
+  const [adding, setAdding] = useState(false);
   const scope: ChatScope = 'all';
   const [period, setPeriod] = useState(initialPeriod);
   const [sort, setSort] = useState<ChatSort>('recent');
@@ -80,8 +87,8 @@ export function ChatsPage({
   const [foldersRev, setFoldersRev] = useState(0);
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const periodQuery = period ? `&from=${period.from}&to=${period.to}` : '';
-  const listKey = `${folderId ?? ''}|${scope}|${tab}|${periodQuery}`;
-  const listUrl = `/openlines/chats?scope=${scope}&status=${tab}${periodQuery}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
+  const listKey = `${folderId ?? ''}|${scope}|${listTab}|${periodQuery}`;
+  const listUrl = `/openlines/chats?scope=${scope}&status=${listTab}${periodQuery}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
   const [list, setList] = useState<{
     key: string;
     items: ChatSummary[];
@@ -162,6 +169,28 @@ export function ChatsPage({
       clearInterval(timer);
     };
   }, [listKey, listUrl, refresh]);
+
+  // Чаты клиента сделки: при открытии и вместе с общим опросом.
+  const dealId = deal?.id ?? null;
+  useEffect(() => {
+    if (!dealId) return;
+    let active = true;
+    const load = () =>
+      apiGet<DealChatsDto>(`/openlines/deal-chats/${dealId}`).then(
+        (d) => {
+          if (!active) return;
+          setDealChats(d);
+          setDealError('');
+        },
+        (e) => active && setDealError(e instanceof Error ? e.message : 'Не удалось загрузить чаты клиента'),
+      );
+    void load();
+    const timer = setInterval(() => void load(), POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [dealId]);
 
   // Мои папки: строки в общем списке (последнее сообщение, непрочитанные).
   useEffect(() => {
@@ -265,6 +294,7 @@ export function ChatsPage({
       const apply = (items: ChatSummary[]) => items.map((x) => (x.chatId === r.chatId ? { ...x, flag: r.flag } : x));
       setList((prev) => (prev ? { ...prev, items: apply(prev.items) } : prev));
       setPhoneHits((prev) => (prev?.items ? { ...prev, items: apply(prev.items) } : prev));
+      setDealChats((prev) => (prev ? { ...prev, items: apply(prev.items) } : prev));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось изменить «!»');
     }
@@ -272,7 +302,8 @@ export function ChatsPage({
 
   const current = list?.key === listKey ? list : null;
   const all = current?.items ?? [];
-  const counts: Record<ChatTab, number | null> = {
+  const counts: Record<ViewTab, number | null> = {
+    deal: dealChats?.items.length ?? null,
     all: current?.counts?.all ?? all.length,
     waiting: current?.counts?.waiting ?? all.filter((c) => c.waitingReply).length,
     booked: current?.counts?.booked ?? null,
@@ -281,12 +312,14 @@ export function ChatsPage({
   const hits = fullPhone && phoneHits?.q === query.trim() ? phoneHits : null;
   // По номеру: найденные по всему порталу + совпавшие среди загруженных (без повторов).
   // Найденные сервером уже совпали по номеру — их фильтруем только по вкладке.
-  const local = visibleChats(all, tab, query, sort);
+  const local = tab === 'deal'
+    ? visibleChats((dealChats?.items ?? []).filter((c) => !channel || messageChannel(c.connector) === channel), 'all', query, sort)
+    : visibleChats(all, listTab, query, sort);
   // Брони и оплаты считает сервер: найденные по номеру по всему порталу в этих вкладках не показываем.
-  const searched = (hits?.items ?? []).filter((c) => tab !== 'booked' && tab !== 'payment' && (!channel || messageChannel(c.connector) === channel) && (!period || (c.lastMessage && dayKey(c.lastMessage.date, timezone) >= period.from && dayKey(c.lastMessage.date, timezone) <= period.to)));
+  const searched = (hits?.items ?? []).filter((c) => tab !== 'booked' && tab !== 'payment' && tab !== 'deal' && (!channel || messageChannel(c.connector) === channel) && (!period || (c.lastMessage && dayKey(c.lastMessage.date, timezone) >= period.from && dayKey(c.lastMessage.date, timezone) <= period.to)));
   const items = fullPhone
     ? [
-        ...visibleChats(searched, tab, '', sort),
+        ...visibleChats(searched, listTab, '', sort),
         ...local.filter((c) => !hits?.items?.some((h) => h.chatId === c.chatId)),
       ]
     : local;
@@ -307,7 +340,11 @@ export function ChatsPage({
                 {current?.exactOrder === false ? 'Порядок приблизительный' : 'Сначала новые сообщения'}
               </p>
             </div>
-            <MessengersButton timezone={timezone} />
+            {canSend && (
+              <button className="cl-add" title="Новый диалог: найти клиента по номеру телефона или логину Telegram" onClick={() => setAdding(true)}>
+                + Добавить
+              </button>
+            )}
             <button className="cl-btn" aria-label="Обновить" title="Обновить" onClick={() => void refresh()}>
               <Icon name="refresh" />
             </button>
@@ -447,23 +484,25 @@ export function ChatsPage({
             </div>
           ) : null}
 
-          <nav className="cl-tabs" aria-label="Фильтр по статусу">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                className={`cl-tab${tab === t.key ? ' active' : ''}${t.icon ? ' icon' : ''}`}
-                aria-pressed={tab === t.key}
-                aria-label={t.title}
-                title={t.title}
-                onClick={() => setTab(t.key)}
-              >
-                {t.icon ? <Icon name={t.icon} size={16} /> : t.label}
-                <span className={`cl-tab-counter${t.key === 'waiting' && counts.waiting ? ' alert' : ''}`}>
-                  {current ? (counts[t.key] ?? '—') : '…'}
-                </span>
-              </button>
-            ))}
-          </nav>
+          <StatusTabs
+            tab={tab}
+            counts={counts}
+            loaded={!!current}
+            onTab={setTab}
+            leading={
+              deal && (
+                <button
+                  className={`cl-tab cl-tab-client cl-tab-fixed${tab === 'deal' ? ' active' : ''}`}
+                  aria-pressed={tab === 'deal'}
+                  title={`Чаты клиента сделки #${deal.id}`}
+                  onClick={() => setTab('deal')}
+                >
+                  <span className="cl-tab-client-name">{dealChats?.clientName || 'Клиент'}</span>
+                  <span className="cl-tab-counter">{dealChats ? counts.deal : '…'}</span>
+                </button>
+              )
+            }
+          />
           {period && <p className="cl-period muted">Последнее сообщение: {period.from} — {period.to} <button type="button" className="link" onClick={() => setPeriod(undefined)}>Все даты</button></p>}
           <div className="cl-list-caption">
             <span>{fullPhone ? (hits?.items ? 'Найдено по номеру' : 'Ищем по номеру…') : 'Переписки'}</span>
@@ -477,13 +516,30 @@ export function ChatsPage({
               {error}
             </div>
           )}
+          {tab === 'deal' && dealError && (
+            <div className="notice error" role="alert">
+              {dealError}
+            </div>
+          )}
           {hits?.error && (
             <div className="notice error" role="alert">
               {hits.error}
             </div>
           )}
-          {!current && !error && <p className="cl-empty">Загрузка чатов…</p>}
-          {current && !items.length && (
+          {(tab === 'deal' ? !dealChats && !dealError : !current && !error) && <p className="cl-empty">Загрузка чатов…</p>}
+          {tab === 'deal' && dealChats && !items.length && (
+            <div className="cl-empty">
+              <strong>{query || channel ? 'Чаты не найдены' : 'У клиента сделки чатов нет'}</strong>
+              {canSend && !query && (
+                <p>
+                  <button type="button" className="link" onClick={() => setAdding(true)}>
+                    Начать новый диалог
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
+          {tab !== 'deal' && current && !items.length && (
             <div className="cl-empty">
               <strong>{query || tab !== 'all' ? 'Чаты не найдены' : 'Чатов нет'}</strong>
               {(query || tab !== 'all') && <p>Попробуйте изменить запрос или фильтр</p>}
@@ -600,7 +656,7 @@ export function ChatsPage({
               )}
             </div>
           ))}
-          {current?.nextOffset !== null && current && (
+          {tab !== 'deal' && current?.nextOffset !== null && current && (
             <button className="link more" disabled={loadingMore} onClick={() => void more()}>
               {loadingMore ? 'Загрузка…' : 'Показать ещё'}
             </button>
@@ -616,12 +672,13 @@ export function ChatsPage({
           onTemplates={setTemplates}
           onBack={() => setOpenId(null)}
           onChanged={() => void refresh()}
-          status={(list?.items ?? []).concat(phoneHits?.items ?? []).find((c) => c.chatId === openId)}
+          status={(list?.items ?? []).concat(phoneHits?.items ?? [], dealChats?.items ?? []).find((c) => c.chatId === openId)}
           onStatus={(r) => {
             // Отметка общая: в списке сразу, остальные сотрудники увидят при обновлении.
             const apply = (items: ChatSummary[]) => items.map((c) => (c.chatId === r.chatId ? { ...c, waitingReply: r.waitingReply, noReply: r.noReply } : c));
             setList((prev) => (prev ? { ...prev, items: apply(prev.items) } : prev));
             setPhoneHits((prev) => (prev?.items ? { ...prev, items: apply(prev.items) } : prev));
+            setDealChats((prev) => (prev ? { ...prev, items: apply(prev.items) } : prev));
           }}
           onOpenChat={(id) => {
             setOpenId(id);
@@ -647,6 +704,17 @@ export function ChatsPage({
         />
       ) : (
         <main className="chat-view empty-chat">Выберите чат слева</main>
+      )}
+      {adding && (
+        <NewDialogDialog
+          timezone={timezone}
+          onClose={() => setAdding(false)}
+          onOpenChat={(id) => {
+            setAdding(false);
+            setOpenId(id);
+            setCreated(null);
+          }}
+        />
       )}
       {form && (
         <ErrorBoundary where="booking-form" onClose={() => setForm(null)}>
@@ -707,7 +775,7 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
     <button className={`cl-card${active ? ' selected' : ''}${c.flag ? ' flagged' : ''}`} role="listitem" aria-current={active} onClick={onOpen}>
       {/* Непрочитанные — в правом верхнем углу аватарки («Не требует ответа» обнуляет). */}
       <span className="cl-avatar-wrap">
-        <span className={`avatar a${avatarTone(c.chatId)}`}>{initials(name)}</span>
+        <Avatar src={c.clientAvatar} name={name} size={null} tone={avatarTone(c.chatId)} />
                   <span className={`cl-unread cl-badge${c.unread ? '' : ' empty'}`} title={`Непрочитанных сообщений: ${c.unread}`}>
             {c.unread > 99 ? '99+' : c.unread}
           </span>
@@ -717,6 +785,7 @@ function ChatCard({ c, active, timezone, onOpen }: { c: ChatSummary; active: boo
           <span className="cl-card-name" title={name}>
             {clipName(name)}
           </span>
+          {hasDisabledWazzupChannel(c.connector, last?.preview) && <ChannelErrorTag />}
           <time className="cl-card-time">{last ? shortTime(last.date, timezone) : ''}</time>
         </span>
         <span className="cl-card-meta">

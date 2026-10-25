@@ -1,0 +1,27 @@
+{
+  "URLBlocklist": [
+    "*",
+    "chrome://*",
+    "file://*",
+    "devtools://*",
+    "javascript://*",
+    "data:*",
+    "view-source:*"
+  ],
+  "URLAllowlist": [
+    "https://.web.whatsapp.com",
+    "https://.web.telegram.org",
+    "https://.web.max.ru"
+  ],
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "DefaultBrowserSettingEnabled": false,
+  "RestoreOnStartup": 5,
+  "TranslateEnabled": false,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false
+}

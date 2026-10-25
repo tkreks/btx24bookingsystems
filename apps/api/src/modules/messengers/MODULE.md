@@ -15,11 +15,11 @@
 | `PUT /api/admin/messengers/:id/line` `{mode: own, name} \| {mode: null}` | создать свою линию и привязать / отвязать |
 | `PUT /api/admin/messengers/:id/groups` `{groupIds}` | группы номера |
 | `GET /api/admin/messengers/:id/chats`, `…/chats/:chatId/messages?before=` | переписка из базы |
-| `POST /api/admin/messengers/:id/send {to, text}` | написать (номер или чат); привязан к линии — через линию (`queued`) |
+| `POST /api/admin/messengers/:id/send {to, text}` | написать (номер или чат); привязан к линии — через линию (`queued`); ответ со своей линией содержит `openlineChatId` — веб открывает новый чат в «Чатах» |
 | `POST …/messages/:messageId/edit {text}`, `DELETE …/messages/:messageId` | изменить / удалить у всех своё |
 | `POST /api/admin/messengers/:id/import` | загрузить историю (в линию не передаётся) |
 | `GET /api/messengers`, `…/:id/chats`, `…/messages`, `POST …/send`, `…/edit`, `DELETE …` (B24AuthGuard; группы номера, `openlines.read`/`send`) | номера групп сотрудника; своя линия — с положительной проверкой каждого диалога |
-| `GET /api/messengers/status` (B24AuthGuard) | блок дашборда «Мессенджеры»: номера групп сотрудника (`openlines.read`), только `ready` и с ошибкой (`MESSENGER_ERROR_STATES`, с описанием); `canScreen` — право писать |
+| `GET /api/messengers/status` (B24AuthGuard) | блок дашборда «Мессенджеры»: все номера групп сотрудника (`openlines.read`) в любом состоянии; описание ошибки — у `MESSENGER_ERROR_STATES`; `canScreen` — право писать |
 | `POST /api/messengers/:id/vnc-ticket`, `GET …/:id/screenshot` (B24AuthGuard; группа номера с `openlines.send` или администратор приложения) | экран номера из дашборда |
 | `GET\|POST /api/messengers/:id/screen-files`, `DELETE …/:fileId`, `POST …/:fileId/attach`, `DELETE …/screen-files` (то же право) | файлы для отправки с экрана: хранятся в сервисе час; `attach` — подставить в следующее окно выбора файла (сотрудник жмёт 📎 на экране), `DELETE` без файла — отменить ожидание |
 | `POST /api/messengers/hook` (без B24AuthGuard: только сеть стенда, nginx закрывает снаружи; `MESSENGER_TOKEN`) | события сервиса: сообщения, правки, удаления, статусы |
@@ -87,6 +87,10 @@
   внутренним POST contact без отправки. found/not_found/unavailable различаются; canSend проверяет
   send и доступ к существующей ОЛ. Дополнительно возвращает доступные существующие CRM-диалоги:
   менеджер выбирает продолжение либо подключённый канал. Чужой провайдер не становится нашим.
+- GET `/messengers/search?login=` — логин Telegram (`@имя`, `t.me/имя`; `normalizeMessengerLogin`):
+  проверяются только номера Telegram (`contacts.resolveUsername` в сервисе), CRM-диалоги по номеру не
+  ищутся, `phone: ''`. Окно «Новый диалог» (кнопка «+ Добавить» в «Чатах», панель ошибки Wazzup) —
+  `apps/web/src/messengers/NewDialogDialog.tsx`: статус проверки у каждого подключения, «Начать чат».
 - Поиск: письмо в RecentCalls без чата, кнопка CallCard без ОЛ; dialog top layer доступен во встройке.
   Канал в ChatsPage фильтрует до подсчёта/пагинации и в результатах поиска по телефону; в ChatView
   select переключает диалоги клиента. Список sibling dialogs положительно авторизован.

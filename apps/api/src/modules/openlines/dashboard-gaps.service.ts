@@ -1,12 +1,12 @@
 import { BadRequestException, Controller, ForbiddenException, Get, Injectable, Query, UseGuards } from '@nestjs/common';
-import type { DashboardGapsDto } from '@btx24/shared';
+import { normalizeClientPhone, type DashboardGapsDto } from '@btx24/shared';
 import { selectedPeriod } from '../../common/period.js';
 import { AccessService } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 
 const MAX = 200;
-type Deal = { ID: string; TITLE?: string; CONTACT_ID?: string; CATEGORY_ID?: string; DATE_CREATE?: string; OPPORTUNITY?: string; CURRENCY_ID?: string };
+type Deal = { ID: string; TITLE?: string; CONTACT_ID?: string; COMPANY_ID?: string; CATEGORY_ID?: string; DATE_CREATE?: string; OPPORTUNITY?: string; CURRENCY_ID?: string };
 
 @Injectable()
 export class DashboardGapsService {
@@ -17,7 +17,7 @@ export class DashboardGapsService {
     const period = selectedPeriod(query, user.portal.timezone);
     const deals = await user.client.listAll<Deal>('crm.deal.list', {
       filter: { STAGE_SEMANTIC_ID: 'P', ...(period ? { '>=DATE_CREATE': period.start.toISOString(), '<DATE_CREATE': period.end.toISOString() } : {}), ...(funnels ? { '@CATEGORY_ID': funnels } : {}) },
-      select: ['ID', 'TITLE', 'CONTACT_ID', 'CATEGORY_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID'], order: { ID: 'DESC' },
+      select: ['ID', 'TITLE', 'CONTACT_ID', 'COMPANY_ID', 'CATEGORY_ID', 'DATE_CREATE', 'OPPORTUNITY', 'CURRENCY_ID'], order: { ID: 'DESC' },
     }, { max: MAX });
     const notes: string[] = deals.length >= MAX ? [`Проверены последние ${MAX} открытых сделок.`] : [];
     let filtered = deals.filter((d) => !funnels || funnels.includes(Number(d.CATEGORY_ID)));
@@ -43,7 +43,26 @@ export class DashboardGapsService {
       });
       if (unknown) notes.push(`У ${unknown} сделок не удалось проверить чат: нет доступа или ошибка Битрикс24.`);
     }
-    return { kind, notes, items: filtered.map((d) => ({ dealId: Number(d.ID), title: d.TITLE || `Сделка #${d.ID}`, contactId: Number(d.CONTACT_ID) || null, createdAt: d.DATE_CREATE || null, opportunity: d.OPPORTUNITY == null ? null : Number(d.OPPORTUNITY), currency: d.CURRENCY_ID ?? null })) };
+    const phones = new Map<string, string[]>();
+    if (kind === 'chat') {
+      const commands: Record<string, { method: string; params: { id: number } }> = {};
+      for (const d of filtered) {
+        if (Number(d.CONTACT_ID) > 0) commands[`contact${d.CONTACT_ID}`] = { method: 'crm.contact.get', params: { id: Number(d.CONTACT_ID) } };
+        if (Number(d.COMPANY_ID) > 0) commands[`company${d.COMPANY_ID}`] = { method: 'crm.company.get', params: { id: Number(d.COMPANY_ID) } };
+      }
+      if (Object.keys(commands).length) {
+        try {
+          // Только клиент сотрудника и только клиенты уже доступных сделок. Отказ CRM не раскрывает телефон.
+          const response = await user.client.batch(commands);
+          for (const key of Object.keys(commands)) {
+            if (response.errors?.[key]) continue;
+            const row = response.result[key] as { PHONE?: { VALUE?: unknown }[] } | undefined;
+            phones.set(key, [...new Set((Array.isArray(row?.PHONE) ? row.PHONE : []).map(p => normalizeClientPhone(p.VALUE)).filter((p): p is string => !!p))]);
+          }
+        } catch { notes.push('Не удалось загрузить телефоны клиентов для поиска в мессенджерах.'); }
+      }
+    }
+    return { kind, notes, items: filtered.map((d) => ({ dealId: Number(d.ID), title: d.TITLE || `Сделка #${d.ID}`, contactId: Number(d.CONTACT_ID) || null, phones: [...new Set([...(phones.get(`contact${d.CONTACT_ID}`) ?? []), ...(phones.get(`company${d.COMPANY_ID}`) ?? [])])], createdAt: d.DATE_CREATE || null, opportunity: d.OPPORTUNITY == null ? null : Number(d.OPPORTUNITY), currency: d.CURRENCY_ID ?? null })) };
   }
 }
 

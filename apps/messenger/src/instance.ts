@@ -1,10 +1,10 @@
 import { cachedMediaFromBrowser } from './browser-media.js';
-import { rm } from 'node:fs/promises';
-import type { Page } from 'puppeteer';
+import { BROWSER_IGNORE_ARGS, configureMessengerBrowser, messengerBrowserArgs, prepareBrowserProfile } from './browser.js';
+import type { Browser, Page } from 'puppeteer';
 import wwebjs from 'whatsapp-web.js';
 import { ensureSerializedId, isClientChat, toWire, type WireEvent, type WireMessage } from './messages.js';
-import { defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
-import { SCREEN, VirtualScreen } from './screen.js';
+import { AVATAR_TTL_MS, avatarKey, defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
+import { VirtualScreen } from './screen.js';
 import type { InstanceSpec, InstanceState, InstanceStatus } from './spec.js';
 
 const { Client, LocalAuth, MessageMedia } = wwebjs;
@@ -82,10 +82,15 @@ export class Instance {
         env.DISPLAY = `:${this.spec.display}`;
       }
       // Блокировка профиля от прежнего процесса (контейнер перезапущен) — иначе Chromium не стартует.
-      for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie'])
-        await rm(`${this.config.dataDir}/sessions/session-${this.spec.id}/${f}`, { force: true });
+      await prepareBrowserProfile(`${this.config.dataDir}/sessions/session-${this.spec.id}`);
+      const auth = new LocalAuth({ clientId: this.spec.id, dataPath: `${this.config.dataDir}/sessions` });
+      const afterInitialized = auth.afterBrowserInitialized?.bind(auth);
+      auth.afterBrowserInitialized = async () => {
+        await afterInitialized?.();
+        if (client.pupBrowser && client.pupPage) await configureMessengerBrowser(client.pupBrowser, client.pupPage, 'whatsapp');
+      };
       const client = new Client({
-        authStrategy: new LocalAuth({ clientId: this.spec.id, dataPath: `${this.config.dataDir}/sessions` }),
+        authStrategy: auth,
         ...(this.spec.auth === 'code' ? { pairWithPhoneNumber: { phoneNumber: this.spec.phone, showNotification: true, intervalMs: 180_000 } } : {}),
         // Кэш версии WhatsApp Web — в томе данных: рабочая папка образа только для чтения (без этого
         // запись падает молча, и после входа «готов» не наступает).
@@ -97,15 +102,8 @@ export class Instance {
           headless: !this.config.display,
           env,
           defaultViewport: null,
-          args: [
-            '--no-sandbox',
-            '--disable-dev-shm-usage',
-            '--no-first-run',
-            `--window-size=${SCREEN.width},${SCREEN.height}`,
-            '--window-position=0,0',
-            // Через прокси и имена хостов разрешает прокси (у сервера DNS к ним не отвечает).
-            ...(this.config.proxy ? [`--proxy-server=${this.config.proxy}`] : []),
-          ],
+          ignoreDefaultArgs: BROWSER_IGNORE_ARGS,
+          args: messengerBrowserArgs('whatsapp', this.config.proxy),
         },
       });
       client.on('code', (code: string) => this.set('pairing', { code }));
@@ -216,6 +214,64 @@ export class Instance {
 
   readMedia(fileId: string) {
     return this.media.read(this.spec.id, fileId);
+  }
+
+  /**
+   * Ссылка на фото профиля. `getProfilePicUrl` библиотеки 1.34.7 падает на WA 2026 (чат по `getChat`),
+   * поэтому спрашиваем мост WhatsApp по ID контакта, затем — уже известную миниатюру.
+   */
+  private async profilePicUrl(chatId: string): Promise<string | null> {
+    const page = this.ready().pupPage as Page | undefined;
+    if (!page) return null;
+    const r = await page.evaluate(async (id) => {
+      type Pic = { eurl?: string; img?: string } | null | undefined;
+      const req = (window as unknown as { require: (m: string) => Record<string, unknown> }).require;
+      const errors: string[] = [];
+      try {
+        const wid = (req('WAWebWidFactory') as { createWid: (s: string) => unknown }).createWid(id);
+        const bridge = req('WAWebContactProfilePicThumbBridge') as { requestProfilePicFromServer: (w: unknown) => Promise<Pic> };
+        try {
+          // Мост ждёт модель с `id` (контакт или чат), а не голый ID.
+          const contacts = (req('WAWebCollections') as { Contact?: { get: (w: unknown) => unknown } }).Contact;
+          const pic = await bridge.requestProfilePicFromServer(contacts?.get(wid) ?? { id: wid });
+          if (pic?.eurl || pic?.img) return { url: pic.eurl ?? pic.img };
+        } catch (e) {
+          errors.push(`server: ${(e as Error)?.name ?? ''} ${(e as Error)?.message ?? String(e)}`);
+        }
+        const thumbs = (req('WAWebCollections') as { ProfilePicThumb?: { get: (w: unknown) => Pic } }).ProfilePicThumb;
+        const thumb = thumbs?.get(wid);
+        if (thumb?.eurl || thumb?.img) return { url: thumb.eurl ?? thumb.img };
+      } catch (e) {
+        errors.push(`wid: ${(e as Error)?.message ?? String(e)}`);
+      }
+      return { url: null, errors };
+    }, chatId).catch((err: unknown) => ({ url: null, errors: [err instanceof Error ? err.message : String(err)] }));
+    if (!r.url && 'errors' in r && r.errors?.length) this.log(`[${this.spec.id}] аватар ${chatId}: ${r.errors.join('; ').slice(0, 300)}`);
+    return r.url ?? null;
+  }
+
+  /**
+   * Фото профиля собеседника (для аватара в открытой линии): ссылка от WhatsApp, файл — отдельной
+   * вкладкой того же браузера (через его прокси). Нет фото или скрыто настройками — null.
+   */
+  async avatar(chatId: string): Promise<WireMedia | null> {
+    const have = await this.media.recent(this.spec.id, avatarKey(chatId), AVATAR_TTL_MS);
+    if (have) return have;
+    const client = this.ready();
+    const url = await this.profilePicUrl(chatId);
+    if (!url || !client.pupBrowser) return null;
+    const page = await (client.pupBrowser as Browser).newPage();
+    try {
+      const res = await page.goto(url, { timeout: 20_000 });
+      if (!res?.ok()) {
+        this.log(`[${this.spec.id}] аватар ${chatId}: HTTP ${res?.status() ?? '—'}`);
+        return null;
+      }
+      const data = await res.buffer();
+      return this.media.save(this.spec.id, avatarKey(chatId), { mimetype: res.headers()['content-type'] || 'image/jpeg', data: data.toString('base64'), filename: 'avatar.jpg' });
+    } finally {
+      await page.close().catch(() => undefined);
+    }
   }
 
   private ready() {
@@ -346,4 +402,9 @@ export class Instance {
 }
 
 /** Что сервис умеет с экземпляром любого мессенджера (WhatsApp — `Instance`, Telegram — `TelegramInstance`). */
-export type MessengerInstance = Pick<Instance, 'spec' | 'info' | 'start' | 'stop' | 'logout' | 'contact' | 'send' | 'edit' | 'remove' | 'history' | 'screenshot' | 'mediaOf' | 'readMedia' | 'filePage'>;
+export type MessengerInstance = Pick<Instance, 'spec' | 'info' | 'start' | 'stop' | 'logout' | 'contact' | 'send' | 'edit' | 'remove' | 'history' | 'screenshot' | 'mediaOf' | 'readMedia' | 'filePage'> & {
+  /** Собеседник по логину — только Telegram. */
+  contactByLogin?(login: string): Promise<{ exists: boolean; chatId: string | null }>;
+  /** Фото профиля собеседника (аватар в открытой линии); нет фото — null. */
+  avatar?(chatId: string): Promise<WireMedia | null>;
+};

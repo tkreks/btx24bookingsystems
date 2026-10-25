@@ -2,9 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import type { InstanceConfig, OutgoingMedia } from './instance.js';
+import { BROWSER_IGNORE_ARGS, configureMessengerBrowser, messengerBrowserArgs, prepareBrowserProfile } from './browser.js';
 import type { WireEvent, WireMessage } from './messages.js';
-import { defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
-import { SCREEN, VirtualScreen } from './screen.js';
+import { AVATAR_TTL_MS, avatarKey, defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
+import { VirtualScreen } from './screen.js';
 import type { InstanceSpec, InstanceState, InstanceStatus } from './spec.js';
 import { eventsOf, isClientUser, msgIdOf, newMemory, toWire, userIdOfChat, type TgMessage, type TgUpdate, type TgUser } from './telegram-wire.js';
 
@@ -83,7 +84,7 @@ export class TelegramInstance {
       }
       await mkdir(this.profile, { recursive: true });
       // Блокировка профиля от прежнего процесса (контейнер перезапущен) — иначе Chromium не стартует.
-      for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) await rm(`${this.profile}/${f}`, { force: true });
+      await prepareBrowserProfile(this.profile);
       this.state = await readFile(this.stateFile, 'utf8').then((s) => JSON.parse(s) as SavedState, () => null);
       for (const u of Object.values(this.state?.users ?? {}))
         this.users.set(u.id, { _: 'user', id: u.id, access_hash: u.access_hash, phone: u.phone, first_name: u.first_name, last_name: u.last_name, username: u.username, pFlags: u.bot ? { bot: true } : {} });
@@ -93,15 +94,8 @@ export class TelegramInstance {
         userDataDir: this.profile,
         env,
         defaultViewport: null,
-        args: [
-          '--no-sandbox',
-          '--disable-dev-shm-usage',
-          '--no-first-run',
-          `--window-size=${SCREEN.width},${SCREEN.height}`,
-          '--window-position=0,0',
-          // Через прокси и имена хостов разрешает прокси (у сервера DNS к Telegram не отвечает).
-          ...(this.config.proxy ? [`--proxy-server=${this.config.proxy}`] : []),
-        ],
+        ignoreDefaultArgs: BROWSER_IGNORE_ARGS,
+        args: messengerBrowserArgs('telegram', this.config.proxy),
       });
       this.browser = browser;
       browser.on('disconnected', () => {
@@ -112,6 +106,7 @@ export class TelegramInstance {
       });
       const page = (await browser.pages())[0] ?? (await browser.newPage());
       this.page = page;
+      await configureMessengerBrowser(browser, page, 'telegram');
       // Telegram Web сообщает о любом изменении переписки — забираем изменения сразу, не ждём опроса.
       await page.exposeFunction('__btxNotify', () => this.pull());
       await page.goto(TELEGRAM_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
@@ -331,6 +326,17 @@ export class TelegramInstance {
     this.ready();
     const u = await this.userByPhone(digits, true);
     return { exists: !!u, chatId: u ? `${u.id}@lid` : null };
+  }
+
+  /** Собеседник по логину (`contacts.resolveUsername`) — без отправки; боты, группы и каналы — «не найден». */
+  async contactByLogin(login: string): Promise<{ exists: boolean; chatId: string | null }> {
+    this.ready();
+    const r = await this.invoke<{ users?: TgUser[]; peer?: { _: string; user_id?: string | number } }>('contacts.resolveUsername', { username: login }).catch(() => null);
+    const u = r?.peer?._ === 'peerUser' ? r.users?.find((x) => String(x.id) === String(r.peer?.user_id)) : undefined;
+    if (!u || u.pFlags?.bot) return { exists: false, chatId: null };
+    this.learn([u]);
+    await this.save();
+    return { exists: true, chatId: `${u.id}@lid` };
   }
 
   /** Куда писать: `<номер>@c.us` (найти по номеру), `<userId>@lid` (известный собеседник), `<chatId>@g.us`. */
@@ -555,6 +561,46 @@ export class TelegramInstance {
 
   readMedia(fileId: string) {
     return this.media.read(this.spec.id, fileId);
+  }
+
+  /** Фото профиля собеседника (`photos.getUserPhotos`, размер ~160–320 px); нет фото — null. */
+  async avatar(chatId: string): Promise<WireMedia | null> {
+    const have = await this.media.recent(this.spec.id, avatarKey(chatId), AVATAR_TTL_MS);
+    if (have) return have;
+    this.ready();
+    const u = this.users.get(userIdOfChat(chatId) ?? '');
+    if (!u?.access_hash) return null;
+    const r = await this.page!.evaluate(
+      async (userId, accessHash) => {
+        type Size = { _: string; type: string; size?: number; sizes?: number[] };
+        const api = (window as unknown as { rootScope: { managers: { apiManager: { invokeApi: (m: string, p: object, o?: object) => Promise<unknown> } } } }).rootScope.managers.apiManager;
+        try {
+          const got = (await api.invokeApi('photos.getUserPhotos', { user_id: { _: 'inputUser', user_id: userId, access_hash: accessHash }, offset: 0, max_id: '0', limit: 1 })) as { photos?: { _: string; id: string; access_hash: string; file_reference: Uint8Array; dc_id: number; sizes: Size[] }[] };
+          const photo = got.photos?.find((p) => p._ === 'photo');
+          if (!photo) return { none: true };
+          const sizes = photo.sizes.filter((s) => (s.size ?? 0) > 0);
+          const pick = sizes.find((s) => s.type === 'b') ?? sizes.find((s) => s.type === 'a') ?? sizes.find((s) => s.type === 'c') ?? sizes[0];
+          if (!pick) return { none: true };
+          const location = { _: 'inputPhotoFileLocation', id: photo.id, access_hash: photo.access_hash, file_reference: photo.file_reference, thumb_size: pick.type };
+          const limit = 512 * 1024;
+          const chunks: Uint8Array[] = [];
+          for (let offset = 0; offset < 4 * limit; offset += limit) {
+            const part = (await api.invokeApi('upload.getFile', { location, offset, limit }, { dcId: photo.dc_id, fileDownload: true })) as { bytes: Uint8Array };
+            chunks.push(part.bytes);
+            if (part.bytes.length < limit) break;
+          }
+          let bin = '';
+          for (const c of chunks) for (let i = 0; i < c.length; i += 0x8000) bin += String.fromCharCode(...c.subarray(i, i + 0x8000));
+          return { data: btoa(bin) };
+        } catch (e) {
+          return { error: String((e as { type?: string })?.type ?? e) };
+        }
+      },
+      String(u.id),
+      String(u.access_hash),
+    );
+    if ('error' in r || 'none' in r) return null;
+    return this.media.save(this.spec.id, avatarKey(chatId), { mimetype: 'image/jpeg', data: r.data, filename: 'avatar.jpg' });
   }
 
   /** Страница Telegram Web — подставить файл в окно выбора файла (`screen-files.ts`). */

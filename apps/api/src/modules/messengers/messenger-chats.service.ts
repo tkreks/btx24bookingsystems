@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerPhone, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
+import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerLogin, normalizeMessengerPhone, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
 import type { Messenger, MessengerMessage } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
@@ -123,18 +123,24 @@ export class MessengerChatsService {
     return this.prisma.messenger.update({ where: { id }, data: { groupIds: ids.filter((g) => known.has(g)) } });
   }
 
-  /** Поиск только по разрешённым номерам; проверка регистрации ничего не отправляет. */
-  async search(user: B24UserContext, input: unknown): Promise<MessengerContactSearchDto> {
-    const phone = normalizeMessengerPhone(input);
-    if (!phone) throw new BadRequestException({ code: 'INVALID_PHONE', message: 'Укажите номер с кодом страны' });
-    const [rows, access] = await Promise.all([this.available(user), this.access.resolve(user)]);
+  /**
+   * Поиск только по разрешённым номерам; проверка регистрации ничего не отправляет. Номер — во всех
+   * мессенджерах; логин (`@user`) — только в Telegram (у WhatsApp и MAX логинов нет).
+   */
+  async search(user: B24UserContext, input: unknown, loginInput?: unknown): Promise<MessengerContactSearchDto> {
+    const phone = loginInput ? null : normalizeMessengerPhone(input);
+    const login = phone ? null : normalizeMessengerLogin(loginInput ?? input);
+    if (!phone && !login)
+      throw new BadRequestException({ code: 'INVALID_PHONE', message: 'Укажите номер с кодом страны или логин Telegram (@имя)' });
+    const [all, access] = await Promise.all([this.available(user), this.access.resolve(user)]);
+    const rows = login ? all.filter(m => m.kind === 'telegram') : all;
     const results = await Promise.all(rows.map(async m => {
       const messenger = toDto(m, null);
       const permitted = access.isAppAdmin || access.groups.some(g => groupIdsOf(m).includes(g.group.id) && g.permissions.includes('openlines.send'));
       try {
-        const found = await this.service.contact(m.id, phone);
+        const found = login ? await this.service.contactByLogin(m.id, login) : await this.service.contact(m.id, phone!);
         if (!found.exists) return { messenger, status: 'not_found' as const, chatId: null, canSend: false, note: null, openlineChatId: null };
-        const known = await this.prisma.messengerChat.findFirst({ where: { portalId: user.portal.id, messengerId: m.id, phone }, orderBy: { lastMessageAt: 'desc' } });
+        const known = phone ? await this.prisma.messengerChat.findFirst({ where: { portalId: user.portal.id, messengerId: m.id, phone }, orderBy: { lastMessageAt: 'desc' } }) : null;
         const chatId = known?.chatId ?? found.chatId;
         const lineChat = chatId && m.lineMode === 'own' ? await this.lineChatOf(m, chatId) : null;
         let openlineChatId: number | null = null;
@@ -148,7 +154,7 @@ export class MessengerChatsService {
       }
     }));
     const existingChats: NonNullable<MessengerContactSearchDto['existingChats']> = [];
-    if (this.crm) {
+    if (this.crm && phone) {
       try {
         const matched = await this.crm.match(user.client, phone, true);
         const ids = new Set<number>();
@@ -164,7 +170,7 @@ export class MessengerChatsService {
         }
       } catch { /* Поиск мессенджеров остаётся доступен при отсутствии доступа к CRM. */ }
     }
-    return { phone, results, existingChats };
+    return { phone: phone ?? '', login, results, existingChats };
   }
 
   async fromOpenline(user: B24UserContext, b24ChatId: number) {
@@ -219,9 +225,10 @@ export class MessengerChatsService {
     const b24ChatId = await this.lineChatOf(m, known?.chatId ?? target, dealId);
     if (b24ChatId) {
       await this.postToLine(user, b24ChatId, body);
-      return { message: null, queued: true };
+      return { message: null, queued: true, openlineChatId: b24ChatId };
     }
-    return { message: toMessageDto(await this.connector.firstContact(user, m, sendTo, body, undefined, dealId)), queued: false };
+    const first = await this.connector.firstContact(user, m, sendTo, body, undefined, dealId);
+    return { message: toMessageDto(first), queued: false, openlineChatId: first.b24ChatId ?? null };
   }
 
   /** Вложение сообщения: из хранилища сервиса (история — скачивается сейчас и запоминается). */
@@ -252,7 +259,10 @@ export class MessengerChatsService {
     const sendTo = known?.phone ? `${known.phone}@c.us` : target;
     const dealId = this.crm ? await this.crm.sending(user, m, known?.chatId ?? target, expectedDeal) : undefined;
     const caption = String(text ?? '').trim().slice(0, 1024);
-    if (m.lineMode === 'own' && m.lineId) return { message: toMessageDto(await this.connector.firstContact(user, m, sendTo, caption, file, dealId)), queued: false };
+    if (m.lineMode === 'own' && m.lineId) {
+      const first = await this.connector.firstContact(user, m, sendTo, caption, file, dealId);
+      return { message: toMessageDto(first), queued: false, openlineChatId: first.b24ChatId ?? null };
+    }
     const w = await this.service.send(m.id, sendTo, caption, undefined, file);
     return { message: toMessageDto(await this.inbox.message(m, w, { source: 'app', sentByUserId: user.userId, ...(dealId !== undefined ? { dealId, awaitingDeal: false } : {}) })), queued: false };
   }

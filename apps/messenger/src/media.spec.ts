@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { ensureSerializedId } from './messages.js';
-import { MediaStore, MAX_MEDIA_BYTES, defaultName } from './media.js';
+import { AVATAR_TTL_MS, avatarKey, MediaStore, MAX_MEDIA_BYTES, defaultName } from './media.js';
 
 describe('MediaStore', () => {
   it('save/meta/read: одинаковый messageId не дублирует, экземпляры изолированы', async () => {
@@ -17,6 +17,16 @@ describe('MediaStore', () => {
       expect(await store.read('m1','../secret')).toBeNull();
       await expect(store.save('../other','msg1',{mimetype:'text/plain',data:'eA=='})).rejects.toThrow('invalid instance');
       await writeFile(`${dir}/media/m1/${meta.fileId}.json`,'broken'); expect(await store.meta('m1',meta.fileId)).toBeNull();
+    } finally { await rm(dir,{recursive:true,force:true}); }
+  });
+  it('аватар: свежий файл по ключу отдаётся, устаревший — нет', async () => {
+    const dir = await mkdtemp(`${tmpdir()}/btx-media-`);
+    try {
+      const store = new MediaStore(dir);
+      expect(await store.recent('m1', avatarKey('1@lid'), AVATAR_TTL_MS)).toBeNull();
+      const meta = await store.save('m1', avatarKey('1@lid'), { mimetype: 'image/jpeg', data: Buffer.from('jpg').toString('base64') });
+      expect(await store.recent('m1', avatarKey('1@lid'), AVATAR_TTL_MS)).toEqual(meta);
+      expect(await store.recent('m1', avatarKey('1@lid'), AVATAR_TTL_MS, Date.now() + AVATAR_TTL_MS + 1000)).toBeNull();
     } finally { await rm(dir,{recursive:true,force:true}); }
   });
   it('отказывает больше 64 МБ до декодирования base64', async () => {

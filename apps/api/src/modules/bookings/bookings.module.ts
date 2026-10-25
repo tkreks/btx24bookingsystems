@@ -6,6 +6,7 @@ import { ClientMessagesAdminController } from './client-messages.controller.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
 import { BookingCancelService } from './booking-cancel.service.js';
 import { BookingDirectoryService } from './booking-directory.service.js';
+import { BookingInfoService } from './booking-info.service.js';
 import { BookingCreateService } from './booking-create.service.js';
 import { BookingRestoreService } from './booking-restore.service.js';
 import { ClientBookingsService } from './client-bookings.service.js';
@@ -14,6 +15,7 @@ import { DealStatusService } from './deal-status.service.js';
 import { ResourceStopsService } from './resource-stops.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { DealFormService } from './deal-form.service.js';
+import { DealHubService } from './deal-hub.service.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { BookingSyncService } from './booking-sync.service.js';
 import { MessageContextService } from './message-context.service.js';
@@ -29,9 +31,11 @@ import { MessageContextService } from './message-context.service.js';
     BookingRestoreService,
     BookingCancelService,
     BookingDirectoryService,
+    BookingInfoService,
     ClientBookingsService,
     DealFieldMapService,
     DealFormService,
+    DealHubService,
     DealPaymentsService,
     DealStatusService,
     MessageContextService,

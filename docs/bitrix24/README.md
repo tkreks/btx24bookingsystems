@@ -213,3 +213,15 @@ contact/deal, каждый результат перепроверяем dialog.
 отключает CRM tracker у сопоставленного/ожидающего выбора клиента, исключает создание дубля CRM.
 Произвольного метода imopenlines.crm.chat.update нет: локальная связь диалога со сделкой — в приложении;
 чужие подключения провайдеров не переиспользуются как собственные каналы доставки.
+
+### Отправка после отключения прежнего провайдера (2026-10-25)
+Проверено официальным MCP: `imopenlines.crm.message.add` требует существующий CHAT_ID,
+CRM_ENTITY_TYPE/CRM_ENTITY и USER_ID участника с доступом к CRM; возвращает ID сообщения
+Битрикс24, что само по себе не подтверждает внешнюю доставку отключённым провайдером.
+[Документация](https://apidocs.bitrix24.com/api-reference/imopenlines/openlines/messages/imopenlines-crm-message-add.html).
+`imconnector.send.messages` передаёт уже полученное/отправленное внешним транспортом сообщение
+в собственную ОЛ; `message.disable_crm=Y` отключает CRM tracker, `user_id` задаёт менеджера.
+Это не метод доставки в WhatsApp/Telegram по номеру.
+`imopenlines.config.get` принимает CONFIG_ID и WITH_QUEUE/SHOW_OFFLINE=Y; живое чтение
+подтвердило ACTIVE=Y и по два оператора в собственных линиях14/16. Подписки Wazzup и MAX
+не менялись. План и ограничения — [переход мессенджеров](../features/messenger-transition.md).

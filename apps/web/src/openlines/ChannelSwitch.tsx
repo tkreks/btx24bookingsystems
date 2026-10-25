@@ -1,16 +1,36 @@
 import { useState } from 'react';
 import type { ChatChannelDto } from '@btx24/shared';
-import { fmtDateTime } from '../format.js';
+import type { AttentionChatDto } from '@btx24/shared';
+import { openCrm } from '../b24.js';
+import { AttentionMessage } from '../dashboard/AttentionMessage.js';
 import { Channel } from './Channel.js';
-import { connectorLabel } from './format.js';
+import { Icon } from './icons.js';
 import { MinimizeButton } from '../Minimize.js';
 
 /** Каналов больше — один кружок с иконками открытых линий; по нажатию — окно со списком чатов. */
 const INLINE_MAX = 2;
 
+/** Чат клиента — строкой как в «Последних сообщениях» дашборда. */
+export function asAttention(c: ChatChannelDto): AttentionChatDto {
+  return {
+    chatId: c.chatId,
+    unread: c.unread ?? 0,
+    title: c.title,
+    clientName: c.clientName ?? null,
+    clientAvatar: c.clientAvatar ?? null,
+    connector: c.connector,
+    lastMessageAt: c.lastMessageAt ?? '',
+    preview: c.preview ?? '',
+    hasFiles: c.hasFiles ?? false,
+    dealId: c.dealId ?? null,
+    contactId: null,
+    responsibleId: null,
+  };
+}
+
 /**
  * Чаты открытых линий клиента под его именем: до двух — кнопками, больше — кружком со стопкой
- * иконок и окном, где видно каждый чат (канал, когда писал, ждёт ли ответа).
+ * иконок и окном: строки как «Последние сообщения» дашборда, у каждой — «Сделка» и «Перейти в чат».
  */
 export function ChannelSwitch({
   channels,
@@ -70,7 +90,7 @@ export function ChannelSwitch({
       </button>
       {open && (
         <div className="sheet-backdrop" onClick={() => setOpen(false)}>
-          <div className="sheet channels-modal" role="dialog" aria-modal="true" aria-label="Чаты клиента" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet channels-modal dash-attention" role="dialog" aria-modal="true" aria-label="Чаты клиента" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>Чаты клиента · {channels.length}</h3>
               <MinimizeButton label="Каналы клиента" />
@@ -78,29 +98,32 @@ export function ChannelSwitch({
                 ×
               </button>
             </header>
-            <ul className="channels-list">
-              {channels.map((c) => (
-                <li key={c.chatId}>
-                  <button
-                    type="button"
-                    className={`channels-row${c.chatId === current ? ' current' : ''}`}
-                    disabled={c.chatId === current}
-                    onClick={() => {
-                      setOpen(false);
-                      onOpen(c.chatId);
-                    }}
-                  >
-                    <Channel connector={c.connector} />
-                    <span className="channels-title" title={c.title}>
-                      {c.title || connectorLabel(c.connector)}
+            <ul className="attention-rows">
+              {channels.map((c) => {
+                const go = () => {
+                  setOpen(false);
+                  if (c.chatId !== current) onOpen(c.chatId);
+                };
+                return (
+                  <li key={c.chatId} className={c.chatId === current ? 'current' : undefined}>
+                    <AttentionMessage chat={asAttention(c)} timezone={timezone} onOpen={go} />
+                    <span className="attention-actions">
+                      <button
+                        className="dash-icon-btn"
+                        title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'}
+                        aria-label="Открыть сделку"
+                        disabled={!c.dealId}
+                        onClick={() => c.dealId && openCrm('deal', c.dealId)}
+                      >
+                        <Icon name="handshake" size={18} />
+                      </button>
+                      <button className="dash-icon-btn" title={c.chatId === current ? 'Этот чат уже открыт' : 'Перейти в чат'} aria-label="Перейти в чат" disabled={c.chatId === current} onClick={go}>
+                        <Icon name="chat" size={18} />
+                      </button>
                     </span>
-                    <span className="channels-side">
-                      {c.chatId === current ? <span className="pill">открыт</span> : c.waitingReply ? <span className="pill waiting">ждёт ответа</span> : null}
-                      {c.lastMessageAt && <span className="muted">{fmtDateTime(c.lastMessageAt, timezone)}</span>}
-                    </span>
-                  </button>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>

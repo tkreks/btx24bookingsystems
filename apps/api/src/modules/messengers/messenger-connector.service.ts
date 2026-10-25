@@ -12,6 +12,8 @@ import { MessengerServiceClient } from './messenger-service.client.js';
 import { MediaLinks } from './media-links.js';
 
 /** Коннектор приложения на вид мессенджера (один на портал, линий — сколько угодно). */
+/** Аватар собеседника переспрашиваем у сервиса раз в сутки. */
+const AVATAR_CACHE_MS = 24 * 3600_000;
 export const connectorId = (kind: string) => `btx24_${kind}`;
 /** События коннектора: сообщение оператора, его правка и удаление; отключение линии. */
 export const CONNECTOR_EVENTS = ['ONIMCONNECTORMESSAGEADD', 'ONIMCONNECTORMESSAGEUPDATE', 'ONIMCONNECTORMESSAGEDELETE', 'ONIMCONNECTORSTATUSDELETE', 'ONIMCONNECTORLINEDELETE'] as const;
@@ -63,6 +65,24 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     @Inject(B24_CONFIG) private readonly config: Bitrix24Config,
     private readonly links: MediaLinks,
   ) {}
+
+  /** Аватар собеседника: ID файла у сервиса или null (нет фото) — на сутки на процесс, без повторных запросов. */
+  private readonly avatars = new Map<string, { fileId: string | null; at: number }>();
+
+  /** Фото клиента для `user.picture` линии; любые сбои — без фото (сообщение важнее аватара). */
+  async pictureOf(m: Messenger, chatId: string): Promise<{ url: string } | undefined> {
+    if (!/@(c\.us|lid)$/.test(chatId)) return undefined;
+    const key = `${m.id}|${chatId}`;
+    let hit = this.avatars.get(key);
+    if (!hit || Date.now() - hit.at > AVATAR_CACHE_MS) {
+      let media: { fileId: string } | null = null;
+      try { media = await this.service.avatar(m.id, chatId); } catch { /* Сервис без фото или недоступен. */ }
+      hit = { fileId: media?.fileId ?? null, at: Date.now() };
+      this.avatars.set(key, hit);
+    }
+    const url = hit.fileId ? this.links.url(m.id, hit.fileId) : null;
+    return url ? { url } : undefined;
+  }
 
   onModuleInit() {
     onBitrixEvent('ONIMCONNECTOR', (portal, event, data) => this.fromBitrix(portal, event, data));
@@ -116,6 +136,7 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     const phone = chat?.phone ?? w.phone ?? phoneOfChat(chatId);
     const name = chat?.name ?? (phone ? `+${phone}` : chatId);
     const relayChatId = await this.relayTarget(m, row);
+    const picture = await this.pictureOf(m, w.chatId);
     try {
       const res = await this.portals.clientFor(portal).call<{ DATA?: { RESULT?: { SUCCESS?: boolean; session?: { CHAT_ID?: string } }[] } }>('imconnector.send.messages', {
         CONNECTOR: connectorId(m.kind),
@@ -123,7 +144,7 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
         MESSAGES: [
           {
             // Чат — как его назвал WhatsApp (`…@lid` или `…@c.us`): так же придут ответы клиента.
-            user: { id: w.chatId, name, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}) },
+            user: { id: w.chatId, name, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}), ...(picture ? { picture } : {}) },
             message: {
               id: w.id,
               date: w.timestamp,
@@ -223,7 +244,8 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     const phone = chat?.phone ?? phoneOfChat(msg.chatId);
     const userName = name ?? chat?.name ?? (phone ? `+${phone}` : msg.chatId);
     const relayChatId = await this.relayTarget(m, msg);
-    const user = { id: msg.chatId, name: userName, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}) };
+    const picture = op === 'send' ? await this.pictureOf(m, msg.chatId) : undefined;
+    const user = { id: msg.chatId, name: userName, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}), ...(picture ? { picture } : {}) };
     // Вложение — ссылкой (Битрикс24 скачивает сам); не скачано — подпись «[фото]».
     const fileUrl = msg.mediaId ? this.links.url(m.id, msg.mediaId) : null;
     const files = fileUrl ? [{ url: fileUrl, name: msg.mediaName ?? 'file' }] : undefined;

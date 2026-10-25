@@ -35,6 +35,7 @@ function setup(
       deleteMany: vi.fn(async () => ({ count: 1 })),
     },
     workGroup: { findMany: vi.fn(async () => groups) },
+    actionLog: { groupBy: vi.fn(async () => [{ entityId: 't1', _count: { _all: 3 } }]), create: vi.fn(async () => ({})) },
   } as unknown as PrismaService;
   const files = {
     meta: vi.fn(
@@ -113,5 +114,13 @@ describe('TemplatesService', () => {
     await expect(t.svc.remove(t.user, 'p1', true)).rejects.toMatchObject({ status: 409, response: { message: expect.stringContaining('Бани (предоплата)') } });
     await expect(t.svc.update(t.user, 'p1', { ...body, purpose: 'chat' }, true)).rejects.toMatchObject({ status: 409 });
     expect(await t.svc.update(t.user, 'p1', { name: 'Предоплата', shared: false, steps: body.steps }, true)).toMatchObject({ shared: true, purpose: 'payment' });
+  });
+
+  it('частота шаблонов: вставки за 30 дней в журнале; чужой личный шаблон отметить нельзя', async () => {
+    const { svc, user, prisma } = setup([{ id: 't1', name: 'Привет', steps: [{ text: 'a', fileIds: [] }] }, { id: 't2', name: 'Чужой', steps: [{ text: 'b', fileIds: [] }], ownerUserId: 9 }]);
+    expect((await svc.list(user)).map((t) => [t.id, t.uses30d])).toEqual([['t1', 3]]);
+    await svc.markUsed(user, 't1');
+    expect(prisma.actionLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'template.use', entityType: 'template', entityId: 't1', userId: 7 }) });
+    await expect(svc.markUsed(user, 't2')).rejects.toMatchObject({ status: 404 });
   });
 });

@@ -2,6 +2,7 @@ import { encodeParams } from './encode-params.js';
 import { Bitrix24Error, RATE_LIMIT_CODES, TOKEN_EXPIRED_CODES } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
 import { isReadMethod } from './read-only.js';
+import { countRest } from '../../../common/cache-invalidation.js';
 
 /** Источник access-токена. Для токенов приложения умеет обновлять, для токена пользователя — нет. */
 export interface AccessProvider {
@@ -111,7 +112,9 @@ export class Bitrix24RestClient {
     let token = await this.opts.access.getAccessToken();
     let refreshed = false;
     for (let attempt = 0; ; attempt++) {
+      const queued = Date.now();
       await this.opts.limiter.acquire(this.opts.limiterKey);
+      countRest(method, Date.now() - queued);
       const body = await this.post(method, { ...params, auth: token });
       if (!body.error) {
         if (viaPolicy) await this.opts.writePolicy!.recorded(method, params, body.result);
@@ -142,7 +145,9 @@ export class Bitrix24RestClient {
     let token = await this.opts.access.getAccessToken();
     let refreshed = false;
     for (let attempt = 0; ; attempt++) {
+      const queued = Date.now();
       await this.opts.limiter.acquire(this.opts.limiterKey);
+      countRest(method, Date.now() - queued);
       const body = await this.post(`api/${method}`, { ...params, auth: token }, '');
       const err = body.error as unknown;
       if (!err) return body.result as T;

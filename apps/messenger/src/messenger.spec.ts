@@ -19,6 +19,7 @@ function fakeInstance(spec: InstanceSpec) {
     logout: vi.fn(async () => undefined),
     screenshot: vi.fn(async () => null),
     contact: vi.fn(async () => ({ exists: true, chatId: '79259734763@c.us' })),
+    avatar: vi.fn(async (chat: string) => (chat === '1@lid' ? { fileId: 'a'.repeat(40), mime: 'image/jpeg', name: 'avatar.jpg', size: 3 } : null)),
   } as unknown as Instance;
 }
 
@@ -49,6 +50,16 @@ describe('Сервис мессенджеров', () => {
     expect(t.manager.list()).toHaveLength(2);
     const specs = JSON.parse(await readFile(`${t.dataDir}/instances.json`, 'utf8')) as InstanceSpec[];
     expect(specs.map((s) => s.display)).toEqual([FIRST_DISPLAY, FIRST_DISPLAY + 1]);
+    await t.close();
+  });
+
+  it('аватар собеседника: маршрут, проверка ID чата, нет фото — media: null', async () => {
+    const t = await setup();
+    await fetch(`${t.base}/instances/aaaaaaaa1`, { method: 'PUT', body: JSON.stringify({ kind: 'whatsapp', phone: '79991234567' }) });
+    const post = (chat: unknown) => fetch(`${t.base}/instances/aaaaaaaa1/avatar`, { method: 'POST', body: JSON.stringify({ chat }) });
+    expect(await (await post('1@lid')).json()).toEqual({ media: { fileId: 'a'.repeat(40), mime: 'image/jpeg', name: 'avatar.jpg', size: 3 } });
+    expect(await (await post('2@c.us')).json()).toEqual({ media: null });
+    expect((await post('../x')).status).toBe(400);
     await t.close();
   });
 

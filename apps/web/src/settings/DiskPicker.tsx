@@ -1,14 +1,57 @@
-import { useEffect, useState } from 'react';
-import type { DiskFileRef, DiskItemDto, DiskBrowseDto } from '@btx24/shared';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { DiskFileRef, DiskItemDto, DiskBrowseDto, DiskStartDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { fileSize } from '../openlines/format.js';
 import { MinimizeButton } from '../Minimize.js';
 
 type Place = { label: string; query: string };
 
-/** Выбор файла с Диска Битрикс24: хранилища → папки → файл. */
+const ROOT: Place[] = [{ label: 'Диск', query: '' }];
+
+/**
+ * Выбор файла с Диска Битрикс24: хранилища → папки → файл. Вложения сотрудников (`/openlines/disk`)
+ * открываются в папке шаблонов общего диска, без доступа к ней — на «Моём диске»; оба переключаются.
+ */
 export function DiskPicker({ onPick, onClose, endpoint = '/admin/disk' }: { onPick: (f: DiskFileRef) => void; onClose: () => void; endpoint?: string }) {
-  const [path, setPath] = useState<Place[]>([{ label: 'Диск', query: '' }]);
+  const places = endpoint === '/openlines/disk';
+  const [start, setStart] = useState<DiskStartDto | null>(null);
+  const [path, setPath] = useState<Place[] | null>(places ? null : ROOT);
+  useEffect(() => {
+    if (!places) return;
+    let active = true;
+    void apiGet<DiskStartDto>('/openlines/disk/start').then(
+      (v) => {
+        if (!active) return;
+        setStart(v);
+        setPath((v.initial === 'user' ? v.user : v.shared) ?? v.shared ?? v.user ?? ROOT);
+      },
+      () => active && setPath(ROOT),
+    );
+    return () => {
+      active = false;
+    };
+  }, [places]);
+  return path ? <Browser path={path} setPath={setPath} start={start} endpoint={endpoint} onPick={onPick} onClose={onClose} /> : <Frame onClose={onClose}><p className="muted">Загрузка…</p></Frame>;
+}
+
+function Frame({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet disk-picker" role="dialog" aria-modal="true" aria-label="Файл с Диска" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>Файл с Диска</h3>
+          <MinimizeButton label="Файлы Диска" />
+          <button aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Browser({ path, setPath, start, endpoint, onPick, onClose }: { path: Place[]; setPath: (p: Place[]) => void; start: DiskStartDto | null; endpoint: string; onPick: (f: DiskFileRef) => void; onClose: () => void }) {
   const [items, setItems] = useState<{ query: string; list: DiskItemDto[]; next: number | null } | null>(null);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -52,16 +95,24 @@ export function DiskPicker({ onPick, onClose, endpoint = '/admin/disk' }: { onPi
   };
 
 
+  const disk = start?.shared && path[0].query === start.shared[0].query ? 'shared' : start?.user && path[0].query === start.user[0].query ? 'user' : null;
+  const switchTo = (p: Place[] | null) => {
+    if (!p) return;
+    setSearch('');
+    setPath(p);
+  };
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet disk-picker" role="dialog" aria-modal="true" aria-label="Файл с Диска" onClick={(e) => e.stopPropagation()}>
-        <header>
-          <h3>Файл с Диска</h3>
-          <MinimizeButton label="Файлы Диска" />
-          <button aria-label="Закрыть" onClick={onClose}>
-            ×
-          </button>
-        </header>
+    <Frame onClose={onClose}>
+        {start && (start.shared || start.user) && (
+          <div className="disk-places" role="group" aria-label="Диск">
+            <button type="button" className={disk === 'shared' ? 'active' : ''} aria-pressed={disk === 'shared'} disabled={!start.shared} title={start.shared ? start.shared.map((p) => p.label).join(' / ') : 'Общий диск недоступен'} onClick={() => switchTo(start.shared)}>
+              Общий диск
+            </button>
+            <button type="button" className={disk === 'user' ? 'active' : ''} aria-pressed={disk === 'user'} disabled={!start.user} onClick={() => switchTo(start.user)}>
+              Мой диск
+            </button>
+          </div>
+        )}
         <nav className="disk-path" aria-label="Путь">
           {path.map((p, i) => (
             <button key={i} className="link" disabled={i === path.length - 1} onClick={() => { setSearch(''); setPath(path.slice(0, i + 1)); }}>
@@ -88,7 +139,6 @@ export function DiskPicker({ onPick, onClose, endpoint = '/admin/disk' }: { onPi
           ))}
         </ul>
         {items?.query === query && items.next !== null && <button type="button" disabled={busy} onClick={() => void more()}>{busy ? 'Загрузка…' : 'Показать ещё'}</button>}
-      </div>
-    </div>
+    </Frame>
   );
 }

@@ -54,8 +54,12 @@ Chromium (`Singleton*`), иначе браузер не стартует. Пос
 не показывают вложения, чтение обычного media endpoint для них — 404.
 
 ## Проверка номера и отправка медиа
+`POST /instances/:id/avatar {chat}` — фото профиля собеседника в хранилище (`avatar:<чат>`, неделя): WhatsApp — `getProfilePicUrl` + отдельная вкладка браузера (через прокси), Telegram — `photos.getUserPhotos`, MAX — `baseUrl` контакта; нет фото — `{media:null}`. Для `user.picture` открытой линии.
+
 `POST /instances/:id/contact {phone}` — getNumberId без sendMessage/создания чата; доступ только
 внутренний с токеном. Не подключённый экземпляр — ошибка проверки, не «клиент не найден».
+`{login}` — только Telegram (`contactByLogin`: `contacts.resolveUsername`; бот/канал — «не найден»,
+собеседник запоминается с `access_hash`, чтобы написать на `<userId>@lid`); у других — 400.
 `whatsapp-compat.ts` + scripts/patch-whatsapp.mjs применяются каждой build: удаляется внутренний
 `message.__x_id` перед созданием outgoing Msg (WA MediaModel иначе затирает корректный id).
 Patch идемпотентный, при изменении upstream маркера сборка останавливается для проверки.
@@ -109,3 +113,41 @@ Patch идемпотентный, при изменении upstream марке�
 - Текст — без разметки (BBCode линии → простой текст в api). Срок правки задаёт сервер MAX.
 - Отправленное через сервис на экране web.max.ru видно после обновления страницы.
 
+
+## Ограниченный экран Chromium (2026-10-25)
+`browser.ts` — общие аргументы и подготовка профиля WhatsApp, Telegram и MAX.
+- `--kiosk --app=<web мессенджера>`: без вкладок, адресной строки и кнопок навигации.
+  `ignoreDefaultArgs: ['--enable-automation']` убирает панель автоматизации; остальные аргументы
+  Puppeteer сохраняются. Это настройка интерфейса, не обещание нераспознаваемости автоматизации.
+- До старта профиля: `profile.exit_type=Normal`, `exited_cleanly=true`, запуск без восстановления
+  вкладок; русские intl prefs/Accept-Language. Остальные prefs, cookies и авторизация сохраняются.
+  Повреждённые prefs не затираются. Язык ru-RU, пакет chromium-l10n установлен.
+- Только контейнер messenger использует TZ Europe/Moscow. API/worker/БД остаются UTC; время
+  броней — в поясе портала. Страну по IP задаёт текущий маршрут/прокси; геолокацию и страну
+  аккаунта не подделываем и не меняем.
+- `docker/messenger/browser-policy.json` → `/etc/chromium/policies/managed/booking.json`:
+  запрещены посторонние сайты и служебные страницы/file/devtools; разрешены точные HTTPS-хосты
+  web.whatsapp.com, web.telegram.org, web.max.ru. Дополнительные page-target закрываются,
+  window.open и внешние ссылки отключены. Вложения и запросы API/CDN остаются доступны.
+- Не добавлять перехват req.continue поверх whatsapp-web.js: библиотека сама перехватывает
+  стартовый HTML из кэша, обработчики конфликтуют. WhatsApp настраивается через штатный хук
+  LocalAuth.afterBrowserInitialized до goto; Telegram/MAX — до goto веб-клиента. MAX без прокси.
+
+Первичные источники: [Puppeteer LaunchOptions](https://pptr.dev/api/puppeteer.launchoptions),
+[формат URL-политик Chromium](https://www.chromium.org/administrators/url-blocklist-filter-format/).
+
+Проверка Chromium: не устанавливать `DeveloperToolsAvailability=2` — браузер перестаёт отдавать
+page targets Puppeteer, запуск зависает. Запрет переходов обеспечивают URL-политики и kiosk.
+CDP-сессию `Emulation.setLocaleOverride` не отсоединять: detach сбрасывает Intl locale обратно
+на en-US. Временный тестовый профиль подтверждает ru-RU для navigator/Intl/Accept-Language,
+Europe/Moscow, блокировку постороннего HTTPS/поддельного хоста/file/chrome://settings, закрытие
+новой вкладки и работоспособность file chooser. Тест выполняется без сети и без рабочих сессий.
+
+## Устойчивость процесса (2026-10-25)
+- Необработанный отказ промиса логируется, а не роняет сервис: слушатель `response` whatsapp-web.js
+  1.34.7 читает тело index.html без `catch`, и «No data found for resource» при перезагрузке страницы
+  убивал процесс со всеми номерами.
+- `VirtualScreen.start` удаляет `/tmp/.X<N>-lock` и сокет старого Xvfb: после перезапуска процесса в том
+  же контейнере они мешали новому Xvfb, и все браузеры падали с «Missing X server».
+- `getProfilePicUrl` библиотеки на WA 2026 не работает — аватар берём мостом
+  `WAWebContactProfilePicThumbBridge.requestProfilePicFromServer(<контакт>)`.

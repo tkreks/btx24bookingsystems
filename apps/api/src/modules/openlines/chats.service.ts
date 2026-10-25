@@ -10,6 +10,7 @@ import type {
   AttentionChatDto,
   ChatScope,
   ChatSummary,
+  DealChatsDto,
   MessageAuthorKind,
   SendResultDto,
   TemplateStepDto,
@@ -80,6 +81,8 @@ const PHONE_MATCHES = 10;
 /** Чатов в одной папке — больше не показываем. */
 const MAX_FOLDER_CHATS = 100;
 const PAGE = 50;
+/** Счётчики непрочитанных сотрудника — не свежее опроса списка чатов. */
+const UNREAD_TTL_MS = 10_000;
 /** Сообщений на чат в сводке: среди них ищем последнее от клиента или оператора. */
 const SUMMARY_MESSAGES = 20;
 /** Кэш списка чатов: сводку старше этого сверяем с Битрикс24 в фоне (ответ — сразу из базы). */
@@ -207,8 +210,31 @@ export class ChatsService {
     return new Set(rows.map((r) => r.chatId));
   }
 
+  /**
+   * Счётчики непрочитанных на сотрудника — на 10 секунд и одним запросом на всех одновременных: список
+   * чатов, папки и каналы опрашиваются каждые 15 секунд, и каждый просил `im.recent.list` у портала.
+   */
+  private readonly unread = new Map<string, { value: Promise<Map<number, number>>; expiresAt: number }>();
+
   /** Непрочитанные по чатам открытых линий — личные счётчики мессенджера сотрудника. */
   async unreadByChat(user: B24UserContext): Promise<Map<number, number>> {
+    const key = `${user.portal.id}:${user.userId}`;
+    const hit = this.unread.get(key);
+    if (hit && hit.expiresAt > Date.now()) return hit.value;
+    if (this.unread.size > 2000) this.unread.clear();
+    const value = this.fetchUnread(user);
+    this.unread.set(key, { value, expiresAt: Date.now() + UNREAD_TTL_MS });
+    // Ошибку не запоминаем: следующий запрос спросит портал снова.
+    value.catch(() => this.unread.delete(key));
+    return value;
+  }
+
+  /** Отметка прочитанного сотрудником — счётчики пересчитать при следующем запросе. */
+  forgetUnread(user: B24UserContext): void {
+    this.unread.delete(`${user.portal.id}:${user.userId}`);
+  }
+
+  private async fetchUnread(user: B24UserContext): Promise<Map<number, number>> {
     try {
       const out = new Map<number, number>();
       for (let offset = 0; offset < 2000; offset += 200) {
@@ -589,6 +615,28 @@ export class ChatsService {
     return { items, nextOffset: null, exactOrder: true };
   }
 
+  /**
+   * Чаты сделки и её клиента (контакты сделки) — вкладка с именем клиента во встройке сделки. Чаты
+   * ищет портал правами сотрудника (`imopenlines.crm.chat.get`), как поиск по номеру.
+   */
+  async byDeal(user: B24UserContext, dealId: number): Promise<DealChatsDto> {
+    const deal = (await user.client.call<{ ID?: string; CONTACT_ID?: string | null }>('crm.deal.get', { id: dealId })).result;
+    if (!deal?.ID) throw new NotFoundException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена` });
+    const items = (await user.client.call<{ CONTACT_ID?: string | number }[]>('crm.deal.contact.items.get', { id: dealId })).result ?? [];
+    const contactIds = [...new Set([Number(deal.CONTACT_ID), ...items.map((c) => Number(c.CONTACT_ID))].filter((x) => x > 0))].slice(0, PHONE_MATCHES);
+    const entities = [{ type: 'deal', id: dealId }, ...contactIds.map((id) => ({ type: 'contact', id }))];
+    const res = await user.client.batch({
+      ...Object.fromEntries(entities.map((e) => [`${e.type}${e.id}`, { method: 'imopenlines.crm.chat.get', params: { CRM_ENTITY_TYPE: e.type, CRM_ENTITY: e.id, ACTIVE_ONLY: 'N' } }])),
+      ...(contactIds.length ? { contact: { method: 'crm.contact.get', params: { id: contactIds[0] } } } : {}),
+    });
+    const chatIds = [
+      ...new Set(entities.flatMap((e) => ((res.result[`${e.type}${e.id}`] as { CHAT_ID?: string | number }[] | undefined) ?? []).map((c) => Number(c.CHAT_ID)))),
+    ].filter((id) => id > 0);
+    const contact = res.result.contact as { NAME?: string | null; LAST_NAME?: string | null } | undefined;
+    const clientName = contact ? [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ').trim() || null : null;
+    return { clientName, items: chatIds.length ? await this.summariesByChat(user, chatIds.slice(0, PAGE)) : [] };
+  }
+
   /** Телефоны привязанных контактов, лидов и компаний — одним пакетом, правами пользователя. */
   /** Телефоны (для поиска) и имена клиентов привязок CRM — одним пакетом; ключ `contact:12`. */
   private async phonesOf(user: B24UserContext, links: ChatSummary['crm'][]): Promise<Map<string, string[]>> {
@@ -625,12 +673,15 @@ export class ChatsService {
     const parsed = historyQuery.safeParse(query);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_QUERY', message: 'Неверный параметр beforeId' });
-    const dialog = (await user.client.call<ImDialog>('imopenlines.dialog.get', { CHAT_ID: chatId })).result;
-    const res = await user.client.call<ImMessages>('im.dialog.messages.get', {
-      DIALOG_ID: `chat${chatId}`,
-      LIMIT: HISTORY_LIMIT,
-      ...(parsed.data.beforeId ? { LAST_ID: parsed.data.beforeId } : {}),
+    // Диалог (права, роль) и сообщения — одним пакетом: переписка опрашивается, лимит портала — на запросы.
+    const pack = await user.client.batch({
+      dialog: { method: 'imopenlines.dialog.get', params: { CHAT_ID: chatId } },
+      messages: { method: 'im.dialog.messages.get', params: { DIALOG_ID: `chat${chatId}`, LIMIT: HISTORY_LIMIT, ...(parsed.data.beforeId ? { LAST_ID: parsed.data.beforeId } : {}) } },
     });
+    const failed = (pack.errors as Record<string, { error?: string; error_description?: string } | undefined>).dialog ?? (pack.errors as Record<string, { error?: string; error_description?: string } | undefined>).messages;
+    if (failed) throw new Bitrix24Error(String(failed.error ?? 'ERROR'), failed.error_description ?? String(failed.error ?? 'ERROR'), undefined, { method: 'imopenlines.dialog.get' });
+    const dialog = pack.result.dialog as ImDialog;
+    const res = { result: pack.result.messages as ImMessages | undefined };
     const users = res.result?.users ?? [];
     const files = res.result?.files ?? [];
     const raw = res.result?.messages ?? [];
@@ -856,7 +907,10 @@ export class ChatsService {
     const siblings = new Set(siblingRows.map(r => r.b24ChatId));
     const candidates = rows.filter(r => (!!contactId && (r.crm as ChatSummary['crm'] | null)?.contactId === contactId) || siblings.has(r.chatId));
     const allowed = await this.summariesByChat(user, candidates.map(r => r.chatId));
-    return allowed.map(r => ({ chatId: r.chatId, connector: r.connector, title: r.title, lastMessageAt: r.lastMessage?.date ?? null, waitingReply: r.waitingReply }));
+    return allowed.map(r => ({
+      chatId: r.chatId, connector: r.connector, title: r.title, lastMessageAt: r.lastMessage?.date ?? null, waitingReply: r.waitingReply,
+      clientName: r.clientName, clientAvatar: r.clientAvatar ?? null, preview: r.lastMessage?.preview ?? '', hasFiles: r.lastMessage?.hasFiles ?? false, unread: r.unread ?? 0, dealId: r.crm?.dealId ?? null,
+    }));
   }
 
   /** Отметки «Не требует ответа» чатов (общие для всех сотрудников). */
@@ -891,7 +945,10 @@ export class ChatsService {
       data: { ...mark, ...(last?.human ? { lastMessageId: lastId, lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}) },
     });
     // Счётчик непрочитанных у отметившего — в ноль и в мессенджере (у остальных его скрывает отметка).
-    if (!needed) await user.client.call('im.dialog.read', { DIALOG_ID: `chat${chatId}` }).catch(() => undefined);
+    if (!needed) {
+      await user.client.call('im.dialog.read', { DIALOG_ID: `chat${chatId}` }).catch(() => undefined);
+      this.forgetUnread(user);
+    }
     return {
       chatId,
       waitingReply: isWaiting(updated.completed, updated.lastAuthor, updated.lastMessageId, updated),

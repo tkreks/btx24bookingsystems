@@ -41,7 +41,7 @@ export class DashboardLayoutService {
     const blocks = (p.data.blocks as DashboardBlock[])
       .filter((b) => (seen.has(b.type) ? false : (seen.add(b.type), true)))
       // Таблица показателей — только у своего блока и в пределах размера (до 6 ячеек).
-      .map(({ kpi, groupIds, ...b }) => (b.type === 'kpiGrid' ? { ...b, kpi: normalizeKpiGrid(kpi) } : b.type === 'resourceTimeline' && groupIds?.length ? { ...b, groupIds: [...new Set(groupIds)] } : b));
+      .map(({ kpi, groupIds, ...b }) => (b.type === 'kpiGrid' ? { ...b, kpi: normalizeKpiGrid(kpi) } : (b.type === 'resourceTimeline' || b.type === 'resourceTimelineNow') && groupIds?.length ? { ...b, groupIds: [...new Set(groupIds)] } : b));
     await this.prisma.dashboardLayout.upsert({
       where: { portalId_userId: { portalId: user.portal.id, userId: user.userId } },
       create: { portalId: user.portal.id, userId: user.userId, blocks: blocks as unknown as Prisma.InputJsonValue },

@@ -349,6 +349,26 @@ describe('ChatsService phone search', () => {
   });
 });
 
+describe('ChatsService: чаты сделки (встройка сделки)', () => {
+  it('чаты самой сделки и всех её контактов — правами сотрудника, без повторов; имя клиента', async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === 'crm.deal.get') return { result: { ID: '9842', CONTACT_ID: '30468' } };
+      if (method === 'crm.deal.contact.items.get') return { result: [{ CONTACT_ID: '30468' }, { CONTACT_ID: '30470' }] };
+      throw new Error(method);
+    });
+    const batch = vi.fn(async () => ({
+      result: { deal9842: [{ CHAT_ID: '16428' }], contact30468: [{ CHAT_ID: '16428' }, { CHAT_ID: '50856' }], contact30470: [], contact: { NAME: 'Ольга', LAST_NAME: 'Иванова' } },
+      errors: {},
+    }));
+    const user = { portal: { id: 'p1' }, userId: 7, client: { call, batch, listAll: vi.fn() } } as unknown as B24UserContext;
+    const svc = new ChatsService({} as FilesService, {} as OpenlineIndexService);
+    const summaries = vi.spyOn(svc, 'summariesByChat').mockResolvedValue([]);
+    expect(await svc.byDeal(user, 9842)).toEqual({ clientName: 'Ольга Иванова', items: [] });
+    expect(summaries).toHaveBeenCalledWith(user, [16428, 50856]);
+    expect(batch).toHaveBeenCalledWith(expect.objectContaining({ deal9842: { method: 'imopenlines.crm.chat.get', params: { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: 9842, ACTIVE_ONLY: 'N' } } }));
+  });
+});
+
 describe('ChatsService: кэш списка чатов', () => {
   const indexed = [
     { chatId: 101, sessionId: 11, responsibleId: 7, completed: false, lastMessageAt: new Date('2026-10-22T09:00:00Z') },

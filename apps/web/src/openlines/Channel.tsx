@@ -1,4 +1,5 @@
 import { connectorLabel } from './format.js';
+import { channelProvider } from './channel-error.js';
 
 const CHANNEL_COLORS: Record<string, string> = {
   WhatsApp: '#18be72',
@@ -19,7 +20,7 @@ export function Channel({ connector }: { connector: string }) {
       <span className="cl-channel-dot" style={{ background: CHANNEL_COLORS[label] ?? '#7e95bd' }} aria-hidden="true">
         {label === 'ВКонтакте' ? 'vk' : label[0]}
       </span>
-      <span className="cl-channel-label">{label}</span>
+      <span className="cl-channel-label">{label}{channelProvider(connector) ? ` · ${channelProvider(connector)}` : ''}</span>
     </span>
   );
 }

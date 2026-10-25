@@ -72,8 +72,8 @@ export interface MessengerVncTicketDto {
 export const MESSENGER_ERROR_STATES: MessengerState[] = ['failed', 'disconnected', 'logged_out', 'unavailable'];
 
 /**
- * `GET /api/messengers/status` — блок дашборда «Мессенджеры»: номера групп сотрудника, которые работают
- * (`ready`) или с ошибкой; `canScreen` — можно открыть экран (VNC): право писать с номера.
+ * `GET /api/messengers/status` — блок дашборда «Мессенджеры»: все номера групп сотрудника с состоянием;
+ * `canScreen` — можно открыть экран (VNC): право писать с номера.
  */
 export interface MessengerStatusDto {
   id: string;
@@ -81,7 +81,7 @@ export interface MessengerStatusDto {
   phone: string;
   title: string | null;
   state: MessengerState;
-  /** Описание ошибки для людей (только у номеров с ошибкой). */
+  /** Описание ошибки для людей (только у состояний из `MESSENGER_ERROR_STATES`). */
   error: string | null;
   canScreen: boolean;
 }
@@ -107,6 +107,15 @@ export interface MessengerScreenFilesDto {
 /** Номер телефона → только цифры с кодом страны (8XXXXXXXXXX и 9XXXXXXXXX → 7…); null — не похоже на номер. */
 export function normalizeMessengerPhone(input: unknown): string | null {
   return normalizeClientPhone(input);
+}
+
+/**
+ * Логин Telegram (`@ivan_petrov`, `t.me/ivan_petrov`, `ivan_petrov`) → `ivan_petrov`; не логин — null.
+ * Правила Telegram: 5–32 символа, латиница, цифры и `_`, начинается с буквы.
+ */
+export function normalizeMessengerLogin(input: unknown): string | null {
+  const s = String(input ?? '').trim().replace(/^(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\//i, '').replace(/^@/, '').replace(/\/+$/, '');
+  return /^[a-z][a-z0-9_]{4,31}$/i.test(s) ? s : null;
 }
 
 /** Привязка к открытой линии: своя линия приложения (`own`) — к чужой линии номер не привязывается. */
@@ -165,6 +174,8 @@ export interface MessengerSendResultDto {
   message: MessengerMessageDto | null;
   /** Передано в открытую линию — появится в переписке после доставки. */
   queued: boolean;
+  /** Чат открытой линии с клиентом (своя линия): новый диалог открывается в «Чатах», а не в окне мессенджера. */
+  openlineChatId?: number | null;
 }
 
 export interface MessengerSendDto {
@@ -191,6 +202,9 @@ export interface MessengerClientContextDto {
 }
 export interface MessengerContactSearchDto {
   existingChats?: { chatId: number; title: string; connector: string }[];
+  /** Номер (цифры) — при поиске по номеру; '' — при поиске по логину. */
   phone: string;
+  /** Логин Telegram — при поиске по логину (проверяются только подключения Telegram). */
+  login?: string | null;
   results: { messenger: MessengerDto; status: 'found' | 'not_found' | 'unavailable'; chatId: string | null; canSend: boolean; note: string | null; openlineChatId: number | null }[];
 }

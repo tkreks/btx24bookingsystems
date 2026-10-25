@@ -199,8 +199,8 @@ export class MessengerUserController {
   }
 
   @Get('search')
-  search(@B24User() user: B24UserContext, @Query('phone') phone: string) {
-    return this.chatsService.search(user, phone);
+  search(@B24User() user: B24UserContext, @Query('phone') phone: string, @Query('login') login?: string) {
+    return this.chatsService.search(user, phone, login);
   }
 
 

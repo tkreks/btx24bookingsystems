@@ -6,6 +6,8 @@ import { useDashboardQuery } from './DashboardSync.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtMoney } from '../format.js';
 import { ListMore } from '../openlines/ListMore.js';
+import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
+import { Icon } from '../openlines/icons.js';
 import { DashBadge } from '../openlines/RecentCalls.js';
 
 /** Загрузка блока: данные, ошибка, «ещё грузится». */
@@ -149,7 +151,7 @@ export function StopsBlock({ period }: { period: Period }) {
 }
 
 
-export function DealGapsBlock({ kind, tz, period }: { kind: 'chat' | 'contact'; tz: string; period: Period }) {
+export function DealGapsBlock({ kind, tz, period, onOpenChat }: { kind: 'chat' | 'contact'; tz: string; period: Period; onOpenChat?: (chatId: number) => void }) {
   const { data, error } = useLoad<DashboardGapsDto>(`/dashboard/deal-gaps?kind=${kind}&${periodQuery(period)}`);
   const [shown, setShown] = useState(STEP);
   return <section className="day-panel dash-block">
@@ -158,15 +160,27 @@ export function DealGapsBlock({ kind, tz, period }: { kind: 'chat' | 'contact'; 
     {!data && (error ? <p className="muted">{error}</p> : <BlockLoading />)}
     {data && !data.items.length && <p className="muted">Таких открытых сделок не найдено.</p>}
     <p className="muted dash-period-note">Созданы в выбранном периоде · состояние на сейчас</p>
-    <ul className="dt-rows">{data?.items.slice(0, shown).map((d) => <li key={d.dealId}>
+    <ul className="dt-rows">{data?.items.slice(0, shown).map((d) => <li key={d.dealId} className="deal-gap-row">
       <button type="button" className="dt-row" onClick={() => openCrm('deal', d.dealId)}>
         <span className="dt-main"><b>{d.title}</b><span className="muted">#{d.dealId}{d.createdAt ? ` · ${fmtDateTime(d.createdAt, tz)}` : ''}</span></span>
         <span className="dt-side">{d.opportunity != null && fmtMoney(d.opportunity, d.currency)}</span>
       </button>
+      {kind === 'chat' && <DealMessengerAction phones={d.phones ?? []} timezone={tz} onOpenChat={onOpenChat} />}
     </li>)}</ul>
     <ListMore total={data?.items.length ?? 0} shown={shown} step={STEP} onShow={setShown} />
     {data?.notes.map((note) => <p className="muted" key={note}>{note}</p>)}
   </section>;
+}
+
+
+function DealMessengerAction({ phones, timezone, onOpenChat }: { phones: string[]; timezone: string; onOpenChat?: (chatId: number) => void }) {
+  const [selected, setSelected] = useState('');
+  const phone = phones.includes(selected) ? selected : phones[0];
+  if (!phone) return <button type="button" className="dash-icon-btn" disabled title="У клиента нет доступного телефона в CRM" aria-label="Поиск в мессенджерах: нет телефона клиента"><Icon name="search" size={18} /></button>;
+  return <span className="deal-gap-messenger">
+    {phones.length > 1 && <select aria-label="Телефон клиента для поиска в мессенджерах" value={phone} onChange={e => setSelected(e.target.value)}>{phones.map(p => <option key={p} value={p}>+{p}</option>)}</select>}
+    <MessengerSearchButton key={phone} phone={phone} timezone={timezone} onOpenChat={onOpenChat} />
+  </span>;
 }
 
 

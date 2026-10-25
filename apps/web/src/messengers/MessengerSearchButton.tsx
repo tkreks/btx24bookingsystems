@@ -1,12 +1,9 @@
 import { useState } from 'react';
 import type { MessengerContactSearchDto, MessengerDto, MessengerKind } from '@btx24/shared';
+import { groupByKind, StartChatFlow, type SearchResult } from './by-kind.js';
 import { apiGet } from '../api.js';
-import { openMessenger } from '../b24.js';
 import { Icon } from '../openlines/icons.js';
-import { MessengerChatsDialog } from './MessengerChatsDialog.js';
 import { MessengerSearchDialog } from './MessengerSearchDialog.js';
-
-type Result = MessengerContactSearchDto['results'][number];
 const KIND_LABEL: Record<MessengerKind, string> = { whatsapp: 'WhatsApp', telegram: 'Telegram', max: 'MAX' };
 
 /** Значок мессенджера (круг в цвете бренда). */
@@ -50,8 +47,8 @@ function Badge({ state }: { state: 'searching' | 'found' | 'missing' }) {
 
 /**
  * Поиск клиента по номеру в подключённых мессенджерах (карточка звонка, блок «Звонки»). До нажатия —
- * значок поиска; после — значок каждого доступного номера-мессенджера со статусом. Найден — нажатие
- * открывает переписку (чат открытой линии или окно мессенджера); иначе — подробности поиска.
+ * значок поиска; после — один значок на мессенджер (не на аккаунт) со статусом. Найден — нажатие
+ * открывает переписку (несколько аккаунтов — сначала выбор аккаунта); иначе — подробности поиска.
  */
 export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel = false }: { phone: string; timezone: string; onOpenChat?: (chatId: number) => void; withLabel?: boolean }) {
   const [list, setList] = useState<MessengerDto[] | null>(null);
@@ -59,7 +56,7 @@ export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel =
   const [error, setError] = useState('');
   const [started, setStarted] = useState(false);
   const [details, setDetails] = useState(false);
-  const [writing, setWriting] = useState<Result | null>(null);
+  const [writing, setWriting] = useState<SearchResult[] | null>(null);
 
   const start = () => {
     setStarted(true);
@@ -71,11 +68,6 @@ export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel =
       setError(e instanceof Error ? e.message : 'Не удалось проверить мессенджеры'),
     );
   };
-  const open = (r: Result) => {
-    if (r.status !== 'found' || !r.canSend) return setDetails(true);
-    if (r.openlineChatId) return onOpenChat ? onOpenChat(r.openlineChatId) : openMessenger(r.openlineChatId);
-    setWriting(r);
-  };
 
   if (!started)
     return (
@@ -86,7 +78,7 @@ export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel =
     );
 
   const messengers = data?.results.map((r) => r.messenger) ?? list ?? [];
-  const resultOf = (id: string) => data?.results.find((r) => r.messenger.id === id);
+  const kinds = groupByKind(messengers, data?.results ?? (error ? [] : null));
   const existing = data?.existingChats ?? [];
   return (
     <span className="msr" role="group" aria-label="Поиск в мессенджерах" aria-busy={!data && !error}>
@@ -96,14 +88,13 @@ export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel =
           <Badge state="searching" />
         </span>
       )}
-      {messengers.map((m) => {
-        const r = resultOf(m.id);
-        const state = r ? (r.status === 'found' ? 'found' : 'missing') : error ? 'missing' : 'searching';
-        const name = `${m.title || KIND_LABEL[m.kind]} +${m.phone}`;
-        const text = !r ? (error ? `${name}: ${error}` : `${name}: ищем…`) : r.status === 'found' ? `${name}: клиент найден${r.canSend ? ' — открыть переписку' : r.note ? ` (${r.note})` : ''}` : r.status === 'not_found' ? `${name}: не найден` : `${name}: ${r.note ?? 'проверка недоступна'}`;
+      {kinds.map((k) => {
+        const state = k.state === 'checking' ? 'searching' : k.state === 'found' ? 'found' : 'missing';
+        const name = KIND_LABEL[k.kind] + (k.accounts.length > 1 ? ` (аккаунтов: ${k.accounts.length})` : '');
+        const text = error ? `${name}: ${error}` : k.state === 'checking' ? `${name}: ищем…` : k.state === 'found' ? `${name}: клиент найден — открыть переписку` : k.state === 'not_found' ? `${name}: не найден` : `${name}: ${k.note ?? 'проверка недоступна'}`;
         return (
-          <button key={m.id} type="button" className={`msr-icon ${state}`} disabled={!r && !error} title={text} aria-label={text} onClick={() => (r ? open(r) : setDetails(true))}>
-            <MessengerKindIcon kind={m.kind} />
+          <button key={k.kind} type="button" className={`msr-icon ${state}`} disabled={k.state === 'checking' && !error} title={text} aria-label={text} onClick={() => (k.state === 'found' ? setWriting(k.found) : setDetails(true))}>
+            <MessengerKindIcon kind={k.kind} />
             <Badge state={state} />
           </button>
         );
@@ -121,9 +112,7 @@ export function MessengerSearchButton({ phone, timezone, onOpenChat, withLabel =
         </button>
       )}
       {details && <MessengerSearchDialog phone={phone} timezone={timezone} initial={data} onClose={() => setDetails(false)} onOpenChat={onOpenChat} />}
-      {writing && (
-        <MessengerChatsDialog messenger={writing.messenger} timezone={timezone} admin={false} initialChatId={writing.chatId ?? `${data?.phone}@c.us`} onClose={() => setWriting(null)} />
-      )}
+      {writing && <StartChatFlow found={writing} phone={data?.phone ?? null} timezone={timezone} onOpenChat={onOpenChat} onClose={() => setWriting(null)} />}
     </span>
   );
 }

@@ -20,6 +20,8 @@ const templateSchema = z
   .object({ name: z.string().trim().min(1).max(100), steps: stepsSchema, shared: z.boolean().optional(), purpose: z.enum(['chat', 'payment', 'auto']).optional() })
   .strict();
 const MAX_TEMPLATES = 100;
+/** Частота шаблонов — по вставкам сотрудника в чат за 30 дней (журнал действий, `template.use`). */
+const USES_WINDOW_MS = 30 * 24 * 3600_000;
 
 /**
  * Шаблоны сообщений: личные (видит и меняет автор) и общие (видят все сотрудники портала, меняют
@@ -40,7 +42,15 @@ export class TemplatesService {
       orderBy: [{ shared: 'desc' }, { name: 'asc' }],
     });
     const steps = rows.map((r) => r.steps as unknown as TemplateStepDto[]);
-    const meta = await this.files.meta(user, [...new Set(steps.flat().flatMap((s) => s.fileIds))]);
+    const [meta, uses] = await Promise.all([
+      this.files.meta(user, [...new Set(steps.flat().flatMap((s) => s.fileIds))]),
+      this.prisma.actionLog.groupBy({
+        by: ['entityId'],
+        where: { portalId: user.portal.id, userId: user.userId, action: 'template.use', entityType: 'template', at: { gte: new Date(Date.now() - USES_WINDOW_MS) } },
+        _count: { _all: true },
+      }),
+    ]);
+    const used = new Map(uses.map((u) => [u.entityId, u._count._all]));
     return rows.map((r, i) => ({
       id: r.id,
       name: r.name,
@@ -49,8 +59,16 @@ export class TemplatesService {
       mine: r.ownerUserId === user.userId,
       canEdit: r.shared ? admin : r.ownerUserId === user.userId,
       updatedAt: r.updatedAt.toISOString(),
+      uses30d: used.get(r.id) ?? 0,
       steps: steps[i].map((s) => ({ ...s, files: s.fileIds.flatMap((id) => (meta.has(id) ? [meta.get(id)!] : [])) })),
     }));
+  }
+
+  /** Сотрудник вставил шаблон в чат — для сортировки по частоте (свой или общий шаблон портала). */
+  async markUsed(user: B24UserContext, id: string): Promise<void> {
+    const t = await this.prisma.messageTemplate.findFirst({ where: { id, portalId: user.portal.id, OR: [{ ownerUserId: user.userId }, { shared: true }] }, select: { id: true, name: true } });
+    if (!t) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: 'Шаблон не найден' });
+    await this.prisma.actionLog.create({ data: { portalId: user.portal.id, userId: user.userId, action: 'template.use', entityType: 'template', entityId: t.id, summary: `Вставил шаблон «${t.name}» в чат`.slice(0, 500), via: 'app' } });
   }
 
   async create(user: B24UserContext, body: unknown, admin = false): Promise<MessageTemplateDto> {

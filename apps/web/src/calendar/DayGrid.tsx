@@ -32,7 +32,9 @@ export function DayGrid({
   const [hover, setHover] = useState<{ resourceId: number; minute: number } | null>(null);
   const hasMine = !!highlightDealId && day.bookings.some((b) => b.dealId === highlightDealId);
   // Бронь сделки — в поле зрения (сетка суток длинная).
-  useEffect(() => mine.current?.scrollIntoView({ block: 'center', inline: 'center' }), [day, highlightDealId]);
+  useEffect(() => {
+    mine.current?.scrollIntoView({ block: 'center', inline: 'center' });
+  }, [day, highlightDealId]);
   const minuteAt = (e: MouseEvent<HTMLDivElement>) =>
     slotAt((e.clientY - e.currentTarget.getBoundingClientRect().top) / PX_PER_MIN, minutes);
   const slotIso = (minute: number) => new Date(dayStart + minute * 60_000).toISOString();

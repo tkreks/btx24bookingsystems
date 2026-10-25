@@ -20,7 +20,9 @@ describe('Файлы в переписке мессенджера',()=>{
   });
   it('номер с собственной ОЛ открывает/дополняет линию от имени сотрудника',async()=>{
     const t=setup();const m={...M,lineMode:'own',lineId:14} as Messenger;const file={mime:'application/pdf',name:'x.pdf',data:Buffer.from('pdf')};const user={userId:7} as never;
-    await t.svc.sendFile(user,m,'x@lid','Caption',file);
+    Object.assign(t.row,{b24ChatId:321});
+    const result=await t.svc.sendFile(user,m,'x@lid','Caption',file);
+    expect(result.openlineChatId).toBe(321);
     expect(t.connector.firstContact).toHaveBeenCalledWith(user,m,'79991234567@c.us','Caption',file,undefined);expect(t.service.send).not.toHaveBeenCalled();
   });
   it('файл истории скачивается лениво, связь сообщения ограничена номером; удалённое не выдаётся',async()=>{

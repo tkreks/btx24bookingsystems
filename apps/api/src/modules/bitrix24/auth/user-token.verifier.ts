@@ -24,6 +24,8 @@ export class AuthError extends HttpException {
 @Injectable()
 export class UserTokenVerifier {
   private readonly cache = new Map<string, { value: Verified; expiresAt: number }>();
+  /** Проверки в полёте: пачка запросов страницы с новым токеном — один user.current/user.admin. */
+  private readonly inflight = new Map<string, Promise<Verified>>();
 
   constructor(private readonly portals: PortalService) {}
 
@@ -40,6 +42,18 @@ export class UserTokenVerifier {
       return { portal, client, ...hit.value };
     }
 
+    let pending = this.inflight.get(key);
+    if (!pending) {
+      pending = this.check(client).finally(() => this.inflight.delete(key));
+      this.inflight.set(key, pending);
+    }
+    const value = await pending;
+    this.remember(key, value);
+    client.actor = { userId: value.userId, name: value.userName };
+    return { portal, client, ...value };
+  }
+
+  private async check(client: ReturnType<PortalService['clientWithToken']>): Promise<Verified> {
     let value: Verified;
     try {
       // Два вызова, а не batch: user.current может быть запрещён в пакете (ERROR_BATCH_METHOD_NOT_ALLOWED).
@@ -60,9 +74,7 @@ export class UserTokenVerifier {
       }
       throw err;
     }
-    this.remember(key, value);
-    client.actor = { userId: value.userId, name: value.userName };
-    return { portal, client, ...value };
+    return value;
   }
 
   private remember(key: string, value: Verified) {
