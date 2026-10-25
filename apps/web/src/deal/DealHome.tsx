@@ -3,6 +3,7 @@ import { normalizeMessengerPhone, type AttentionChatDto, type ChatFlagDto, type 
 import { apiGet, apiPut } from '../api.js';
 import { openCrm } from '../b24.js';
 import { AttentionMessage } from '../dashboard/AttentionMessage.js';
+import { ChatRowMenu } from '../dashboard/ChatRowMenu.js';
 import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
 import { HideChatDialog } from '../openlines/DashboardPage.js';
@@ -115,15 +116,7 @@ export function DealHome({ dealId, timezone, canBook, onOpen, onOpenChat }: { de
                   >
                     !
                   </button>
-                  <button className="dash-icon-btn" title={c.dealId ? `Сделка #${c.dealId}` : 'Чат не привязан к сделке'} aria-label="Открыть сделку" disabled={!c.dealId} onClick={() => c.dealId && openCrm('deal', c.dealId)}>
-                    <Icon name="deal" size={18} />
-                  </button>
-                  <button className="dash-icon-btn" title="Перейти в чат" aria-label="Перейти в чат" onClick={() => onOpenChat(c.chatId)}>
-                    <Icon name="gochat" size={18} />
-                  </button>
-                  <button className="dash-icon-btn" title="Скрыть чат с дашборда" aria-label="Скрыть чат с дашборда" onClick={() => setHiding(c)}>
-                    <Icon name="hide" size={18} />
-                  </button>
+                  <ChatRowMenu dealId={c.dealId} onDeal={() => c.dealId && openCrm('deal', c.dealId)} onChat={() => onOpenChat(c.chatId)} onHide={() => setHiding(c)} />
                 </span>
               </li>
             );

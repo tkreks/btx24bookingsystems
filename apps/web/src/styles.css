@@ -8763,3 +8763,9 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .deal-home-broken > span { flex: 1 1 260px; }
 .deal-home-tiles { grid-template-columns: repeat(2, minmax(0, 260px)); }
 .deal-home-tile.booking .deal-home-icon { background: linear-gradient(135deg, #22c55e, #16a34a); }
+
+/* «⋮» в строке чата: «Сделка», «Перейти в чат», «Скрыть с дашборда» (меню у кнопки, поверх блоков). */
+.cl-menu.chat-row-menu { position: fixed; z-index: 60; min-width: 210px; }
+.chat-row-menu .cl-menu-item { display: flex; align-items: center; gap: 9px; }
+.chat-row-menu .cl-menu-item:disabled { opacity: .45; background: transparent; color: #40516d; }
+.chat-row-menu .icon { flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
