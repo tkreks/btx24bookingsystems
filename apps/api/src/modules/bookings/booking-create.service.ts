@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import {
+  CLIENT_REQUIRED_MESSAGE,
   canUsePaymentMode,
   DEAL_KIND_TYPE_VALUE,
   DEAL_KINDS,
@@ -98,6 +99,17 @@ export class BookingCreateService {
     @Optional() private readonly stops?: ResourceStopsService,
   ) {}
 
+  /** Контакт для привязки к выбранной сделке без клиента; null — привязывать не нужно. Нет клиента — 400. */
+  private async requireClient(user: B24UserContext, b: CreateBookingDto): Promise<number | null> {
+    const given = b.contactId ?? b.newDeal?.contactId ?? null;
+    if (b.dealId) {
+      const deal = (await user.client.call<{ CONTACT_ID?: string | null }>('crm.deal.get', { id: b.dealId })).result;
+      if (Number(deal?.CONTACT_ID) > 0) return null;
+      if (given) return given;
+    } else if (given) return null;
+    throw new BadRequestException({ code: 'CLIENT_REQUIRED', message: CLIENT_REQUIRED_MESSAGE });
+  }
+
   async create(user: B24UserContext, body: unknown): Promise<CreateBookingResultDto> {
     const parsed = createSchema.safeParse(body);
     if (!parsed.success)
@@ -156,6 +168,9 @@ export class BookingCreateService {
     // Идёт прямо сейчас (не зависла дольше 2 минут) — второй раз не запускаем.
     if (prev?.status === 'running' && prev.updatedAt.getTime() > Date.now() - STUCK_MS)
       throw new ConflictException({ code: 'OPERATION_RUNNING', message: 'Бронь уже создаётся — дождитесь результата' });
+    // У клиентской брони всегда есть клиент (решение владельца 2026-10-26): контакт заявки или сделки;
+    // у выбранной сделки контакта нет — привязываем к ней контакт заявки.
+    const attachContact = b.kind === 'client' ? await this.requireClient(user, b) : null;
     // Прошлая попытка сорвалась — повтор безопасен: созданная тогда новая сделка используется снова,
     // а бронь, которую не удалось снять откатом, сначала снимаем.
     const reuseDealId = prev && b.newDeal ? prev.dealId : null;
@@ -210,6 +225,15 @@ export class BookingCreateService {
         await log('deal.add', true, { dealId });
       }
       const contactId = b.contactId ?? b.newDeal?.contactId ?? null;
+      if (dealId && attachContact) {
+        try {
+          await user.client.call('crm.deal.contact.add', { id: dealId, fields: { CONTACT_ID: attachContact, IS_PRIMARY: 'Y' } });
+          await log('deal.contact.add', true, { contactId: attachContact });
+        } catch (err) {
+          warnings.push('Клиент не привязан к сделке — укажите его в сделке');
+          await log('deal.contact.add', false, msg(err));
+        }
+      }
 
       // 2. Бронь
       const products = b.products ?? [];

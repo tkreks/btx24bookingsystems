@@ -277,6 +277,9 @@ export function canUsePaymentMode(permissions: readonly string[], mode: PaymentM
   return !RESTRICTED_PAYMENT_MODES.includes(mode) || (permissions.includes('booking.create') && permissions.includes('deal.create'));
 }
 
+/** У клиентской брони всегда есть клиент (решение владельца 2026-10-26). */
+export const CLIENT_REQUIRED_MESSAGE = 'У брони должен быть клиент — выберите или создайте контакт';
+
 /** `POST /api/bookings` — создать бронь (сага: сделка → бронь → связь → поля сделки → товары). */
 export interface CreateBookingDto {
   /** Ключ идемпотентности: повтор с тем же ключом вернёт тот же результат. */

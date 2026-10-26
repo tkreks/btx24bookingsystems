@@ -9,6 +9,8 @@ export type SectionKey = 'who' | 'when' | 'slot' | 'certificate' | 'goods' | 'fi
 export type SectionStatus = 'locked' | 'empty' | 'done' | 'warning' | 'error';
 export type DealMode = 'existing' | 'new' | 'service' | 'none';
 
+export const CLIENT_REQUIRED_TEXT = 'Выберите клиента: у брони всегда есть клиент';
+
 export const SECTION_TITLES: Record<SectionKey, string> = {
   who: 'Клиент и сделка',
   when: 'Группа',
@@ -25,6 +27,8 @@ export interface WizardSnapshot {
   dealMode: DealMode;
   /** Сделка пришла из встройки — раздел «Кто» не меняется. */
   dealFixed: boolean;
+  /** Клиентская бронь без контакта: у брони всегда есть клиент (решение владельца 2026-10-26). */
+  clientMissing: boolean;
   /** По выбранной сделке уже есть бронь — предупреждение. */
   dealBooked: boolean;
   /** Группа выбрана и доступна для такой брони. */
@@ -68,6 +72,7 @@ export function allIssues(s: WizardSnapshot): { key: SectionKey; text: string }[
   const out: { key: SectionKey; text: string }[] = [];
   const keys = visibleSections(s);
   if (s.dealMode === 'none') out.push({ key: 'who', text: 'Выберите сделку, «Новая сделка» или служебную бронь' });
+  else if (s.clientMissing) out.push({ key: 'who', text: CLIENT_REQUIRED_TEXT });
   if (!s.groupOk) out.push({ key: 'when', text: 'Выберите группу' });
   else if (s.kindMissing) out.push({ key: 'when', text: 'Выберите тип сделки' });
   if (keys.includes('slot')) {
@@ -121,6 +126,7 @@ export function sectionView(key: SectionKey, s: WizardSnapshot, touched: Readonl
   switch (key) {
     case 'who':
       if (s.dealMode === 'none') return { key, status: t ? 'error' : 'empty', note: t ? 'Выберите сделку' : null };
+      if (s.clientMissing) return { key, status: 'error', note: 'Выберите клиента' };
       return s.dealBooked ? { key, status: 'warning', note: 'По сделке уже есть бронь' } : { key, status: 'done', note: null };
     case 'when':
       if (!s.groupOk) return { key, status: t ? 'error' : 'empty', note: t ? 'Выберите группу' : null };
@@ -157,7 +163,7 @@ export function firstSection(s: WizardSnapshot): SectionKey {
   const keys = visibleSections(s);
   for (const k of keys) {
     // «Кто» открыт, пока сделку не подтвердили (из чата и звонка сделка выбрана, но её надо подтвердить).
-    if (k === 'who' && (s.dealFixed || s.dealMode === 'new')) continue;
+    if (k === 'who' && (s.dealFixed || s.dealMode === 'new') && !s.clientMissing) continue;
     if (k === 'when' && s.groupOk && !s.kindMissing && s.groupGiven) continue;
     if (k === 'slot' && s.resourceCount && !s.slotError) continue;
     return k;

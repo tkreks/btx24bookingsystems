@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Optional } from '@nestjs/common';
-import type { BookingCatalogDto, CrmContactHit, CrmDealHit, CrmDealModifier, CrmSearchDto, DealBookingTone, DealProductRowDto, GroupOptionsDto } from '@btx24/shared';
+import { normalizeMessengerPhone, type BookingCatalogDto, type CrmContactHit, type CrmDealHit, type CrmDealModifier, type CrmSearchDto, type DealBookingTone, type DealProductRowDto, type GroupOptionsDto } from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { phoneVariants } from '../openlines/chats.service.js';
@@ -166,6 +166,40 @@ export class BookingDirectoryService {
     if (q.length < 2) throw new BadRequestException({ code: 'SHORT_QUERY', message: 'Введите хотя бы 2 символа' });
     if (query.kind === 'deal') return { contacts: [], deals: await this.findDeals(user, q) };
     return { contacts: await this.findContacts(user, q), deals: [] };
+  }
+
+  /**
+   * Новый клиент из мастера брони (у брони всегда есть клиент, решение владельца 2026-10-26): имя и
+   * телефон. Контакт с таким номером уже есть — возвращаем его, дубль не создаём. Токеном сотрудника.
+   */
+  async createContact(user: B24UserContext, body: { name?: unknown; phone?: unknown }): Promise<CrmContactHit> {
+    await this.canCreate(user);
+    const name = typeof body?.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
+    if (!name || name.length > 100) throw new BadRequestException({ code: 'INVALID_NAME', message: 'Имя клиента: от 1 до 100 символов' });
+    const raw = typeof body?.phone === 'string' ? body.phone.trim() : '';
+    const phone = raw ? normalizeMessengerPhone(raw) : null;
+    if (raw && !phone) throw new BadRequestException({ code: 'INVALID_PHONE', message: 'Телефон: 10–15 цифр с кодом страны' });
+    if (phone) {
+      const found = await user.client.call<{ CONTACT?: number[] }>('crm.duplicate.findbycomm', { entity_type: 'CONTACT', type: 'PHONE', values: phoneVariants(phone) });
+      const id = found.result?.CONTACT?.[0];
+      if (id) {
+        const rows = await user.client.listAll<Contact>('crm.contact.list', { filter: { ID: id }, select: CONTACT_SELECT }, { max: 1 });
+        if (rows[0]) return this.contactHit(user, rows[0]);
+      }
+    }
+    const [first, ...rest] = name.split(' ');
+    const res = await user.client.call<number>('crm.contact.add', {
+      fields: {
+        NAME: first,
+        ...(rest.length ? { LAST_NAME: rest.join(' ') } : {}),
+        ...(phone ? { PHONE: [{ VALUE: `+${phone}`, VALUE_TYPE: 'MOBILE' }] } : {}),
+        ASSIGNED_BY_ID: user.userId,
+        OPENED: 'Y',
+      },
+    });
+    const id = Number(res.result);
+    if (!(id > 0)) throw new BadRequestException({ code: 'CONTACT_NOT_CREATED', message: 'Портал не создал контакт' });
+    return { id, name, photo: null, phones: phone ? [`+${phone}`] : [], emails: [] };
   }
 
   private async findContacts(user: B24UserContext, q: string): Promise<CrmContactHit[]> {

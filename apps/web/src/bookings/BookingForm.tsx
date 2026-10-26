@@ -488,6 +488,7 @@ export function BookingForm({
   const snapshot: WizardSnapshot = {
     dealMode: deal.mode,
     dealFixed: !!context.dealId,
+    clientMissing: (deal.mode === 'new' || deal.mode === 'existing') && !client.contactId,
     dealBooked: !!chosenDeal && (chosenDeal.tone ?? (chosenDeal.booking ? 'booked' : 'empty')) === 'booked',
     groupOk: groupChoices.some((g) => g.id === groupId),
     groupGiven: allowed.length <= 1 || (!!context.groupId && (!context.dealId || !!context.resourceId)),
@@ -653,9 +654,12 @@ export function BookingForm({
 
   // Выбран клиент поиском — его сделки (последняя открытая — первой); нет открытых — новая сделка.
   const chooseContact = async (c: CrmContactHit) => {
+    // Выбранная сделка без клиента (встройка, чат) остаётся — клиент привяжется к ней при создании.
+    const keepDeal = deal.mode === 'existing' && !client.contactId;
     setClient({ contactId: c.id, name: c.name });
     setClientCard(c);
     setSearching(false);
+    if (keepDeal) return;
     setDealsShown(DEALS_STEP);
     try {
       const r = await apiGet<CrmSearchDto>(`/crm/search?contactId=${c.id}`);
@@ -787,7 +791,8 @@ export function BookingForm({
               </>
             )}
           </div>
-          {searching && <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />}
+          {snapshot.clientMissing && <p className="notice error" role="alert">У брони должен быть клиент, а у {deal.mode === 'existing' ? 'этой сделки' : 'новой сделки'} его нет — найдите клиента или создайте нового.</p>}
+          {(searching || snapshot.clientMissing) && <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} newName={client.name} autoFocus />}
           <h4 className="bk-title wz-deals-title">
             Сделка{dealCards.length ? ` · ${dealCards.length} ${dealCards.length === 1 ? 'открытая' : 'открытые'}` : ''} <ToneLegend />
           </h4>
@@ -803,7 +808,8 @@ export function BookingForm({
         </>
       ) : (
         <>
-          <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />
+          {snapshot.clientMissing && <p className="notice error" role="alert">У брони должен быть клиент, а у {deal.mode === 'existing' ? 'этой сделки' : 'новой сделки'} его нет — найдите клиента или создайте нового.</p>}
+          <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} newName={client.name} autoFocus />
           <h4 className="bk-title wz-deals-title">
             Последняя активность <ToneLegend />
           </h4>

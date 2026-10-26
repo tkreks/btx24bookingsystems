@@ -5,6 +5,7 @@ import type {
   BookingAlertDto,
   BookingVersionsDto,
   BookingCatalogDto,
+  CrmContactHit,
   CrmSearchDto,
   DealProductRowDto,
   RecentDealsDto,
@@ -120,6 +121,13 @@ export class BookingsController {
   @Get('crm/search')
   search(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<CrmSearchDto> {
     return this.directory.search(user, query);
+  }
+
+  /** Новый клиент из мастера брони (контакт с тем же телефоном — существующий). */
+  @Post('crm/contacts')
+  @HttpCode(200)
+  createContact(@B24User() user: B24UserContext, @Body() body: { name?: unknown; phone?: unknown }): Promise<CrmContactHit> {
+    return this.directory.createContact(user, body);
   }
 
   @Get('booking-alerts')

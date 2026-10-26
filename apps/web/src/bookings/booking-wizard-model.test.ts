@@ -4,6 +4,7 @@ import { allIssues, firstSection, missingText, reviewTarget, sectionView, visibl
 const base: WizardSnapshot = {
   dealMode: 'existing',
   dealFixed: false,
+  clientMissing: false,
   dealBooked: false,
   groupOk: true,
   groupGiven: false,
@@ -97,5 +98,17 @@ describe('allIssues / reviewTarget', () => {
 describe('missingText', () => {
   it('до трёх имён, дальше +N', () => {
     expect(missingText(['А', 'Б', 'В', 'Г', 'Д'])).toBe('Не заполнено 5: А, Б, В +2');
+  });
+});
+describe('клиент брони', () => {
+  it('сделка из встройки без клиента — «Кто» открыт первым, с ошибкой; проверка — туда же', () => {
+    const s = { ...base, dealFixed: true, clientMissing: true };
+    expect(firstSection(s)).toBe('who');
+    expect(sectionView('who', s, none, none)).toMatchObject({ status: 'error', note: 'Выберите клиента' });
+    expect(reviewTarget(s)).toBe('who');
+    expect(allIssues(s)[0].text).toMatch(/всегда есть клиент/);
+  });
+  it('служебная бронь клиента не требует', () => {
+    expect(allIssues({ ...base, dealMode: 'service' }).some((i) => i.key === 'who')).toBe(false);
   });
 });

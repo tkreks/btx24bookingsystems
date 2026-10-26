@@ -9265,3 +9265,9 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .dp-pop-foot { display: flex; justify-content: center; gap: 16px; margin-top: 8px; font-size: 13px; }
 .wz-hint { margin: 0 0 10px; font-size: 13px; }
 @media (max-width: 480px) { .dp-rel { display: none; } .dp-num { width: 40px; height: 40px; font-size: 19px; } }
+
+/* Мастер брони: «Новый клиент» в поиске клиента (у брони всегда есть клиент). */
+.cp-new { justify-self: start; margin: 4px 0; font-size: 13px; }
+.cp-new-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; padding: 10px; border: 1px dashed var(--line); border-radius: 12px; }
+.cp-new-form input { flex: 1 1 160px; min-width: 0; }
+.cp-new-form .cp-hint { flex-basis: 100%; margin: 0; }

@@ -22,7 +22,7 @@ const group = {
 };
 const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
 
-function setup(o: { failCompensation?: boolean; fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[]; formFields?: DealFormField[] } = {}) {
+function setup(o: { dealContact?: string | null; failCompensation?: boolean; fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[]; formFields?: DealFormField[] } = {}) {
   const ops: Record<string, unknown>[] = [];
   const prisma = {
     bookingOperation: {
@@ -43,6 +43,8 @@ function setup(o: { failCompensation?: boolean; fail?: string; failCode?: string
   const fieldMap = { get: vi.fn(async () => map), enumId: vi.fn(async (_p: string, _c: unknown, _f: string, v: string) => (v === 'xml-88' ? '88' : v)) } as unknown as DealFieldMapService;
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+    // Проверка клиента сделки — до записей; в списке вызовов саги её не учитываем.
+    if (method === 'crm.deal.get') return { result: { ID: String(params.id), CONTACT_ID: o.dealContact === undefined ? '140' : o.dealContact } };
     calls.push([method, params]);
     if (o.failCompensation && method === 'booking.v1.booking.delete') throw new Error('delete failed');
     if (o.fail === method) throw new Bitrix24Error(o.failCode ?? (method === 'booking.v1.booking.add' ? '1018' : 'ERR'), `${method} failed`);
@@ -102,6 +104,28 @@ describe('BookingCreateService', () => {
     const r = await t.svc.create(t.user, body({ dealId: undefined, newDeal: { title: 'Баня, Иванов', contactId: 140 } }));
     expect(r.dealId).toBe(900);
     expect(t.calls[0]).toEqual(['crm.deal.add', { fields: { TITLE: 'Баня, Иванов', CATEGORY_ID: 0, ASSIGNED_BY_ID: 7, CONTACT_ID: 140 } }]);
+  });
+
+  it('у брони всегда есть клиент: сделка без контакта — контакт заявки привязывается к сделке', async () => {
+    const t = setup({ dealContact: null });
+    const r = await t.svc.create(t.user, body());
+    expect(r.warnings).toEqual([]);
+    expect(t.calls).toContainEqual(['crm.deal.contact.add', { id: 678, fields: { CONTACT_ID: 140, IS_PRIMARY: 'Y' } }]);
+  });
+
+  it('у брони всегда есть клиент: ни у сделки, ни в заявке — 400 до любых записей', async () => {
+    const t = setup({ dealContact: null });
+    await expect(t.svc.create(t.user, body({ contactId: null }))).rejects.toMatchObject({ status: 400, response: { code: 'CLIENT_REQUIRED' } });
+    const n = setup();
+    await expect(n.svc.create(n.user, body({ dealId: undefined, contactId: null, newDeal: { title: 'Баня', contactId: null } }))).rejects.toMatchObject({ response: { code: 'CLIENT_REQUIRED' } });
+    expect([...t.calls, ...n.calls]).toEqual([]);
+    expect([...t.ops, ...n.ops]).toEqual([]);
+  });
+
+  it('у сделки уже есть клиент — контакт к ней не добавляется', async () => {
+    const t = setup();
+    await t.svc.create(t.user, body());
+    expect(t.calls.some(([m]) => m === 'crm.deal.contact.add')).toBe(false);
   });
 
   it('overlap (1018) → 409, nothing to compensate', async () => {

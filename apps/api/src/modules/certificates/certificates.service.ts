@@ -1,6 +1,7 @@
 import { selectedPeriod } from '../../common/period.js';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  CLIENT_REQUIRED_MESSAGE,
   CERTIFICATE_DEAL_TYPE,
   CERTIFICATE_KIND_LABELS,
   CERTIFICATE_KINDS,
@@ -139,6 +140,8 @@ export class CertificatesService {
     if (!g) throw new ForbiddenException({ code: 'NO_BOOKING_CREATE', message: 'Нет права оформлять сделки в этой группе' });
     if (input.newDeal && !g.permissions.includes('deal.create'))
       throw new ForbiddenException({ code: 'NO_DEAL_CREATE', message: 'Нет права создавать сделки в этой группе' });
+    // Новая сделка — только с клиентом (решение владельца 2026-10-26).
+    if (input.newDeal && !input.newDeal.contactId) throw new BadRequestException({ code: 'CLIENT_REQUIRED', message: CLIENT_REQUIRED_MESSAGE });
     const warnings: string[] = [];
     const map = await this.fieldMap.resolved(user.portal.id, user.client);
     const typeValue = map.dealType ? await this.fieldMap.enumId(user.portal.id, user.client, map.dealType, CERTIFICATE_DEAL_TYPE, true).catch(() => null) : null;

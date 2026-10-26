@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CrmContactHit, CrmDealHit, CrmSearchDto } from '@btx24/shared';
-import { apiGet } from '../api.js';
+import { apiGet, apiPost } from '../api.js';
 import { fmtMoney } from '../format.js';
 import { Avatar } from '../openlines/Avatar.js';
 
@@ -18,19 +18,39 @@ export function ContactName({ name, id }: { name: string; id: number }) {
 
 /**
  * Поиск клиента или сделки для брони: «Клиент» — ID контакта, телефон, e-mail или ФИО; «Сделка» —
- * название, ID или имя клиента. Поиск — от 2 символов, с паузой после ввода.
+ * название, ID или имя клиента. Поиск — от 2 символов, с паузой после ввода. Клиента нет в CRM —
+ * «Новый клиент» (имя и телефон; контакт с этим номером уже есть — берётся он).
  */
 export function ClientPicker({
   onContact,
   onDeal,
+  newName = null,
   autoFocus = false,
 }: {
   onContact: (c: CrmContactHit) => void;
   onDeal: (d: CrmDealHit) => void;
+  /** Имя для «Новый клиент» (из чата или звонка). */
+  newName?: string | null;
   autoFocus?: boolean;
 }) {
   const [kind, setKind] = useState<Kind>('contact');
   const [q, setQ] = useState('');
+  const [draft, setDraft] = useState<{ name: string; phone: string; busy: boolean; error: string } | null>(null);
+  const openDraft = () => {
+    const t = q.trim();
+    const phoneLike = /^[+\d\s()-]{5,}$/.test(t);
+    setDraft({ name: phoneLike ? (newName ?? '') : t || (newName ?? ''), phone: phoneLike ? t : '', busy: false, error: '' });
+  };
+  const create = async () => {
+    if (!draft || draft.busy || !draft.name.trim()) return;
+    setDraft({ ...draft, busy: true, error: '' });
+    try {
+      onContact(await apiPost<CrmContactHit>('/crm/contacts', { name: draft.name.trim(), phone: draft.phone.trim() || undefined }));
+      setDraft(null);
+    } catch (e) {
+      setDraft({ ...draft, busy: false, error: e instanceof Error ? e.message : 'Не удалось создать клиента' });
+    }
+  };
   const [res, setRes] = useState<{ key: string; data: CrmSearchDto | null; error: string } | null>(null);
   const query = q.trim();
   const key = `${kind}:${query}`;
@@ -81,6 +101,24 @@ export function ClientPicker({
       {query.length >= 2 && !current && <p className="cp-hint">Ищем…</p>}
       {current?.error && <p className="cp-hint error">{current.error}</p>}
       {current?.data && !hits.length && <p className="cp-hint">Ничего не найдено</p>}
+      {kind === 'contact' && !draft && (
+        <button type="button" className="link cp-new" onClick={openDraft}>
+          ＋ Новый клиент
+        </button>
+      )}
+      {draft && (
+        <div className="cp-new-form" role="group" aria-label="Новый клиент">
+          <input value={draft.name} maxLength={100} aria-label="Имя клиента" placeholder="Имя и фамилия" autoFocus onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          <input value={draft.phone} inputMode="tel" aria-label="Телефон клиента" placeholder="Телефон, +7…" onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
+          <button type="button" className="primary" disabled={draft.busy || !draft.name.trim()} onClick={() => void create()}>
+            {draft.busy ? 'Создаём…' : 'Создать'}
+          </button>
+          <button type="button" onClick={() => setDraft(null)}>
+            Отмена
+          </button>
+          {draft.error && <p className="cp-hint error">{draft.error}</p>}
+        </div>
+      )}
       {hits.length > 0 && (
         <ul className="cp-hits" role="listbox" aria-label="Результаты поиска">
           {kind === 'contact'
