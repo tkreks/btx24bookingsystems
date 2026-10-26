@@ -32,7 +32,7 @@ import {
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
 import { fmtDate, fmtDateTime, fmtMoney, fmtTime, plusMonths, shiftDate } from '../format.js';
-import { durationText, periodToUtc, upcomingPeriod, type PeriodFields } from './booking-form.js';
+import { byDays, daysText, durationText, periodToUtc, upcomingPeriod, type PeriodFields } from './booking-form.js';
 import { ClientPicker, ContactName, NewClientForm } from './ClientPicker.js';
 import { WizDialog } from './WizDialog.js';
 import { Avatar } from '../openlines/Avatar.js';
@@ -388,8 +388,10 @@ export function BookingForm({
     };
   }, [existingDealId, onGoods, productsTry]);
   const names = new Map((list ?? []).map((r) => [r.id, r.name]));
-  const nights =
-    group?.bookingMode === 'interval' ? Math.max(1, Math.round((Date.parse(period.endDate) - Date.parse(period.startDate)) / 86_400_000) || 1) : 1;
+  // Количество товара «заезд/выезд» — по ночам; у группы «по дням» (беседки) — по дням брони.
+  const dayCount = group && byDays(group);
+  const spanDays = Math.round((Date.parse(period.endDate) - Date.parse(period.startDate)) / 86_400_000);
+  const nights = group?.bookingMode === 'interval' ? (dayCount ? Math.max(1, spanDays + 1) : Math.max(1, spanDays || 1)) : 1;
   const defaultRows: ProductRow[] = cat
     ? resourceIds.flatMap((rid) =>
         (cat.defaults?.[String(rid)] ?? []).flatMap((dp) => {
@@ -710,7 +712,7 @@ export function BookingForm({
   const resourcesText = resourceIds.map((id) => names.get(id)).filter(Boolean).join(', ');
   const whenText =
     group?.bookingMode === 'interval'
-      ? `${period.startDate.slice(8, 10)}.${period.startDate.slice(5, 7)} ${period.startTime} → ${period.endDate.slice(8, 10)}.${period.endDate.slice(5, 7)} ${period.endTime} · ${nightsText(nights)}`
+      ? `${period.startDate.slice(8, 10)}.${period.startDate.slice(5, 7)} ${period.startTime} → ${period.endDate.slice(8, 10)}.${period.endDate.slice(5, 7)} ${period.endTime} · ${dayCount ? daysText(nights) : nightsText(nights)}`
       : `${period.startTime}–${period.endDate !== period.startDate ? `${period.endDate.slice(8, 10)}.${period.endDate.slice(5, 7)} ` : ''}${period.endTime}${'error' in utc ? '' : ` · ${durationText(Date.parse(utc.end) - Date.parse(utc.start))}`}`;
   const total = productsTotal(productRows);
   const typeTitle = (group?.bookingTypes ?? []).find((t) => t.id === bookingTypeId)?.title;

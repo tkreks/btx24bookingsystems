@@ -10,15 +10,24 @@ export interface PeriodFields {
 }
 
 /**
+ * Группа «по дням» (беседки, решение владельца 2026-10-26): «заезд/выезд» с 0 в «Минимум дней» и выездом
+ * позже заезда — бронь в тот же день (10:00–22:00), при желании на несколько дней.
+ */
+export function byDays(group: Pick<MyGroupDto, 'bookingMode' | 'checkInTime' | 'checkOutTime' | 'defaultNights'>): boolean {
+  return group.bookingMode === 'interval' && group.defaultNights === 0 && group.checkOutTime > group.checkInTime;
+}
+
+/**
  * Время брони по умолчанию по режиму группы: «часы от клика» — с `time` на `durationMinutes`;
- * «заезд/выезд» — заезд в `checkInTime`, выезд через `defaultNights` суток в `checkOutTime`.
+ * «заезд/выезд» — заезд в `checkInTime`, выезд через `defaultNights` суток в `checkOutTime` (группа «по
+ * дням» — в тот же день).
  */
 export function defaultPeriod(group: Pick<MyGroupDto, 'bookingMode' | 'durationMinutes' | 'checkInTime' | 'checkOutTime' | 'defaultNights'>, date: string, time = '14:00'): PeriodFields {
   if (group.bookingMode === 'interval')
     return {
       startDate: date,
       startTime: group.checkInTime,
-      endDate: shiftDate(date, Math.max(1, group.defaultNights)),
+      endDate: shiftDate(date, byDays(group) ? 0 : Math.max(1, group.defaultNights)),
       endTime: group.checkOutTime,
     };
   const [h, m] = time.split(':').map(Number);
@@ -94,4 +103,11 @@ export function durationText(ms: number): string {
   const h = Math.floor((min % 1440) / 60);
   const m = min % 60;
   return [d ? `${d} сут` : '', h ? `${h} ч` : '', m ? `${m} мин` : ''].filter(Boolean).join(' ') || '0 мин';
+}
+
+/** «1 день», «2 дня», «5 дней». */
+export function daysText(n: number): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  return `${n} ${m10 === 1 && m100 !== 11 ? 'день' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'дня' : 'дней'}`;
 }

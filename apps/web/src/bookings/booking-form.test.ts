@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultPeriod, durationChoices, periodToUtc, upcomingPeriod, withDuration } from './booking-form.js';
+import { byDays, daysText, defaultPeriod, durationChoices, periodToUtc, upcomingPeriod, withDuration } from './booking-form.js';
 
 const duration = { bookingMode: 'duration' as const, durationMinutes: 240, checkInTime: '14:00', checkOutTime: '12:00', defaultNights: 1 };
 
@@ -34,5 +34,13 @@ describe('booking form', () => {
       endDate: '2026-10-27',
       endTime: '03:00',
     });
+  });
+
+  it('gazebo group (0 min days, check-out after check-in): same day by default', () => {
+    const gazebo = { ...duration, bookingMode: 'interval' as const, checkInTime: '10:00', checkOutTime: '22:00', defaultNights: 0 };
+    expect(byDays(gazebo)).toBe(true);
+    expect(defaultPeriod(gazebo, '2026-10-27')).toEqual({ startDate: '2026-10-27', startTime: '10:00', endDate: '2026-10-27', endTime: '22:00' });
+    expect(byDays({ ...gazebo, checkInTime: '14:00', checkOutTime: '12:00' })).toBe(false);
+    expect([1, 2, 5, 21].map(daysText)).toEqual(['1 день', '2 дня', '5 дней', '21 день']);
   });
 });

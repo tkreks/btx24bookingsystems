@@ -12,7 +12,7 @@ import {
 } from '@btx24/shared';
 import { availabilityPieces, slotAt } from '../calendar/layout.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
-import { durationChoices, durationText, localAt, periodToUtc, upcomingPeriod, withDuration, type PeriodFields } from './booking-form.js';
+import { byDays, durationChoices, durationText, localAt, periodToUtc, upcomingPeriod, withDuration, type PeriodFields } from './booking-form.js';
 import { DatePicker } from './DatePicker.js';
 
 /** Занятость ресурса на выбранное время: свободен, тех. окно (можно), пересечение с бронью или стоп ресурса. */
@@ -93,6 +93,8 @@ export function SlotPicker({
   const now = useNow();
   const today = todayIn(timezone);
   const interval = group.bookingMode === 'interval';
+  // Беседки: бронь в тот же день, выбор — число дней, а не ночей.
+  const perDay = byDays(group);
   const startMs = zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).getTime();
   const endMs = zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).getTime();
   const durationMs = endMs - startMs;
@@ -154,21 +156,24 @@ export function SlotPicker({
       {nightsMode ? (
         <div className="wz-when">
           <label className="wz-when-field">
-            <span className="df-label">Время заезда</span>
+            <span className="df-label">{perDay ? 'Начало' : 'Время заезда'}</span>
             <input type="time" aria-label="Время заезда" value={period.startTime} onChange={(e) => onPeriod({ ...period, startTime: e.target.value })} />
           </label>
           <div className="wz-when-field">
-            <span className="df-label">Ночей</span>
-            <div className="wz-durations" role="group" aria-label="Ночей">
-              {NIGHTS.map((n) => (
-                <button key={n} type="button" aria-pressed={nights === n} className={nights === n ? 'active' : ''} onClick={() => onPeriod({ ...period, endDate: shiftDate(period.startDate, n) })}>
-                  {n}
-                </button>
-              ))}
+            <span className="df-label">{perDay ? 'Дней' : 'Ночей'}</span>
+            <div className="wz-durations" role="group" aria-label={perDay ? 'Дней' : 'Ночей'}>
+              {NIGHTS.map((n) => {
+                const active = (perDay ? nights + 1 : nights) === n;
+                return (
+                  <button key={n} type="button" aria-pressed={active} className={active ? 'active' : ''} onClick={() => onPeriod({ ...period, endDate: shiftDate(period.startDate, perDay ? n - 1 : n) })}>
+                    {n}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <label className="wz-when-field">
-            <span className="df-label">Выезд</span>
+            <span className="df-label">{perDay ? 'Окончание' : 'Выезд'}</span>
             <span className="bk-dt">
               <input type="date" aria-label="Дата выезда" value={period.endDate} onChange={(e) => e.target.value && onPeriod({ ...period, endDate: e.target.value })} />
               <input type="time" aria-label="Время выезда" value={period.endTime} onChange={(e) => onPeriod({ ...period, endTime: e.target.value })} />
