@@ -98,8 +98,11 @@ export function AccountPicker({ results, onPick, onClose }: { results: SearchRes
   );
 }
 
-/** Первое сообщение клиенту через свою линию: после отправки чат появляется в «Чатах» и открывается. */
-export function FirstMessageDialog({ result, to, onSent, onClose }: { result: SearchResult; to: string; onSent: (chatId: number) => void; onClose: () => void }) {
+/**
+ * Первое сообщение клиенту через свою линию: после отправки чат появляется в «Чатах» и открывается.
+ * `forDeal` — из встройки сделки: диалог свяжется с клиентом этой сделки, а не создаст нового.
+ */
+export function FirstMessageDialog({ result, to, forDeal, onSent, onClose }: { result: SearchResult; to: string; forDeal?: number; onSent: (chatId: number) => void; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -110,7 +113,7 @@ export function FirstMessageDialog({ result, to, onSent, onClose }: { result: Se
     setBusy(true);
     setError('');
     try {
-      const r = await apiPost<MessengerSendResultDto>(`/messengers/${encodeURIComponent(m.id)}/send`, { to, text });
+      const r = await apiPost<MessengerSendResultDto>(`/messengers/${encodeURIComponent(m.id)}/send`, { to, text, ...(forDeal ? { forDeal } : {}) });
       if (r.openlineChatId) onSent(r.openlineChatId);
       else {
         setError('Сообщение отправлено, но чат в открытой линии ещё не создан — он появится в «Чатах» через несколько секунд.');

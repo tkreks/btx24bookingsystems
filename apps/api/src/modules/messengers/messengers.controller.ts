@@ -1,10 +1,10 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Headers, HttpCode, NotFoundException, Param, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Headers, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MESSENGER_MAX_FILE_BYTES } from '@btx24/shared';
 import { MessengerCrmService } from './messenger-crm.service.js';
 import { MediaLinks } from './media-links.js';
 import type { Response } from 'express';
-import type { CreateMessengerDto, MessengerChatDto, MessengerDto, MessengerLinkDto, MessengerMessageDto, MessengerSendDto, MessengerSendResultDto, MessengerVncTicketDto } from '@btx24/shared';
+import type { CreateMessengerDto, MessengerChatDto, MessengerDealTargetsDto, MessengerDto, MessengerLinkDto, MessengerMessageDto, MessengerSendDto, MessengerSendResultDto, MessengerVncTicketDto } from '@btx24/shared';
 import { MessengerChatsService } from './messenger-chats.service.js';
 import { MessengerInboxService } from './messenger-inbox.service.js';
 import { MessengerServiceClient, type WireEvent } from './messenger-service.client.js';
@@ -203,6 +203,12 @@ export class MessengerUserController {
     return this.chatsService.search(user, phone, login);
   }
 
+  /** Встройка сделки: куда написать клиенту сделки, когда прежний канал не работает. */
+  @Get('deal-targets/:dealId')
+  dealTargets(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<MessengerDealTargetsDto> {
+    return this.chatsService.dealTargets(user, dealId);
+  }
+
 
   @Get()
   async list(@B24User() user: B24UserContext): Promise<MessengerDto[]> {
@@ -243,7 +249,9 @@ export class MessengerUserController {
   @Post(':id/send')
   @HttpCode(200)
   async send(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: MessengerSendDto): Promise<MessengerSendResultDto> {
-    return this.chatsService.send(user, (await this.chatsService.forUser(user, id, true, body?.to)).m, body?.to, body?.text, body?.dealId);
+    const forDeal = body?.forDeal === undefined ? undefined : Number(body.forDeal);
+    if (forDeal !== undefined && (!Number.isSafeInteger(forDeal) || forDeal < 1)) throw new BadRequestException('Неверная сделка');
+    return this.chatsService.send(user, (await this.chatsService.forUser(user, id, true, body?.to)).m, body?.to, body?.text, body?.dealId, forDeal);
   }
 
   @Post(':id/messages/:messageId/edit')

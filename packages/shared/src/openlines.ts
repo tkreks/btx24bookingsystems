@@ -45,6 +45,8 @@ export interface ChatSummary {
   folderId: string | null;
   /** В моём избранном (★). */
   favorite: boolean;
+  /** Почему писать в чат нельзя (линия выключена, канал не подключён); null — рабочий. Только во встройке сделки. */
+  lineProblem?: string | null;
 }
 
 /** Псевдопапка «★ Избранное» в списке папок и `?folder=` списка чатов. */

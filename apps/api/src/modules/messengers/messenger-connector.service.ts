@@ -1,5 +1,5 @@
-import { Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
-import type { Messenger, MessengerMessage, Portal } from '../../generated/prisma/client.js';
+import { Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit, Optional } from '@nestjs/common';
+import type { Messenger, MessengerChat, MessengerMessage, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { B24_CONFIG, type Bitrix24Config } from '../bitrix24/bitrix24.tokens.js';
 import { onBitrixEvent } from '../bitrix24/events/events.service.js';
@@ -10,6 +10,8 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { MessengerInboxService, phoneOfChat, previewOf } from './messenger-inbox.service.js';
 import { MessengerServiceClient } from './messenger-service.client.js';
 import { MediaLinks } from './media-links.js';
+import { MessengerCrmService } from './messenger-crm.service.js';
+import { chatLineProblem } from '../openlines/line-health.js';
 
 /** Коннектор приложения на вид мессенджера (один на портал, линий — сколько угодно). */
 /** Аватар собеседника переспрашиваем у сервиса раз в сутки. */
@@ -38,6 +40,12 @@ const GROUP_BACKLOG_MS = 3 * 24 * 3600_000;
  */
 export const PHONE_MARK = '=== Исходящее сообщение, автор: Телефон ===';
 const isGroup = (chatId: string) => chatId.endsWith('@g.us');
+
+/** Контакты клиента для `user` линии: номер мессенджера, иначе — связанного контакта CRM; его почта. */
+export function lineUser(phone: string | null | undefined, who: { phone: string | null; email: string | null } | null): { phone?: string; skip_phone_validate?: 'Y'; email?: string } {
+  const p = phone ? `+${phone}` : who?.phone;
+  return { ...(p ? { phone: p, skip_phone_validate: 'Y' as const } : {}), ...(who?.email ? { email: who.email } : {}) };
+}
 
 /** Текст для линии: с телефона — с меткой, в группе — с именем автора. */
 export function lineText(msg: Pick<MessengerMessage, 'fromMe' | 'chatId' | 'body' | 'type' | 'hasMedia'>, author: string | null, withFile: boolean): string {
@@ -84,7 +92,45 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     private readonly inbox: MessengerInboxService,
     @Inject(B24_CONFIG) private readonly config: Bitrix24Config,
     private readonly links: MediaLinks,
+    @Optional() private readonly crm?: MessengerCrmService,
   ) {}
+
+  /**
+   * Клиент нового диалога для CRM-трекера линии — телефон и почта связанного контакта: Битрикс24 ищет
+   * клиента диалога по ним. Без этого Telegram-клиент без номера становился новым контактом и сделкой.
+   */
+  private async identity(portal: Portal, chat: MessengerChat | null): Promise<{ phone: string | null; email: string | null } | null> {
+    if (!chat?.crmContactId || !this.crm) return null;
+    try {
+      const c = await this.crm.comms(portal, chat.crmContactId);
+      return c.phone || c.email ? c : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * У найденного клиента есть рабочий чат в другой линии — новый канал тогда открывает сотрудник (не
+   * плодим конкурирующие диалоги). Все прежние чаты на выключенных линиях (Wazzup) — конкурента нет.
+   * Проверить не удалось — считаем, что есть: сообщение подождёт выбора в приложении.
+   */
+  private async hasWorkingChat(portal: Portal, chat: MessengerChat | null): Promise<boolean> {
+    const dealIds = ((chat?.crmMatch as { dealIds?: number[] } | null)?.dealIds ?? []).slice(0, 5);
+    const entities = [...(chat?.crmContactId ? [{ type: 'contact', id: chat.crmContactId }] : []), ...dealIds.map((id) => ({ type: 'deal', id }))];
+    if (!entities.length) return true;
+    try {
+      const client = this.portals.clientFor(portal);
+      const ids = new Set<number>();
+      for (const e of entities) {
+        const r = await client.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: e.type, CRM_ENTITY: e.id, ACTIVE_ONLY: 'N' });
+        for (const c of r.result ?? []) if (Number(c.CHAT_ID) > 0) ids.add(Number(c.CHAT_ID));
+      }
+      for (const id of ids) if (!(await chatLineProblem(client, this.prisma, portal.id, id))) return true;
+      return false;
+    } catch {
+      return true;
+    }
+  }
 
   /** Аватар собеседника: ID файла у сервиса или null (нет фото) — на сутки на процесс, без повторных запросов. */
   private readonly avatars = new Map<string, { fileId: string | null; at: number }>();
@@ -150,8 +196,10 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
    * открываем чат в линии этим сообщением от имени сотрудника (`message.user_id`) — в Битрикс24 видно,
    * кто и что написал. Дальше переписка идёт через линию.
    */
-  async firstContact(user: B24UserContext, m: Messenger, chatId: string, text: string, file?: { mime: string; name: string; data: Buffer }, dealId?: number | null): Promise<MessengerMessage> {
+  async firstContact(user: B24UserContext, m: Messenger, chatId: string, text: string, file?: { mime: string; name: string; data: Buffer }, dealId?: number | null, contactId?: number): Promise<MessengerMessage> {
     const w = await this.service.send(m.id, chatId, text, undefined, file);
+    // Мессенджер мог вернуть другой адрес собеседника (номер → скрытый ID): клиент CRM — и у него.
+    if (contactId && this.crm) await this.crm.pin(m, w.chatId, { dealId: dealId ?? null, contactId }, w.phone);
     const row = await this.inbox.message(m, w, { source: 'app', sentByUserId: user.userId, ...(dealId !== undefined ? { dealId, awaitingDeal: false } : {}) });
     const portal = await this.prisma.portal.findFirst({ where: { id: m.portalId, status: 'ACTIVE' } });
     if (!portal || !m.lineId) return row;
@@ -160,6 +208,8 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     const name = chat?.name ?? (phone ? `+${phone}` : chatId);
     const relayChatId = await this.relayTarget(m, row);
     const picture = await this.pictureOf(m, w.chatId);
+    // Чат к сделке (`::deal:`) — второй диалог того же клиента: трекер не нужен.
+    const who = relayChatId.includes('::deal:') ? null : await this.identity(portal, chat);
     try {
       const res = await this.portals.clientFor(portal).call<{ DATA?: { RESULT?: { SUCCESS?: boolean; session?: { CHAT_ID?: string } }[] } }>('imconnector.send.messages', {
         CONNECTOR: connectorId(m.kind),
@@ -167,12 +217,12 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
         MESSAGES: [
           {
             // Чат — как его назвал WhatsApp (`…@lid` или `…@c.us`): так же придут ответы клиента.
-            user: { id: w.chatId, name, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}), ...(picture ? { picture } : {}) },
+            user: { id: w.chatId, name, ...lineUser(phone, who), ...(picture ? { picture } : {}) },
             message: {
               id: w.id,
               date: w.timestamp,
               user_id: user.userId,
-              ...(row.dealId ? { disable_crm: 'Y' } : {}),
+              ...(row.dealId && !who ? { disable_crm: 'Y' } : {}),
               ...(text ? { text } : {}),
               ...(w.media && this.links.url(m.id, w.media.fileId) ? { files: [{ url: this.links.url(m.id, w.media.fileId), name: w.media.name ?? 'file' }] } : {}),
             },
@@ -305,15 +355,13 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
 
   private async relayOne(m: Messenger, msg: MessengerMessage, name: string | null, op: 'send' | 'update' | 'delete', explicitChannel = false): Promise<void> {
     const group = isGroup(msg.chatId);
-    // Новый канал к найденной сделке открывает сотрудник. До выбора сообщение видно в приложении.
-    if (op === 'send' && !explicitChannel && (msg.dealId || msg.awaitingDeal)) {
-      const known = await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null } } });
-      if (!known) return;
-    }
     const portal = await this.prisma.portal.findFirst({ where: { id: m.portalId, status: 'ACTIVE' } });
     if (!portal) return;
-    const client = this.portals.clientFor(portal);
     const chat = await this.prisma.messengerChat.findUnique({ where: { messengerId_chatId: { messengerId: m.id, chatId: msg.chatId } } });
+    const opened = op !== 'send' || group ? true : !!(await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null } }, select: { id: true } }));
+    // Новый канал к найденной сделке открывает сотрудник, если у клиента есть рабочий чат. До выбора сообщение видно в приложении.
+    if (op === 'send' && !explicitChannel && (msg.dealId || msg.awaitingDeal) && !opened && (await this.hasWorkingChat(portal, chat))) return;
+    const client = this.portals.clientFor(portal);
     const phone = group ? null : (chat?.phone ?? phoneOfChat(msg.chatId));
     // Группа — под своим названием (в списке чатов приложения у старых групп могло остаться имя участника).
     const title = group ? await this.nameOf(m, msg.chatId) : null;
@@ -321,14 +369,16 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     const userName = name ?? title ?? chat?.name ?? (phone ? `+${phone}` : msg.chatId);
     const relayChatId = await this.relayTarget(m, msg);
     const picture = op === 'send' && !group ? await this.pictureOf(m, msg.chatId) : undefined;
-    const user = { id: msg.chatId, name: userName, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}), ...(picture ? { picture } : {}) };
+    // Новый диалог — с телефоном/почтой связанного клиента: линия свяжет его с ним, а не создаст нового.
+    const who = !opened && !relayChatId.includes('::deal:') ? await this.identity(portal, chat) : null;
+    const user = { id: msg.chatId, name: userName, ...lineUser(phone, who), ...(picture ? { picture } : {}) };
     // Вложение — ссылкой (Битрикс24 скачивает сам); не скачано — подпись «[фото]».
     const fileUrl = msg.mediaId ? this.links.url(m.id, msg.mediaId) : null;
     const files = fileUrl ? [{ url: fileUrl, name: msg.mediaName ?? 'file' }] : undefined;
     const author = group && !msg.fromMe ? (msg.authorName ?? (await this.nameOf(m, msg.author))) : null;
     const text = lineText(msg, author, !!files);
     // Группа — без трекера CRM для сообщений (новый диалог линия всё равно может связать со сделкой — настройка линии CRM_CREATE).
-    const noCrm = msg.dealId || msg.awaitingDeal || group;
+    const noCrm = group || (!who && (msg.dealId || msg.awaitingDeal));
     const item = {
       user,
       message: { ...(noCrm ? { disable_crm: 'Y' } : {}), id: msg.externalId, date: Math.floor(msg.sentAt.getTime() / 1000), ...(files ? { files, ...(text ? { text } : {}) } : { text: text || ' ' }) },

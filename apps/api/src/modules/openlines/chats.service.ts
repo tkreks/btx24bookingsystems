@@ -638,7 +638,10 @@ export class ChatsService {
     ].filter((id) => id > 0);
     const contact = res.result.contact as { NAME?: string | null; LAST_NAME?: string | null } | undefined;
     const clientName = contact ? [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ').trim() || null : null;
-    return { clientName, items: chatIds.length ? await this.summariesByChat(user, chatIds.slice(0, PAGE)) : [] };
+    const chats = chatIds.length ? await this.summariesByChat(user, chatIds.slice(0, PAGE)) : [];
+    // Встройка решает, открыть чат или предложить новый: рабочая ли линия у каждого чата.
+    const problems = await Promise.all(chats.map((c) => chatLineProblem(user.client, this.prisma, user.portal.id, c.chatId)));
+    return { clientName, items: chats.map((c, i) => ({ ...c, lineProblem: problems[i] })) };
   }
 
   /** Телефоны привязанных контактов, лидов и компаний — одним пакетом, правами пользователя. */

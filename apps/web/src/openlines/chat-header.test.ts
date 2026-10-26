@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChatSummary } from '@btx24/shared';
 import { clipTitle, dealDate } from './ChatDealCard.js';
 import { asAttention } from './ChannelSwitch.js';
-import { brokenChat } from '../deal/DealHome.js';
+import { brokenChat, isDeadChat } from '../deal/DealHome.js';
 
 const tz = 'Europe/Moscow';
 
@@ -30,6 +30,12 @@ describe('встройка сделки: ошибка канала Wazzup', () =
   it('находит чат с «канал выключен», иначе шага нет', () => {
     expect(brokenChat([chat(1, 'btx24_telegram', 'Привет'), chat(2, 'wz_whatsapp', '=== SYSTEM WZ === Ошибка отправки сообщения: канал выключен')])?.chatId).toBe(2);
     expect(brokenChat([chat(1, 'wz_whatsapp', 'Спасибо')])).toBeNull();
+  });
+  it('чат в неработающей линии (по проверке линии) — тоже «создать новый чат»', () => {
+    const dead = { ...chat(3, 'wz_telegram', 'Спасибо'), lineProblem: 'канал линии «Wazzup» не подключён' } as ChatSummary;
+    expect(isDeadChat(dead)).toBe(true);
+    expect(isDeadChat(chat(4, 'btx24_telegram', 'Привет'))).toBe(false);
+    expect(brokenChat([chat(4, 'btx24_telegram', 'Привет'), dead])?.chatId).toBe(3);
   });
 });
 

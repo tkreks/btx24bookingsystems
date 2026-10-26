@@ -1,13 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { chatNotWorkingMessage, lineProblem } from '../openlines/line-health.js';
-import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerLogin, normalizeMessengerPhone, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
+import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerLogin, normalizeMessengerPhone, type MessengerDealTargetsDto, type MessengerDealTargetVia, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
 import type { Messenger, MessengerMessage } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { MessengerConnectorService } from './messenger-connector.service.js';
-import { MessengerCrmService } from './messenger-crm.service.js';
+import { MessengerCrmService, WZ_TELEGRAM_ID, WZ_TELEGRAM_LOGIN } from './messenger-crm.service.js';
 import { MessengerInboxService } from './messenger-inbox.service.js';
 import { MessengerServiceClient } from './messenger-service.client.js';
 import { toDto } from './messengers.service.js';
@@ -209,7 +209,7 @@ export class MessengerChatsService {
    * (чата в линии ещё нет) — открываем чат в линии сообщением от имени сотрудника и доставляем сами.
    * Не привязан или линия не работает — ошибка «создайте работающий чат».
    */
-  async send(user: B24UserContext, m: Messenger, to: string, text: string, expectedDeal?: number | null): Promise<MessengerSendResultDto> {
+  async send(user: B24UserContext, m: Messenger, to: string, text: string, expectedDeal?: number | null, forDeal?: number): Promise<MessengerSendResultDto> {
     const body = String(text ?? '').trim().slice(0, 4096);
     if (!body) throw new BadRequestException({ code: 'EMPTY_MESSAGE', message: 'Пустое сообщение' });
     const target = String(to ?? '').includes('@') ? String(to) : normalizeMessengerPhone(to) && `${normalizeMessengerPhone(to)}@c.us`;
@@ -221,14 +221,68 @@ export class MessengerChatsService {
       : await this.prisma.messengerChat.findUnique({ where: { messengerId_chatId: { messengerId: m.id, chatId: target } } });
     const sendTo = known?.phone ? `${known.phone}@c.us` : target;
     await this.requireWorkingLine(user, m);
+    // Из встройки сделки: клиент чата — контакт сделки (до первого сообщения, чтобы линия не создала нового).
+    const link = forDeal !== undefined && this.crm ? await this.crm.linkForDeal(user, forDeal) : null;
+    if (link) {
+      await this.crm!.pin(m, known?.chatId ?? target, link, known?.phone ?? (target.endsWith('@c.us') ? target.replace(/@.*$/, '') : null));
+      expectedDeal = link.dealId ?? undefined;
+    }
     const dealId = this.crm ? await this.crm.sending(user, m, known?.chatId ?? target, expectedDeal) : undefined;
     const b24ChatId = await this.lineChatOf(m, known?.chatId ?? target, dealId);
     if (b24ChatId) {
       await this.postToLine(user, b24ChatId, body);
       return { message: null, queued: true, openlineChatId: b24ChatId };
     }
-    const first = await this.connector.firstContact(user, m, sendTo, body, undefined, dealId);
+    const first = await this.connector.firstContact(user, m, sendTo, body, undefined, dealId, link?.contactId);
     return { message: toMessageDto(first), queued: false, openlineChatId: first.b24ChatId ?? null };
+  }
+
+  /**
+   * Куда написать клиенту сделки (встройка сделки, прежний канал не работает): номера со своей линией,
+   * с которых сотрудник может писать. Адрес — уже связанный с контактом чат, Telegram ID и логин из CRM
+   * (их записывал прежний провайдер), телефоны контакта. Проверка ничего клиенту не отправляет.
+   */
+  async dealTargets(user: B24UserContext, dealId: number): Promise<MessengerDealTargetsDto> {
+    const deal = (await user.client.call<{ ID?: string; CONTACT_ID?: string | null }>('crm.deal.get', { id: dealId })).result;
+    if (!deal?.ID) throw new NotFoundException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена` });
+    const contactId = Number(deal.CONTACT_ID) || 0;
+    if (!contactId) return { dealId, contact: null, targets: [] };
+    const c = (await user.client.call<Record<string, unknown> & { NAME?: string | null; LAST_NAME?: string | null; PHONE?: { VALUE?: string }[] }>('crm.contact.get', { id: contactId })).result;
+    const name = [c?.NAME, c?.LAST_NAME].filter(Boolean).join(' ').trim() || `Контакт #${contactId}`;
+    const phones = [...new Set((c?.PHONE ?? []).map((p) => normalizeMessengerPhone(p.VALUE)).filter((p): p is string => !!p))];
+    const tgId = String(c?.[WZ_TELEGRAM_ID] ?? '').trim();
+    const tgLogin = c?.[WZ_TELEGRAM_LOGIN] ? normalizeMessengerLogin(c[WZ_TELEGRAM_LOGIN]) : null;
+    const rows = (await this.available(user)).filter((m) => m.lineMode === 'own' && m.lineId);
+    const can = await this.sendable(user, rows);
+    const targets = await Promise.all(rows.filter((m) => can.has(m.id)).map(async (m): Promise<MessengerDealTargetsDto['targets'][number]> => {
+      const messenger = toDto(m, null);
+      try {
+        let to: string | null = null;
+        let via: MessengerDealTargetVia | null = null;
+        const linked = await this.prisma.messengerChat.findFirst({ where: { portalId: user.portal.id, messengerId: m.id, crmContactId: contactId, NOT: { chatId: { endsWith: '@g.us' } } }, orderBy: { lastMessageAt: 'desc' } });
+        if (linked) [to, via] = [linked.chatId, 'chat'];
+        if (!to && m.kind === 'telegram' && /^\d+$/.test(tgId)) [to, via] = [`${tgId}@lid`, 'telegram'];
+        if (!to && m.kind === 'telegram' && tgLogin) {
+          const f = await this.service.contactByLogin(m.id, tgLogin);
+          if (f.exists && f.chatId) [to, via] = [f.chatId, 'login'];
+        }
+        for (const p of phones) {
+          if (to) break;
+          const f = await this.service.contact(m.id, p);
+          if (f.exists) [to, via] = [f.chatId ?? `${p}@c.us`, 'phone'];
+        }
+        if (!to) return { messenger, status: 'not_found', to: null, via: null, openlineChatId: null, note: null };
+        const lineChat = await this.lineChatOf(m, to);
+        let openlineChatId: number | null = null;
+        if (lineChat) {
+          try { if ((await user.client.call<{ id?: number }>('imopenlines.dialog.get', { CHAT_ID: lineChat })).result?.id) openlineChatId = lineChat; } catch { /* Права линии проверяет портал. */ }
+        }
+        return { messenger, status: 'found', to, via, openlineChatId, note: via === 'telegram' ? 'ID Telegram из карточки клиента (записал прежний провайдер)' : null };
+      } catch {
+        return { messenger, status: 'unavailable', to: null, via: null, openlineChatId: null, note: 'Не удалось проверить: проверьте подключение номера' };
+      }
+    }));
+    return { dealId, contact: { id: contactId, name }, targets };
   }
 
   /** Вложение сообщения: из хранилища сервиса (история — скачивается сейчас и запоминается). */

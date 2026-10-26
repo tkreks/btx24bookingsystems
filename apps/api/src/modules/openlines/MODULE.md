@@ -14,7 +14,7 @@
 | `GET/POST /api/openlines/folders`, `PUT/DELETE /api/openlines/folders/:id` | `openlines.read` | **личные папки** чатов (охрана, ресепшн, АХО…) со сводкой: число чатов, непрочитанные, последнее сообщение |
 | `PUT /api/openlines/folders/:id/chats/:chatId`, `DELETE /api/openlines/folder-chats/:chatId` | `openlines.read` | положить / перенести чат в папку, вернуть в общий список |
 | `GET /api/openlines/chats/search?q=<номер>`                    | `openlines.read` | поиск по телефону клиента по всему порталу: `crm.duplicate.findbycomm` → `imopenlines.crm.chat.get` |
-| `GET /api/openlines/deal-chats/:dealId`                        | `openlines.read` | встройка сделки, вкладка с именем клиента: чаты сделки и её контактов (`imopenlines.crm.chat.get` правами сотрудника) |
+| `GET /api/openlines/deal-chats/:dealId`                        | `openlines.read` | встройка сделки, вкладка с именем клиента: чаты сделки и её контактов (`imopenlines.crm.chat.get` правами сотрудника); у каждого `lineProblem` — почему линия не работает (`chatLineProblem`) |
 | `GET /api/openlines/chats/:chatId/messages?beforeId=`          | `openlines.read` | история (50 сообщений, старее — по `beforeId`)                                            |
 | `POST /api/openlines/chats/:chatId/join`                       | `openlines.send` | войти в диалог (`imopenlines.session.join`)                                               |
 | `POST /api/openlines/chats/:chatId/send`                       | `openlines.send` | цепочка сообщений по порядку                                                              |

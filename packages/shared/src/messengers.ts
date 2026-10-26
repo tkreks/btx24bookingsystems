@@ -187,6 +187,32 @@ export interface MessengerSendDto {
   /** Номер телефона или ID чата. */
   to: string;
   text: string;
+  /**
+   * Новый чат из встройки сделки: клиент — контакт этой сделки (проверяется правами сотрудника). Диалог
+   * линии свяжется с ним, даже если мессенджер не показывает номер, — нового клиента CRM не будет.
+   */
+  forDeal?: number;
+}
+
+/** Как найден адрес клиента сделки в мессенджере. */
+export type MessengerDealTargetVia = 'chat' | 'telegram' | 'login' | 'phone';
+
+/** `GET /api/messengers/deal-targets/:dealId` — куда написать клиенту сделки, когда старый канал не работает. */
+export interface MessengerDealTargetsDto {
+  dealId: number;
+  /** Основной контакт сделки; null — у сделки нет контакта (новый чат не создать). */
+  contact: { id: number; name: string } | null;
+  /** Подключения приложения со своей линией, с которых сотрудник может писать. */
+  targets: {
+    messenger: MessengerDto;
+    status: 'found' | 'not_found' | 'unavailable';
+    /** Адрес для `POST /messengers/:id/send` (`to`). */
+    to: string | null;
+    via: MessengerDealTargetVia | null;
+    /** Уже есть чат в линии — открыть его вместо нового. */
+    openlineChatId: number | null;
+    note: string | null;
+  }[];
 }
 
 /** Файл для отправки в мессенджер — не больше (видео, документы). */

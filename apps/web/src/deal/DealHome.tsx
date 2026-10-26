@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  normalizeMessengerPhone,
+  messageChannel,
   type AttentionChatDto,
   type ChatFlagDto,
   type ChatSummary,
@@ -16,15 +16,20 @@ import { AttentionMessage } from '../dashboard/AttentionMessage.js';
 import { ChatRowMenu } from '../dashboard/ChatRowMenu.js';
 import { ClientInvoicesBlock } from './ClientInvoicesBlock.js';
 import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
-import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
+import { DealNewChatDialog } from '../messengers/DealNewChatDialog.js';
 import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
 import { ChatView } from '../openlines/ChatView.js';
 import { HideChatDialog } from '../openlines/DashboardPage.js';
 import { Icon, type IconName } from '../openlines/icons.js';
 
-/** Чат клиента сделки, где Wazzup сообщил «канал выключен» (по последнему сообщению). */
+/** Чат, куда писать нельзя: линия выключена или канал не подключён (Wazzup), либо Wazzup сообщил «канал выключен». */
+export function isDeadChat(c: ChatSummary): boolean {
+  return !!c.lineProblem || hasDisabledWazzupChannel(c.connector, c.lastMessage?.preview);
+}
+
+/** Чат клиента сделки в неработающем канале. */
 export function brokenChat(items: ChatSummary[]): ChatSummary | null {
-  return items.find((c) => hasDisabledWazzupChannel(c.connector, c.lastMessage?.preview)) ?? null;
+  return items.find(isDeadChat) ?? null;
 }
 
 /** Чат клиента — строкой «Последних сообщений» дашборда. */
@@ -96,6 +101,8 @@ export function DealHome({
   const [flagError, setFlagError] = useState('');
   const [paying, setPaying] = useState(false);
   const [invoicesOf, setInvoicesOf] = useState<number | null>(null);
+  /** «Создать новый чат» вместо чата в неработающем канале: мессенджер прежнего чата — первым. */
+  const [newChat, setNewChat] = useState<{ kind: string | null } | null>(null);
   const [paymentRev, setPaymentRev] = useState(0);
   useEffect(() => {
     let active = true;
@@ -119,12 +126,12 @@ export function DealHome({
   }, []);
 
   const items = data?.items ?? [];
-  // Чат один — сразу он, без списка и без «назад».
-  const single = items.length === 1;
+  // Чат один и рабочий — сразу он, без списка и без «назад». Неработающий — список с «Создать новый чат».
+  const single = items.length === 1 && !isDeadChat(items[0]);
   const shownId = openId ?? (single ? items[0].chatId : null);
   const shown = items.find((c) => c.chatId === shownId);
   const broken = brokenChat(items);
-  const phone = broken ? (broken.phones.map((p) => normalizeMessengerPhone(p)).find((p): p is string => !!p) ?? null) : null;
+  const hasWorking = items.some((c) => !isDeadChat(c));
   const categoryId = dealInfo?.openDeals.find((d) => d.id === dealId)?.categoryId;
   const timelineGroups = dealGroups(groups, categoryId);
 
@@ -173,23 +180,36 @@ export function DealHome({
             {error && <p className="notice error" role="alert">{error}</p>}
             {flagError && <p className="notice error" role="alert">{flagError}</p>}
             {data && !items.length && <p className="muted">Чатов с клиентом сделки нет.</p>}
-            {broken && (
+            {broken && !hasWorking && (
               <div className="deal-home-broken" role="alert">
                 <Icon name="alert" size={18} />
                 <span>
-                  <b>Канал Wazzup выключен</b> — сообщения клиенту не доходят.{' '}
-                  {phone ? 'Ищем клиента в мессенджерах:' : 'Номера клиента нет — поиск в мессенджерах недоступен.'}
+                  <b>Нет рабочего чата с клиентом</b> — {broken.lineProblem ?? 'канал Wazzup выключен'}, сообщения не доходят. Создайте новый чат — он
+                  привяжется к клиенту этой сделки.
                 </span>
-                {phone && <MessengerSearchButton phone={phone} timezone={timezone} onOpenChat={(id) => setOpenId(id)} autoStart />}
+                <button type="button" className="primary" onClick={() => setNewChat({ kind: messageChannel(broken.connector) })}>
+                  Создать новый чат
+                </button>
               </div>
             )}
             <ul className="attention-rows">
               {items.map((s) => {
                 const c = chatRow(s);
+                const dead = isDeadChat(s);
                 return (
-                  <li key={c.chatId} className={c.flag ? 'flagged' : undefined}>
+                  <li key={c.chatId} className={[c.flag ? 'flagged' : '', dead ? 'dead' : ''].filter(Boolean).join(' ') || undefined}>
                     <AttentionMessage chat={c} timezone={timezone} onOpen={() => setOpenId(c.chatId)} />
                     <span className="attention-actions">
+                      {dead && (
+                        <button
+                          type="button"
+                          className="deal-new-chat-btn"
+                          title={`Чат не работает: ${s.lineProblem ?? 'канал Wazzup выключен'}. Новый чат привяжется к клиенту этой сделки`}
+                          onClick={() => setNewChat({ kind: messageChannel(s.connector) })}
+                        >
+                          Создать новый чат
+                        </button>
+                      )}
                       <button
                         className={`dash-icon-btn cl-flag${c.flag ? ' on' : ''}`}
                         aria-pressed={!!c.flag}
@@ -270,6 +290,17 @@ export function DealHome({
         />
       )}
       {hiding && <HideChatDialog chat={hiding} onClose={() => setHiding(null)} onHidden={() => setHiding(null)} />}
+      {newChat && (
+        <DealNewChatDialog
+          dealId={dealId}
+          kind={newChat.kind}
+          onClose={() => setNewChat(null)}
+          onOpenChat={(id) => {
+            setRev((n) => n + 1);
+            setOpenId(id);
+          }}
+        />
+      )}
     </div>
   );
 }
