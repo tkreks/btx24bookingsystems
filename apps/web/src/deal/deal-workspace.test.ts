@@ -24,3 +24,16 @@ describe('шкала во встройке сделки', () => {
     expect(dealGroups(groups, undefined)).toEqual([]);
   });
 });
+
+describe('linkTimeLeft', () => {
+  it('formats the time the payment link still works', async () => {
+    const { linkTimeLeft } = await import('./ClientInvoicesBlock.js');
+    const now = Date.parse('2026-10-26T10:00:00Z');
+    expect(linkTimeLeft(null, now)).toBe('');
+    expect(linkTimeLeft('2026-10-26T11:20:30Z', now)).toBe('ещё 1 ч 20 мин');
+    expect(linkTimeLeft('2026-10-26T12:00:00Z', now)).toBe('ещё 2 ч');
+    expect(linkTimeLeft('2026-10-26T10:12:00Z', now)).toBe('ещё 12 мин');
+    expect(linkTimeLeft('2026-10-26T10:00:30Z', now)).toBe('меньше минуты');
+    expect(linkTimeLeft('2026-10-26T09:59:00Z', now)).toBe('срок вышел');
+  });
+});

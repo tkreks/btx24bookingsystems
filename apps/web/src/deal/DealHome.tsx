@@ -14,6 +14,7 @@ import { openCrm } from '../b24.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { AttentionMessage } from '../dashboard/AttentionMessage.js';
 import { ChatRowMenu } from '../dashboard/ChatRowMenu.js';
+import { ClientInvoicesBlock } from './ClientInvoicesBlock.js';
 import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
 import { MessengerSearchButton } from '../messengers/MessengerSearchButton.js';
 import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
@@ -207,6 +208,8 @@ export function DealHome({
           </div>
         )}
       </section>
+
+      {canPay && <ClientInvoicesBlock dealId={dealId} timezone={timezone} revision={paymentRev} />}
 
       <div className="deal-ws-timeline">
         <ResourceTimelineBlock

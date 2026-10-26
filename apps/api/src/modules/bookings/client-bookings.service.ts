@@ -101,18 +101,20 @@ export class ClientBookingsService {
         ? (
             await this.prisma.bookingRecord.findMany({
               where: { portalId: user.portal.id, bookingId: { in: missing } },
-              select: { bookingId: true, resourceIds: true },
+              select: { bookingId: true, resourceIds: true, status: true },
             })
-          ).map((r) => [r.bookingId, Array.isArray(r.resourceIds) ? r.resourceIds.map(Number) : []])
+          ).map((r) => [r.bookingId, { resourceIds: Array.isArray(r.resourceIds) ? r.resourceIds.map(Number) : [], status: r.status }])
         : [],
     );
     for (const { d, id } of fromDeals) {
       const b = (fetched.result[`b${id}`] as { booking?: RawBooking } | undefined)?.booking;
       if (b) items.push(item(sec(b, 'from'), sec(b, 'to'), id, (b.resourceIds ?? []).map(Number), Number(d.ID)));
+      // Снятая через приложение бронь: поля сделки остаются заполненными — по ним брони не показываем.
+      else if (journal.get(id)?.status === 'cancelled') continue;
       else {
         const s = map.bookingStart ? Date.parse(String(d[map.bookingStart] ?? '')) : NaN;
         const e = map.bookingEnd ? Date.parse(String(d[map.bookingEnd] ?? '')) : NaN;
-        if (Number.isFinite(s) && Number.isFinite(e)) items.push(item(s, e, null, journal.get(id) ?? [], Number(d.ID)));
+        if (Number.isFinite(s) && Number.isFinite(e)) items.push(item(s, e, null, journal.get(id)?.resourceIds ?? [], Number(d.ID)));
       }
     }
     // Брони сделок из журнала, которых нет выше, — прежде всего удалённые в Битрикс24 и ждущие решения:

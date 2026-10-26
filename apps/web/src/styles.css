@@ -8780,8 +8780,8 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .chat-row-menu .icon { flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Встройка сделки (2026-10-26): слева чаты клиента, справа сверху шкала броней воронки, снизу быстрые действия. */
-.deal-ws { display: grid; grid-template-columns: minmax(340px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(0, 1fr) auto; gap: 12px; height: 100dvh; padding: 12px; box-sizing: border-box; }
-.deal-ws-chat { grid-row: 1 / span 2; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: 0; }
+.deal-ws { display: grid; grid-template-columns: minmax(340px, 5fr) minmax(0, 7fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; height: 100dvh; padding: 12px; box-sizing: border-box; }
+.deal-ws-chat { grid-row: 1 / -1; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: 0; }
 .deal-ws-chat > .chat-view { flex: 1; min-height: 0; border-radius: inherit; }
 .deal-ws-chats { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; margin: 0; }
 .deal-ws-chats .attention-row { display: flex; gap: 10px; padding: 10px 4px; }
@@ -8859,3 +8859,26 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .system-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
 .system-when { font-size: 13px; color: var(--text); }
 .system-source { font-size: 12px; }
+
+/* Счета клиента во встройке сделки — тонкие строки над шкалой броней. */
+.deal-ws-invoices { grid-column: 2; grid-row: 1; min-width: 0; padding: 10px 12px; }
+.deal-ws-invoices .dash-attention-title { margin: 0 0 6px; }
+.deal-ws-invoices > .muted { margin: 0; font-size: 13px; }
+.ci-rows { list-style: none; margin: 0; padding: 0; max-height: 168px; overflow-y: auto; display: grid; gap: 4px; }
+.ci-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 5px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-weight: 400; font-size: 13px; line-height: 18px; text-align: left; cursor: pointer; }
+.ci-row:hover { border-color: rgba(0, 122, 255, .35); background: var(--hover); }
+.ci-row.paid { border-left: 3px solid var(--ok); }
+.ci-row.open { border-left: 3px solid var(--primary); }
+.ci-tag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--info-bg); color: var(--info-text); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.ci-tag.other { background: #ffedd5; color: #c2410c; }
+.ci-amount { flex: none; white-space: nowrap; }
+.ci-date { flex: none; white-space: nowrap; }
+.ci-purpose { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-state { flex: none; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.ci-row.paid .ci-state { color: var(--ok); font-weight: 600; }
+.ci-state.late { color: var(--danger); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ci-tag.other { background: rgba(234, 88, 12, .2); color: #fdba74; } }
+:root[data-theme="dark"] .ci-tag.other { background: rgba(234, 88, 12, .2); color: #fdba74; }
+.deal-ws-timeline { grid-column: 2; grid-row: 2; }
+.deal-ws-actions { grid-column: 2; grid-row: 3; }
+@media (max-width: 860px) { .deal-ws-invoices, .deal-ws-timeline, .deal-ws-actions { grid-column: auto; grid-row: auto; } }

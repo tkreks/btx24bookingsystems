@@ -221,3 +221,29 @@ export function withPaymentLink(text: string, link: string): string {
   if (body.includes(PAYMENT_LINK_VAR)) return body.split(PAYMENT_LINK_VAR).join(link);
   return body ? `${body}\n${link}` : link;
 }
+
+/**
+ * Счёт клиента во встройке сделки (решение владельца 2026-10-26): по всем сделкам контакта — ждёт оплаты
+ * или оплачен (виден, пока не закончилась бронь счёта, а без неё — бронь его сделки).
+ */
+export interface ClientInvoiceDto {
+  invoiceId: number;
+  dealId: number;
+  dealTitle: string;
+  /** Счёт сделки, из которой открыта встройка; иначе — другая сделка клиента. */
+  thisDeal: boolean;
+  amount: number;
+  currency: string;
+  state: 'open' | 'paid';
+  createdAt: string;
+  /** Основание: из заявки приложения, иначе название счёта. */
+  purpose: string;
+  /** Срок ссылки (ISO); null — без срока или счёт выставлен не приложением. */
+  deadline: string | null;
+}
+
+/** `GET /api/payments/client-invoices?dealId` — сначала ждущие оплаты, новые сверху. */
+export interface ClientInvoicesDto {
+  dealId: number;
+  invoices: ClientInvoiceDto[];
+}

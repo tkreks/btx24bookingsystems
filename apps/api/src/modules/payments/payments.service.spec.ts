@@ -169,6 +169,28 @@ describe('PaymentsService', () => {
     expect(r.invoices[2].request?.deadline).toBe('2026-10-22T12:00:00.000Z');
   });
 
+  it('client invoices: all deals of the contact; awaiting payment and paid until the booking ends', async () => {
+    const t = setup();
+    (t.user.client as unknown as { listAll: unknown }).listAll = vi.fn(async (method: string) =>
+      method === 'crm.deal.list'
+        ? [{ ID: '700', TITLE: 'Домик' }, { ID: '678', TITLE: 'Баня' }]
+        : [
+            { id: 7004, title: 'Не оплачен', opportunity: 5000, stageId: 'DT31_2:D', categoryId: 2, createdTime: '2026-10-23T10:00:00+03:00', parentId2: 700 },
+            { id: 7003, title: 'Счёт домика', opportunity: 15000, stageId: 'DT31_2:N', categoryId: 2, createdTime: '2026-10-22T11:00:00+03:00', parentId2: 700 },
+            { id: 6002, title: 'Оплаченный', opportunity: 10000, stageId: 'DT31_2:P', categoryId: 2, createdTime: '2026-10-21T10:00:00+03:00', parentId2: 678 },
+            { id: 7001, title: 'Оплачен, бронь прошла', opportunity: 9000, stageId: 'DT31_2:P', categoryId: 2, createdTime: '2026-10-20T10:00:00+03:00', parentId2: 700 },
+            { id: 6001, title: 'Приложения', opportunity: 45000, stageId: 'DT31_2:N', categoryId: 2, createdTime: '2026-10-20T10:00:00+03:00', parentId2: 678 },
+          ],
+    );
+    (t.prisma.bookingRecord as unknown as { findMany: unknown }).findMany = vi.fn(async () => [{ bookingId: 5918, dealId: 678 }]);
+    const r = await t.svc.clientInvoices(t.user, 678);
+    expect(r.invoices.map((i) => [i.invoiceId, i.state, i.thisDeal, i.dealTitle, i.deadline])).toEqual([
+      [7003, 'open', false, 'Домик', null],
+      [6001, 'open', true, 'Баня', '2026-10-22T12:00:00.000Z'],
+      [6002, 'paid', true, 'Баня', null],
+    ]);
+  });
+
   it('links the invoice to the nearest booking of the deal; foreign booking refused', async () => {
     const t = setup({ link: 'https://pay.example/x', bookings: [5918, 5920] });
     const p = await t.svc.preview(t.user, 678, 'prepayment');

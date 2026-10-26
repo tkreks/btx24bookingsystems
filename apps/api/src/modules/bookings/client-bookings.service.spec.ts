@@ -76,3 +76,25 @@ describe('ClientBookingsService recent', () => {
     expect(r.recent.map((b) => b.bookingId)).toEqual([7, 6, 5, 4, 3, 1]);
   });
 });
+
+describe('ClientBookingsService cancelled', () => {
+  it('does not show a booking cancelled via the app although deal fields still hold it', async () => {
+    const call = vi.fn(async (method: string) => (method === 'crm.contact.get' ? { result: {} } : { result: { booking: [] } }));
+    const listAll = vi.fn(async (_m: string, params: { filter: Record<string, unknown> }) =>
+      params.filter.CONTACT_ID ? [{ ID: '678', TITLE: 'Тест', STAGE_SEMANTIC_ID: 'P', CATEGORY_ID: '0', UF_ID: '5992', UF_S: '2026-10-26T10:00:00+03:00', UF_E: '2026-10-27T22:00:00+03:00' }] : [],
+    );
+    const batch = vi.fn(async () => ({ result: { b5992: { booking: null } } }));
+    const prisma = {
+      resource: { findMany: vi.fn(async () => []) },
+      bookingRecord: { findMany: vi.fn(async ({ where }: { where: { status?: string } }) => (where.status ? [] : [{ bookingId: 5992, resourceIds: [54], status: 'cancelled' }])) },
+    } as unknown as PrismaService;
+    const fieldMap = {
+      get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S', bookingEnd: 'UF_E' })),
+      outcome: vi.fn(async () => ({ certificateTypeId: null })),
+    } as unknown as DealFieldMapService;
+    const user = { portal: { id: 'p1' }, client: { call, listAll, batch } } as unknown as B24UserContext;
+    const r = await new ClientBookingsService(prisma, fieldMap).forContact(user, 140, [], new Date('2026-10-26T01:00:00Z'));
+    expect(r.upcoming).toEqual([]);
+    expect(r.openDeals[0].booking).toBeNull();
+  });
+});

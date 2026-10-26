@@ -11,6 +11,7 @@ import {
   type PaymentAmountSource,
   BOOKING_REQUIRED_MESSAGE,
   type DealInvoicesDto,
+  type ClientInvoicesDto,
   type PaymentBookingOption,
   type PaymentDealOptionsDto,
   type PaymentPreviewDto,
@@ -302,6 +303,60 @@ export class PaymentsService {
     // Заявки, у которых счёт не создался, — видны в «Все счета» как ошибка.
     for (const r of reqs.filter((x) => !x.invoiceId))
       invoices.push({ invoiceId: 0, title: 'Счёт не создан', amount: Number(r.amount), currency: 'RUB', stageId: '', stageName: '', state: 'failed', createdAt: r.createdAt.toISOString(), request: toDto(r) });
+    return { dealId, invoices };
+  }
+
+  /**
+   * Счета клиента для встройки сделки — по всем сделкам контакта сделки: ждут оплаты (заявка приложения
+   * ещё идёт или счёт открыт) или оплачены, пока у брони счёта (без неё — у его сделки) есть незакончившаяся бронь.
+   */
+  async clientInvoices(user: B24UserContext, dealId: number, now = new Date()): Promise<ClientInvoicesDto> {
+    const deal = await this.flow.deal(user, dealId);
+    if (!deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена или нет доступа` });
+    const contactId = Number(deal.CONTACT_ID) || 0;
+    const rows = contactId
+      ? await user.client.listAll<{ ID: string; TITLE?: string }>('crm.deal.list', { filter: { CONTACT_ID: contactId }, select: ['ID', 'TITLE'], order: { ID: 'DESC' } }, { max: 50 })
+      : [];
+    const titles = new Map(rows.map((d) => [Number(d.ID), d.TITLE || `Сделка #${d.ID}`]));
+    if (!titles.has(dealId)) titles.set(dealId, String(deal.TITLE ?? '') || `Сделка #${dealId}`);
+    const ids = [...titles.keys()];
+    const items = await user.client.listAll<{ id: number; title?: string; opportunity?: number; currencyId?: string; stageId?: string; categoryId?: number; createdTime?: string; parentId2?: number }>(
+      'crm.item.list',
+      { entityTypeId: 31, filter: { '@parentId2': ids }, select: ['id', 'title', 'opportunity', 'currencyId', 'stageId', 'categoryId', 'createdTime', 'parentId2'], order: { id: 'desc' } },
+      { max: 200, pick: (r) => ((r as { items?: never[] })?.items ?? []) },
+    );
+    if (!items.length) return { dealId, invoices: [] };
+    const stages = await this.invoiceStages(user, [...new Set(items.map((i) => Number(i.categoryId ?? 0)))]);
+    const [reqs, live] = await Promise.all([
+      this.prisma.paymentRequest.findMany({ where: { portalId: user.portal.id, invoiceId: { in: items.map((i) => Number(i.id)) } } }),
+      this.prisma.bookingRecord.findMany({ where: { portalId: user.portal.id, dealId: { in: ids }, status: 'active', endsAt: { gt: now } }, select: { bookingId: true, dealId: true } }),
+    ]);
+    const byInvoice = new Map(reqs.map((r) => [r.invoiceId!, r]));
+    const liveBookings = new Set(live.map((b) => b.bookingId));
+    const liveDeals = new Set(live.map((b) => b.dealId));
+    const invoices: ClientInvoicesDto['invoices'] = [];
+    for (const i of items) {
+      const sem = stages.get(String(i.stageId ?? ''))?.semantics ?? (String(i.stageId).endsWith(':P') ? 'S' : String(i.stageId).endsWith(':D') ? 'F' : '');
+      const req = byInvoice.get(Number(i.id));
+      const owner = Number(i.parentId2);
+      const state = sem === 'S' ? 'paid' : sem === 'F' ? null : 'open';
+      if (!state) continue;
+      if (state === 'open' && req && req.status !== 'link_pending' && req.status !== 'sent') continue;
+      if (state === 'paid' && !(req?.bookingId ? liveBookings.has(req.bookingId) : liveDeals.has(owner))) continue;
+      invoices.push({
+        invoiceId: Number(i.id),
+        dealId: owner,
+        dealTitle: titles.get(owner) ?? `Сделка #${owner}`,
+        thisDeal: owner === dealId,
+        amount: Number(i.opportunity ?? 0),
+        currency: i.currencyId ?? 'RUB',
+        state,
+        createdAt: i.createdTime ? new Date(i.createdTime).toISOString() : '',
+        purpose: req?.purpose || i.title || `Счёт #${i.id}`,
+        deadline: state === 'open' ? (req?.deadlineAt?.toISOString() ?? null) : null,
+      });
+    }
+    invoices.sort((a, b) => (a.state === b.state ? b.createdAt.localeCompare(a.createdAt) : a.state === 'open' ? -1 : 1));
     return { dealId, invoices };
   }
 
