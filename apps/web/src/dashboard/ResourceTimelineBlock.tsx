@@ -7,7 +7,7 @@ import { BookingForm, type WizardResult } from '../bookings/BookingForm.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { SLOT_MINUTES } from '../calendar/layout.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
-import { resourceDayState, timelinePieces } from './timeline-data.js';
+import { resourceDayState, timelinePieces, withPast } from './timeline-data.js';
 import { fmtDateTime, fmtMoney, fmtTime, shiftDate } from '../format.js';
 import { dayKey } from '../openlines/chat-list.js';
 import { DashBadge } from '../openlines/RecentCalls.js';
@@ -182,10 +182,10 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
           <span className="timeline-resource" title={`${r.name} #${r.id}`}>{r.name}</span>
           {period ? <div className="timeline-period-bar" role="group" aria-label={`Дни: ${r.name}`}>
             {current.days.map(d => {
-              const state = resourceDayState(d, r.id, timezone);
-              const status = state.bookings.length ? `Броней: ${state.bookings.length}` : state.stops.length ? 'Стоп' : 'Свободно';
+              const state = resourceDayState(d, r.id, timezone, nowMs);
+              const status = state.bookings.length ? `Броней: ${state.bookings.length}` : state.kind === 'past' ? 'Прошло' : state.stops.length ? 'Стоп' : 'Свободно';
               const stopText = state.stops.map(s => s.reason).join('; ');
-              return <button type="button" key={d.date} className={`timeline-period-cell ${state.kind}${state.stops.length ? ' has-stop' : ''}`} title={`${d.date} · ${r.name} · ${status}${stopText ? ` · Стоп: ${stopText}` : ''}`} aria-label={`${d.date}, ${r.name}: ${status}. Открыть день`} onClick={() => openDay(d.date)}>{state.bookings.length || (state.stops.length ? 'Стоп' : '')}</button>;
+              return <button type="button" key={d.date} className={`timeline-period-cell ${state.kind}${state.stops.length ? ' has-stop' : ''}`} title={`${d.date} · ${r.name} · ${status}${stopText ? ` · Стоп: ${stopText}` : ''}`} aria-label={`${d.date}, ${r.name}: ${status}. Открыть день`} onClick={() => openDay(d.date)}>{state.bookings.length || (state.kind !== 'past' && state.stops.length ? 'Стоп' : '')}</button>;
             })}
           </div> : <div className={`timeline-bar${live ? ' live' : ''}`} role="group" aria-label={`Занятость: ${r.name}`}>
             {ticks.map(t => <i key={t.key} className="timeline-hour" style={{ left: `${t.at * 100}%` }} aria-hidden="true" />)}
@@ -194,10 +194,11 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
               const from = Math.max(0, (Date.parse(b.start) - current.startMs) / span);
               const to = Math.min(1, (Date.parse(b.end) - current.startMs) / span);
               return <button key={b.id} type="button" className="tl-piece busy" style={{ left: `${from * 100}%`, width: `${(to - from) * 100}%` }} title={`${fmtDateTime(b.start, timezone)} → ${fmtDateTime(b.end, timezone)}${b.deal ? ` · ${b.deal.title}` : ''}`} aria-label={`Бронь ${fmtDateTime(b.start, timezone)} — ${fmtDateTime(b.end, timezone)}`} onClick={() => setSelected(b)}>{to - from >= 0.08 && <span>{fmtTime(b.start, timezone)}–{fmtTime(b.end, timezone)}</span>}</button>;
-            }) : timelinePieces(current, r.id, current.startMs, current.endMs).map((p, i) => {
+            }) : withPast(timelinePieces(current, r.id, current.startMs, current.endMs), current.startMs, current.endMs, nowMs).map((p, i) => {
               const style = { left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` };
               const booking = p.kind === 'booked' && p.bookingId !== null ? current.bookings.find(b => b.id === p.bookingId) : undefined;
               if (booking) return <button key={i} type="button" className="tl-piece busy" style={style} title={`${fmtDateTime(booking.start, timezone)} → ${fmtDateTime(booking.end, timezone)}${booking.deal ? ` · ${booking.deal.title}` : ''}`} aria-label={`Бронь ${fmtDateTime(booking.start, timezone)} — ${fmtDateTime(booking.end, timezone)}`} onClick={() => setSelected(booking)}>{p.to - p.from >= 0.08 && <span>{fmtTime(booking.start, timezone)}–{fmtTime(booking.end, timezone)}</span>}</button>;
+              if (p.kind === 'past') return <span key={i} className="tl-piece past" style={style} title="Время прошло — бронь только на будущее" aria-hidden="true" />;
               if (p.kind === 'stop') return <span key={i} className="tl-piece stopped" style={style} title={`Стоп: ${p.reason}`} aria-label={`${r.name}: стоп — ${p.reason}`}>{p.to - p.from >= 0.08 ? 'Стоп' : ''}</span>;
               const title = p.kind === 'tech' ? 'Тех. окно — бронь возможна · нажмите, чтобы забронировать' : 'Свободно · нажмите, чтобы забронировать';
               return canCreate && !error && current.endMs > Date.now() ? <button key={i} type="button" className="tl-piece free" style={style} title={title} aria-label={`Забронировать ${r.name}`} onClick={e => { const bar = e.currentTarget.parentElement!.getBoundingClientRect(); createAt(r.id, (e.clientX - bar.left) / bar.width, current.startMs + p.from * span, current.startMs + p.to * span); }} /> : <div key={i} className="tl-piece free" style={style} title="Свободно" />;
@@ -205,7 +206,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
           </div>}
         </div>)}
       </div></div>
-      <p className="timeline-legend muted">{live ? 'Брони, которые идут сейчас; синяя черта — текущее время. ' : period ? 'Красный день — есть хотя бы одна бронь. Нажмите день для часовой шкалы. ' : 'Зелёное — свободно, красное — бронь. '}{!live && 'Серый штрих — стоп, бронирование закрыто.'}</p>
+      <p className="timeline-legend muted">{live ? 'Брони, которые идут сейчас; синяя черта — текущее время. ' : period ? 'Красный день — есть хотя бы одна бронь, серый — прошедший день без брони. Нажмите день для часовой шкалы. ' : 'Зелёное — свободно, красное — бронь, серое — прошедшее время (бронь только на будущее). '}{!live && 'Серый штрих — стоп, бронирование закрыто.'}</p>
     </>}
     {selected && <TimelineBooking booking={selected} resources={new Map(allResources.map(r => [r.id, r.name]))} timezone={timezone} onClose={() => setSelected(null)} />}
     {form && group && <ErrorBoundary where="booking-form" onClose={() => setForm(null)}><BookingForm groups={groups} timezone={timezone} context={{ ...form, groupId: group.id, ...(deal ? { dealId: deal.dealId, contactId: deal.contactId, openDeals: deal.openDeals } : {}) }} onClose={() => setForm(null)} onDone={(r: WizardResult) => { setForm(null); if (r.payment && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal }); setNote(r.note); setRev(n => n + 1); }} /></ErrorBoundary>}

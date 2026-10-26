@@ -8824,3 +8824,6 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .pay-wizard-link { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 12.5px; }
 .pay-wizard-link a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notice.success { border-color: #abefc6; background: #ecfdf3; color: #067647; }
+.wz-modal-all { flex-wrap: wrap; } .wz-modal-all .primary { margin-left: auto; }
+.tl-piece.past { background: repeating-linear-gradient(135deg, #e4e7ec 0 6px, #eceef2 6px 12px); }
+.timeline-period-cell.past { background: #eceef2; color: #98a2b3; }

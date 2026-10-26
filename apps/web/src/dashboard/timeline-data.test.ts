@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { CalendarBooking, CalendarDay, ResourceStopDto } from '@btx24/shared';
-import { resourceDayState, timelinePieces } from './timeline-data.js';
+import { resourceDayState, timelinePieces, withPast } from './timeline-data.js';
+
+/** «Сейчас» до дней тестов: прошедшими они не считаются. */
+const EARLY = Date.parse('2026-10-01T00:00:00Z');
 const start = Date.parse('2026-10-24T21:00:00Z');
 const end = Date.parse('2026-10-25T21:00:00Z');
 const booking = (s: string, e: string): CalendarBooking => ({ id: 1, name: 'Бронь', resourceIds: [14], start: s, end: e, dealId: null, deal: null, fields: [], description: null });
@@ -28,15 +31,31 @@ describe('стопы в шкале ресурсов', () => {
 });
 describe('период: день занят при любой брони', () => {
   it('учитывает даже одну минуту и завершившуюся утреннюю бронь', () => {
-    expect(resourceDayState(day([booking('2026-10-25T00:00:00Z', '2026-10-25T00:01:00Z')]), 14, 'Europe/Moscow').kind).toBe('booked');
+    expect(resourceDayState(day([booking('2026-10-25T00:00:00Z', '2026-10-25T00:01:00Z')]), 14, 'Europe/Moscow', EARLY).kind).toBe('booked');
   });
   it('не включает бронь, закончившуюся точно в полночь; учитывает переход через полночь', () => {
-    expect(resourceDayState(day([booking('2026-10-24T19:00:00Z', '2026-10-24T21:00:00Z')]), 14, 'Europe/Moscow').kind).toBe('free');
-    expect(resourceDayState(day([booking('2026-10-24T20:59:00Z', '2026-10-24T21:01:00Z')]), 14, 'Europe/Moscow').kind).toBe('booked');
+    expect(resourceDayState(day([booking('2026-10-24T19:00:00Z', '2026-10-24T21:00:00Z')]), 14, 'Europe/Moscow', EARLY).kind).toBe('free');
+    expect(resourceDayState(day([booking('2026-10-24T20:59:00Z', '2026-10-24T21:01:00Z')]), 14, 'Europe/Moscow', EARLY).kind).toBe('booked');
   });
   it('стоп — отдельное закрытое состояние, а не свободный или занятый бронью день', () => {
-    expect(resourceDayState(day([], [stop()]), 14, 'Europe/Moscow').kind).toBe('stop');
-    const both = resourceDayState(day([booking('2026-10-25T07:00:00Z', '2026-10-25T09:00:00Z')], [stop()]), 14, 'Europe/Moscow');
+    expect(resourceDayState(day([], [stop()]), 14, 'Europe/Moscow', EARLY).kind).toBe('stop');
+    const both = resourceDayState(day([booking('2026-10-25T07:00:00Z', '2026-10-25T09:00:00Z')], [stop()]), 14, 'Europe/Moscow', EARLY);
     expect(both.kind).toBe('booked'); expect(both.stops).toHaveLength(1);
+  });
+});
+
+describe('прошедшее время на шкале', () => {
+  it('свободное, техокно и стоп до «сейчас» — серые, брони остаются; участок делится по «сейчас»', () => {
+    const pieces = [
+      { kind: 'free' as const, from: 0, to: 0.3, bookingId: null },
+      { kind: 'booked' as const, from: 0.3, to: 0.4, bookingId: 1 },
+      { kind: 'free' as const, from: 0.4, to: 1, bookingId: null },
+    ];
+    expect(withPast(pieces as never, 0, 100, 50).map((p) => [p.kind, p.from, p.to])).toEqual([['past', 0, 0.3], ['booked', 0.3, 0.4], ['past', 0.4, 0.5], ['free', 0.5, 1]]);
+    expect(withPast(pieces as never, 0, 100, -1)).toEqual(pieces);
+  });
+  it('прошедший день без брони — «past», с бронью — «booked»', () => {
+    const d = { date: '2026-10-24', resources: [], bookings: [], techWindows: [], stops: [] } as never;
+    expect(resourceDayState(d, 14, 'Europe/Moscow', Date.parse('2026-10-26T00:00:00Z')).kind).toBe('past');
   });
 });

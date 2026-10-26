@@ -1167,7 +1167,7 @@ const DEAL_TONE_TITLES: Record<DealBookingTone, string> = {
 
 /**
  * В сделке уже заполнены поля формы — что с ними делать: оставить (по умолчанию) или очистить.
- * Переключатель на каждое поле и «Оставить все / Очистить все».
+ * Сверху «Оставить все» и «Очистить все» (сразу дальше) и «Продолжить» — по переключателям полей ниже.
  */
 function FieldsDecision({ fields, onDone }: { fields: DealFormField[]; onDone: (clear: string[]) => void }) {
   const [clear, setClear] = useState<Set<string>>(new Set());
@@ -1183,12 +1183,16 @@ function FieldsDecision({ fields, onDone }: { fields: DealFormField[]; onDone: (
       <div className="wz-modal" role="dialog" aria-modal="true" aria-label="В сделке уже заполнены поля">
         <h4>В сделке уже заполнены поля</h4>
         <p className="muted">Оставить значения или очистить перед новой бронью?</p>
+        {/* Решение владельца 2026-10-26: «Оставить все» и «Очистить все» сразу продолжают, «Продолжить» — по выбору ниже. */}
         <div className="wz-modal-all">
-          <button type="button" onClick={() => setClear(new Set())}>
+          <button type="button" onClick={() => onDone([])} title="Оставить все значения и перейти дальше">
             Оставить все
           </button>
-          <button type="button" onClick={() => setClear(new Set(fields.map((f) => f.code)))}>
+          <button type="button" onClick={() => onDone(fields.map((f) => f.code))} title="Очистить все эти поля сделки и перейти дальше">
             Очистить все
+          </button>
+          <button type="button" className="primary" onClick={() => onDone([...clear])} title="Оставить и очистить поля, как выбрано ниже">
+            Продолжить
           </button>
         </div>
         <ul className="wz-filled">
@@ -1209,11 +1213,6 @@ function FieldsDecision({ fields, onDone }: { fields: DealFormField[]; onDone: (
             </li>
           ))}
         </ul>
-        <div className="form-actions">
-          <button type="button" className="primary" onClick={() => onDone([...clear])}>
-            Продолжить
-          </button>
-        </div>
       </div>
     </div>
   );
