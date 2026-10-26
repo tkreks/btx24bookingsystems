@@ -1,19 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { agoText, wizardSteps } from './BookingForm.js';
+import { agoText, dayShort, errorSection, nightsText } from './BookingForm.js';
 import { productsTotal, rowTotal } from './ProductsEditor.js';
-
-describe('wizardSteps — шаги мастера по месту открытия', () => {
-  it('из меню: клиент → группа → календарь → детали', () => {
-    expect(wizardSteps({}, 3)).toEqual(['deal', 'group', 'slot', 'details']);
-  });
-  it('из сделки: без первого шага; одна группа — без выбора группы', () => {
-    expect(wizardSteps({ dealId: 678 }, 3)).toEqual(['group', 'slot', 'details']);
-    expect(wizardSteps({ dealId: 678 }, 1)).toEqual(['slot', 'details']);
-  });
-  it('клик в календаре: ресурс и время известны', () => {
-    expect(wizardSteps({ resourceId: 10 }, 3)).toEqual(['deal', 'details']);
-  });
-});
 
 describe('agoText', () => {
   const now = Date.parse('2026-10-22T12:00:00Z');
@@ -44,12 +31,15 @@ describe('newDealTitle', () => {
   });
 });
 
-describe('wizardSteps — тип сделки (бани)', () => {
-  it('после группы — «Тип сделки»; покупка сертификата — шаг «Сертификат» без даты и товаров', () => {
-    expect(wizardSteps({}, 4, { kinds: true, kind: null })).toEqual(['deal', 'group', 'kind', 'slot', 'details']);
-    expect(wizardSteps({}, 4, { kinds: true, kind: 'visit' })).toEqual(['deal', 'group', 'kind', 'slot', 'details']);
-    expect(wizardSteps({}, 4, { kinds: true, kind: 'certificate' })).toEqual(['deal', 'group', 'kind', 'certificate']);
-    expect(wizardSteps({ dealId: 5, resourceId: 3 }, 4, { kinds: true, kind: 'no_payment' })).toEqual(['kind', 'details']);
-    expect(wizardSteps({}, 4, { kinds: false, kind: 'certificate' })).toEqual(['deal', 'group', 'slot', 'details']);
+describe('сводки и ошибки конструктора', () => {
+  it('день брони, ночи', () => {
+    expect(dayShort('2026-10-27')).toBe('вт 27.10');
+    expect([1, 2, 5, 11, 21].map(nightsText)).toEqual(['1 ночь', '2 ночи', '5 ночей', '11 ночей', '21 ночь']);
+  });
+  it('ошибка создания — раздел для исправления', () => {
+    expect(errorSection('Баня 1 занята в это время')).toBe('slot');
+    expect(errorSection('Выберите тип бронирования')).toBe('goods');
+    expect(errorSection('Заполните поле «Гостей»')).toBe('fields');
+    expect(errorSection('Битрикс24 недоступен')).toBeNull();
   });
 });

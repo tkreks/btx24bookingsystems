@@ -62,6 +62,7 @@ const SLOT_LEGEND: LegendItem[] = [
 
 export function SlotPicker({
   compact = false,
+  hideDays = false,
   group,
   timezone,
   period,
@@ -72,6 +73,8 @@ export function SlotPicker({
   onResources,
 }: {
   compact?: boolean;
+  /** Лента дней — снаружи (конструктор брони: раздел «Группа и дата»). */
+  hideDays?: boolean;
   group: MyGroupDto;
   timezone: string;
   period: PeriodFields;
@@ -127,7 +130,6 @@ export function SlotPicker({
     }
   };
 
-  const strip = Array.from({ length: 7 }, (_, i) => shiftDate(period.startDate, i - 2));
   const resources = days?.resources ?? [];
   const rows = resources.map((r) => ({ r, state: slotStateOf(r.id, days?.bookings ?? [], days?.techWindows ?? [], startMs, endMs, days?.stops ?? []) }));
   const open = (s: SlotState) => s.kind !== 'busy' && s.kind !== 'stop';
@@ -143,30 +145,7 @@ export function SlotPicker({
 
   return (
     <section className="bk-section wz-slot">
-      <div className="wz-daynav">
-        <button type="button" aria-label="Раньше" onClick={() => setDay(shiftDate(period.startDate, -1))}>
-          ‹
-        </button>
-        <div className="wz-days" role="group" aria-label="Дни">
-          {strip.map((d) => {
-            const noon = new Date(`${d}T12:00:00Z`);
-            const weekend = [0, 6].includes(noon.getUTCDay());
-            return (
-              <button key={d} type="button" aria-pressed={d === period.startDate} className={`wz-day${d === period.startDate ? ' active' : ''}${weekend ? ' weekend' : ''}`} onClick={() => setDay(d)}>
-                <small>{new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short' }).format(noon)}</small>
-                <b>{Number(d.slice(8, 10))}</b>
-              </button>
-            );
-          })}
-        </div>
-        <button type="button" aria-label="Позже" onClick={() => setDay(shiftDate(period.startDate, 1))}>
-          ›
-        </button>
-        <label className="wz-date-jump">
-          <span>Быстрый переход к дате</span>
-          <input type="date" aria-label="Дата брони" value={period.startDate} onChange={(e) => e.target.value && setDay(e.target.value)} />
-        </label>
-      </div>
+      {!hideDays && <DayStrip date={period.startDate} onDate={setDay} />}
 
       {!compact && <div className="wz-when">
         {interval ? (
@@ -320,6 +299,36 @@ export function SlotPicker({
   );
 }
 
+/** Лента дней (±): 7 дней вокруг выбранного, стрелки и переход к дате. */
+export function DayStrip({ date, onDate }: { date: string; onDate: (d: string) => void }) {
+  const strip = Array.from({ length: 7 }, (_, i) => shiftDate(date, i - 2));
+  return (
+      <div className="wz-daynav">
+        <button type="button" aria-label="Раньше" onClick={() => onDate(shiftDate(date, -1))}>
+          ‹
+        </button>
+        <div className="wz-days" role="group" aria-label="Дни">
+          {strip.map((d) => {
+            const noon = new Date(`${d}T12:00:00Z`);
+            const weekend = [0, 6].includes(noon.getUTCDay());
+            return (
+              <button key={d} type="button" aria-pressed={d === date} className={`wz-day${d === date ? ' active' : ''}${weekend ? ' weekend' : ''}`} onClick={() => onDate(d)}>
+                <small>{new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short' }).format(noon)}</small>
+                <b>{Number(d.slice(8, 10))}</b>
+              </button>
+            );
+          })}
+        </div>
+        <button type="button" aria-label="Позже" onClick={() => onDate(shiftDate(date, 1))}>
+          ›
+        </button>
+        <label className="wz-date-jump">
+          <span>Быстрый переход к дате</span>
+          <input type="date" aria-label="Дата брони" value={date} onChange={(e) => e.target.value && onDate(e.target.value)} />
+        </label>
+      </div>
+  );
+}
 
 /** Нативный dialog удерживает фокус внутри и возвращает его на таймлайн при закрытии. */
 function SlotTimeDialog({ initial, timezone, resourceName, onClose, onApply }: {
