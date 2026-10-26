@@ -17,6 +17,7 @@ import { InvoicesBadge } from '../bookings/InvoicesBadge.js';
 import { ChatFile } from './ChatFile.js';
 import { ChannelRecovery } from './ChannelRecovery.js';
 import { hasDisabledWazzupChannel } from './channel-error.js';
+import { Reactions } from '../messengers/Reactions.js';
 
 /** Новые сообщения открытого чата подтягиваем раз в 15 секунд. */
 const POLL_MS = 15_000;
@@ -428,7 +429,7 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
         <div className="cv-bubble-meta">
           <strong>{m.author.name}</strong>
           {m.viaPhone && (
-            <span className="via-phone" title="Отправлено менеджером с телефона из рабочего WhatsApp (Wazzup)">
+            <span className="via-phone" title="Отправлено менеджером с телефона, не из Битрикс24 и не из приложения">
               📱 с телефона
             </span>
           )}
@@ -440,6 +441,7 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
         {m.files.map((f) => (
           <ChatFile key={f.id} chatId={chatId} f={f} />
         ))}
+        <Reactions items={m.reactions} />
       </div>
       {!incoming && <span className="cv-msg-avatar agent">{initials(m.author.name || 'Оператор')}</span>}
     </div>

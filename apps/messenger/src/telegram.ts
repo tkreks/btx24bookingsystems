@@ -7,7 +7,7 @@ import type { WireEvent, WireMessage } from './messages.js';
 import { AVATAR_TTL_MS, avatarKey, defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
 import { VirtualScreen } from './screen.js';
 import type { InstanceSpec, InstanceState, InstanceStatus } from './spec.js';
-import { eventsOf, isClientUser, msgIdOf, newMemory, toWire, userIdOfChat, type TgMessage, type TgUpdate, type TgUser } from './telegram-wire.js';
+import { eventsOf, isClientUser, learnTitles, nameOf, type TgChat, msgIdOf, newMemory, toWire, userIdOfChat, type TgMessage, type TgUpdate, type TgUser } from './telegram-wire.js';
 
 export const TELEGRAM_URL = 'https://web.telegram.org/k/';
 /** Как часто проверять вход и забирать изменения, если Telegram Web сам не дал знать. */
@@ -241,7 +241,7 @@ export class TelegramInstance {
 
   private async difference(): Promise<void> {
     for (let i = 0; i < 20 && this.state; i++) {
-      type Diff = { _: string; pts?: number; date?: number; seq?: number; new_messages?: TgMessage[]; other_updates?: TgUpdate[]; users?: TgUser[]; state?: SavedState; intermediate_state?: SavedState };
+      type Diff = { _: string; pts?: number; date?: number; seq?: number; new_messages?: TgMessage[]; other_updates?: TgUpdate[]; users?: TgUser[]; chats?: TgChat[]; state?: SavedState; intermediate_state?: SavedState };
       const d = await this.invoke<Diff>('updates.getDifference', { pts: this.state.pts, date: this.state.date, qts: this.state.qts });
       if (d._ === 'updates.differenceEmpty') {
         this.state.date = d.date ?? this.state.date;
@@ -254,6 +254,7 @@ export class TelegramInstance {
         continue;
       }
       this.learn(d.users ?? []);
+      learnTitles(this.mem, d.chats);
       const { events, messages } = eventsOf(this.spec.id, d.new_messages ?? [], d.other_updates ?? [], this.users, this.mem);
       for (const { wire, raw } of messages) await this.deliver(wire, raw);
       for (const e of events) this.emit(e);
@@ -374,7 +375,7 @@ export class TelegramInstance {
     const now = Math.floor(Date.now() / 1000);
     const created = sentMessage(updates);
     this.learn(updates.users ?? []);
-    let wire: WireMessage | null = created ? toWire(created, this.users) : null;
+    let wire: WireMessage | null = created ? toWire(created, this.users, this.mem.titles) : null;
     if (!wire) {
       const id = updates._ === 'updateShortSentMessage' ? updates.id : updates.updates?.find((u) => u._ === 'updateMessageID')?.id;
       if (!id) throw new Error('Сообщение отправлено, но Telegram не вернул его номер — проверьте в чате');
@@ -446,7 +447,7 @@ export class TelegramInstance {
       throw err;
     });
     const edited = r.updates?.find((u) => u._ === 'updateEditMessage')?.message as TgMessage | undefined;
-    const wire = toWire(edited ?? { ...m, message: text }, this.users)!;
+    const wire = toWire(edited ?? { ...m, message: text }, this.users, this.mem.titles)!;
     this.mem.bodyOf.set(m.id, wire.body);
     return wire;
   }
@@ -564,6 +565,24 @@ export class TelegramInstance {
   }
 
   /** Фото профиля собеседника (`photos.getUserPhotos`, размер ~160–320 px); нет фото — null. */
+  async names(ids: string[]): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    // Группы — по названию; неизвестные названия спрашиваем у Telegram.
+    const groups = ids.map((id) => /^(\d{1,20})@g\.us$/.exec(id)?.[1]).filter((g): g is string => !!g);
+    const unknown = groups.filter((g) => !this.mem.titles.has(g));
+    if (unknown.length) {
+      this.ready();
+      learnTitles(this.mem, (await this.invoke<{ chats?: TgChat[] }>('messages.getChats', { id: unknown })).chats);
+    }
+    for (const g of groups) if (this.mem.titles.has(g)) out[`${g}@g.us`] = this.mem.titles.get(g)!;
+    for (const id of ids) {
+      const uid = userIdOfChat(id);
+      const name = uid ? nameOf(this.users.get(uid)) : null;
+      if (name) out[id] = name;
+    }
+    return out;
+  }
+
   async avatar(chatId: string): Promise<WireMedia | null> {
     const have = await this.media.recent(this.spec.id, avatarKey(chatId), AVATAR_TTL_MS);
     if (have) return have;

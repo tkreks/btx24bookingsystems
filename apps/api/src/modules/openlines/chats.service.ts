@@ -4,6 +4,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { FAVORITES_FOLDER, hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
+  ChatMessageDto,
   ChatListDto,
   ChatFlagDto,
   ChatReplyStatusDto,
@@ -23,9 +24,11 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { bitrix24ErrorMessage } from '../bitrix24/http/bitrix24-error.filter.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import {
+  connectorMidOf,
   connectorOf,
   crmLinksOf,
   clientAvatarOf,
+  groupReactions,
   lastMeaningful,
   messageText,
   preview,
@@ -697,9 +700,32 @@ export class ChatsService {
       joined,
       canSend: joined && canSendRight,
       crm: crmLinksOf(dialog.entity_data_2),
-      messages: raw.map((m) => toMessageDto(m, users, files)).sort((a, b) => a.id - b.id),
+      messages: await this.withReactions(user.portal.id, dialog.entity_id, raw, raw.map((m) => toMessageDto(m, users, files)).sort((a, b) => a.id - b.id)),
       hasMore: raw.length >= HISTORY_LIMIT,
     };
+  }
+
+  /**
+   * Реакции из мессенджера — у чатов своих линий приложения (`btx24_*`): сообщение линии связано с
+   * перепиской приложения через `CONNECTOR_MID`, номер — по линии чата (`entity_id`).
+   */
+  private async withReactions(portalId: string, entityId: string | null | undefined, raw: ImMessage[], messages: ChatMessageDto[]): Promise<ChatMessageDto[]> {
+    const [connector, line] = String(entityId ?? '').split('|');
+    if (!this.prisma || !connector?.startsWith('btx24_') || !Number(line)) return messages;
+    const mids = new Map<number, string>();
+    for (const m of raw) {
+      const mid = connectorMidOf(m);
+      if (mid) mids.set(Number(m.id), mid);
+    }
+    if (!mids.size) return messages;
+    const messenger = await this.prisma.messenger.findFirst({ where: { portalId, lineMode: 'own', lineId: Number(line) }, select: { id: true } });
+    if (!messenger) return messages;
+    const rows = await this.prisma.messengerMessage.findMany({ where: { portalId, messengerId: messenger.id, externalId: { in: [...new Set(mids.values())] } }, select: { externalId: true, reactions: true } });
+    const byMid = new Map(rows.map((r) => [r.externalId, groupReactions(r.reactions)]));
+    return messages.map((m) => {
+      const reactions = byMid.get(mids.get(m.id) ?? '');
+      return reactions?.length ? { ...m, reactions } : m;
+    });
   }
 
   /** Войти в диалог оператором (`imopenlines.session.join`). В режиме «только чтение» запрещено. */

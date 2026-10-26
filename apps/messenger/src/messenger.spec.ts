@@ -113,3 +113,15 @@ describe('ID WhatsApp в разных форматах', () => {
     expect(widOf(undefined)).toBe('');
   });
 });
+
+describe('реакции WhatsApp', () => {
+  it('по одной на поставившего; своя — mine', async () => {
+    const { waReactions } = await import('./messages.js');
+    expect(waReactions([{ id: '👍', aggregateEmoji: '👍', senders: [{ reaction: '👍', id: { fromMe: true } }, { reaction: '👍', id: { fromMe: false } }] }, { id: '❤️', senders: [{ reaction: '', id: {} }] }])).toEqual([
+      { emoji: '👍', mine: true },
+      { emoji: '👍', mine: false },
+      { emoji: '❤️', mine: false },
+    ]);
+    expect(waReactions(null)).toEqual([]);
+  });
+});

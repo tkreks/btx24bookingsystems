@@ -1,5 +1,5 @@
 import { photoUrl } from '../bitrix24/rest/photo-url.js';
-import type { ChatCrmLinks, ChatMessageDto, MessageAuthorKind } from '@btx24/shared';
+import type { ChatCrmLinks, ChatMessageDto, ChatReactionDto, MessageAuthorKind } from '@btx24/shared';
 
 /** Пользователь из ответа im.dialog.messages.get (нужные поля). */
 export interface ImUser {
@@ -157,4 +157,25 @@ export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): Ch
         url: f.urlDownload || f.urlShow || null,
       })),
   };
+}
+
+/** ID сообщения в мессенджере из параметров сообщения линии (`CONNECTOR_MID`) — связь с перепиской приложения. */
+export function connectorMidOf(m: ImMessage): string | null {
+  const mid = m.params?.CONNECTOR_MID;
+  const v = Array.isArray(mid) ? mid[0] : mid;
+  return typeof v === 'string' && v ? v : null;
+}
+
+/** Реакции (по одной на поставившего) → по эмодзи, в порядке появления. */
+export function groupReactions(list: unknown): ChatReactionDto[] {
+  const out: ChatReactionDto[] = [];
+  for (const r of Array.isArray(list) ? (list as { emoji?: unknown; mine?: unknown }[]) : []) {
+    if (typeof r?.emoji !== 'string' || !r.emoji) continue;
+    const hit = out.find((x) => x.emoji === r.emoji);
+    if (hit) {
+      hit.count++;
+      hit.mine ||= !!r.mine;
+    } else out.push({ emoji: r.emoji, count: 1, mine: !!r.mine });
+  }
+  return out;
 }

@@ -31,7 +31,10 @@ export interface WireMessage {
   chatId: string;
   fromMe: boolean;
   author: string | null;
+  /** Имя собеседника; в группе — название группы (если известно). */
   name: string | null;
+  /** Группа: имя написавшего участника. */
+  authorName?: string | null;
   /** Номер собеседника для чата со скрытым ID (`…@lid`), если известен. */
   phone?: string | null;
   body: string;
@@ -48,7 +51,15 @@ export type WireEvent =
   | { type: 'message'; instanceId: string; message: WireMessage }
   | { type: 'edit'; instanceId: string; id: string; chatId: string; body: string; prevBody: string; at: number }
   | { type: 'revoke'; instanceId: string; id: string; chatId: string; at: number }
-  | { type: 'ack'; instanceId: string; id: string; ack: number };
+  | { type: 'ack'; instanceId: string; id: string; ack: number }
+  /** Полный текущий набор реакций сообщения (пустой — все сняли). */
+  | { type: 'reaction'; instanceId: string; id: string; chatId: string; reactions: WireReaction[] };
+
+export interface WireReaction {
+  emoji: string;
+  /** Поставил наш аккаунт (сотрудник с телефона). */
+  mine: boolean;
+}
 
 const TIMEOUT_MS = 10_000;
 
@@ -122,6 +133,11 @@ export class MessengerServiceClient {
   /** Фото профиля собеседника в хранилище сервиса (для аватара в открытой линии); нет — null. */
   async avatar(id: string, chatId: string): Promise<WireMedia | null> {
     return (await this.request<{ media: WireMedia | null }>('POST', `/instances/${id}/avatar`, { chat: chatId }, 25_000)).media;
+  }
+  /** Имена участников и названия групп по ID (неизвестных нет в ответе). */
+  async names(id: string, ids: string[]): Promise<Record<string, string>> {
+    if (!ids.length) return {};
+    return (await this.request<{ names: Record<string, string> }>('POST', `/instances/${id}/names`, { ids }, 25_000)).names ?? {};
   }
   /** Вложение сообщения (скачать в хранилище сервиса, если ещё нет). */
   mediaOf(id: string, messageId: string): Promise<WireMedia> {

@@ -105,6 +105,15 @@ export interface ChatMessageDto {
   files: ChatFileDto[];
   /** Отправлено менеджером с телефона (рабочий WhatsApp через Wazzup) — наше сообщение. */
   viaPhone?: boolean;
+  /** Реакции из мессенджера (свои линии приложения): эмодзи, сколько, есть ли наша. Только просмотр. */
+  reactions?: ChatReactionDto[];
+}
+
+export interface ChatReactionDto {
+  emoji: string;
+  count: number;
+  /** Среди поставивших — наш аккаунт (сотрудник с телефона). */
+  mine: boolean;
 }
 
 export interface ChatHistoryDto {

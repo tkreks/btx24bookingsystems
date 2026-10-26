@@ -9194,3 +9194,15 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .sheet.bk .pe-picker-quantity input { width: 46px !important; padding: 4px 2px !important; }
 .sheet.bk .pe-catalog-search { width: auto !important; }
 .pe-catalog-list .pe-picker-quantity { justify-self: end; }
+
+/* Реакции из мессенджера под сообщением — только просмотр. */
+.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.msg-reaction {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 13px; line-height: 20px; cursor: default;
+}
+.msg-reaction b { font-size: 11px; font-weight: 600; color: var(--muted); }
+.msg-reaction.mine { background: var(--info-bg); border-color: transparent; }
+.mt-author { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }

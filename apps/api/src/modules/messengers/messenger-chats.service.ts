@@ -11,6 +11,7 @@ import { MessengerCrmService } from './messenger-crm.service.js';
 import { MessengerInboxService } from './messenger-inbox.service.js';
 import { MessengerServiceClient } from './messenger-service.client.js';
 import { toDto } from './messengers.service.js';
+import { groupReactions } from '../openlines/chat-parsing.js';
 
 const PAGE = 50;
 export const groupIdsOf = (m: Messenger): string[] => (Array.isArray(m.groupIds) ? (m.groupIds as unknown[]).filter((x): x is string => typeof x === 'string') : []);
@@ -372,5 +373,7 @@ export function toMessageDto(r: MessengerMessage): MessengerMessageDto {
     deletedAt: r.deletedAt?.toISOString() ?? null,
     source: r.source as MessengerMessageDto['source'],
     relayError: r.relayError,
+    authorName: r.authorName ?? null,
+    reactions: groupReactions(r.reactions),
   };
 }

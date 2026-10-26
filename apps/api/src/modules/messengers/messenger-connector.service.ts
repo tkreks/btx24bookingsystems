@@ -27,6 +27,26 @@ const MAX_ATTEMPTS = 5;
 
 type OperatorFile = { name?: string; link?: string; url?: string; downloadLink?: string; urlDownload?: string; type?: string };
 type ConnectorItem = { im?: { chat_id?: number; message_id?: number }; message?: { id?: string | string[]; text?: string; user_id?: number; files?: OperatorFile[] }; chat?: { id?: string } };
+/** Отправленное с телефона ждёт столько, прежде чем уйти в линию: своё из приложения/линии за это время получит источник. */
+const OUTGOING_DELAY_MS = 5_000;
+/** Группа впервые попадает в линию — вместе с пропущенными сообщениями за столько (но не раньше добавления номера: до него группу вёл прежний канал). */
+const GROUP_BACKLOG_MS = 3 * 24 * 3600_000;
+/**
+ * Метка сообщения сотрудника с телефона: в линию оно уходит от имени клиента (коннектор не может
+ * написать от сотрудника без события отправки клиенту), приложение по метке показывает его как наше —
+ * так же, как у Wazzup (`phoneOutgoing` в `openlines/chat-parsing.ts`).
+ */
+export const PHONE_MARK = '=== Исходящее сообщение, автор: Телефон ===';
+const isGroup = (chatId: string) => chatId.endsWith('@g.us');
+
+/** Текст для линии: с телефона — с меткой, в группе — с именем автора. */
+export function lineText(msg: Pick<MessengerMessage, 'fromMe' | 'chatId' | 'body' | 'type' | 'hasMedia'>, author: string | null, withFile: boolean): string {
+  const base = withFile ? msg.body.trim() : previewOf(msg);
+  if (msg.fromMe) return base ? `${PHONE_MARK}\n${base}` : PHONE_MARK;
+  if (isGroup(msg.chatId) && author) return base ? `${author}:\n${base}` : `${author}:`;
+  return base;
+}
+
 /** Файл оператора не больше — скачиваем и отправляем клиенту. */
 const MAX_OPERATOR_FILE = 64 * 1024 * 1024;
 
@@ -88,7 +108,10 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     onBitrixEvent('ONIMCONNECTOR', (portal, event, data) => this.fromBitrix(portal, event, data));
     this.timer = setInterval(() => void this.retry().catch((err: unknown) => this.logger.warn(`retry: ${err instanceof Error ? err.message : String(err)}`)), RETRY_MS);
     this.inbox.listen({
-      incoming: (m, msg, name) => this.toBitrix(m, msg, name, 'send'),
+      incoming: (m, msg, name) => this.toBitrix(m, msg, isGroup(msg.chatId) ? null : name, 'send'),
+      outgoing: async (m, msg) => {
+        setTimeout(() => void this.fromPhone(m, msg.id).catch((err: unknown) => this.logger.warn(`phone ${msg.externalId}: ${err instanceof Error ? err.message : String(err)}`)), OUTGOING_DELAY_MS).unref?.();
+      },
       edited: (m, msg) => this.toBitrix(m, msg, null, 'update'),
       revoked: (m, msg) => this.toBitrix(m, msg, null, 'delete'),
     });
@@ -222,6 +245,48 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     await this.toBitrix(m, msg, null, 'send', true);
   }
 
+  /**
+   * Сообщение сотрудника, отправленное с телефона, — в линию (иначе в «Чатах» его не видно). Сервис
+   * присылает и своё отправленное приложением/линией: ждём, пока у него появится источник, и такое
+   * не трогаем. Личный чат — только если диалог в линии уже есть (новый диалог открывает приложение).
+   */
+  async fromPhone(m: Messenger, rowId: string): Promise<void> {
+    const row = await this.prisma.messengerMessage.findUnique({ where: { id: rowId } });
+    if (!row || !row.fromMe || row.source !== 'messenger' || row.relayedAt || row.deletedAt) return;
+    if (!isGroup(row.chatId)) {
+      const known = await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: row.chatId, relayedAt: { not: null } }, select: { id: true } });
+      if (!known) return;
+    }
+    try {
+      await this.toBitrix(m, row, null, 'send');
+    } catch (err) {
+      await this.prisma.messengerMessage.update({ where: { id: row.id }, data: { relayError: `Не передано в открытую линию: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500) } });
+    }
+  }
+
+  /** Названия групп и имена участников от сервиса — на процесс (подпись в линии). */
+  private readonly names = new Map<string, string | null>();
+  private async nameOf(m: Messenger, id: string | null): Promise<string | null> {
+    if (!id) return null;
+    const key = `${m.id}|${id}`;
+    if (!this.names.has(key)) {
+      const got = await this.service.names(m.id, [id]).catch(() => ({}) as Record<string, string>);
+      this.names.set(key, got[id] ?? null);
+    }
+    return this.names.get(key) ?? null;
+  }
+
+  /** Группа впервые в линии: сначала пропущенные сообщения (по порядку), потом текущее. */
+  private async groupBacklog(m: Messenger, msg: MessengerMessage): Promise<void> {
+    const since = Math.max(Date.now() - GROUP_BACKLOG_MS, m.createdAt.getTime());
+    const rows = await this.prisma.messengerMessage.findMany({
+      where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, source: 'messenger', relayedAt: null, deletedAt: null, id: { not: msg.id }, sentAt: { gte: new Date(since), lte: msg.sentAt } },
+      orderBy: [{ sentAt: 'asc' }, { id: 'asc' }],
+      take: 100,
+    });
+    for (const r of rows) await this.relayOne(m, r, null, 'send');
+  }
+
   private async relayTarget(m: Messenger, msg: MessengerMessage): Promise<string> {
     const prior = msg.dealId ? await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null }, dealId: msg.dealId }, orderBy: { sentAt: 'desc' } }) : null;
     const other = msg.dealId && !prior ? await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null }, dealId: { not: null } } }) : null;
@@ -230,8 +295,16 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
 
   private async toBitrix(m: Messenger, msg: MessengerMessage, name: string | null, op: 'send' | 'update' | 'delete', explicitChannel = false): Promise<void> {
     if (m.lineMode !== 'own' || !m.lineId) return;
-    // Группы в открытую линию не передаём: линия — переписка один на один.
-    if (msg.chatId.endsWith('@g.us')) return;
+    // Группа (рабочие чаты сотрудников) — тоже в линию, как было у Wazzup: впервые — с пропущенным.
+    if (op === 'send' && isGroup(msg.chatId)) {
+      const known = await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, relayedAt: { not: null } }, select: { id: true } });
+      if (!known) await this.groupBacklog(m, msg);
+    }
+    await this.relayOne(m, msg, name, op, explicitChannel);
+  }
+
+  private async relayOne(m: Messenger, msg: MessengerMessage, name: string | null, op: 'send' | 'update' | 'delete', explicitChannel = false): Promise<void> {
+    const group = isGroup(msg.chatId);
     // Новый канал к найденной сделке открывает сотрудник. До выбора сообщение видно в приложении.
     if (op === 'send' && !explicitChannel && (msg.dealId || msg.awaitingDeal)) {
       const known = await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null } } });
@@ -241,17 +314,24 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     if (!portal) return;
     const client = this.portals.clientFor(portal);
     const chat = await this.prisma.messengerChat.findUnique({ where: { messengerId_chatId: { messengerId: m.id, chatId: msg.chatId } } });
-    const phone = chat?.phone ?? phoneOfChat(msg.chatId);
-    const userName = name ?? chat?.name ?? (phone ? `+${phone}` : msg.chatId);
+    const phone = group ? null : (chat?.phone ?? phoneOfChat(msg.chatId));
+    // Группа — под своим названием (в списке чатов приложения у старых групп могло остаться имя участника).
+    const title = group ? await this.nameOf(m, msg.chatId) : null;
+    if (title && chat && chat.name !== title) await this.prisma.messengerChat.update({ where: { id: chat.id }, data: { name: title.slice(0, 255) } });
+    const userName = name ?? title ?? chat?.name ?? (phone ? `+${phone}` : msg.chatId);
     const relayChatId = await this.relayTarget(m, msg);
-    const picture = op === 'send' ? await this.pictureOf(m, msg.chatId) : undefined;
+    const picture = op === 'send' && !group ? await this.pictureOf(m, msg.chatId) : undefined;
     const user = { id: msg.chatId, name: userName, ...(phone ? { phone: `+${phone}`, skip_phone_validate: 'Y' } : {}), ...(picture ? { picture } : {}) };
     // Вложение — ссылкой (Битрикс24 скачивает сам); не скачано — подпись «[фото]».
     const fileUrl = msg.mediaId ? this.links.url(m.id, msg.mediaId) : null;
     const files = fileUrl ? [{ url: fileUrl, name: msg.mediaName ?? 'file' }] : undefined;
+    const author = group && !msg.fromMe ? (msg.authorName ?? (await this.nameOf(m, msg.author))) : null;
+    const text = lineText(msg, author, !!files);
+    // Группа — без трекера CRM для сообщений (новый диалог линия всё равно может связать со сделкой — настройка линии CRM_CREATE).
+    const noCrm = msg.dealId || msg.awaitingDeal || group;
     const item = {
       user,
-      message: { ...(msg.dealId || msg.awaitingDeal ? { disable_crm: 'Y' } : {}), id: msg.externalId, date: Math.floor(msg.sentAt.getTime() / 1000), ...(files ? { files, ...(msg.body.trim() ? { text: msg.body } : {}) } : { text: previewOf(msg) || ' ' }) },
+      message: { ...(noCrm ? { disable_crm: 'Y' } : {}), id: msg.externalId, date: Math.floor(msg.sentAt.getTime() / 1000), ...(files ? { files, ...(text ? { text } : {}) } : { text: text || ' ' }) },
       chat: { id: relayChatId, name: msg.dealId ? `${userName} · Сделка #${msg.dealId}` : userName },
     };
     const method = op === 'send' ? 'imconnector.send.messages' : op === 'update' ? 'imconnector.update.messages' : 'imconnector.delete.messages';

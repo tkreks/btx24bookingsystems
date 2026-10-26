@@ -2,7 +2,7 @@ import { cachedMediaFromBrowser } from './browser-media.js';
 import { BROWSER_IGNORE_ARGS, configureMessengerBrowser, messengerBrowserArgs, prepareBrowserProfile } from './browser.js';
 import type { Browser, Page } from 'puppeteer';
 import wwebjs from 'whatsapp-web.js';
-import { ensureSerializedId, isClientChat, toWire, type WireEvent, type WireMessage } from './messages.js';
+import { ensureSerializedId, isClientChat, toWire, waReactions, widOf, type WireEvent, type WireMessage } from './messages.js';
 import { AVATAR_TTL_MS, avatarKey, defaultName, MAX_MEDIA_BYTES, MediaStore, type WireMedia } from './media.js';
 import { VirtualScreen } from './screen.js';
 import type { InstanceSpec, InstanceState, InstanceStatus } from './spec.js';
@@ -140,6 +140,16 @@ export class Instance {
         const w = toWire((before ?? m) as never);
         this.emit({ type: 'revoke', instanceId: id, id: w.id, chatId: w.chatId, at: Math.floor(Date.now() / 1000) });
       });
+      // Реакция (поставили или сняли): отдаём весь текущий набор реакций сообщения.
+      client.on('message_reaction', (r) => {
+        void (async () => {
+          const msg = await client.getMessageById(widOf(r.msgId as never));
+          if (!msg) return;
+          const w = toWire(msg as never);
+          if (!isClientChat(w.chatId)) return;
+          this.emit({ type: 'reaction', instanceId: id, id: w.id, chatId: w.chatId, reactions: waReactions((await msg.getReactions()) as never) });
+        })().catch((err: unknown) => this.log(`[${id}] message_reaction: ${err instanceof Error ? err.message : String(err)}`));
+      });
       client.on('message_ack', (m, ack) => this.emit({ type: 'ack', instanceId: id, id: toWire(m as never).id, ack: Number(ack) }));
       client.on('auth_failure', (msg: string) => this.set('failed', { error: `Вход не удался: ${msg}` }));
       client.on('disconnected', (reason: string) => {
@@ -172,8 +182,14 @@ export class Instance {
   private readonly waiters = new Set<(m: WireMessage) => void>();
   /** Скрытый идентификатор `…@lid` → номер (WhatsApp знает его для контактов и тех, кому писали). */
   private readonly lidPhones = new Map<string, string | null>();
+  private readonly groupTitles = new Map<string, string | null>();
 
   private async withPhone(m: WireMessage): Promise<WireMessage> {
+    if (m.chatId.endsWith('@g.us') && this.client) {
+      // Название группы — для списка чатов и открытой линии (кэш на процесс).
+      if (!this.groupTitles.has(m.chatId)) this.groupTitles.set(m.chatId, (await this.client.getChatById(m.chatId).catch(() => null))?.name ?? null);
+      return { ...m, name: this.groupTitles.get(m.chatId) ?? null };
+    }
     if (!m.chatId.endsWith('@lid') || !this.client) return m;
     if (!this.lidPhones.has(m.chatId)) {
       const r = await this.client.getContactLidAndPhone([m.chatId]).catch(() => []);
@@ -388,6 +404,18 @@ export class Instance {
     this.readyTimer = null;
   }
 
+  async names(ids: string[]): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    if (!this.client) return out;
+    for (const id of ids) {
+      const name = id.endsWith('@g.us')
+        ? (await this.client.getChatById(id).catch(() => null))?.name
+        : await this.client.getContactById(id).then((c) => c.pushname || c.name).catch(() => null);
+      if (name) out[id] = name;
+    }
+    return out;
+  }
+
   /** Страница браузера — подставить файл в окно выбора файла (`screen-files.ts`); null — не подключён. */
   filePage(): Page | null {
     return this.status.state === 'ready' ? ((this.client?.pupPage as Page | undefined) ?? null) : null;
@@ -407,4 +435,6 @@ export type MessengerInstance = Pick<Instance, 'spec' | 'info' | 'start' | 'stop
   contactByLogin?(login: string): Promise<{ exists: boolean; chatId: string | null }>;
   /** Фото профиля собеседника (аватар в открытой линии); нет фото — null. */
   avatar?(chatId: string): Promise<WireMedia | null>;
+  /** Имена участников (`…@lid`, `…@c.us`) и названия групп (`…@g.us`); неизвестных нет в ответе. */
+  names?(ids: string[]): Promise<Record<string, string>>;
 };

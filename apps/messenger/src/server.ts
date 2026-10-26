@@ -54,7 +54,7 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
     }
     const sf = /^\/instances\/([^/]+)\/screen-files(?:\/([0-9a-f]{24})(\/attach)?)?$/.exec(url.pathname);
     if (sf && ID_RE.test(sf[1]) && files) return screenFiles(req, res, sf[1], sf[2], !!sf[3], files);
-    const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact|avatar))?$/.exec(url.pathname);
+    const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact|avatar|names))?$/.exec(url.pathname);
     if (!m || !ID_RE.test(m[1])) return json(res, 404, { error: 'not found' });
     const [, id, action] = m;
     if (req.method === 'PUT' && !action) {
@@ -85,6 +85,14 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
       if (typeof b.phone !== 'string' || !/^\d{11,15}$/.test(b.phone)) return json(res, 400, { error: 'Некорректный номер' });
       try { return json(res, 200, await inst.contact(b.phone)); }
       catch { return json(res, 422, { error: 'Не удалось проверить контакт: мессенджер недоступен' }); }
+    }
+    if (req.method === 'POST' && action === 'names') {
+      const inst = manager.get(id);
+      if (!inst) return json(res, 404, { error: 'not found' });
+      const b = (await readJson(req)) as { ids?: unknown };
+      const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === 'string' && /^[\w.:-]{1,80}@(c\.us|lid|g\.us)$/.test(x)).slice(0, 200) : [];
+      try { return json(res, 200, { names: inst.names ? await inst.names(ids) : {} }); }
+      catch { return json(res, 200, { names: {} }); }
     }
     if (req.method === 'POST' && action === 'avatar') {
       const inst = manager.get(id);

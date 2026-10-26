@@ -166,6 +166,10 @@ export interface MessengerMessageDto {
   relayError: string | null;
   dealId?: number | null;
   awaitingDeal?: boolean;
+  /** Группа: имя написавшего участника. */
+  authorName?: string | null;
+  /** Реакции из мессенджера (только просмотр). */
+  reactions?: import('./openlines.js').ChatReactionDto[];
 }
 
 /** Отправка через открытую линию: сообщение уйдёт клиенту, когда его доставит линия (очередь). */

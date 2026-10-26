@@ -60,7 +60,7 @@ describe('Telegram → вид для api', () => {
       [],
       [
         { _: 'updateEditMessage', message: msg(20, '5001', 'Стало') },
-        // Реакция — правка без изменения текста: не событие.
+        // Правка без изменения текста — не правка; реакций нет — сняли последнюю.
         { _: 'updateEditMessage', message: msg(21, '5001', 'Моё', true) },
         { _: 'updateReadHistoryOutbox', peer: { _: 'peerUser', user_id: '5001' }, max_id: 21 },
         { _: 'updateDeleteMessages', messages: [20, 999] },
@@ -70,8 +70,29 @@ describe('Telegram → вид для api', () => {
     );
     expect(next.events).toEqual([
       expect.objectContaining({ type: 'edit', id: 'tg_20', chatId: '5001@lid', body: 'Стало', prevBody: 'Было' }),
+      { type: 'reaction', instanceId: 'i1', id: 'tg_21', chatId: '5001@lid', reactions: [] },
       { type: 'ack', instanceId: 'i1', id: 'tg_21', ack: 3 },
       expect.objectContaining({ type: 'revoke', id: 'tg_20', chatId: '5001@lid' }),
+    ]);
+  });
+
+  it('реакции: правкой сообщения и отдельным обновлением; свои эмодзи-паки не показываем', () => {
+    const mem = newMemory();
+    eventsOf('i1', [msg(30, '5001', 'Спасибо', true)], [], users, mem);
+    const reactions = {
+      _: 'messageReactions' as const,
+      results: [
+        { _: 'reactionCount' as const, reaction: { _: 'reactionEmoji', emoticon: '👍' }, count: 2, chosen_order: 0 },
+        { _: 'reactionCount' as const, reaction: { _: 'reactionCustomEmoji' }, count: 1 },
+      ],
+    };
+    const r = eventsOf('i1', [], [
+      { _: 'updateEditMessage', message: msg(30, '5001', 'Спасибо', true, { reactions }) },
+      { _: 'updateMessageReactions', peer: { _: 'peerUser', user_id: '5001' }, msg_id: 31, reactions: { _: 'messageReactions', results: [{ _: 'reactionCount', reaction: { _: 'reactionEmoji', emoticon: '❤' }, count: 1 }] } },
+    ], users, mem);
+    expect(r.events).toEqual([
+      { type: 'reaction', instanceId: 'i1', id: 'tg_30', chatId: '5001@lid', reactions: [{ emoji: '👍', mine: true }, { emoji: '👍', mine: false }] },
+      { type: 'reaction', instanceId: 'i1', id: 'tg_31', chatId: '5001@lid', reactions: [{ emoji: '❤', mine: false }] },
     ]);
   });
 

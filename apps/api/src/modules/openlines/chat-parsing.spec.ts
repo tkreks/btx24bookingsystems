@@ -114,3 +114,16 @@ describe('сообщения менеджера с телефона (Wazzup)', (
     expect(toMessageDto(msg(3, 42, '=== Исходящее сообщение, автор: Телефон ===\nx'), users, [])).not.toHaveProperty('viaPhone');
   });
 });
+
+describe('реакции из мессенджера', () => {
+  it('CONNECTOR_MID и группировка по эмодзи', async () => {
+    const { connectorMidOf, groupReactions } = await import('./chat-parsing.js');
+    expect(connectorMidOf({ id: 1, author_id: 1, date: '', params: { CONNECTOR_MID: ['tg_48253'] } })).toBe('tg_48253');
+    expect(connectorMidOf({ id: 1, author_id: 1, date: '', params: {} })).toBeNull();
+    expect(groupReactions([{ emoji: '👍', mine: false }, { emoji: '❤', mine: true }, { emoji: '👍', mine: true }, { bad: 1 }])).toEqual([
+      { emoji: '👍', count: 2, mine: true },
+      { emoji: '❤', count: 1, mine: true },
+    ]);
+    expect(groupReactions(null)).toEqual([]);
+  });
+});

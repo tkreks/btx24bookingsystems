@@ -1,6 +1,6 @@
 import type { Messenger } from '../../generated/prisma/client.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
-import { bbToMessenger, MessengerConnectorService } from './messenger-connector.service.js';
+import { bbToMessenger, lineText, MessengerConnectorService, PHONE_MARK } from './messenger-connector.service.js';
 import { MessengerInboxService, phoneOfChat } from './messenger-inbox.service.js';
 import type { MessengerServiceClient, WireMessage } from './messenger-service.client.js';
 
@@ -41,10 +41,35 @@ describe('Переписка мессенджера в базе', () => {
     const db = fakeDb();
     const inbox = new MessengerInboxService(db.prisma);
     const incoming = vi.fn(async () => undefined);
-    inbox.listen({ incoming, edited: vi.fn(), revoked: vi.fn() });
+    inbox.listen({ incoming, outgoing: vi.fn(), edited: vi.fn(), revoked: vi.fn() });
     await inbox.apply([{ type: 'message', instanceId: 'm1', message: wire('a', 'Привет') }, { type: 'message', instanceId: 'm1', message: wire('a', 'Привет') }]);
     expect(db.msgs).toHaveLength(1);
     expect(incoming).toHaveBeenCalledTimes(1);
+  });
+
+  it('отправленное с телефона — в линию (outgoing); своё из приложения — нет', async () => {
+    const db = fakeDb();
+    const inbox = new MessengerInboxService(db.prisma);
+    const outgoing = vi.fn(async () => undefined);
+    inbox.listen({ incoming: vi.fn(), outgoing, edited: vi.fn(), revoked: vi.fn() });
+    await inbox.apply([{ type: 'message', instanceId: 'm1', message: wire('p', 'С телефона', true) }]);
+    await inbox.message(M, wire('q', 'Из приложения', true), { source: 'app' });
+    expect(outgoing).toHaveBeenCalledTimes(1);
+    expect(outgoing.mock.calls[0]).toEqual([M, expect.objectContaining({ externalId: 'p' })]);
+  });
+
+  it('реакции — текущий набор сообщения', async () => {
+    const db = fakeDb();
+    const inbox = new MessengerInboxService(db.prisma);
+    await inbox.apply([{ type: 'reaction', instanceId: 'm1', id: 'a', chatId: '79991234567@c.us', reactions: [{ emoji: '👍', mine: false }, { emoji: 'x'.repeat(40), mine: true }] }]);
+    expect(db.prisma.messengerMessage.updateMany).toHaveBeenCalledWith({ where: { messengerId: 'm1', externalId: 'a' }, data: { reactions: [{ emoji: '👍', mine: false }] } });
+  });
+
+  it('текст для линии: с телефона — с меткой, в группе — с автором', () => {
+    const base = { chatId: '79991234567@c.us', body: 'Какой возраст детей?', type: 'chat', hasMedia: false };
+    expect(lineText({ ...base, fromMe: true }, null, false)).toBe(`${PHONE_MARK}\nКакой возраст детей?`);
+    expect(lineText({ ...base, chatId: '5116402572@g.us', fromMe: false }, 'Светлана', false)).toBe('Светлана:\nКакой возраст детей?');
+    expect(lineText({ ...base, fromMe: false }, null, false)).toBe('Какой возраст детей?');
   });
 
   it('правка хранит прежний текст, удаление — отметка, текст остаётся', async () => {

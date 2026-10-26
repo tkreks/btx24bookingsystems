@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { Messenger, MessengerMessage, Prisma } from '../../generated/prisma/client.js';
 import { MessengerCrmService } from './messenger-crm.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
-import type { WireEvent, WireMessage } from './messenger-service.client.js';
+import type { WireEvent, WireMessage, WireReaction } from './messenger-service.client.js';
 
 /** Номер собеседника из ID личного чата (`79991234567@c.us`); скрытые номера (`…@lid`) и группы — null. */
 export const phoneOfChat = (chatId: string): string | null => (/^(\d{10,15})@c\.us$/.exec(chatId)?.[1] ?? null);
@@ -10,6 +10,9 @@ export const phoneOfChat = (chatId: string): string | null => (/^(\d{10,15})@c\.
 export const previewOf = (m: { body: string; type: string; hasMedia: boolean }) =>
   (m.body.trim() || (m.hasMedia ? `[${MEDIA_LABELS[m.type] ?? 'вложение'}]` : '')).slice(0, 500);
 const MEDIA_LABELS: Record<string, string> = { image: 'фото', video: 'видео', ptt: 'голосовое', audio: 'аудио', document: 'файл', sticker: 'стикер', location: 'геопозиция' };
+
+/** Правки и удаления передаются в линию: входящие и переданные туда сообщения с телефона. */
+const relayedFromChat = (row: MessengerMessage) => !row.fromMe || (row.source === 'messenger' && !!row.relayedAt);
 
 /** Колонки вложения: скачанное — с файлом, нескачанное — только описание из WhatsApp. */
 export function mediaColumns(w: WireMessage) {
@@ -21,6 +24,8 @@ export function mediaColumns(w: WireMessage) {
 /** Куда ещё отдать изменения переписки (своя открытая линия — `MessengerConnectorService`). */
 export interface InboxListener {
   incoming(messenger: Messenger, msg: MessengerMessage, name: string | null): Promise<void>;
+  /** Отправлено с телефона (не из приложения и не из линии). */
+  outgoing(messenger: Messenger, msg: MessengerMessage): Promise<void>;
   edited(messenger: Messenger, msg: MessengerMessage): Promise<void>;
   revoked(messenger: Messenger, msg: MessengerMessage): Promise<void>;
 }
@@ -54,6 +59,7 @@ export class MessengerInboxService {
         if (e.type === 'message') await this.message(m, e.message);
         else if (e.type === 'edit') await this.edit(m, e.id, e.body, e.prevBody, e.at);
         else if (e.type === 'revoke') await this.revoke(m, e.id, e.at);
+        else if (e.type === 'reaction') await this.react(m, e.id, e.reactions);
         else await this.prisma.messengerMessage.updateMany({ where: { messengerId: m.id, externalId: e.id, OR: [{ ack: null }, { ack: { lt: e.ack } }] }, data: { ack: e.ack } });
       } catch (err) {
         this.logger.warn(`messenger ${m.id} ${e.type}: ${err instanceof Error ? err.message : String(err)}`);
@@ -79,6 +85,7 @@ export class MessengerInboxService {
         externalId: w.id,
         fromMe: w.fromMe,
         author: w.author,
+        authorName: w.authorName?.slice(0, 255) ?? null,
         body: w.body,
         type: w.type,
         hasMedia: w.hasMedia,
@@ -105,8 +112,12 @@ export class MessengerInboxService {
           ...(newest ? (w.fromMe ? { unread: 0 } : { unread: { increment: 1 } }) : {}),
         },
       });
-      // Клиенту — в свою открытую линию (только новое входящее; отправленное из линии уже там).
-      if (opts.relay !== false && !w.fromMe && !extra.source && this.listener) await this.listener.incoming(m, row, w.name).catch((err: unknown) => this.relayFailed(row, err));
+      // В свою открытую линию: новое входящее и отправленное с телефона (отправленное из линии и
+      // приложения уже там — у него `extra.source`).
+      if (opts.relay !== false && !extra.source && this.listener) {
+        if (!w.fromMe) await this.listener.incoming(m, row, w.name).catch((err: unknown) => this.relayFailed(row, err));
+        else await this.listener.outgoing(m, row).catch((err: unknown) => this.relayFailed(row, err));
+      }
     }
     return row;
   }
@@ -116,7 +127,7 @@ export class MessengerInboxService {
     if (!row || row.body === body) return row;
     const edits = [...((row.edits as { at: string; body: string }[] | null) ?? []), { at: new Date(at * 1000).toISOString(), body: prevBody || row.body }];
     const updated = await this.prisma.messengerMessage.update({ where: { id: row.id }, data: { body, editedAt: new Date(at * 1000), edits } });
-    if (!row.fromMe && this.listener) await this.listener.edited(m, updated).catch((err: unknown) => this.relayFailed(updated, err));
+    if (relayedFromChat(row) && this.listener) await this.listener.edited(m, updated).catch((err: unknown) => this.relayFailed(updated, err));
     return updated;
   }
 
@@ -124,8 +135,14 @@ export class MessengerInboxService {
     const row = await this.prisma.messengerMessage.findUnique({ where: { messengerId_externalId: { messengerId: m.id, externalId } } });
     if (!row || row.deletedAt) return row;
     const updated = await this.prisma.messengerMessage.update({ where: { id: row.id }, data: { deletedAt: new Date(at * 1000) } });
-    if (!row.fromMe && this.listener) await this.listener.revoked(m, updated).catch((err: unknown) => this.relayFailed(updated, err));
+    if (relayedFromChat(row) && this.listener) await this.listener.revoked(m, updated).catch((err: unknown) => this.relayFailed(updated, err));
     return updated;
+  }
+
+  /** Реакции сообщения — текущий набор из мессенджера (повтор безопасен). */
+  async react(m: Messenger, externalId: string, reactions: WireReaction[]): Promise<void> {
+    const clean = (reactions ?? []).filter((r) => typeof r?.emoji === 'string' && r.emoji.length <= 16).slice(0, 100).map((r) => ({ emoji: r.emoji, mine: !!r.mine }));
+    await this.prisma.messengerMessage.updateMany({ where: { messengerId: m.id, externalId }, data: { reactions: clean } });
   }
 
   private async relayFailed(row: MessengerMessage, err: unknown) {

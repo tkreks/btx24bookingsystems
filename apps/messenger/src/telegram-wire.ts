@@ -1,4 +1,4 @@
-import type { WireEvent, WireMessage } from './messages.js';
+import type { WireEvent, WireMessage, WireReaction } from './messages.js';
 
 /**
  * Объекты Telegram API (MTProto, как их отдаёт Telegram Web K) — только нужные поля. Длинные числа
@@ -37,6 +37,33 @@ export interface TgMessage {
   pFlags?: { out?: true };
   reply_to?: { reply_to_msg_id?: number };
   media?: { _: string; photo?: { _: string; id?: string | number; sizes?: { size?: number; sizes?: number[] }[] }; document?: TgDocument };
+  reactions?: TgReactions;
+}
+type TgReaction = { _: 'reactionEmoji'; emoticon: string } | { _: string; emoticon?: string };
+/** Реакции сообщения: счётчики по эмодзи (`chosen_order` — среди них есть наша) и последние поставившие. */
+export interface TgReactions {
+  _: 'messageReactions';
+  results?: { _: 'reactionCount'; reaction: TgReaction; count: number; chosen_order?: number }[];
+  recent_reactions?: { _: 'messagePeerReaction'; peer_id?: TgPeer; reaction: TgReaction; pFlags?: { my?: true } }[];
+}
+
+/**
+ * Реакции Telegram → набор для api: по одной на поставившего. Свои эмодзи-паки и платные звёзды не
+ * показываем (их нечем нарисовать). У счётчика с `chosen_order` одна из реакций — наша.
+ */
+export function reactionsOf(r: TgReactions | undefined): WireReaction[] {
+  const out: WireReaction[] = [];
+  for (const c of r?.results ?? []) {
+    if (c.reaction._ !== 'reactionEmoji' || !c.reaction.emoticon) continue;
+    const mine = c.chosen_order !== undefined;
+    for (let i = 0; i < Math.min(c.count, 50); i++) out.push({ emoji: c.reaction.emoticon, mine: mine && i === 0 });
+  }
+  return out;
+}
+
+/** Запомнить названия групп из `chats` ответа Telegram. */
+export function learnTitles(mem: TgMemory, chats: TgChat[] | undefined) {
+  for (const c of chats ?? []) if (c._ === 'chat' && c.title) mem.titles.set(String(c.id), c.title);
 }
 
 /** Служебная учётка Telegram (коды входа) — её сообщения в приложение не попадают. */
@@ -93,7 +120,7 @@ export function mediaTypeOf(media: TgMessage['media']): { type: string; info: Wi
 }
 
 /** Сообщение Telegram → вид для api; null — не переписка с клиентом (канал, бот, служебное). */
-export function toWire(m: TgMessage, users: Map<string, TgUser>): WireMessage | null {
+export function toWire(m: TgMessage, users: Map<string, TgUser>, titles?: Map<string, string>): WireMessage | null {
   if (m._ !== 'message') return null;
   const chatId = chatIdOf(m.peer_id);
   if (!chatId) return null;
@@ -107,7 +134,9 @@ export function toWire(m: TgMessage, users: Map<string, TgUser>): WireMessage | 
     chatId,
     fromMe,
     author: authorId ? `${authorId}@lid` : null,
-    name: fromMe ? null : nameOf(authorId ? users.get(authorId) : peerUser),
+    // В группе — название группы и отдельно имя участника.
+    name: m.peer_id?._ === 'peerChat' ? (titles?.get(String(m.peer_id.chat_id)) ?? null) : fromMe ? null : nameOf(peerUser),
+    ...(m.peer_id?._ === 'peerChat' ? { authorName: fromMe ? null : nameOf(authorId ? users.get(authorId) : undefined) } : {}),
     phone: peerUser?.phone ? peerUser.phone.replace(/\D/g, '') || null : null,
     body: m.message ?? '',
     type: media?.type ?? 'chat',
@@ -123,10 +152,12 @@ export function toWire(m: TgMessage, users: Map<string, TgUser>): WireMessage | 
 /** Что отследить между опросами: чат сообщения (удаление в Telegram приходит без чата), текст, свои непрочитанные. */
 export interface TgMemory {
   chatOf: Map<number, string>;
+  /** Названия групп (ID группы → название) — из `chats` ответов Telegram. */
+  titles: Map<string, string>;
   bodyOf: Map<number, string>;
   unread: Map<string, Set<number>>;
 }
-export const newMemory = (): TgMemory => ({ chatOf: new Map(), bodyOf: new Map(), unread: new Map() });
+export const newMemory = (): TgMemory => ({ chatOf: new Map(), titles: new Map(), bodyOf: new Map(), unread: new Map() });
 
 const LIMIT = 20_000;
 function remember(mem: TgMemory, id: number, chatId: string, body: string, outUnread: boolean) {
@@ -149,31 +180,40 @@ export type TgUpdate =
   | { _: 'updateNewMessage' | 'updateEditMessage'; message: TgMessage }
   | { _: 'updateDeleteMessages'; messages: number[] }
   | { _: 'updateReadHistoryOutbox'; peer: TgPeer; max_id: number }
+  | { _: 'updateMessageReactions'; peer: TgPeer; msg_id: number; reactions: TgReactions }
   | { _: string; [k: string]: unknown };
 
 /**
  * Изменения из `updates.getDifference` → события для api. Новые (в том числе отправленные с телефона)
  * — `message`; правка — `edit` с прежним текстом (если он известен); удаление — `revoke` (в Telegram
- * удаление в личном чате — у обоих); прочтение собеседником — `ack` 3 для своих сообщений.
+ * удаление в личном чате — у обоих); прочтение собеседником — `ack` 3 для своих сообщений; реакции —
+ * `reaction` (в личных чатах Telegram присылает их правкой сообщения без изменения текста).
  */
 export function eventsOf(instanceId: string, newMessages: TgMessage[], updates: TgUpdate[], users: Map<string, TgUser>, mem: TgMemory): { events: WireEvent[]; messages: Array<{ wire: WireMessage; raw: TgMessage }> } {
   const events: WireEvent[] = [];
   const messages: Array<{ wire: WireMessage; raw: TgMessage }> = [];
   const now = Math.floor(Date.now() / 1000);
+  const react = (wire: WireMessage, r: TgReactions | undefined) => {
+    if (r) events.push({ type: 'reaction', instanceId, id: wire.id, chatId: wire.chatId, reactions: reactionsOf(r) });
+  };
   const add = (raw: TgMessage) => {
-    const wire = toWire(raw, users);
+    const wire = toWire(raw, users, mem.titles);
     if (!wire) return;
     remember(mem, raw.id, wire.chatId, wire.body, wire.fromMe);
     messages.push({ wire, raw });
+    react(wire, raw.reactions);
   };
   for (const m of newMessages) add(m);
   for (const u of updates) {
     if (u._ === 'updateNewMessage') add((u as { message: TgMessage }).message);
     else if (u._ === 'updateEditMessage') {
       const raw = (u as { message: TgMessage }).message;
-      const wire = toWire(raw, users);
+      const wire = toWire(raw, users, mem.titles);
       if (!wire) continue;
       const prevBody = mem.bodyOf.get(raw.id) ?? '';
+      // Правка известного сообщения без изменения текста и без реакций — сняли последнюю реакцию.
+      const same = mem.bodyOf.has(raw.id) && prevBody === wire.body;
+      react(wire, raw.reactions ?? (same ? { _: 'messageReactions', results: [] } : undefined));
       // Правка без изменения текста (реакции, просмотры) — не событие для переписки.
       if (prevBody === wire.body && mem.bodyOf.has(raw.id)) continue;
       mem.bodyOf.set(raw.id, wire.body);
@@ -185,6 +225,10 @@ export function eventsOf(instanceId: string, newMessages: TgMessage[], updates: 
         // Чужие для приложения (каналы, боты) и неизвестные — пропускаем: без чата событие не применить.
         if (chatId) events.push({ type: 'revoke', instanceId, id: wireIdOf(id), chatId, at: now });
       }
+    } else if (u._ === 'updateMessageReactions') {
+      const r = u as { peer: TgPeer; msg_id: number; reactions: TgReactions };
+      const chatId = chatIdOf(r.peer);
+      if (chatId && r.peer._ !== 'peerChannel') events.push({ type: 'reaction', instanceId, id: wireIdOf(r.msg_id), chatId, reactions: reactionsOf(r.reactions) });
     } else if (u._ === 'updateReadHistoryOutbox') {
       const r = u as { peer: TgPeer; max_id: number };
       const chatId = chatIdOf(r.peer);

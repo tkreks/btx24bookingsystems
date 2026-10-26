@@ -1183,6 +1183,8 @@ model MessengerMessage {
   externalId   String    @db.VarChar(190)
   fromMe       Boolean
   author       String?   @db.VarChar(100)
+  /// Группа: имя написавшего участника (как его показывает мессенджер).
+  authorName   String?   @db.VarChar(255)
   body         String    @db.Text
   type         String    @db.VarChar(20)
   hasMedia     Boolean   @default(false)
@@ -1219,6 +1221,8 @@ model MessengerMessage {
   /// Реальный ID диалога коннектора (может включать контекст сделки).
   relayChatId  String? @db.VarChar(190)
   @@index([portalId, messengerId, chatId, dealId, sentAt])
+  /// Реакции — текущий набор из мессенджера: [{ emoji, mine }] (mine — наш аккаунт); смотреть, не ставить.
+  reactions    Json?
 
 }
 

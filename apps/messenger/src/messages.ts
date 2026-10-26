@@ -9,8 +9,10 @@ export interface WireMessage {
   fromMe: boolean;
   /** Отправитель в группе. */
   author: string | null;
-  /** Имя собеседника в мессенджере (если он его указал). */
+  /** Имя собеседника в мессенджере (если он его указал); в группе — название группы (если известно). */
   name: string | null;
+  /** Группа: имя написавшего участника (своё — null). */
+  authorName?: string | null;
   /** Номер собеседника, если чат адресован скрытым идентификатором (`…@lid`) и номер известен. */
   phone?: string | null;
   body: string;
@@ -29,15 +31,33 @@ export interface WireMessage {
   ack: number | null;
 }
 
+/** Реакция на сообщение: эмодзи и кто поставил (`mine` — наш аккаунт, сотрудник с телефона). */
+export interface WireReaction {
+  emoji: string;
+  mine: boolean;
+}
+
+/** Реакции WhatsApp (`msg.getReactions()`) → набор для api: по одной на поставившего. */
+export function waReactions(lists: { aggregateEmoji?: string; id?: string; senders?: { reaction?: string; id?: { fromMe?: boolean } }[] }[] | null | undefined): WireReaction[] {
+  const out: WireReaction[] = [];
+  for (const l of lists ?? []) for (const s of l.senders ?? []) {
+    const emoji = s.reaction || l.aggregateEmoji || l.id;
+    if (emoji) out.push({ emoji, mine: !!s.id?.fromMe });
+  }
+  return out;
+}
+
 /**
- * Событие для api: новое (`message`), правка (`edit`), удаление у всех (`revoke`), статус (`ack`).
+ * Событие для api: новое (`message`), правка (`edit`), удаление у всех (`revoke`), статус (`ack`),
+ * реакции (`reaction` — полный текущий набор реакций сообщения, пустой — все сняли).
  * Порядок не гарантирован, повтор возможен — api применяет идемпотентно (по `id`).
  */
 export type WireEvent =
   | { type: 'message'; instanceId: string; message: WireMessage }
   | { type: 'edit'; instanceId: string; id: string; chatId: string; body: string; prevBody: string; at: number }
   | { type: 'revoke'; instanceId: string; id: string; chatId: string; at: number }
-  | { type: 'ack'; instanceId: string; id: string; ack: number };
+  | { type: 'ack'; instanceId: string; id: string; ack: number }
+  | { type: 'reaction'; instanceId: string; id: string; chatId: string; reactions: WireReaction[] };
 
 type WaId = string | { _serialized?: string; id?: string; remote?: WaId; fromMe?: boolean; user?: string; server?: string } | null | undefined;
 type WaMessage = {
@@ -78,12 +98,17 @@ export function ensureSerializedId<T extends { id?: WaId }>(message: T): T {
 }
 
 export function toWire(m: WaMessage): WireMessage {
+  const chatId = widOf(m.fromMe ? m.to : m.from);
+  const notify = m.fromMe ? null : (m._data?.notifyName ?? null);
+  // В группе notifyName — имя участника, а не чата (название группы подставляет экземпляр).
+  const group = chatId.endsWith('@g.us');
   return {
     id: widOf(m.id),
-    chatId: widOf(m.fromMe ? m.to : m.from),
+    chatId,
     fromMe: !!m.fromMe,
     author: widOf(m.author) || null,
-    name: m.fromMe ? null : (m._data?.notifyName ?? null),
+    name: group ? null : notify,
+    ...(group ? { authorName: notify } : {}),
     body: m.body ?? '',
     type: m.type,
     hasMedia: !!m.hasMedia,

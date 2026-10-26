@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { MESSENGER_MAX_FILE_BYTES, type MessengerMessageDto } from '@btx24/shared';
 import { fmtDateTime } from '../format.js';
+import { Reactions } from './Reactions.js';
 
 /** Что умеет переписка: загрузить (страницу раньше `before`), отправить, изменить, удалить у всех. */
 export interface ThreadApi {
@@ -133,7 +134,9 @@ export function MessengerThread({ api, timezone, canSend = true, label, kind = '
             <Fragment key={m.id}>
               <div className={`mt-msg${own ? ' own' : ''}${m.deletedAt ? ' deleted' : ''}`}>
                 {m.hasMedia && !m.deletedAt && <MessengerMedia message={m} api={api} onReady={() => { if (atBottom.current && list.current) list.current.scrollTop = list.current.scrollHeight; }} />}
+                {!own && m.authorName && <div className="mt-author">{m.authorName}</div>}
                 <div className="mt-body">{m.body}</div>
+                <Reactions items={m.reactions} />
                 <div className="mt-meta">
                   <span>{fmtDateTime(m.sentAt, timezone)}</span>
                   {m.editedAt && (
