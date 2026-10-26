@@ -323,6 +323,7 @@ export function ChatsPage({
         ...local.filter((c) => !hits?.items?.some((h) => h.chatId === c.chatId)),
       ]
     : local;
+  const formChat = form ? [...items, ...all].find((c) => c.chatId === form.chatId) : undefined;
 
   return (
     <div className={`chats-page${openId ? ' has-open' : ''}`}>
@@ -694,7 +695,15 @@ export function ChatsPage({
                 canCreate={canCreate}
                 revision={bookingsRev}
                 onOpenDay={onOpenDay}
-                onCreate={(data) => setForm({ chatId: openId, data })}
+                onCreate={(data) => {
+                  // Данные клиента ещё не пришли — сначала они: иначе мастер откроется без контакта и сделок.
+                  if (data) return setForm({ chatId: openId, data });
+                  const chatId = openId;
+                  void apiGet<ClientBookingsDto>(`/openlines/chats/${chatId}/bookings`).then(
+                    (d) => setForm({ chatId, data: d }),
+                    () => setForm({ chatId, data: null }),
+                  );
+                }}
               />
               {created && (
                 <p className="notice cb-created">{created}</p>
@@ -723,10 +732,11 @@ export function ChatsPage({
             timezone={timezone}
             context={{
               date: todayIn(timezone),
-              contactId: form.data?.contactId ?? null,
+              // Брони клиента не загрузились — контакт из привязки чата, сделки мастер подгрузит сам.
+              contactId: form.data?.contactId ?? formChat?.crm.contactId ?? null,
               dealId: form.dealId ?? null,
-              clientName: ((c) => c?.clientName || c?.title || null)([...items, ...all].find((c) => c.chatId === form.chatId)),
-              openDeals: form.data?.openDeals ?? [],
+              clientName: form.data?.contact?.name || formChat?.clientName || formChat?.title || null,
+              openDeals: form.data?.openDeals,
             }}
             onClose={() => setForm(null)}
             onDone={(r) => {

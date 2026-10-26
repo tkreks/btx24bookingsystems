@@ -201,12 +201,12 @@ export const DEAL_KIND_HINTS: Record<DealKind, string> = {
   by_certificate: 'как посещение; ссылку на оплату — по решению на последнем шаге',
   no_payment: 'дата, ресурс и время, остальные поля группы',
 };
-/** Вариант поля «Тип сделки» (начало названия). «Без оплаты» в списке нет — это бронь посещения. */
+/** Вариант поля «Тип сделки» (начало названия; «Бронирование без оплаты» добавлен в поле 2026-10-26). */
 export const DEAL_KIND_TYPE_VALUE: Record<DealKind, string> = {
   certificate: CERTIFICATE_DEAL_TYPE,
   visit: 'Бронирование посещения',
   by_certificate: 'Бронирование сертификатом',
-  no_payment: 'Бронирование посещения',
+  no_payment: 'Бронирование без оплаты',
 };
 /** Оплата брони по типу сделки; для «сертификатом» — `certificate`, со ссылкой — `prepayment`. */
 export const DEAL_KIND_PAYMENT: Record<Exclude<DealKind, 'certificate'>, PaymentMode> = {

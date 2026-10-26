@@ -12,7 +12,7 @@ import {
 } from '@btx24/shared';
 import { availabilityPieces, slotAt } from '../calendar/layout.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
-import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
+import { durationChoices, durationText, localAt, periodToUtc, upcomingPeriod, withDuration, type PeriodFields } from './booking-form.js';
 import { DatePicker } from './DatePicker.js';
 
 /** Занятость ресурса на выбранное время: свободен, тех. окно (можно), пересечение с бронью или стоп ресурса. */
@@ -53,13 +53,15 @@ const NIGHTS = [1, 2, 3, 5, 7];
 const SLOT_LEGEND: LegendItem[] = [
   { label: 'Занято', swatch: { background: '#f04438' } },
   { label: 'Тех. окно — можно', swatch: { background: '#fcd34d' }, title: 'Пересечение с тех. окном разрешено, с предупреждением' },
-  { label: 'Выбранное время', swatch: { borderColor: 'var(--primary)', background: 'rgba(0, 122, 255, 0.18)' }, title: 'Видно при наведении на шкалу выбранного ресурса' },
+  { label: 'Бронь на выбранную длительность', swatch: { borderColor: 'var(--primary)', background: 'rgba(0, 122, 255, 0.18)' }, title: 'Накладка при наведении на шкалу ресурса; нажатие — выбрать это время' },
 ];
 
 /**
- * Раздел «Ресурс и время» (решение владельца 2026-10-26): посередине — выбор даты, ниже — ресурсы со
- * статусом на выбранное время и шкалой занятости. Почасовые группы: нажатие на шкалу — окно с началом и
- * завершением от этого места; «заезд/выезд» — время заезда и ночи, шкала выбирает ресурс.
+ * Раздел «Ресурс и время» (решение владельца 2026-10-26): посередине — выбор даты, ниже — длительность
+ * (почасовые группы: по умолчанию группы и +1…+3 ч, «＋» — своя) и ресурсы со шкалой занятости.
+ * Прошедшие часы сегодня на шкале не показываются (идущие брони видны с левого края). Наведение на
+ * шкалу — накладка брони выбранной длительности от этого места, нажатие — выбрать её; «заезд/выезд» —
+ * время заезда и ночи, шкала выбирает ресурс.
  */
 export function SlotPicker({
   compact = false,
@@ -85,31 +87,50 @@ export function SlotPicker({
   onResources: (ids: number[]) => void;
 }) {
   const [onlyFree, setOnlyFree] = useState(false);
-  const [draft, setDraft] = useState<{ rid: number; period: PeriodFields } | null>(null);
+  const [draft, setDraft] = useState<{ rid: number | null; period: PeriodFields } | null>(null);
+  const [hover, setHover] = useState<{ rid: number; start: number } | null>(null);
+  const [askHours, setAskHours] = useState(false);
   const now = useNow();
+  const today = todayIn(timezone);
   const interval = group.bookingMode === 'interval';
   const startMs = zonedTimeToUtc(period.startDate, period.startTime || '00:00', timezone).getTime();
   const endMs = zonedTimeToUtc(period.endDate, period.endTime || '00:00', timezone).getTime();
   const durationMs = endMs - startMs;
   const nights = Math.round((Date.parse(period.endDate) - Date.parse(period.startDate)) / 86_400_000);
-  // Во встройке — сутки выбранного дня; вне неё «заезд/выезд» охватывает весь период.
-  const range = { from: zonedDayRange(period.startDate, timezone).start.getTime(), to: zonedDayRange(interval && !compact ? period.endDate : period.startDate, timezone).end.getTime() };
+  // «Заезд/выезд» вне встройки: шкала выбирает ресурс; иначе — бронь от места нажатия.
+  const nightsMode = interval && !compact;
+  // Во встройке — сутки выбранного дня; вне неё «заезд/выезд» охватывает весь период. Сегодня — с текущего часа.
+  const dayStart = zonedDayRange(period.startDate, timezone).start.getTime();
+  const from = period.startDate === today ? dayStart + Math.max(0, Math.floor((now - dayStart) / 3_600_000)) * 3_600_000 : dayStart;
+  const range = { from, to: Math.max(from + 3_600_000, zonedDayRange(nightsMode ? period.endDate : period.startDate, timezone).end.getTime()) };
   const span = range.to - range.from;
   const frac = (ms: number) => Math.min(1, Math.max(0, (ms - range.from) / span));
+  // Длительность брони от наведения: выбранная (или группы по умолчанию).
+  const lengthMs = durationMs > 0 ? durationMs : group.durationMinutes * 60_000;
 
-  const setDay = (d: string) => onPeriod(defaultPeriod(group, d, period.startTime));
-  // «Заезд/выезд» вне встройки: шкала выбирает ресурс; иначе — окно времени от места нажатия.
-  const nightsMode = interval && !compact;
-  const pickOnBar = (rid: number, e: MouseEvent<HTMLDivElement>) => {
-    if (nightsMode) return onResources([rid]);
+  const setDay = (d: string) => onPeriod(upcomingPeriod(group, d, d === period.startDate ? period.startTime : undefined, Date.now(), timezone));
+  /** Начало брони под курсором: шаг 30 минут, не раньше ближайших получаса. */
+  const startAt = (e: MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const dayMin = span / 60_000;
     const m = slotAt(((e.clientX - r.left) / r.width) * dayMin, dayMin);
-    const start = new Date(range.from + m * 60_000);
-    const end = new Date(start.getTime() + (durationMs > 0 ? durationMs : group.durationMinutes * 60_000));
-    const localDay = (d: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(d);
-    setDraft({ rid, period: { startDate: localDay(start), startTime: fmtTime(start.toISOString(), timezone), endDate: localDay(end), endTime: fmtTime(end.toISOString(), timezone) } });
+    const step = 30 * 60_000;
+    return Math.max(range.from + m * 60_000, Math.ceil(now / step) * step);
   };
+  const periodFrom = (start: number): PeriodFields => {
+    const s = localAt(start, timezone);
+    const e = localAt(start + lengthMs, timezone);
+    return { startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time };
+  };
+  const pickOnBar = (rid: number, e: MouseEvent<HTMLDivElement>) => {
+    if (nightsMode) return onResources([rid]);
+    onPeriod(periodFrom(startAt(e)));
+    onResources([rid]);
+  };
+  const hours = durationChoices(group.durationMinutes);
+  const lengthH = Math.round((durationMs / 3_600_000) * 100) / 100;
+  const ghostOf = (rid: number) =>
+    hover?.rid !== rid ? null : nightsMode ? { start: startMs, end: endMs } : { start: hover.start, end: hover.start + lengthMs };
 
   const resources = days?.resources ?? [];
   const rows = resources.map((r) => ({ r, state: slotStateOf(r.id, days?.bookings ?? [], days?.techWindows ?? [], startMs, endMs, days?.stops ?? []) }));
@@ -117,12 +138,14 @@ export function SlotPicker({
   const free = rows.filter((x) => open(x.state)).length;
   const shown = onlyFree ? rows.filter((x) => open(x.state) || resourceIds.includes(x.r.id)) : rows;
   // Метки считаются по местному времени портала, включая дни перехода на летнее время.
+  const firstHour = Number(localAt(range.from, timezone).time.slice(0, 2));
+  const spanH = span / 3_600_000;
+  const tickStep = spanH > 12 ? 4 : spanH > 6 ? 2 : 1;
   const ticks = nightsMode
     ? Array.from({ length: nights + 1 }, (_, i) => ({ at: (i + 0.5) / (nights + 1), label: `${shiftDate(period.startDate, i).slice(8, 10)}.${shiftDate(period.startDate, i).slice(5, 7)}` }))
-    : [0, 4, 8, 12, 16, 20].map((h) => ({
-      at: frac(zonedTimeToUtc(period.startDate, `${String(h).padStart(2, '0')}:00`, timezone).getTime()),
-      label: `${h}ч`,
-    }));
+    : Array.from({ length: 24 - firstHour }, (_, i) => firstHour + i)
+        .filter((h) => h % tickStep === 0)
+        .map((h) => ({ at: frac(zonedTimeToUtc(period.startDate, `${String(h).padStart(2, '0')}:00`, timezone).getTime()), label: `${h}ч` }));
 
   return (
     <section className="bk-section wz-slot">
@@ -153,7 +176,37 @@ export function SlotPicker({
           </label>
         </div>
       ) : (
-        <p className="muted wz-hint">Нажмите на шкалу ресурса — откроется выбор начала и завершения брони.</p>
+        <div className="wz-when">
+          {!interval && (
+            <div className="wz-when-field">
+              <span className="df-label">Длительность</span>
+              <div className="wz-durations" role="group" aria-label="Длительность">
+                {[...hours, ...(durationMs > 0 && !hours.includes(lengthH) ? [lengthH] : [])].map((h) => (
+                  <button key={h} type="button" aria-pressed={lengthH === h} className={lengthH === h ? 'active' : ''} onClick={() => onPeriod(withDuration(period, h * 60, timezone))}>
+                    {String(h).replace('.', ',')} ч
+                  </button>
+                ))}
+                <button type="button" className="wz-dur-add" aria-label="Другая длительность" title="Другая длительность, ч" onClick={() => setAskHours(true)}>
+                  ＋
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="wz-when-field">
+            <span className="df-label">Время</span>
+            <span className="wz-when-time">
+              <b>
+                {period.startTime}–{period.endDate !== period.startDate ? `${period.endDate.slice(8, 10)}.${period.endDate.slice(5, 7)} ` : ''}
+                {period.endTime}
+              </b>
+              {durationMs > 0 && <span className="muted"> · {durationText(durationMs)}</span>}
+              <button type="button" className="link" onClick={() => setDraft({ rid: resourceIds.length === 1 ? resourceIds[0] : null, period: { ...period } })}>
+                Точное время
+              </button>
+            </span>
+          </div>
+          <p className="muted wz-hint">Наведите на шкалу ресурса — накладка покажет бронь на выбранную длительность; нажмите, чтобы выбрать.</p>
+        </div>
       )}
 
       {isPastStart(startMs, now) && (
@@ -181,6 +234,8 @@ export function SlotPicker({
       <ul className="wz-res-list" aria-label="Ресурсы">
         {shown.map(({ r, state }) => {
           const on = resourceIds.includes(r.id);
+          const ghost = ghostOf(r.id);
+          const ghostState = ghost ? slotStateOf(r.id, days?.bookings ?? [], days?.techWindows ?? [], ghost.start, ghost.end, days?.stops ?? []) : null;
           const pieces = availabilityPieces(days?.bookings ?? [], days?.techWindows ?? [], r.id, range.from, range.to).filter((p) => p.kind !== 'free');
           const note =
             state.kind === 'stop'
@@ -209,7 +264,7 @@ export function SlotPicker({
               </button>
               <div className="wz-res-timeline">
               <div
-                className="wz-res-scale"
+                className={`wz-res-scale${ghost ? ' hovering' : ''}`}
                 title={nightsMode ? 'Выбрать ресурс' : 'Нажмите — бронь с этого времени'}
                 role="button"
                 tabIndex={0}
@@ -221,12 +276,28 @@ export function SlotPicker({
                     else setDraft({ rid: r.id, period: { ...period } });
                   }
                 }}
+                onMouseMove={(e) => {
+                  if (nightsMode) return hover?.rid !== r.id && setHover({ rid: r.id, start: startMs });
+                  const start = startAt(e);
+                  if (hover?.rid !== r.id || hover.start !== start) setHover({ rid: r.id, start });
+                }}
+                onMouseLeave={() => setHover(null)}
                 onClick={(e) => pickOnBar(r.id, e)}
               >
                 {pieces.map((p, i) => (
                   <i key={i} className={`piece ${p.kind}`} style={{ left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` }} />
                 ))}
-                {on && durationMs > 0 && <i className="pick" style={{ left: `${frac(startMs) * 100}%`, width: `${(frac(endMs) - frac(startMs)) * 100}%` }} />}
+                {on && durationMs > 0 && !ghost && <i className="pick" style={{ left: `${frac(startMs) * 100}%`, width: `${(frac(endMs) - frac(startMs)) * 100}%` }} />}
+                {ghost && (
+                  <i
+                    className={`ghost${ghostState && (ghostState.kind === 'busy' || ghostState.kind === 'stop') ? ' busy' : ''}`}
+                    style={{ left: `${frac(ghost.start) * 100}%`, width: `${Math.max(0, frac(ghost.end) - frac(ghost.start)) * 100}%` }}
+                  >
+                    <span>
+                      {fmtTime(new Date(ghost.start).toISOString(), timezone)}–{fmtTime(new Date(ghost.end).toISOString(), timezone)}
+                    </span>
+                  </i>
+                )}
                 {ticks.map((t, i) => <i key={i} className="wz-res-tick" style={{ left: `${t.at * 100}%` }} />)}
               </div>
               <div className="wz-res-tick-labels" aria-hidden="true">
@@ -242,10 +313,11 @@ export function SlotPicker({
       {draft && <SlotTimeDialog
         initial={draft.period}
         timezone={timezone}
-        resourceName={resources.find((r) => r.id === draft.rid)?.name ?? 'Ресурс'}
+        resourceName={resources.find((r) => r.id === draft.rid)?.name ?? null}
         onClose={() => setDraft(null)}
-        onApply={(p) => { onPeriod(p); onResources([draft.rid]); setDraft(null); }}
+        onApply={(p) => { onPeriod(p); if (draft.rid) onResources([draft.rid]); setDraft(null); }}
       />}
+      {askHours && <HoursDialog onClose={() => setAskHours(false)} onApply={(h) => { onPeriod(withDuration(period, Math.round(h * 60), timezone)); setAskHours(false); }} />}
     </section>
   );
 }
@@ -254,7 +326,7 @@ export function SlotPicker({
 function SlotTimeDialog({ initial, timezone, resourceName, onClose, onApply }: {
   initial: PeriodFields;
   timezone: string;
-  resourceName: string;
+  resourceName: string | null;
   onClose: () => void;
   onApply: (period: PeriodFields) => void;
 }) {
@@ -272,7 +344,7 @@ function SlotTimeDialog({ initial, timezone, resourceName, onClose, onApply }: {
     <dialog ref={ref} className="wz-time-dialog" aria-label="Время брони" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
       if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(); }
     }}>
-      <h3>Время брони · {resourceName}</h3>
+      <h3>Время брони{resourceName ? ` · ${resourceName}` : ''}</h3>
       <p className="muted">{fmtDayTitle(value.startDate, timezone)}</p>
       <div className="df-grid">
         <label className="df-field"><span className="df-label">Время начала</span>
@@ -289,6 +361,31 @@ function SlotTimeDialog({ initial, timezone, resourceName, onClose, onApply }: {
       <div className="wz-time-actions">
         <button type="button" onClick={onClose}>Отмена</button>
         <button type="button" className="primary" onClick={apply}>Применить</button>
+      </div>
+    </dialog>
+  );
+}
+
+/** Своя длительность брони в часах (кнопка «＋» рядом с быстрым выбором). */
+function HoursDialog({ onClose, onApply }: { onClose: () => void; onApply: (hours: number) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [value, setValue] = useState('');
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const hours = Number(value.replace(',', '.'));
+  const ok = hours >= 0.5 && hours <= 72;
+  const apply = () => ok && onApply(Math.round(hours * 2) / 2);
+  return (
+    <dialog ref={ref} className="wz-time-dialog" aria-label="Длительность брони" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(); }
+    }}>
+      <h3>Длительность брони</h3>
+      <label className="df-field"><span className="df-label">Часов (шаг — полчаса)</span>
+        <input inputMode="decimal" autoFocus value={value} placeholder="Например, 8" onChange={(e) => setValue(e.target.value)} />
+      </label>
+      {value && !ok && <p className="cp-hint error">От 0,5 до 72 часов</p>}
+      <div className="wz-time-actions">
+        <button type="button" onClick={onClose}>Отмена</button>
+        <button type="button" className="primary" disabled={!ok} onClick={apply}>Применить</button>
       </div>
     </dialog>
   );

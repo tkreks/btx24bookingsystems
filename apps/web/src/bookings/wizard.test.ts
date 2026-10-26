@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agoText, dayShort, errorSection, nightsText } from './BookingForm.js';
+import { agoText, dayShort, errorSection, kindValue, nightsText } from './BookingForm.js';
 import { productsTotal, rowTotal } from './ProductsEditor.js';
 
 describe('agoText', () => {
@@ -41,5 +41,15 @@ describe('сводки и ошибки конструктора', () => {
     expect(errorSection('Выберите тип бронирования')).toBe('goods');
     expect(errorSection('Заполните поле «Гостей»')).toBe('fields');
     expect(errorSection('Битрикс24 недоступен')).toBeNull();
+  });
+});
+
+describe('kindValue', () => {
+  const field = { kind: 'enum' as const, items: [{ id: '72', value: 'Бронирование посещения банного комплекса' }, { id: '332', value: 'Бронирование без оплаты' }] };
+  it('picks the «Тип сделки» item by the start of its name', () => {
+    expect(kindValue(field, 'visit')).toBe('72');
+    expect(kindValue(field, 'no_payment')).toBe('332');
+    expect(kindValue(field, 'by_certificate')).toBe('');
+    expect(kindValue(field, null)).toBe('');
   });
 });

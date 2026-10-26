@@ -102,8 +102,9 @@ export class DealFormService {
   private async fields(user: B24UserContext, g: GroupAccess, deal: Record<string, unknown> | null): Promise<DealFormField[]> {
     const configs: DealFieldConfig[] = ((g.group.options ?? null) as GroupOptionsDto | null)?.dealFields ?? [];
     if (!configs.length) return [];
-    const [meta, map] = await Promise.all([this.dealMeta(user), this.fieldMap.get(user.portal.id)]);
-    return dealFormFields(configs, meta, map, deal, user.portal.timezone);
+    const [meta, map, resolved] = await Promise.all([this.dealMeta(user), this.fieldMap.get(user.portal.id), this.fieldMap.resolved(user.portal.id, user.client)]);
+    // «Тип сделки» найден по названию — тоже с ролью: мастер выбирает его в разделе «Группа», а не в полях.
+    return dealFormFields(configs, meta, resolved.dealType && !map.dealType ? { dealType: resolved.dealType, ...map } : map, deal, user.portal.timezone);
   }
 
   private async deal(user: B24UserContext, dealId: number): Promise<Record<string, unknown>> {

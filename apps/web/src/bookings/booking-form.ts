@@ -41,3 +41,57 @@ export function periodToUtc(p: PeriodFields, timeZone: string): { start: string;
   if (end.getTime() <= start.getTime()) return { error: 'Конец брони должен быть позже начала' };
   return { start: start.toISOString(), end: end.toISOString() };
 }
+
+/** Дата и время `HH:MM` момента `ms` в поясе портала. */
+export function localAt(ms: number, timeZone: string): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(ms))
+      .map((p) => [p.type, p.value]),
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+}
+
+/**
+ * Время брони по умолчанию, но не в прошлом (решение владельца 2026-10-26): начало по умолчанию уже
+ * прошло (сегодня после 14:00) — начало с ближайших получаса; у «часов» конец — через длительность группы,
+ * у «заезд/выезд» выезд остаётся (14:00 → 12:00 завтра).
+ */
+export function upcomingPeriod(
+  group: Pick<MyGroupDto, 'bookingMode' | 'durationMinutes' | 'checkInTime' | 'checkOutTime' | 'defaultNights'>,
+  date: string,
+  time: string | undefined,
+  now: number,
+  timeZone: string,
+): PeriodFields {
+  const p = defaultPeriod(group, date, time);
+  if (zonedTimeToUtc(p.startDate, p.startTime, timeZone).getTime() >= now) return p;
+  const step = 30 * 60_000;
+  const at = localAt(Math.ceil(now / step) * step, timeZone);
+  // Другой день (выбрали прошедший) — время по умолчанию остаётся, проверка покажет «в прошлом».
+  if (at.date !== date) return p;
+  if (group.bookingMode !== 'interval') return defaultPeriod(group, at.date, at.time);
+  const q = { ...p, startTime: at.time };
+  return 'error' in periodToUtc(q, timeZone) ? { ...q, endDate: shiftDate(q.endDate, 1) } : q;
+}
+
+/** Период с тем же началом и длительностью `minutes`. */
+export function withDuration(p: PeriodFields, minutes: number, timeZone: string): PeriodFields {
+  const end = localAt(zonedTimeToUtc(p.startDate, p.startTime, timeZone).getTime() + minutes * 60_000, timeZone);
+  return { ...p, endDate: end.date, endTime: end.time };
+}
+
+/** Быстрый выбор длительности, ч: по умолчанию группы и ещё три часа сверху (бани: 4, 5, 6, 7). */
+export function durationChoices(defaultMinutes: number): number[] {
+  const base = Math.max(1, Math.round(defaultMinutes / 60));
+  return [base, base + 1, base + 2, base + 3];
+}
+
+/** «4 ч», «1 сут 2 ч», «45 мин» — длительность брони. */
+export function durationText(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  const d = Math.floor(min / 1440);
+  const h = Math.floor((min % 1440) / 60);
+  const m = min % 60;
+  return [d ? `${d} сут` : '', h ? `${h} ч` : '', m ? `${m} мин` : ''].filter(Boolean).join(' ') || '0 мин';
+}

@@ -7,6 +7,7 @@ import {
   DEAL_KIND_HINTS,
   DEAL_KIND_LABELS,
   DEAL_KIND_PAYMENT,
+  DEAL_KIND_TYPE_VALUE,
   DEAL_KINDS,
   PAYMENT_MODE_LABELS,
   PAYMENT_MODES,
@@ -31,8 +32,9 @@ import {
 } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
 import { fmtDate, fmtDateTime, fmtMoney, fmtTime, plusMonths, shiftDate } from '../format.js';
-import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
-import { ClientPicker, ContactName } from './ClientPicker.js';
+import { durationText, periodToUtc, upcomingPeriod, type PeriodFields } from './booking-form.js';
+import { ClientPicker, ContactName, NewClientForm } from './ClientPicker.js';
+import { WizDialog } from './WizDialog.js';
 import { Avatar } from '../openlines/Avatar.js';
 import { openCrm } from '../b24.js';
 import { ColorLegend, type LegendItem } from '../ColorLegend.js';
@@ -112,15 +114,6 @@ const DEALS_STEP = 4;
 /** Начало брони уже прошло. */
 const PAST_START_ERROR = 'Начало брони уже прошло — выберите сегодня позже текущего времени или другой день';
 
-/** «4 ч», «1 сут 2 ч», «45 мин» — длительность брони для сводки. */
-export function durationText(ms: number): string {
-  const min = Math.round(ms / 60_000);
-  const d = Math.floor(min / 1440);
-  const h = Math.floor((min % 1440) / 60);
-  const m = min % 60;
-  return [d ? `${d} сут` : '', h ? `${h} ч` : '', m ? `${m} мин` : ''].filter(Boolean).join(' ') || '0 мин';
-}
-
 /** «12 мин назад», «3 ч назад», «вчера», «5 дн назад» — давность активности сделки. */
 export function agoText(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return '';
@@ -192,13 +185,15 @@ export function BookingForm({
   // Календарь мог остаться на прошедшем дне (страницу открыли до полуночи) — бронь начинаем с сегодня.
   const startDay = context.date < todayIn(timezone) ? todayIn(timezone) : context.date;
   const [period, setPeriod] = useState<PeriodFields>(() =>
-    group ? defaultPeriod(group, startDay, context.time) : { startDate: startDay, startTime: '14:00', endDate: startDay, endTime: '18:00' },
+    // Время по умолчанию не в прошлом: сегодня после 14:00 — с ближайших получаса.
+    group ? upcomingPeriod(group, startDay, context.time, Date.now(), timezone) : { startDate: startDay, startTime: '14:00', endDate: startDay, endTime: '18:00' },
   );
   const [resourceIds, setResourceIds] = useState<number[]>(context.resourceId ? [context.resourceId] : []);
   // Клиент брони: из чата/сделки — сразу; из меню — поиском или из сделок с последней активностью.
   const [client, setClient] = useState<{ contactId: number | null; name: string | null }>({ contactId: context.contactId ?? null, name: context.clientName ?? null });
   const [dealList, setDealList] = useState<DealCard[]>(context.openDeals ?? []);
-  const [searching, setSearching] = useState(false);
+  // Окна раздела «Кто»: поиск клиента (карандаш), «＋ Добавить» клиента, «Найти сделку».
+  const [dialog, setDialog] = useState<'client' | 'new' | 'deal' | null>(null);
   // Карточка клиента (имя «Имя Фамилия», фото) — из поиска или подгружается по контакту.
   const [clientCard, setClientCard] = useState<CrmContactHit | null>(null);
   useEffect(() => {
@@ -229,6 +224,24 @@ export function BookingForm({
             : { mode: 'none' },
   );
   const [dealsShown, setDealsShown] = useState(DEALS_STEP);
+  // Клиент известен (чат), а его сделки не пришли — подгружаем: открытая сделка выбирается сама.
+  const loadDeals = !!context.contactId && !context.openDeals && !context.dealId;
+  useEffect(() => {
+    if (!loadDeals || !context.contactId) return;
+    let active = true;
+    apiGet<CrmSearchDto>(`/crm/search?contactId=${context.contactId}`).then(
+      (r) => {
+        if (!active) return;
+        setDealList((prev) => (prev.length ? prev : r.deals.map(toCard)));
+        const openDeal = r.deals.find((d) => !d.closed);
+        if (openDeal) setDeal((d) => (d.mode === 'new' ? { mode: 'existing', dealId: openDeal.id } : d));
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [loadDeals, context.contactId]);
   const kindsOn = !!group?.dealKinds && deal.mode !== 'service';
   // «Бронирование сертификатом»: ссылку на оплату решает менеджер; сумма — «Сумма предоплаты» сделки.
   const [sendLink, setSendLink] = useState(false);
@@ -318,8 +331,13 @@ export function BookingForm({
   // «Сумма предоплаты» существующей сделки — в поле суммы ссылки (менеджер может поправить).
   const dealPrepay = currentForm?.form?.prepaymentAmount ?? null;
   const prepayAmount = prepayEdited ?? (dealPrepay ? String(dealPrepay) : '');
-  // Тип брони — отдельным выбором (с автоопределением по товарам).
-  const createFields = useMemo(() => (currentForm?.form?.fields ?? []).filter((f) => f.showCreate && f.role !== 'bookingType'), [currentForm]);
+  // Тип брони — отдельным выбором (с автоопределением по товарам); «Тип сделки» выбирается в разделе
+  // «Группа» — в полях его нет (решение владельца 2026-10-26), значение уходит по выбранному типу.
+  const kindField = kindsOn ? (currentForm?.form?.fields ?? []).find((f) => f.showCreate && f.role === 'dealType' && !f.readOnly) : undefined;
+  const createFields = useMemo(
+    () => (currentForm?.form?.fields ?? []).filter((f) => f.showCreate && f.role !== 'bookingType' && f.code !== kindField?.code),
+    [currentForm, kindField?.code],
+  );
   const fieldState = useDealFieldValues(createFields, 'create', currentForm ? formKey : '');
   // В сделке уже заполнены поля — спросить: оставить или очистить (один раз на сделку).
   const filled = deal.mode === 'existing' ? createFields.filter((f) => !f.readOnly && f.value.trim()) : [];
@@ -404,7 +422,7 @@ export function BookingForm({
     setGroupId(id);
     if (manual) setGroupManual(true);
     const g = allowed.find((x) => x.id === id);
-    if (g) setPeriod(defaultPeriod(g, period.startDate, period.startTime));
+    if (g) setPeriod(upcomingPeriod(g, period.startDate, period.startTime, Date.now(), timezone));
     setResourceIds((prev) => prev.filter((r) => g?.resourceIds.includes(r)));
     // Другая группа — другие права: недоступный выбор сбрасывается.
     if (deal.mode === 'new' && !g?.permissions.includes('deal.create')) setDeal({ mode: 'service' });
@@ -561,6 +579,7 @@ export function BookingForm({
     if (certificateMode) return sellCertificate();
     if ('error' in utc) return setError({ text: utc.error, section: 'slot' });
     const dealFields = Object.fromEntries(createFields.filter((f) => !f.readOnly).map((f) => [f.code, values[f.code] ?? '']));
+    if (kindField) dealFields[kindField.code] = kindValue(kindField, kind);
     const commentText = (deal.mode !== 'service' && commentField ? (values[commentField.code] ?? '') : comment).trim();
     setBusy(true);
     setError(null);
@@ -658,7 +677,7 @@ export function BookingForm({
     const keepDeal = deal.mode === 'existing' && !client.contactId;
     setClient({ contactId: c.id, name: c.name });
     setClientCard(c);
-    setSearching(false);
+    setDialog(null);
     if (keepDeal) return;
     setDealsShown(DEALS_STEP);
     try {
@@ -673,14 +692,8 @@ export function BookingForm({
   const chooseDeal = (d: CrmDealHit) => {
     setDealList((prev) => [toCard(d), ...prev.filter((x) => x.id !== d.id)]);
     if (d.contact) setClient({ contactId: d.contact.id, name: d.contact.name });
-    setSearching(false);
+    setDialog(null);
     pick({ mode: 'existing', dealId: d.id });
-  };
-  const resetClient = () => {
-    setClient({ contactId: null, name: null });
-    setDealList([]);
-    setSearching(false);
-    setDeal({ mode: 'none' });
   };
 
   // ── Сводки свёрнутых разделов ──
@@ -764,35 +777,42 @@ export function BookingForm({
     </button>
   );
 
+  // Клиент: аватарка и имя, ✎ — поиск клиента в окне, «＋ Добавить» — новый клиент (решение владельца 2026-10-26).
+  const clientRow = (
+    <div className="bk-client">
+      {client.contactId ? (
+        <button type="button" className="bk-client-card" title="Открыть карточку клиента в Битрикс24" onClick={() => openCrm('contact', client.contactId!)}>
+          <Avatar src={card?.photo} name={card?.name ?? client.name ?? '?'} size={36} />
+          <ContactName name={card?.name ?? client.name ?? `Контакт #${client.contactId}`} id={client.contactId} />
+        </button>
+      ) : (
+        <span className={`bk-client-card static${client.name ? '' : ' empty'}`}>
+          <Avatar name={client.name ?? '?'} size={36} />
+          {client.name ? <b>{client.name}</b> : <span>Клиент не выбран</span>}
+        </span>
+      )}
+      <button type="button" className="bk-client-edit" title="Найти другого клиента" aria-label="Изменить клиента" onClick={() => setDialog('client')}>
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <button type="button" className="bk-client-add" onClick={() => setDialog('new')}>
+        ＋ Добавить
+      </button>
+    </div>
+  );
+  const missingNotice = snapshot.clientMissing && (
+    <p className="notice error" role="alert">
+      У брони должен быть клиент — выберите его (✎) или добавьте нового.
+    </p>
+  );
+
   const whoSection = (
     <>
+      {clientRow}
+      {missingNotice}
       {client.contactId || client.name || dealList.length ? (
         <>
-          <div className="bk-client">
-            {client.contactId ? (
-              <button type="button" className="bk-client-card" title="Открыть карточку клиента в Битрикс24" onClick={() => openCrm('contact', client.contactId!)}>
-                <Avatar src={card?.photo} name={card?.name ?? client.name ?? '?'} size={36} />
-                <ContactName name={card?.name ?? client.name ?? `Контакт #${client.contactId}`} id={client.contactId} />
-              </button>
-            ) : (
-              <span className="bk-client-card static">
-                <Avatar name={client.name ?? '?'} size={36} />
-                <b>{client.name}</b>
-              </span>
-            )}
-            {!context.contactId && (
-              <>
-                <button type="button" className="bk-more" aria-expanded={searching} onClick={() => setSearching(!searching)}>
-                  Изменить
-                </button>
-                <button type="button" className="bk-more" onClick={resetClient}>
-                  Сбросить
-                </button>
-              </>
-            )}
-          </div>
-          {snapshot.clientMissing && <p className="notice error" role="alert">У брони должен быть клиент, а у {deal.mode === 'existing' ? 'этой сделки' : 'новой сделки'} его нет — найдите клиента или создайте нового.</p>}
-          {(searching || snapshot.clientMissing) && <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} newName={client.name} autoFocus />}
           <h4 className="bk-title wz-deals-title">
             Сделка{dealCards.length ? ` · ${dealCards.length} ${dealCards.length === 1 ? 'открытая' : 'открытые'}` : ''} <ToneLegend />
           </h4>
@@ -808,8 +828,6 @@ export function BookingForm({
         </>
       ) : (
         <>
-          {snapshot.clientMissing && <p className="notice error" role="alert">У брони должен быть клиент, а у {deal.mode === 'existing' ? 'этой сделки' : 'новой сделки'} его нет — найдите клиента или создайте нового.</p>}
-          <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} newName={client.name} autoFocus />
           <h4 className="bk-title wz-deals-title">
             Последняя активность <ToneLegend />
           </h4>
@@ -871,7 +889,25 @@ export function BookingForm({
           </span>
         </button>
       </div>
+      <button type="button" className="link wz-find-deal" onClick={() => setDialog('deal')}>
+        Найти сделку
+      </button>
       {snapshot.dealBooked && <p className="notice warning">По этой сделке уже есть бронь — вторая бронь, скорее всего, нужна в другой сделке.</p>}
+      {dialog === 'client' && (
+        <WizDialog title="Клиент брони" wide onClose={() => setDialog(null)}>
+          <ClientPicker onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />
+        </WizDialog>
+      )}
+      {dialog === 'deal' && (
+        <WizDialog title="Найти сделку" wide onClose={() => setDialog(null)}>
+          <ClientPicker initialKind="deal" onContact={(c) => void chooseContact(c)} onDeal={chooseDeal} autoFocus />
+        </WizDialog>
+      )}
+      {dialog === 'new' && (
+        <WizDialog title="Новый клиент" onClose={() => setDialog(null)}>
+          <NewClientForm name={client.contactId ? null : client.name} onContact={(c) => void chooseContact(c)} onCancel={() => setDialog(null)} />
+        </WizDialog>
+      )}
     </>
   );
 
@@ -1480,6 +1516,14 @@ export function errorSection(text: string): SectionKey | null {
   if (/пол[ея] «|заполните поле|поле сделки/.test(t)) return 'fields';
   if (/нет права|нет доступа/.test(t)) return 'when';
   return null;
+}
+
+/** Вариант «Тип сделки» по типу из мастера (начало названия, как на сервере); не нашли — пусто. */
+export function kindValue(f: Pick<DealFormField, 'kind' | 'items'>, kind: DealKind | null): string {
+  if (!kind) return '';
+  const want = DEAL_KIND_TYPE_VALUE[kind].toLocaleLowerCase('ru');
+  if (f.kind !== 'enum') return DEAL_KIND_TYPE_VALUE[kind];
+  return f.items?.find((i) => i.value.toLocaleLowerCase('ru').startsWith(want))?.id ?? '';
 }
 
 /** Название новой сделки (решение владельца 2026-10-23): «Имя клиента 25.10.2026 Баня 1». */

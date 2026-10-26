@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultPeriod, periodToUtc } from './booking-form.js';
+import { defaultPeriod, durationChoices, periodToUtc, upcomingPeriod, withDuration } from './booking-form.js';
 
 const duration = { bookingMode: 'duration' as const, durationMinutes: 240, checkInTime: '14:00', checkOutTime: '12:00', defaultNights: 1 };
 
@@ -16,5 +16,23 @@ describe('booking form', () => {
   it('converts to UTC in the portal zone and rejects reversed periods', () => {
     expect(periodToUtc({ startDate: '2020-06-01', startTime: '14:00', endDate: '2020-06-01', endTime: '18:00' }, 'Europe/Moscow')).toEqual({ start: '2020-06-01T11:00:00.000Z', end: '2020-06-01T15:00:00.000Z' });
     expect(periodToUtc({ startDate: '2020-06-01', startTime: '14:00', endDate: '2020-06-01', endTime: '13:00' }, 'Europe/Moscow')).toEqual({ error: expect.any(String) });
+  });
+
+  it('default time is never in the past: today after 14:00 — from the next half hour', () => {
+    const now = Date.parse('2026-10-26T15:10:00Z'); // 18:10 МСК
+    expect(upcomingPeriod(duration, '2026-10-26', undefined, now, 'Europe/Moscow')).toEqual({ startDate: '2026-10-26', startTime: '18:30', endDate: '2026-10-26', endTime: '22:30' });
+    const house = { ...duration, bookingMode: 'interval' as const };
+    expect(upcomingPeriod(house, '2026-10-26', undefined, now, 'Europe/Moscow')).toEqual({ startDate: '2026-10-26', startTime: '18:30', endDate: '2026-10-27', endTime: '12:00' });
+    expect(upcomingPeriod(duration, '2026-10-27', undefined, now, 'Europe/Moscow')).toEqual(defaultPeriod(duration, '2026-10-27'));
+  });
+
+  it('duration chips and changing the length keeps the start', () => {
+    expect(durationChoices(240)).toEqual([4, 5, 6, 7]);
+    expect(withDuration({ startDate: '2026-10-26', startTime: '22:00', endDate: '2026-10-27', endTime: '02:00' }, 300, 'Europe/Moscow')).toEqual({
+      startDate: '2026-10-26',
+      startTime: '22:00',
+      endDate: '2026-10-27',
+      endTime: '03:00',
+    });
   });
 });
