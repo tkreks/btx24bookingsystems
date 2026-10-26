@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Конструктор брони — макет</title>
+<style>
+/* =====================================================================
+   Макет «Конструктор брони в одном окне» (docs/features/booking-constructor.md).
+   Визуальная система — apps/web/src/styles.css (:root, .pill, .notice, .segmented, .dash-block)
+   и прежний макет docs/prototype/ui/booking-wizard.html. Новые классы — префикс bc-.
+   Без внешних зависимостей. Состояния — переключателем над окном.
+   ===================================================================== */
+:root {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --line: rgba(17, 24, 39, 0.1);
+  --primary: #007aff;
+  --primary-hover: #0066d6;
+  --ok: #15803d;
+  --danger: #b91c1c;
+  --hover: #f5f7fb;
+  --surface-2: #f8fafc;
+  --info-bg: #eef4ff;
+  --info-text: #1d4ed8;
+  --ok-bg: #dcfae6;
+  --ok-text: #067647;
+  --warn-bg: #fffaeb;
+  --warn-text: #93370d;
+  --neutral-bg: #f2f4f7;
+  --radius: 16px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  /* поля формы */
+  --f-border: #d0d5dd;
+  --f-border-hover: #98a2b3;
+  --f-label: #475467;
+  --f-focus: 0 0 0 3px rgba(0, 122, 255, 0.18);
+  --ph: #98a2b3;
+  /* статусы разделов */
+  --st-done: #079455;      --st-done-bg: #ecfdf3;
+  --st-warn: #dc6803;      --st-warn-bg: #fffaeb;  --st-warn-line: #fedf89;
+  --st-err: #d92d20;       --st-err-bg: #fef3f2;   --st-err-line: #fda29b;  --st-err-text: #b42318;
+  --st-lock: #98a2b3;
+  --sel-bg: rgba(0, 122, 255, 0.06);
+  --sel-bg-2: rgba(0, 122, 255, 0.1);
+  /* ритм */
+  --ctl: 36px;
+  --row: 44px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; max-width: 100%; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #fbfbfd 0%, var(--bg) 60%, #eef1f6 100%);
+  min-height: 100dvh;
+  font-size: 14px;
+  line-height: 1.4;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- кнопки ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: var(--ctl); padding: 6px 14px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); font-weight: 600; font-size: 14px; white-space: nowrap;
+  transition: background .15s, border-color .15s, box-shadow .15s, color .15s;
+}
+.btn:hover:not(:disabled) { background: var(--hover); border-color: rgba(17,24,39,.18); }
+.btn:focus-visible, .bc-row:focus-visible, .chip:focus-visible, .tag:focus-visible, .card:focus-visible, .seg button:focus-visible, .cat-nav button:focus-visible, .lnk:focus-visible, .icon-btn:focus-visible {
+  outline: none; box-shadow: var(--f-focus); border-color: var(--primary);
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn.soft { background: var(--sel-bg-2); border-color: transparent; color: var(--primary); }
+.btn.soft:hover:not(:disabled) { background: rgba(0,122,255,.16); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--primary); }
+.btn.ghost:hover:not(:disabled) { background: var(--sel-bg); }
+.btn.sm { min-height: 30px; padding: 4px 10px; font-size: 13px; border-radius: 8px; }
+.btn small { font-weight: 500; opacity: .85; font-size: 12.5px; }
+.icon-btn {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted);
+}
+.icon-btn:hover { background: var(--neutral-bg); color: var(--text); }
+.lnk { border: 0; background: none; padding: 0; color: var(--primary); font-weight: 600; font-size: 13px; border-radius: 4px; }
+.lnk:hover { text-decoration: underline; }
+
+/* ---------- поля ---------- */
+.inp, select.inp, textarea.inp {
+  width: 100%; min-width: 0; height: var(--ctl); padding: 6px 10px;
+  border: 1px solid var(--f-border); border-radius: 10px; background: #fff; font-size: 14px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+textarea.inp { height: auto; min-height: 64px; resize: vertical; line-height: 1.4; padding-top: 8px; }
+.inp:hover { border-color: var(--f-border-hover); }
+.inp:focus { outline: none; border-color: var(--primary); box-shadow: var(--f-focus); }
+.inp::placeholder { color: var(--ph); }
+.inp:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+.inp.r { text-align: right; font-variant-numeric: tabular-nums; }
+.search { position: relative; flex: 1; min-width: 0; }
+.search .i { position: absolute; left: 10px; top: 50%; translate: 0 -50%; color: var(--ph); }
+.search .inp { padding-left: 32px; }
+
+/* сегмент (как .wz-seg) */
+.seg { display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 2px; border-radius: 10px; background: var(--neutral-bg); }
+.seg button {
+  min-height: 30px; padding: 4px 12px; border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--f-label); font-weight: 600; font-size: 13px;
+}
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed=true] { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(16,24,40,.14); }
+.seg.sm button { min-height: 26px; padding: 2px 8px; font-size: 12.5px; }
+
+/* чипы выбора (одиночный выбор из списка до 5 коротких вариантов) */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  min-height: 32px; padding: 5px 12px; border: 1px solid var(--f-border); border-radius: 999px;
+  background: #fff; font-size: 13px; font-weight: 500; color: var(--text);
+  transition: border-color .15s, background .15s, color .15s;
+}
+.chip:hover { border-color: var(--f-border-hover); }
+.chip[aria-pressed=true], .chip[aria-checked=true] { border-color: var(--primary); background: var(--sel-bg-2); color: #0b5cc4; font-weight: 600; }
+
+/* пилюли/бейджи (как .pill) */
+.pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; line-height: 1.5; white-space: nowrap; background: rgba(0,122,255,.1); color: #075985; }
+.pill.ok { background: var(--st-done-bg); color: var(--st-done); }
+.pill.warn { background: #fef0c7; color: #b54708; }
+.pill.err { background: #fee4e2; color: var(--st-err-text); }
+.pill.grey { background: var(--neutral-bg); color: #475467; }
+.pill.def { background: #f4f3ff; color: #5925dc; font-weight: 600; }
+
+/* уведомления (как .notice) */
+.notice { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; border-radius: 12px; font-size: 13px; background: rgba(239,246,255,.95); border: 1px solid rgba(59,130,246,.2); color: #1e40af; }
+.notice .i { margin-top: 1px; }
+.notice.warn { background: var(--warn-bg); border-color: var(--st-warn-line); color: #93370d; }
+.notice.err { background: var(--st-err-bg); border-color: #fecdca; color: var(--st-err-text); }
+.notice.ok { background: var(--st-done-bg); border-color: #abefc6; color: var(--ok-text); }
+.notice .grow { flex: 1; min-width: 0; }
+.notice .btn { margin: -3px -4px -3px 0; flex: none; }
+
+/* =====================================================================
+   ПЕРЕКЛЮЧАТЕЛЬ СОСТОЯНИЙ (вне окна макета)
+   ===================================================================== */
+.demo { max-width: 1040px; margin: 0 auto; padding: 16px 16px 40px; }
+.demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+.demo-bar b { font-size: 13px; margin-right: 4px; }
+.demo-bar button { min-height: 30px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: 12.5px; font-weight: 600; color: var(--f-label); }
+.demo-bar button[aria-pressed=true] { background: #111827; border-color: #111827; color: #fff; }
+.demo-cap { margin: 0 0 14px; color: var(--muted); font-size: 13px; min-height: 18px; }
+.stage { width: 100%; max-width: 760px; margin: 0 auto; }
+.stage.phone { max-width: 390px; }
+.stage-bg { position: relative; padding: 0; }
+
+/* =====================================================================
+   ОКНО КОНСТРУКТОРА
+   ===================================================================== */
+.bc {
+  container: bc / inline-size;
+  position: relative; display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(16,24,40,.16), 0 2px 6px rgba(16,24,40,.06);
+  overflow: hidden;
+}
+/* В приложении: max-height: min(92dvh, 960px); прокручивается .bc-body. В макете высота не ограничена,
+   чтобы всё состояние было видно целиком. */
+.bc-head {
+  display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 8px 0 18px;
+  background: rgba(255,255,255,.92); border-bottom: 1px solid var(--line);
+}
+.bc-head h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.bc-head h1 span { color: var(--muted); font-weight: 500; }
+.bc-head .src { flex: none; }
+.bc-body { display: grid; gap: 6px; padding: 12px; align-content: start; }
+
+/* ---------- раздел: строка-сводка + раскрываемое тело ---------- */
+.sec {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  transition: border-color .2s, box-shadow .2s, margin .2s;
+}
+.bc-row {
+  display: grid; grid-template-columns: 22px 156px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  width: 100%; min-height: var(--row); padding: 0 8px 0 12px; border: 1px solid transparent; border-radius: 11px;
+  background: transparent; text-align: left; font-size: 14px; color: var(--text);
+}
+.bc-row:hover { background: var(--hover); }
+.bc-row .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-row .s { display: flex; align-items: center; gap: 8px; min-width: 0; color: #344054; }
+.bc-row .s > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-row .edit { color: var(--primary); font-size: 13px; font-weight: 600; padding: 4px 6px; border-radius: 6px; }
+.bc-row:hover .edit { background: var(--sel-bg); }
+.bc-row .aside { display: none; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+
+/* статусные значки */
+.st { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 800; line-height: 1; }
+.st svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.st.done { background: var(--st-done-bg); color: var(--st-done); }
+.st.warning { background: transparent; color: var(--st-warn); }
+.st.warning svg { width: 20px; height: 20px; stroke-width: 0; fill: currentColor; }
+.st.error { background: var(--st-err); color: #fff; }
+.st.locked { color: var(--st-lock); }
+.st.locked svg { width: 15px; height: 15px; stroke-width: 2; }
+.st.empty { border: 1.5px dashed #b4bcc8; }
+.st.active { background: var(--primary); color: #fff; box-shadow: 0 0 0 3px rgba(0,122,255,.15); }
+.st-a { display: none; }
+.sec.is-active .st-a { display: grid; }
+.sec.is-active .st-c { display: none; }
+
+.sec.s-empty .bc-row .s { color: var(--muted); }
+.sec.s-locked { background: transparent; border-style: dashed; border-color: rgba(17,24,39,.12); }
+.sec.s-locked .bc-row { cursor: not-allowed; color: var(--st-lock); }
+.sec.s-locked .bc-row:hover { background: transparent; }
+.sec.s-locked .bc-row .t { color: #667085; font-weight: 500; }
+.sec.s-locked .bc-row .s { color: var(--st-lock); font-size: 13px; }
+.sec.s-locked .edit { display: none; }
+.sec.s-error:not(.is-active) { border-color: var(--st-err-line); box-shadow: inset 3px 0 0 var(--st-err); background: #fffbfa; }
+.sec.s-warning:not(.is-active) { border-color: #fde9b4; }
+
+/* активный раздел */
+.sec.is-active { border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px rgba(0,122,255,.08), 0 6px 18px rgba(16,24,40,.06); margin: 4px 0; }
+.sec.is-active .bc-row { cursor: default; min-height: 48px; }
+.sec.is-active .bc-row:hover { background: transparent; }
+.sec.is-active .bc-row .t { font-size: 15px; font-weight: 700; overflow: visible; }
+.sec.is-active .bc-row .s, .sec.is-active .bc-row .edit { display: none; }
+.sec.is-active .bc-row .aside { display: block; }
+.sec.is-active .bc-row { grid-template-columns: 22px minmax(0, 1fr) auto; }
+.sec-panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+.sec.is-active .sec-panel { grid-template-rows: 1fr; }
+.sec-inner { overflow: hidden; min-height: 0; }
+.sec-body { padding: 2px 14px 14px; display: grid; gap: 14px; }
+.sec-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.sec-foot .hint { margin-right: auto; color: var(--muted); font-size: 12.5px; }
+.sec-foot .hint.err { color: var(--st-err-text); }
+
+/* подзаголовок внутри раздела (капс + линия) */
+.sub { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--f-label); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.sub::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.sub .pill { text-transform: none; letter-spacing: 0; }
+.sub .r { order: 2; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); }
+
+/* ---------- футер окна ---------- */
+.bc-foot {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 12px calc(10px + var(--safe-b)) 16px;
+  background: rgba(255,255,255,.96); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(16,24,40,.05);
+}
+.bc-sum { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--f-label); white-space: nowrap; overflow: hidden; }
+.bc-sum > span { overflow: hidden; text-overflow: ellipsis; }
+.bc-sum b { color: var(--text); font-weight: 600; }
+.bc-sum .tot { flex: none; font-size: 15px; font-weight: 800; color: var(--text); }
+.bc-sum .sep { color: #d0d5dd; }
+.bc-sum .pill { flex: none; }
+.bc-acts { display: flex; gap: 8px; flex: none; }
+
+/* ---------- К: клиент и сделки ---------- */
+.client { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.ava { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12.5px; font-weight: 700; background: linear-gradient(135deg, #7aa7ff, #5856d6); }
+.client .who { flex: 1; min-width: 0; }
+.client b { display: block; font-size: 14.5px; }
+.client small { color: var(--muted); font-size: 12.5px; }
+.lock-note { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.card {
+  position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center;
+  min-height: 60px; padding: 9px 12px; border: 1px solid var(--f-border); border-radius: 12px; background: #fff; text-align: left;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.card:hover { border-color: var(--f-border-hover); }
+.card[aria-checked=true] { border-color: var(--primary); background: var(--sel-bg); box-shadow: 0 0 0 1px var(--primary); }
+.card .dot { grid-row: 1 / span 2; width: 16px; height: 16px; border: 1.5px solid #98a2b3; border-radius: 50%; background: #fff; }
+.card[aria-checked=true] .dot { border: 5px solid var(--primary); }
+.card .ct { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .cm { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.card .cs { font-weight: 700; font-variant-numeric: tabular-nums; }
+.card.new { border-style: dashed; color: var(--primary); }
+.card.new .ct { color: var(--primary); }
+.tone { display: inline-flex; align-items: center; gap: 4px; }
+.tone i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+
+/* ---------- Г: группа, тип, дата ---------- */
+.row-flex { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.fl { display: grid; gap: 6px; min-width: 0; }
+.fl > .lbl, .lbl { color: var(--f-label); font-size: 12.5px; font-weight: 500; }
+.grp { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.grp .card { grid-template-columns: 34px minmax(0,1fr) 16px; min-height: 56px; }
+.grp .ico { grid-row: 1 / span 2; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--neutral-bg); font-size: 18px; }
+.grp .dot { grid-column: 3; grid-row: 1 / span 2; }
+.grp .cm { grid-column: 2; }
+.days { display: flex; gap: 4px; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
+.days button.d {
+  flex: none; min-width: 50px; min-height: 44px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  display: grid; justify-items: center; line-height: 1.15; font-size: 11px; color: var(--muted); font-weight: 500;
+}
+.days button.d b { font-size: 15px; color: var(--text); }
+.days button.d.we b { color: #d92d20; }
+.days button.d.today { border-color: rgba(0,122,255,.4); }
+.days button.d[aria-pressed=true] { background: var(--primary); border-color: var(--primary); color: #fff; }
+.days button.d[aria-pressed=true] b { color: #fff; }
+.days .icon-btn { height: auto; border: 1px solid var(--line); background: #fff; }
+
+/* ---------- Р: шкала занятости ---------- */
+.durs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.durs .chip { min-height: var(--ctl); }
+.time-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; }
+.time-row .fl select { width: 92px; }
+.till { padding-bottom: 8px; font-size: 14px; color: var(--f-label); }
+.till b { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.scale { display: grid; gap: 5px; }
+.scale-axis, .scale-row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 8px; align-items: center; }
+.scale-axis .ax { position: relative; height: 16px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scale-axis .ax span { position: absolute; transform: translateX(-50%); }
+.scale-axis .ax span:first-child { transform: none; }
+.scale-axis .ax span:last-child { transform: translateX(-100%); }
+.res-btn {
+  display: flex; align-items: center; gap: 7px; min-width: 0; height: 30px; padding: 0 8px 0 6px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; font-size: 13px; font-weight: 600; text-align: left;
+}
+.res-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-btn:hover { background: var(--hover); }
+.res-btn .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #98a2b3; background: #fff; }
+.res-btn[aria-checked=true] { background: var(--sel-bg-2); color: #0b5cc4; }
+.res-btn[aria-checked=true] .dot { border: 4.5px solid var(--primary); }
+.bar {
+  position: relative; height: 30px; border-radius: 8px; overflow: hidden; background: #d6f3de; cursor: copy;
+  background-image: linear-gradient(90deg, rgba(17,24,39,.08) 1px, transparent 1px); background-size: calc(100% / 14) 100%;
+}
+.bar > i { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 0 4px; font-style: normal; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.bar .busy { background: linear-gradient(90deg, #f97066, #f04438); color: #fff; box-shadow: inset 1px 0 0 rgba(255,255,255,.5); cursor: pointer; }
+.bar .tech { background: repeating-linear-gradient(135deg, #fef0c7 0 4px, #fec84b 4px 6px); }
+.bar .tech.clash { background: repeating-linear-gradient(135deg, #fef0c7 0 4px, #f79009 4px 7px); box-shadow: inset 0 0 0 1.5px #dc6803; }
+.bar .stop { background: repeating-linear-gradient(135deg, #b4bac4 0 5px, #d9dde3 5px 10px); color: #283142; cursor: not-allowed; }
+.bar .sel { background: #d4e6ff; border: 2px solid var(--primary); border-radius: 7px; color: #0b4fa8; font-size: 11.5px; z-index: 1; cursor: grab; }
+.bar .sel::before, .bar .sel::after { content: ''; position: absolute; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--primary); }
+.bar .sel::before { left: 3px; } .bar .sel::after { right: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-left: 144px; color: var(--muted); font-size: 11.5px; }
+.legend i { display: inline-block; width: 12px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+
+/* ---------- Т: товары ---------- */
+.extras { display: grid; gap: 8px; padding: 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.extras-top { display: flex; gap: 8px; align-items: center; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 11px; border: 1px solid var(--f-border); border-radius: 999px;
+  background: #fff; font-size: 13px; font-weight: 500; color: var(--text); transition: background .15s, border-color .15s;
+}
+.tag:hover { border-color: var(--primary); color: #0b5cc4; }
+.tag .n { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.tag.has { background: var(--sel-bg-2); border-color: rgba(0,122,255,.35); color: #0b5cc4; font-weight: 600; }
+.tag.more { color: var(--f-label); }
+.tag.all { border-style: dashed; color: var(--primary); font-weight: 600; }
+
+.gt { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #fff; }
+.gt-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 96px 84px 96px 80px 28px; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 12px; border-top: 1px solid var(--line); transition: background 1s ease;
+}
+.gt-row:first-child { border-top: 0; }
+.gt-head { min-height: 32px; padding-top: 6px; padding-bottom: 6px; background: var(--surface-2); color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.gt-head span:nth-child(n+3) { text-align: right; }
+.gt-head span:nth-child(2) { text-align: center; }
+.gt-row.is-new { background: #eaf3ff; box-shadow: inset 3px 0 0 var(--primary); }
+.gt-row.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { 0% { background: #d6e8ff; } 100% { background: transparent; } }
+.gname { min-width: 0; }
+.gname b { display: block; font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gname small { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; color: var(--muted); font-size: 11.5px; }
+.gname small .pill { font-size: 10.5px; padding: 0 6px; }
+.chg { color: #b54708; display: inline-flex; align-items: center; gap: 3px; }
+.chg button { border: 0; background: none; padding: 0 2px; color: #b54708; font-size: 13px; line-height: 1; border-radius: 4px; }
+.chg button:hover { background: #fef0c7; }
+.qty { display: inline-flex; align-items: stretch; height: 32px; border: 1px solid var(--f-border); border-radius: 9px; overflow: hidden; background: #fff; justify-self: center; }
+.qty button { width: 28px; padding: 0; border: 0; background: var(--surface-2); color: #475467; font-size: 16px; font-weight: 500; line-height: 1; }
+.qty button:hover { background: var(--neutral-bg); color: var(--text); }
+.qty output, .qty input { width: 34px; border: 0; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; display: grid; place-items: center; font-size: 13.5px; padding: 0; background: #fff; }
+.qty.err { border-color: var(--st-err); background: var(--st-err-bg); }
+.qty.err button, .qty.err output { background: var(--st-err-bg); }
+.qty.lg { height: var(--ctl); }
+.qty.lg button { width: 36px; }
+.qty.lg output { width: 48px; }
+.price { position: relative; }
+.price .inp { height: 32px; padding: 4px 8px; font-size: 13.5px; }
+.price.changed .inp { background: var(--warn-bg); border-color: #fdb022; }
+.price.changed::after { content: 'изм.'; position: absolute; top: -7px; right: 6px; padding: 0 4px; border-radius: 4px; background: #fdb022; color: #fff; font-size: 9.5px; font-weight: 800; line-height: 13px; }
+.disc { display: flex; align-items: stretch; height: 32px; border: 1px solid var(--f-border); border-radius: 9px; overflow: hidden; background: #fff; }
+.disc input { width: 100%; min-width: 0; border: 0; padding: 0 6px; text-align: right; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.disc input:focus { outline: none; }
+.disc:focus-within { border-color: var(--primary); box-shadow: var(--f-focus); }
+.disc button { flex: none; width: 30px; border: 0; border-left: 1px solid var(--line); background: var(--surface-2); color: var(--f-label); font-size: 12px; font-weight: 700; padding: 0; }
+.disc button:hover { background: var(--neutral-bg); }
+.gsum { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.gsum s { display: block; color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.gdel { width: 28px; height: 28px; }
+.gdel:hover { color: var(--st-err); background: var(--st-err-bg); }
+.glbl { display: none; }
+.gt-empty { display: grid; justify-items: center; gap: 4px; padding: 22px 12px; text-align: center; color: var(--muted); font-size: 13px; }
+.gt-empty b { color: var(--text); font-size: 14px; }
+.totals { display: grid; justify-content: end; gap: 3px; padding: 0 4px; font-variant-numeric: tabular-nums; font-size: 13px; }
+.totals div { display: flex; justify-content: space-between; gap: 28px; min-width: 240px; color: var(--muted); }
+.totals .d { color: #d92d20; }
+.totals .t { color: var(--text); font-size: 17px; font-weight: 800; padding-top: 5px; margin-top: 2px; border-top: 1px solid var(--line); }
+.pay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+.pay .full { grid-column: 1 / -1; }
+.btype { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.btype .card { grid-template-columns: 16px minmax(0, 1fr); min-height: 52px; padding: 8px 10px; }
+.btype .card .cm { grid-column: 2; }
+.money { position: relative; }
+.money .inp { padding-right: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.money::after { content: '₽'; position: absolute; right: 10px; top: 50%; translate: 0 -50%; color: var(--muted); font-size: 14px; pointer-events: none; }
+.switch { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.switch i { flex: none; position: relative; width: 36px; height: 20px; border-radius: 999px; background: var(--primary); }
+.switch i::after { content: ''; position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+
+/* ---------- П: поля сделки ---------- */
+.df { display: grid; gap: 14px; }
+.df-block { display: grid; gap: 12px; }
+.df-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px 14px; }
+.df-row.pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.df-f { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.df-l { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; color: var(--f-label); font-size: 12.5px; font-weight: 500; min-height: 18px; }
+.req { color: var(--st-err); font-weight: 700; font-style: normal; margin-left: -3px; }
+.tagf { padding: 0 6px; border-radius: 6px; font-size: 10.5px; font-weight: 600; line-height: 17px; }
+.tagf.def { background: #f4f3ff; color: #5925dc; }
+.tagf.fx { background: var(--neutral-bg); color: #475467; font-family: Georgia, serif; font-style: italic; }
+.tagf.man { background: #fef0c7; color: #b54708; }
+.df-c { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.df-c > .inp, .df-c > .money, .df-c > select { flex: 1; min-width: 0; }
+.df-h { color: var(--muted); font-size: 11.5px; }
+.df-e { display: none; align-items: center; gap: 4px; color: var(--st-err-text); font-size: 12px; font-weight: 500; }
+.df-f.is-err .df-e { display: flex; }
+.df-f.is-err .inp, .df-f.is-err .money .inp { border-color: var(--st-err); background: var(--st-err-bg); }
+.df-f.is-err .chips { justify-self: start; padding: 4px; margin: -4px; border-radius: 12px; background: var(--st-err-bg); box-shadow: inset 0 0 0 1px var(--st-err); }
+.df-f.is-err .df-l { color: var(--st-err-text); }
+.fx-val { position: relative; flex: 1; min-width: 0; }
+.fx-val .inp { padding-left: 30px; background: var(--surface-2); }
+.fx-val::before { content: 'ƒ'; position: absolute; left: 11px; top: 50%; translate: 0 -52%; color: var(--muted); font-family: Georgia, serif; font-style: italic; font-size: 15px; }
+.fx-val.man .inp { background: #fff; }
+.fx-val.man::after { content: ''; position: absolute; left: 22px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: #f79009; }
+.reset { width: var(--ctl); height: var(--ctl); border: 1px solid var(--line); background: #fff; font-size: 15px; color: var(--f-label); }
+.ro-line { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: 12px; }
+.ro-line b { color: #344054; font-weight: 600; }
+.from-goods { display: flex; align-items: center; gap: 8px; height: var(--ctl); padding: 0 10px; border-radius: 10px; background: var(--surface-2); border: 1px dashed var(--f-border); font-weight: 700; font-variant-numeric: tabular-nums; }
+.from-goods .lnk { margin-left: auto; font-size: 12.5px; }
+
+/* ---------- ✓: проверка ---------- */
+.receipt { position: relative; border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 4px 14px 10px; }
+.receipt::before { content: ''; position: absolute; left: 12px; right: 12px; top: -1px; height: 4px; background: radial-gradient(circle at 4px -1px, var(--bg) 3px, transparent 3.5px) 0 0 / 10px 4px repeat-x; }
+.rc { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 0; border-top: 1px dashed rgba(17,24,39,.14); align-items: baseline; font-size: 13.5px; }
+.rc:first-child { border-top: 0; }
+.rc dt { color: var(--muted); font-size: 12.5px; }
+.rc dd { margin: 0; min-width: 0; }
+.rc .lnk { font-size: 12.5px; }
+.rc-lines { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.rc-lines li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; font-variant-numeric: tabular-nums; }
+.rc-lines li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-lines .x { color: var(--muted); }
+.rc-lines .tot { margin-top: 3px; padding-top: 4px; border-top: 1px solid var(--line); font-weight: 800; font-size: 15px; }
+.rc-fields { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.rc-fields span { color: var(--muted); }
+.rc-fields span b { color: var(--text); font-weight: 500; }
+.rc-fields span.rq b { font-weight: 700; }
+.warns { display: grid; gap: 6px; }
+
+/* ---------- окно каталога ---------- */
+.ovl { position: absolute; inset: 0; z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding: 64px 16px 16px; background: rgba(16,24,40,.42); animation: fade .15s ease-out; }
+@keyframes fade { from { opacity: 0; } }
+.dlg {
+  width: 100%; max-width: 660px; max-height: 640px; display: flex; flex-direction: column; overflow: hidden;
+  background: #fff; border-radius: 16px; box-shadow: 0 24px 60px rgba(16,24,40,.28); animation: pop .18s ease-out;
+}
+@keyframes pop { from { transform: translateY(8px) scale(.985); opacity: 0; } }
+.dlg-head { display: grid; gap: 10px; padding: 14px 12px 12px 18px; border-bottom: 1px solid var(--line); }
+.dlg-head .r1 { display: flex; align-items: center; gap: 8px; }
+.dlg-head h3 { margin: 0; flex: 1; font-size: 16px; }
+.dlg-head h3 span { color: var(--muted); font-weight: 500; }
+.dlg-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 184px minmax(0, 1fr); }
+.cat-nav { display: grid; align-content: start; gap: 1px; padding: 8px; border-right: 1px solid var(--line); background: var(--surface-2); overflow-y: auto; }
+.cat-nav button {
+  display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 8px 4px 10px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; text-align: left; font-size: 13.5px; font-weight: 500; color: #344054;
+}
+.cat-nav button:hover { background: #eef1f5; }
+.cat-nav button[aria-current=true] { background: #fff; color: var(--text); font-weight: 700; box-shadow: 0 1px 2px rgba(16,24,40,.1); }
+.cat-nav .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-nav .ct { color: var(--muted); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.cat-nav .sel { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.cat-nav .sub-c { padding-left: 22px; font-size: 13px; }
+.cat-list { overflow-y: auto; padding: 6px 8px; }
+.cat-list .grp-t { padding: 8px 6px 4px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.ci {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 104px; align-items: center; gap: 10px;
+  min-height: 48px; padding: 6px 8px 6px 11px; border-radius: 10px; transition: background .15s;
+}
+.ci + .ci { box-shadow: 0 -1px 0 var(--line); }
+.ci:hover { background: var(--hover); }
+.ci.on { background: var(--sel-bg); box-shadow: inset 3px 0 0 var(--primary); }
+.ci.on + .ci { box-shadow: none; }
+.ci .nm b { display: block; font-weight: 600; font-size: 13.5px; }
+.ci .nm small { color: var(--muted); font-size: 11.5px; }
+.ci .nm mark { background: #fff3b0; color: inherit; border-radius: 3px; padding: 0 1px; }
+.ci .pr { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13.5px; text-align: right; }
+.ci .pr.none { color: var(--ph); font-weight: 500; font-size: 12.5px; }
+.ci .act { display: flex; justify-content: flex-end; }
+.add { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--f-border); border-radius: 9px; background: #fff; color: var(--primary); font-size: 18px; font-weight: 500; }
+.add:hover { background: var(--sel-bg-2); border-color: var(--primary); }
+.dlg-foot { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 18px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.dlg-foot .grow { flex: 1; font-size: 13.5px; color: var(--f-label); }
+.dlg-foot b { color: var(--text); }
+.cat-empty { display: grid; justify-items: center; gap: 4px; padding: 36px 12px; text-align: center; color: var(--muted); }
+
+/* ---------- экран результата ---------- */
+.result { display: grid; justify-items: center; gap: 14px; padding: 28px 18px 20px; text-align: center; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+.result .big { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--st-done-bg); color: var(--st-done); }
+.result .big svg { width: 28px; height: 28px; stroke-width: 2.6; }
+.result h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+.result p { margin: -6px 0 0; color: var(--f-label); }
+.result .warns { width: 100%; text-align: left; }
+.result .acts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.result .op { color: var(--muted); font-size: 12px; }
+
+/* ---------- заметки дизайнера ---------- */
+.notes { max-width: 860px; margin: 40px auto 0; padding: 22px 24px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); }
+.notes h2 { margin: 0 0 4px; font-size: 20px; }
+.notes > p { margin: 0 0 8px; color: var(--muted); }
+.notes h3 { margin: 22px 0 6px; font-size: 15px; }
+.notes ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13.5px; }
+.notes li b { font-weight: 650; }
+.notes code { background: var(--neutral-bg); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
+.notes .prop { list-style: none; margin-left: -20px; padding: 8px 12px; border-left: 3px solid var(--primary2, #5856d6); background: #f6f5ff; border-radius: 0 10px 10px 0; }
+.notes .prop::before { content: 'Предложение дизайнера. '; font-weight: 700; color: #5925dc; }
+.sw { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
+.sw span { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+.sw i { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); }
+
+/* =====================================================================
+   ТЕЛЕФОН (окно ≤560px). В приложении — @media (max-width: 560px): окно на весь экран.
+   ===================================================================== */
+@container bc (max-width: 560px) {
+  .bc-head { padding-left: 14px; }
+  .inp, .disc input { font-size: 16px; } /* iOS: без автозума при фокусе */
+  .bc-head h1 { font-size: 15px; }
+  .bc-head .src, .bc-head .min { display: none; }
+  .bc-body { padding: 8px; gap: 6px; }
+  .bc-row { grid-template-columns: 22px minmax(0, 1fr) auto; min-height: 48px; padding: 5px 6px 5px 10px; row-gap: 0; }
+  .bc-row .st { grid-row: 1 / span 2; }
+  .bc-row .t { grid-column: 2; font-size: 12px; font-weight: 600; color: var(--muted); line-height: 1.2; }
+  .bc-row .s { grid-column: 2; grid-row: 2; font-size: 13.5px; }
+  .bc-row .edit { grid-column: 3; grid-row: 1 / span 2; }
+  .bc-row .s .pill { display: none; }
+  .sec.is-active .bc-row .t { color: var(--text); }
+  .sec-body { padding: 2px 10px 12px; }
+  .cards, .grp, .btype, .pay { grid-template-columns: minmax(0, 1fr); }
+  .df-row.pair { grid-template-columns: minmax(0, 1fr); }
+  .extras { padding: 8px; }
+  .tags { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -8px; padding: 0 8px 2px; }
+  .tag { flex: none; }
+  .tag.more { display: none; }
+  /* товары: строка → карточка */
+  .gt { border: 0; background: transparent; display: grid; gap: 8px; overflow: visible; }
+  .gt-head { display: none; }
+  .gt-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 10px; padding: 10px 6px 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+  .gt-row .gname { grid-column: 1 / 3; }
+  .gt-row .gdel { grid-column: 3; grid-row: 1; justify-self: end; }
+  .gt-row .qty { grid-column: 1; grid-row: 2; justify-self: start; height: 36px; }
+  .gt-row .qty button { width: 34px; }
+  .gt-row .price { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 6px; }
+  .gt-row .price .inp { height: 36px; max-width: 110px; }
+  .gt-row .price .glbl { display: inline; color: var(--muted); font-size: 12px; }
+  .gt-row .gsum { grid-column: 3; grid-row: 2; padding-right: 6px; font-size: 15px; }
+  .gt-row .disc-w { grid-column: 1 / -1; grid-row: 3; display: flex; align-items: center; gap: 8px; }
+  .gt-row .disc-w .glbl { display: inline; color: var(--muted); font-size: 12px; }
+  .gt-row .disc { width: 110px; height: 32px; }
+  .gt-row.nodisc .disc-w { display: none; }
+  .gt-row.nodisc .add-disc { display: inline-flex !important; }
+  .extras-top { flex-wrap: nowrap; }
+  .extras-top .btn .bt { display: none; }
+  .extras-top .btn { padding: 0 10px; }
+  .gt-row.is-new { box-shadow: inset 3px 0 0 var(--primary); }
+  .totals { justify-content: stretch; }
+  .totals div { min-width: 0; }
+  .scale-axis, .scale-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .scale-axis > span:first-child { display: none; }
+  .legend { margin-left: 0; }
+  .rc { grid-template-columns: minmax(0, 1fr) auto; }
+  .rc dd { grid-column: 1 / -1; grid-row: 2; }
+  .bc-foot { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px calc(10px + var(--safe-b)); }
+  .bc-acts .btn { flex: 1; min-height: 44px; }
+  .bc-acts .btn.cancel { flex: 0 0 auto; }
+  .ovl { padding: 0; align-items: flex-end; }
+  .dlg { max-width: none; max-height: 92%; border-radius: 16px 16px 0 0; }
+  .dlg-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .cat-nav { display: flex; gap: 6px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .cat-nav button { flex: none; min-height: 32px; border: 1px solid var(--f-border); border-radius: 999px; background: #fff; }
+  .cat-nav button[aria-current=true] { border-color: var(--text); background: var(--text); color: #fff; }
+  .cat-nav button[aria-current=true] .ct { color: rgba(255,255,255,.7); }
+  .cat-nav .sub-c { display: none; }
+  .ci { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; row-gap: 2px; }
+  .ci .pr { grid-column: 1; grid-row: 2; text-align: left; }
+  .ci .act { grid-column: 2; grid-row: 1 / span 2; }
+}
+.add-disc { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sec-panel, .gt-row, .sec { transition: none; }
+  .gt-row.flash, .ovl, .dlg { animation: none; }
+}
+</style>
+</head>
+<body data-state="C">
+<div class="demo">
+  <div class="demo-bar" role="toolbar" aria-label="Состояние макета">
+    <b>Состояние:</b>
+    <button type="button" data-s="A">A · вход из чата</button>
+    <button type="button" data-s="B">B · ресурс и время</button>
+    <button type="button" data-s="C">C · товары</button>
+    <button type="button" data-s="D">D · каталог</button>
+    <button type="button" data-s="D2">D′ · доп. услуги</button>
+    <button type="button" data-s="E">E · поля сделки</button>
+    <button type="button" data-s="E2">E′ · поля свёрнуты</button>
+    <button type="button" data-s="F">F · проверка</button>
+    <button type="button" data-s="G">G · телефон</button>
+    <button type="button" data-s="G2">G′ · каталог 390</button>
+    <button type="button" data-s="H">H · частичный сбой</button>
+  </div>
+  <p class="demo-cap" id="cap"></p>
+  <div class="stage" id="stage"></div>
+
+  <!-- ===================== ЗАМЕТКИ ДИЗАЙНЕРА ===================== -->
+  <section class="notes" id="notes">
+    <h2>Заметки дизайнера</h2>
+    <p>Дополняют спецификацию <code>docs/features/booking-constructor.md</code>. Где расхожусь или предлагаю улучшение — фиолетовый блок «Предложение дизайнера».</p>
+
+    <h3>1. Сетка и размеры</h3>
+    <ul>
+      <li><b>Окно:</b> ширина до 760px, высота <code>min(92dvh, 960px)</code>, радиус 18px, тень <code>0 24px 60px rgba(16,24,40,.16)</code>. Фон окна — <code>--bg #f5f5f7</code>, разделы — белые карточки: так свёрнутые строки читаются как «стопка», а активный раздел выделяется рамкой.</li>
+      <li><b>Шапка</b> 52px: заголовок 16px/700, после «·» — группа и клиент приглушённо (<code>--muted</code>); справа — источник входа (пилюля «из чата», «из звонка»), «свернуть», «×».</li>
+      <li><b>Свёрнутая строка</b> 44px (телефон 48px, CALL_CARD 40px): <code>22px значок | 156px название | сводка | «Изменить»</code> (в спецификации 132px — см. предложения), отступы 0 8px 0 12px, промежуток между строками 6px, радиус 12px. Вся строка — одна <code>&lt;button&gt;</code>.</li>
+      <li><b>Активный раздел:</b> рамка 1.5px <code>--primary</code> + ореол <code>0 0 0 3px rgba(0,122,255,.08)</code>, внешний отступ 4px сверху и снизу; заголовок 48px, 15px/700; тело — отступы 2px 14px 14px, промежуток между блоками 14px; низ раздела — «Далее →» (мягкая синяя кнопка, главная — в футере).</li>
+      <li><b>Контролы:</b> высота 36px (CALL_CARD 32px), радиус 10px, рамка <code>#d0d5dd</code>, метка над полем 12.5px/500 <code>#475467</code>, промежуток метка–поле 5px, между полями 12px по вертикали и 14px по горизонтали. На телефоне шрифт в полях 16px (иначе Safari увеличивает страницу при фокусе).</li>
+      <li><b>Футер</b> 56px, закреплён: слева живая сводка 13px (итог 15px/800), справа «Отмена» и главная кнопка. На телефоне — две строки: сводка, затем кнопки высотой 44px; снизу добавляется <code>safe-area-inset-bottom</code>.</li>
+      <li><b>Таблица товаров</b> (ПК): <code>1fr | 100 кол-во | 90 цена | 108 скидка | 82 сумма | 28 ×</code>, строка ≈48px, шапка 32px 11.5px <code>--muted</code>. Числа — <code>tabular-nums</code>, выравнивание вправо.</li>
+    </ul>
+
+    <h3>2. Цвета статусов</h3>
+    <div class="sw">
+      <span><i style="background:#079455"></i>done #079455 / фон #ecfdf3</span>
+      <span><i style="background:#dc6803"></i>warning #dc6803 / фон #fffaeb / линия #fedf89</span>
+      <span><i style="background:#d92d20"></i>error #d92d20 / фон #fef3f2 / рамка #fda29b / текст #b42318</span>
+      <span><i style="background:#98a2b3"></i>locked #98a2b3, пунктирная рамка</span>
+      <span><i style="background:#fff;border:1.5px dashed #b4bcc8"></i>empty — пунктирный кружок</span>
+      <span><i style="background:#007aff"></i>active #007aff</span>
+    </div>
+    <ul>
+      <li><b>done</b> — зелёная галочка в светлом кружке; сводка обычным текстом <code>#344054</code>.</li>
+      <li><b>warning</b> — жёлтый треугольник, рядом со сводкой пилюля «тех. окно» (<code>#fef0c7 / #b54708</code>); рамка строки чуть желтеет.</li>
+      <li><b>error</b> — красный круг с «!», полоса 3px слева, рамка <code>#fda29b</code>, фон <code>#fffbfa</code>, красная пилюля с текстом проблемы. Единственный статус, который тянет взгляд, — так и задумано.</li>
+      <li><b>locked</b> — строка без фона с пунктирной рамкой, серый замок, текст-подсказка «Сначала выберите группу», курсор <code>not-allowed</code>, без «Изменить». В фокус клавиатуры не попадает (<code>aria-disabled</code>, но остаётся в дереве доступности — подсказку читает экранный диктор).</li>
+      <li><b>empty</b> — пунктирный кружок, сводка «Не выбрано» серым.</li>
+      <li>Цвет никогда не единственный носитель смысла: у каждого статуса своя форма значка и текст в пилюле.</li>
+    </ul>
+
+    <h3>3. Состояния контролов</h3>
+    <ul>
+      <li><b>hover:</b> строки и пункты — фон <code>#f5f7fb</code>; поля и карточки — рамка темнее (<code>#98a2b3</code>); тег раздела — рамка и текст primary.</li>
+      <li><b>focus</b> (только <code>:focus-visible</code>): рамка primary + ореол <code>0 0 0 3px rgba(0,122,255,.18)</code>. Одинаково у кнопок, полей, чипов, строк разделов, тегов.</li>
+      <li><b>selected:</b> карточки и чипы — рамка primary, фон <code>rgba(0,122,255,.06–.10)</code>, текст <code>#0b5cc4</code>; у карточек — радиокружок с толстой синей рамкой.</li>
+      <li><b>disabled:</b> прозрачность 50%, курсор <code>not-allowed</code>, рядом всегда текст «почему» (подсказка в низу раздела или <code>title</code>). Главная кнопка не отключается молча: «Далее» без выбранной сделки — отключена с подсказкой «Выберите сделку или «Новая сделка»».</li>
+      <li><b>изменено вручную:</b> янтарный (<code>#fdb022</code>/<code>#fffaeb</code>) — цена товара («изм.»), формула, переписанная руками (точка у ƒ), и кнопка ↺ «вернуть».</li>
+      <li><b>по умолчанию:</b> фиолетовая метка (<code>#f4f3ff / #5925dc</code>) — и у товара «по умолчанию · Баня 1», и у поля сделки. Один цвет = одно значение во всём окне.</li>
+    </ul>
+
+    <h3>4. Анимации</h3>
+    <ul>
+      <li><b>Сворачивание/раскрытие:</b> <code>grid-template-rows: 0fr → 1fr</code>, 220ms <code>ease</code>; одновременно старый раздел сворачивается, новый раскрывается. После раскрытия — <code>scrollIntoView({block:'nearest'})</code> заголовка, фокус — на первый незаполненный контрол раздела (или на поле, по которому кликнули в сводке ошибки).</li>
+      <li><b>Новая строка товара:</b> вставляется вверх списка допов, фон <code>#d6e8ff → прозрачный</code> за 1.2s + полоса 3px primary слева, полоса держится, пока окно открыто (в макете — «Парение»). Счётчик тега обновляется без анимации.</li>
+      <li><b>Окно каталога:</b> затемнение 150ms, окно — подъём на 8px + масштаб .985 → 1 за 180ms; на телефоне — выезд снизу.</li>
+      <li><b>Ошибка поля:</b> рамка и фон краснеют без «тряски»; при «Проверить» с ошибками раздел П раскрывается, фокус — на первое пустое обязательное поле.</li>
+      <li>Всё отключается при <code>prefers-reduced-motion: reduce</code>.</li>
+    </ul>
+
+    <h3>5. Обязательные поля</h3>
+    <ul>
+      <li><b>Пометка:</b> красная <code>*</code> сразу после метки (без пробела, 700), у контрола <code>aria-required="true"</code>; в заголовке П справа — «обязательных: 3». Пока поле не трогали, оно не красное.</li>
+      <li><b>Подсветка</b> после ухода с раздела / потери фокуса пустым / «Проверить»: рамка <code>#d92d20</code>, фон <code>#fef3f2</code>, метка красная, под полем «⚠ Обязательное поле» 12px. Для чипов — красная обводка и фон вокруг группы; для степпера — красная рамка степпера. В паре «2 в линии» краснеет только пустая ячейка.</li>
+      <li><b>Свёрнутый П с ошибкой:</b> красный «!», полоса слева, пилюля «Не заполнено 2: Гостей, Программа» (дальше «+N»). Клик по строке — раскрыть П и поставить фокус на первое из них (состояние E′).</li>
+      <li><b>Проверка</b> с ошибками не открывается: строка «Проверка» — locked с текстом «Сначала заполните: Гостей, Программа»; кнопка «Проверить» в футере активна и ведёт к первой ошибке.</li>
+      <li><b>В «чеке»</b> обязательные поля — полужирным значением, необязательные — обычным; пустые необязательные не показываются.</li>
+      <li><b>Тексты:</b> «Обязательное поле» · «Укажите число гостей» (для степпера, если 0) · «Выберите программу» · «Не заполнено 2: Гостей, Программа» · «Сначала заполните обязательные поля сделки».</li>
+    </ul>
+
+    <h3>6. Товары, допы и оплата</h3>
+    <ul>
+      <li>Сверху — плашка-источник: для новой/пустой сделки синяя «Подставили товары по умолчанию для Баня 1», для сделки с товарами — жёлтая «Изменения заменят товары сделки #678» с кнопкой «Вернуть товары сделки».</li>
+      <li><b>Панель «Допы»</b> — серый блок: поиск по каталогу (Enter или 2+ символа → окно каталога с этим запросом) + «Весь каталог»; ниже теги разделов. Тег с выбранным — мягкая синяя заливка и кружок-счётчик (число <b>позиций</b>, не штук). Порядок тегов — из ⚙ группы; первые 4, остальные под «Ещё ▾». Клик по тегу открывает окно каталога сразу на этом разделе.</li>
+      <li><b>Строка:</b> название 13.5px/600, под ним мета 11.5px: «по умолчанию · Баня 1 · = длительности» или «каталог 600 ₽ ↺». Изменённая цена — янтарное поле с ярлыком «изм.» на рамке; подсказка <code>title</code> «Каталог: 600 ₽». Скидка — поле + переключатель единиц «%/₽» (клик меняет). Со скидкой — старая сумма зачёркнута над новой.</li>
+      <li>Количество «Баня, час» следует за длительностью (4 ч → 4), пока его не правили руками; после правки мета меняется на «изменено вручную», ↺ возвращает связь.</li>
+      <li><b>Пустое состояние:</b> «Товаров пока нет» + «Добавьте из каталога или выберите раздел выше». Кнопки каталога, пока не загружены товары сделки, — отключены, подсказка «Загружаем товары сделки…», вместо таблицы — 3 строки-скелета.</li>
+      <li><b>«Бронь и оплата»:</b> тип брони — карточки (≤3 вариантов) или select (больше); способ оплаты — сегмент; сумма предоплаты — деньги; переключатель «Ссылку на оплату — в чат после создания». «Гостей» — только если в группе нет поля-роли (в примере оно есть в П, поэтому здесь не показано).</li>
+    </ul>
+
+    <h3>7. Окно каталога (и доп. услуг)</h3>
+    <ul>
+      <li>Нативный <code>&lt;dialog&gt;</code>, 660×до 640px, сверху 64px от края окна. Шапка: «Каталог · Бани» + поиск (автофокус); слева разделы 184px («Все 26», затем разделы с числом товаров и синим кружком числа выбранных позиций; вложенные — с отступом); справа товары.</li>
+      <li>Строка товара 48px: название + (при поиске) подпись раздела и подсветка совпадения; цена (<code>без цены</code> серым); «+» или степпер. Выбранная — фон <code>rgba(0,122,255,.06)</code> + полоса 3px слева. «−» до нуля убирает позицию из брони.</li>
+      <li><b>Доп. услуги</b> (D′) — тот же компонент, у услуг под названием длительность и исполнитель («40 мин · банщик»); у услуги «без цены» после добавления в таблице цена пустая и подсвечена янтарным «укажите цену».</li>
+      <li>Футер: «Выбрано: 4 позиции · 17 310 ₽» — те же итоги, что и в таблице (с ручными ценами и скидками), плюс «Готово». Esc и «×» закрывают только окно; выбранное уже применено (без «Отмены» внутри окна — меньше потерь).</li>
+      <li>Пустой поиск: «Ничего не нашли по «…»» + «Искать во всех разделах» (если стоял фильтр раздела).</li>
+      <li>Телефон: окно-лист снизу на 92% высоты, разделы — лента чипов, цена — под названием.</li>
+    </ul>
+
+    <h3>8. Поля сделки</h3>
+    <ul>
+      <li>Блоки с заголовком: капс 11.5px/700 <code>#475467</code>, разрядка .05em, тонкая линия до правого края; справа в заголовке — уточнение («из настроек группы»).</li>
+      <li><b>Число «гостей»</b> — степпер 36px (− поле +), пустое значение «—»; <b>деньги</b> — разделители тысяч, «₽» справа внутри поля, выравнивание вправо; <b>список ≤5 коротких</b> — чипы, иначе select; <b>да/нет</b> — сегмент «Да | Нет | —» («—» = не задано); <b>дата</b> — поле + ссылки «сегодня» / «дата брони»; <b>формула</b> — серое поле со значком ƒ и меткой «авто»; изменённая вручную — белое поле, янтарная точка у ƒ, метка «вручную» и кнопка ↺; <b>по умолчанию</b> — фиолетовая метка у подписи; <b>многострочный текст</b> — всегда во всю ширину.</li>
+      <li>«Сумма сделки» — не поле ввода: пунктирная плашка «17 310 ₽ · из товаров» со ссылкой «Товары →» (открывает Т).</li>
+      <li>Только чтение — одной серой строкой «подпись: значение» внизу; поля, которые заполнит приложение, перечислены там же одной фразой («ID брони, дата брони, ссылка на оплату — заполнит приложение»).</li>
+    </ul>
+
+    <h3>9. Пустые, загрузочные и ошибочные состояния</h3>
+    <ul>
+      <li>Раздел, чьи данные грузятся, — скелеты (полосы 12px, мерцание 1.3s) по форме будущего контента; в свёрнутой строке — «Загружаем…» вместо сводки.</li>
+      <li>Нет сделок у клиента: в К сразу выбрана карточка «Новая сделка», раздел свёрнут, открыт Г.</li>
+      <li>Нет свободного времени в дне: под шкалой — «На пн 27.10 всё занято» + «Ближайшее свободное: вт 28.10 12:00 →».</li>
+      <li>Свежая занятость: Р становится error, пилюля «Баня 1 заняли 14:00–16:00», в шкале занятый кусок поверх выбора.</li>
+      <li>Ошибки создания: 409/стоп → открыть Р с красной плашкой; 503 → в футере «Повторить» (тот же ключ идемпотентности); «уже создаётся» → «Проверить результат».</li>
+    </ul>
+
+    <h3>10. Доступность и клавиатура</h3>
+    <ul>
+      <li>Строка раздела — <code>&lt;button aria-expanded aria-controls&gt;</code>; тело — <code>role="region" aria-labelledby</code>. Сводка и статус читаются в названии кнопки: «Ресурс и время, предупреждение: тех. окно. Баня 1, 14:00–18:00, 4 ч. Изменить».</li>
+      <li>Карточки сделок/групп/типа брони — <code>role="radiogroup"</code> + <code>role="radio" aria-checked</code>, стрелки ↑↓←→ двигают выбор; чипы списка — тоже радио-группа; сегмент да/нет — <code>aria-pressed</code>.</li>
+      <li>Ошибка поля — <code>aria-invalid="true"</code> + <code>aria-describedby</code> на текст «Обязательное поле»; при «Проверить» — <code>aria-live="polite"</code> сообщение «Не заполнено 2 поля».</li>
+      <li>Шкала: клавиатурная альтернатива — «Начало» и «Длительность» над шкалой; полосы занятости — <code>title</code>/<code>aria-label</code> «Баня 2, занято 12:00–15:00».</li>
+      <li>Клавиши: <b>Enter</b> в разделе = «Далее» (кроме textarea), <b>Ctrl/⌘+Enter</b> = главная кнопка футера, <b>Esc</b> — закрыть окно каталога, второй Esc — спросить «Закрыть конструктор? Данные не сохранятся» (если что-то введено).</li>
+      <li>Контраст: серый текст <code>#6b7280</code> на белом 4.8:1; подсказки locked <code>#98a2b3</code> используются только вместе с тёмным названием раздела.</li>
+    </ul>
+
+    <h3>11. CALL_CARD (карточка звонка)</h3>
+    <ul>
+      <li>Узкая колонка ~380–480px: включается телефонная раскладка, но плотнее — строки 40px, контролы 32px, промежутки 8px.</li>
+      <li>Футер переносится вверх (под шапку): во время разговора нижний край карточки звонка закрыт панелью телефонии.</li>
+      <li>К открыт для подтверждения: выбранная сделка (по звонку) отмечена, «Далее» сразу активна.</li>
+      <li>Время — компактно: вместо шкалы список свободных окон по ресурсам («Баня 1: 14:00–18:00, после 21:30»), шкала — по кнопке «Шкала» в окне.</li>
+      <li>Окно каталога — на всю карточку; товары только карточками.</li>
+    </ul>
+
+    <h3>12. Предложения дизайнера</h3>
+    <ul>
+      <li class="prop">Буквы К/Г/Р/Т/П — только для документации. В интерфейсе — словесные названия и значок статуса; буквы не несут смысла для менеджера и путаются с инициалами.</li>
+      <li class="prop">Поиск в панели «Допы» сначала показывает выпадающий список из 6 совпадений прямо под полем (Enter — добавить первое, ↑↓ — выбор), а «Все результаты →» открывает окно каталога. Частый сценарий «добавить чай» — без окна.</li>
+      <li class="prop">Счётчик на теге и в окне — число позиций, не штук (иначе «Веники · 3» при 2 дубовых и 1 эвкалиптовом читается как «три вида»). Зафиксировать в спецификации.</li>
+      <li class="prop">В итогах — ссылка «Скидка на всё…» (одна скидка % на все строки, кроме «по умолчанию» по выбору). Сейчас менеджер ставит скидку построчно.</li>
+      <li class="prop">Услуга «без цены» после добавления: цена пустая и подсвечена янтарным «укажите цену» — предупреждение на проверке («1 товар без цены»), но не блокирующая ошибка.</li>
+      <li class="prop">В свёрнутом П с ошибкой каждое имя в пилюле — отдельная ссылка: клик по «Программа» открывает П и ставит фокус именно на «Программу».</li>
+      <li class="prop">«Создать бронь» с предупреждениями — без отдельного чекбокса «Я видел предупреждения»: подпись в кнопке «· с предупреждениями: 1» и жёлтый блок над ней достаточны; лишний клик раздражает на каждом тех. окне.</li>
+      <li class="prop">В шкале тех. окно — продолжение выбора янтарной штриховкой; если оно залезает на чужую бронь, штриховка темнее с обводкой, и в предупреждении — точное пересечение («пересекается на 15 мин с бронью 18:15»).</li>
+      <li class="prop">Цвет сделки (🟢🟡🔴) на карточке дублировать словами: «пустая», «поля заполнены», «есть бронь 03.11» — цвет сам по себе не читается дальтониками и экранным диктором.</li>
+      <li class="prop">«Свернуть» в шапке — сворачивает окно в плавающую плашку справа внизу «Новая бронь · Баня 1 · 14:00 ↗», чтобы заглянуть в календарь/чат и вернуться без потери данных (черновик живёт до закрытия вкладки).</li>
+      <li class="prop">Экран результата показывать при частичном сбое и при «ссылка на оплату не отправлена»; при полном успехе — закрывать окно и показывать тост «Бронь #555 создана · Открыть», без лишнего экрана (совпадает с вопросом 5 спецификации).</li>
+      <li class="prop">Название раздела в строке — «Товары и оплата» (а не «Товары, допы и оплата»), колонка названия — 156px вместо 132px: при 132px не помещаются ни «Товары, допы и оплата», ни «Ресурс и время» полужирным 14px; сводка от этого не страдает (у Т она самая длинная, ≈300px, и помещается в окне 668px).</li>
+      <li class="prop">На телефоне теги разделов — горизонтальная лента без «Ещё ▾» (скролл естественнее, чем выпадающее меню на узком экране).</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+/* =====================================================================
+   Данные-примеры
+   ===================================================================== */
+const fmt = n => Math.round(n).toLocaleString('ru-RU');
+const I = {
+  check: '<svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+  warn: '<svg viewBox="0 0 20 20"><path d="M10 2.2c.5 0 .9.3 1.2.7l7.3 12.7c.5.9-.1 2-1.2 2H2.7c-1 0-1.7-1.1-1.2-2L8.8 2.9c.3-.4.7-.7 1.2-.7z"/><path d="M10 7v4.5M10 14v.1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+  lock: '<svg viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 015 0V7"/></svg>',
+  search: '<svg class="i" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>',
+  info: '<svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.3V11M8 5v.1"/></svg>',
+  alert: '<svg class="i" viewBox="0 0 16 16"><path d="M8 2.2l6 10.6H2z"/><path d="M8 6.5v3M8 11.2v.1"/></svg>',
+  x: '<svg class="i" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  min: '<svg class="i" viewBox="0 0 16 16"><path d="M3.5 12.5h9"/></svg>',
+  grid: '<svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg>',
+  bigcheck: '<svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+};
+
+const CAT = [
+  { id: 'main', name: 'Основное', items: [
+    { id: 'bath-h', name: 'Баня, час', price: 3500 },
+    { id: 'terem-h', name: 'Баня «Теремок», час', price: 4500 },
+    { id: 'kupel', name: 'Купель, час', price: 800 },
+  ]},
+  { id: 'veniki', name: 'Веники', items: [
+    { id: 'v-oak', name: 'Веник дубовый', price: 450 },
+    { id: 'v-birch', name: 'Веник берёзовый', price: 400 },
+    { id: 'v-euc', name: 'Веник эвкалиптовый', price: 600 },
+    { id: 'v-jun', name: 'Веник можжевеловый', price: 700 },
+  ]},
+  { id: 'tea', name: 'Чай', items: [
+    { id: 't-herb', name: 'Чай травяной, чайник', price: 350 },
+    { id: 't-ivan', name: 'Иван-чай, чайник', price: 400 },
+    { id: 't-thyme', name: 'Чай с чабрецом, чайник', price: 350 },
+    { id: 't-honey', name: 'Мёд, розетка', price: 200 },
+    { id: 't-jam', name: 'Варенье, розетка', price: 200 },
+  ]},
+  { id: 'serv', name: 'Доп. услуги', items: [
+    { id: 's-par', name: 'Парение', price: 2000, meta: '40 мин · банщик' },
+    { id: 's-mass', name: 'Массаж классический', price: 3000, meta: '60 мин · массажист' },
+    { id: 's-scrub', name: 'Скраб-пилинг', price: 1500, meta: '30 мин' },
+    { id: 's-wrap', name: 'Обёртывание', price: null, meta: 'по договорённости' },
+    { id: 's-host', name: 'Банщик на час', price: 1800, meta: '60 мин' },
+  ]},
+  { id: 'drinks', name: 'Напитки', items: [
+    { id: 'd-kvas', name: 'Квас, 1 л', price: 300 },
+    { id: 'd-mors', name: 'Морс, 1 л', price: 350 },
+    { id: 'd-water', name: 'Вода, 0,5 л', price: 150 },
+    { id: 'd-lem', name: 'Лимонад, 0,5 л', price: 250 },
+  ]},
+  { id: 'rent', name: 'Аренда', items: [
+    { id: 'r-robe', name: 'Халат', price: 300 },
+    { id: 'r-sheet', name: 'Простыня', price: 200 },
+    { id: 'r-slip', name: 'Тапочки', price: 100 },
+  ]},
+  { id: 'souv', name: 'Сувениры', items: [
+    { id: 'u-hat', name: 'Шапка банная', price: 900 },
+    { id: 'u-towel', name: 'Полотенце', price: 1200 },
+  ]},
+];
+const ITEM = {}; CAT.forEach(s => s.items.forEach(it => { ITEM[it.id] = { ...it, sec: s.id, secName: s.name }; }));
+const TAGS = ['veniki', 'tea', 'serv', 'drinks'];   // первые 4 из ⚙, остальные под «Ещё»
+const MORE = ['rent', 'souv'];
+
+const initialSel = () => [
+  { id: 'bath-h', qty: 4, price: 3500, disc: 0, unit: '%', def: true },
+  { id: 's-par', qty: 1, price: 2000, disc: 0, unit: '%', isNew: true },
+  { id: 'v-oak', qty: 2, price: 450, disc: 10, unit: '%' },
+  { id: 'v-euc', qty: 1, price: 500, disc: 0, unit: '%' },
+];
+let sel = initialSel();
+
+const lineBase = l => l.qty * (l.price || 0);
+const lineDisc = l => l.unit === '%' ? lineBase(l) * l.disc / 100 : Math.min(l.disc, lineBase(l));
+const totals = () => {
+  const base = sel.reduce((a, l) => a + lineBase(l), 0);
+  const disc = sel.reduce((a, l) => a + lineDisc(l), 0);
+  return { base, disc, total: base - disc, n: sel.length };
+};
+const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; };
+const goodsSummary = () => { const t = totals(); return `${t.n} поз. · ${fmt(t.total)} ₽ · Предоплата · «Парение»`; };
+const secSelCount = id => sel.filter(l => ITEM[l.id].sec === id).length;
+
+/* =====================================================================
+   Состояния макета
+   ===================================================================== */
+const SECS = [
+  { id: 'who', t: 'Клиент и сделка' },
+  { id: 'when', t: 'Группа и дата' },
+  { id: 'slot', t: 'Ресурс и время' },
+  { id: 'goods', t: 'Товары и оплата' },
+  { id: 'fields', t: 'Поля сделки' },
+  { id: 'review', t: 'Проверка' },
+];
+const WHO_DONE = { s: 'done', sum: 'Иван Петров · #678 «Баня 25.10» · <span class="tone" style="--c:#12b76a"><i></i>пустая</span>' };
+const WHEN_DONE = { s: 'done', sum: 'Бани · Визит · пн 27.10' };
+const SLOT_WARN = { s: 'warning', sum: 'Баня 1 · 14:00–18:00 · 4 ч', badge: ['warn', 'тех. окно'] };
+const GOODS_DONE = { s: 'done', sum: () => goodsSummary() };
+const FIELDS_ERR = { s: 'error', sum: '', badge: ['err', 'Не заполнено 2: Гостей, Программа'] };
+
+const STATES = {
+  A: { cap: 'Вход из чата WhatsApp: клиент известен (🔒), у него 2 открытые сделки — открыт выбор сделки. Остальные разделы ждут или заблокированы.',
+    active: 'who', head: 'Иван Петров', src: 'из чата',
+    st: { who: { s: 'empty', sum: 'Иван Петров · сделка не выбрана' }, when: { s: 'empty', sum: 'Не выбрано' },
+      slot: { s: 'locked', sum: 'Сначала выберите группу и дату' }, goods: { s: 'locked', sum: 'Сначала выберите группу' },
+      fields: { s: 'locked', sum: 'Сначала выберите группу и сделку' }, review: { s: 'locked', sum: 'Заполните разделы выше' } },
+    foot: { sum: '<b>Иван Петров</b><span class="sep">·</span><span>сделка не выбрана</span>', btn: 'Далее', dis: true } },
+  B: { cap: 'К и Г заполнены и свёрнуты. Открыт «Ресурс и время»: шкала занятости, быстрые длительности, тех. окно пересекается с соседней бронью → предупреждение.',
+    active: 'slot', head: 'Бани · Иван Петров', src: 'из чата',
+    st: { who: WHO_DONE, when: WHEN_DONE, slot: SLOT_WARN, goods: { s: 'empty', sum: 'Подставим товары ресурса после выбора времени' },
+      fields: { s: 'empty', sum: 'Не заполнено · обязательных: 3' }, review: { s: 'locked', sum: 'Заполните разделы выше' } },
+    foot: { sum: '<b>Баня 1</b><span class="sep">·</span><span>пн 27.10, 14:00–18:00</span>', btn: 'Далее' } },
+  C: { cap: 'Главный экран: товары по умолчанию, теги разделов со счётчиками, таблица со скидкой и изменённой ценой, новая строка подсвечена, итоги, «Бронь и оплата». Клик по тегу открывает каталог.',
+    active: 'goods', head: 'Бани · Иван Петров', src: 'из чата',
+    st: { who: WHO_DONE, when: WHEN_DONE, slot: SLOT_WARN, goods: GOODS_DONE,
+      fields: { s: 'empty', sum: 'Не заполнено · обязательных: 3' }, review: { s: 'locked', sum: 'Заполните разделы выше' } },
+    foot: { sum: 'slot+total', btn: 'Далее' } },
+  D: { cap: 'Окно каталога поверх конструктора: разделы с числом товаров и счётчиком выбранного, степперы, поиск по всему каталогу, футер «Выбрано». Всё кликается.',
+    base: 'C', dialog: { sec: 'veniki', q: '' } },
+  D2: { cap: 'То же окно на разделе «Доп. услуги»: под названием — длительность и исполнитель, «без цены» серым.',
+    base: 'C', dialog: { sec: 'serv', q: '' } },
+  E: { cap: 'Поля сделки: блоки с заголовками, «2 в линии», все типы контролов. Менеджер уже нажимал «Проверить» — два пустых обязательных подсвечены.',
+    active: 'fields', head: 'Бани · Иван Петров', src: 'из чата', fieldsErr: true,
+    st: { who: WHO_DONE, when: WHEN_DONE, slot: SLOT_WARN, goods: GOODS_DONE, fields: FIELDS_ERR,
+      review: { s: 'locked', sum: 'Сначала заполните: Гостей, Программа' } },
+    foot: { sum: 'slot+total+err', btn: 'Проверить' } },
+  E2: { cap: 'Тот же момент, но П свёрнут: красный «!», полоса слева, бейдж «Не заполнено 2». Клик по строке раскрывает раздел (аккордеон).',
+    active: 'goods', head: 'Бани · Иван Петров', src: 'из чата', fieldsErr: true,
+    st: { who: WHO_DONE, when: WHEN_DONE, slot: SLOT_WARN, goods: GOODS_DONE, fields: FIELDS_ERR,
+      review: { s: 'locked', sum: 'Сначала заполните: Гостей, Программа' } },
+    foot: { sum: 'slot+total+err', btn: 'Проверить' } },
+  F: { cap: 'Проверка: «чек» только для чтения с «Изменить» у строк, жёлтое предупреждение о тех. окне, кнопка «Создать бронь · с предупреждениями: 1».',
+    active: 'review', head: 'Бани · Иван Петров', src: 'из чата',
+    st: { who: WHO_DONE, when: WHEN_DONE, slot: SLOT_WARN, goods: GOODS_DONE,
+      fields: { s: 'done', sum: 'Заполнено 7 из 9 · очищено 2' }, review: { s: 'empty', sum: 'Готово к созданию' } },
+    foot: { sum: 'slot+total', btn: 'Создать бронь', warnN: 1 } },
+  G: { cap: 'Телефон 390px: окно на весь экран, строки разделов в две строки, товары карточками, теги лентой, футер закреплён снизу.',
+    base: 'C', phone: true },
+  G2: { cap: 'Телефон 390px: каталог — лист снизу, разделы лентой чипов.',
+    base: 'C', phone: true, dialog: { sec: 'veniki', q: '' } },
+  H: { cap: 'Экран результата при частичном сбое: бронь создана, но товары не записаны в сделку — предупреждения и следующие действия.',
+    head: 'Бани · Иван Петров', src: 'из чата', result: true },
+};
+
+let cur = { key: 'C', active: 'goods', dialog: null, phone: false, dealChosen: false };
+const conf = () => { const s = STATES[cur.key]; return s.base ? { ...STATES[s.base], ...s, cap: s.cap } : s; };
+
+/* =====================================================================
+   Разделы: тела
+   ===================================================================== */
+function bodyWho() {
+  const chosen = cur.key !== 'A' || cur.dealChosen;
+  return `
+  <div class="client">
+    <div class="ava">ИП</div>
+    <div class="who"><b>Иван Петров</b><small>+7 916 555-12-34 · ivan.petrov@mail.ru</small></div>
+    <span class="lock-note" title="Клиент определён по чату — сменить нельзя">${I.lock.replace('<svg', '<svg class="i" style="width:14px;height:14px"')}из чата</span>
+  </div>
+  <div class="fl">
+    <span class="lbl">Сделка <span class="muted">· 2 открытые</span></span>
+    <div class="cards" role="radiogroup" aria-label="Сделка">
+      <button type="button" class="card js-deal" role="radio" aria-checked="${chosen}">
+        <span class="dot"></span><span class="ct">#678 «Баня 25.10»</span><span class="cs">0 ₽</span>
+        <span class="cm"><span class="tone" style="--c:#12b76a"><i></i>пустая</span> · Новая · вчера</span>
+      </button>
+      <button type="button" class="card js-deal" role="radio" aria-checked="false">
+        <span class="dot"></span><span class="ct">#651 «Домик на ноябрьские»</span><span class="cs">18 000 ₽</span>
+        <span class="cm"><span class="tone" style="--c:#f04438"><i></i>есть бронь 03.11</span> · Предоплата</span>
+      </button>
+      <button type="button" class="card new js-deal" role="radio" aria-checked="false">
+        <span class="dot"></span><span class="ct">+ Новая сделка</span><span></span>
+        <span class="cm">воронка — по группе ресурсов</span>
+      </button>
+      <button type="button" class="card js-deal" role="radio" aria-checked="false" style="border-style:dashed">
+        <span class="dot"></span><span class="ct">Служебная бронь</span><span></span>
+        <span class="cm">без сделки: уборка, ремонт, свои</span>
+      </button>
+    </div>
+  </div>`;
+}
+function bodyWhen() {
+  const days = [['пт', 24], ['сб', 25, 'we'], ['вс', 26, 'we today'], ['пн', 27, 'on'], ['вт', 28], ['ср', 29], ['чт', 30], ['пт', 31], ['сб', 1, 'we']];
+  return `
+  <div class="fl"><span class="lbl">Группа ресурсов</span>
+    <div class="grp" role="radiogroup" aria-label="Группа">
+      <button type="button" class="card" role="radio" aria-checked="true"><span class="ico">♨</span><span class="ct">Бани</span><span class="dot"></span><span class="cm">3 ресурса · часы от клика</span></button>
+      <button type="button" class="card" role="radio" aria-checked="false"><span class="ico">⌂</span><span class="ct">Домики</span><span class="dot"></span><span class="cm">4 ресурса · заезд/выезд</span></button>
+    </div>
+  </div>
+  <div class="fl"><span class="lbl">Тип сделки</span>
+    <div><div class="seg" role="group"><button type="button" aria-pressed="true">Визит</button><button type="button" aria-pressed="false">Покупка сертификата</button></div></div>
+  </div>
+  <div class="fl"><span class="lbl">Дата</span>
+    <div class="days">
+      <button type="button" class="icon-btn" aria-label="Раньше">‹</button>
+      ${days.map(([w, d, c = '']) => `<button type="button" class="d ${c.replace('on', '')}" aria-pressed="${c.includes('on')}">${w}<b>${d}</b></button>`).join('')}
+      <button type="button" class="icon-btn" aria-label="Позже">›</button>
+    </div>
+    <span class="df-h">Сегодня — вс 26.10 · выходные красным · календарь — по клику на дату</span>
+  </div>`;
+}
+function bodySlot() {
+  const P = h => ((h - 10) / 14 * 100).toFixed(3) + '%';
+  const W = (a, b) => ((b - a) / 14 * 100).toFixed(3) + '%';
+  const seg = (cls, a, b, txt = '', t = '') => `<i class="${cls}" style="left:${P(a)};width:${W(a, b)}" title="${t}">${txt}</i>`;
+  const rows = [
+    ['Баня 1', true, [seg('busy', 10, 13, 'Смирнова', 'Занято 10:00–13:00'), seg('tech', 13, 13.5, '', 'Тех. окно'), seg('sel', 14, 18, '14:00–18:00', 'Ваша бронь'), seg('tech clash', 18, 18.5, '', 'Тех. окно пересекается с бронью 18:15'), seg('busy', 18.25, 21, 'Корпоратив', 'Занято 18:15–21:00'), seg('tech', 21, 21.5)]],
+    ['Баня 2', false, [seg('busy', 12, 15, 'Орлов', 'Занято 12:00–15:00'), seg('tech', 15, 15.5), seg('busy', 19, 22, 'Ким', 'Занято 19:00–22:00'), seg('tech', 22, 22.5)]],
+    ['Баня 3 «Теремок»', false, [seg('stop', 10, 12, 'стоп', 'Стоп: обслуживание'), seg('busy', 16, 20, 'Семья Л.', 'Занято 16:00–20:00'), seg('tech', 20, 20.5)]],
+  ];
+  return `
+  <div class="time-row">
+    <label class="fl"><span class="lbl">Начало</span><select class="inp"><option>14:00</option></select></label>
+    <div class="fl"><span class="lbl">Длительность</span>
+      <div class="durs" role="radiogroup" aria-label="Длительность">
+        ${['1 ч', '2 ч', '3 ч', '4 ч', '5 ч', '6 ч'].map(d => `<button type="button" class="chip" role="radio" aria-checked="${d === '4 ч'}">${d}</button>`).join('')}
+        <button type="button" class="chip" role="radio" aria-checked="false">Своя…</button>
+      </div>
+    </div>
+    <div class="till">до <b>18:00</b></div>
+  </div>
+  <div class="scale" role="group" aria-label="Занятость на пн 27.10">
+    <div class="scale-axis"><span class="lbl">пн 27.10</span><div class="ax">${[10, 12, 14, 16, 18, 20, 22, 24].map(h => `<span style="left:${P(h)}">${h}:00</span>`).join('')}</div></div>
+    ${rows.map(([n, on, segs]) => `<div class="scale-row"><button type="button" class="res-btn" role="radio" aria-checked="${on}"><span class="dot"></span><span>${n}</span></button><div class="bar">${segs.join('')}</div></div>`).join('')}
+    <div class="legend"><span><i style="background:#d6f3de"></i>свободно — клик ставит начало</span><span><i style="background:#f04438"></i>занято</span><span><i style="background:repeating-linear-gradient(135deg,#fef0c7 0 3px,#fec84b 3px 5px)"></i>тех. окно 30 мин</span><span><i style="background:repeating-linear-gradient(135deg,#b4bac4 0 3px,#d9dde3 3px 6px)"></i>стоп</span></div>
+  </div>
+  <div class="notice warn">${I.alert}<span class="grow"><b>Тех. окно Баня 1 (18:00–18:30) пересекается на 15 мин с бронью 18:15–21:00.</b> Бронь возможна — уборку придётся сократить.</span><button type="button" class="btn sm">До 17:45</button></div>`;
+}
+function goodsRows() {
+  if (!sel.length) return `<div class="gt-empty"><b>Товаров пока нет</b>Добавьте из каталога или выберите раздел выше</div>`;
+  return sel.map((l, i) => {
+    const it = ITEM[l.id];
+    const changed = it.price != null && l.price !== it.price;
+    const d = lineDisc(l), b = lineBase(l);
+    const meta = [];
+    if (l.def) meta.push('<span class="pill def">по умолчанию · Баня 1</span>', '<span>кол-во = длительности</span>');
+    if (changed) meta.push(`<span class="chg" title="Каталог: ${fmt(it.price)} ₽">каталог ${fmt(it.price)} ₽<button type="button" class="js-reset" data-i="${i}" aria-label="Вернуть цену каталога">↺</button></span>`);
+    if (!l.def && !changed) meta.push('<span>' + it.secName + (it.meta ? ' · ' + it.meta : '') + '</span>');
+    if (it.price == null) meta.push('<span class="chg">укажите цену</span>');
+    return `<div class="gt-row ${l.isNew ? 'is-new' : ''} ${l.flash ? 'flash' : ''} ${l.disc ? '' : 'nodisc'}">
+      <div class="gname"><b>${it.name}</b><small>${meta.join('')}</small></div>
+      <div class="qty" role="group" aria-label="Количество"><button type="button" class="js-q" data-i="${i}" data-d="-1" aria-label="Меньше">−</button><output>${l.qty}</output><button type="button" class="js-q" data-i="${i}" data-d="1" aria-label="Больше">+</button></div>
+      <label class="price ${changed ? 'changed' : ''}"><span class="glbl">×</span><input class="inp r" value="${l.price == null ? '' : fmt(l.price)}" placeholder="цена" aria-label="Цена" title="${changed ? 'Каталог: ' + fmt(it.price) + ' ₽' : ''}"></label>
+      <div class="disc-w"><span class="glbl">Скидка</span><div class="disc"><input value="${l.disc || ''}" placeholder="0" aria-label="Скидка"><button type="button" class="js-unit" data-i="${i}" aria-label="Единицы скидки">${l.unit}</button></div></div>
+      <div class="gsum">${d ? `<s>${fmt(b)}</s>` : ''}${fmt(b - d)} ₽</div>
+      <button type="button" class="icon-btn gdel js-del" data-i="${i}" aria-label="Убрать">${I.x}</button>
+      <button type="button" class="lnk add-disc" style="grid-column:1/-1;grid-row:3;justify-self:start;font-weight:500;font-size:12.5px">+ Скидка</button>
+    </div>`;
+  }).join('');
+}
+function bodyGoods() {
+  const t = totals();
+  const tag = id => { const s = CAT.find(c => c.id === id), n = secSelCount(id); return `<button type="button" class="tag ${n ? 'has' : ''} js-tag" data-sec="${id}">${s.name}${n ? `<span class="n">${n}</span>` : ''}</button>`; };
+  return `
+  <div class="notice">${I.info}<span class="grow">В сделке #678 товаров нет — подставили товары по умолчанию для <b>Баня 1</b>. При создании брони они запишутся в сделку.</span></div>
+  <div class="extras">
+    <div class="extras-top">
+      <label class="search">${I.search}<input class="inp js-gsearch" placeholder="Найти товар или услугу…" aria-label="Поиск по каталогу"></label>
+      <button type="button" class="btn js-tag" data-sec="all" title="Весь каталог">${I.grid}<span class="bt">Весь каталог</span></button>
+    </div>
+    <div class="tags" aria-label="Разделы каталога">${TAGS.map(tag).join('')}${cur.more ? MORE.map(tag).join('') : '<button type="button" class="tag more js-more">Ещё ▾</button>'}${cur.phone ? MORE.map(tag).join('') : ''}</div>
+  </div>
+  <div class="gt" role="table" aria-label="Выбранные товары">
+    <div class="gt-row gt-head" role="row"><span>Товар</span><span>Кол-во</span><span>Цена, ₽</span><span>Скидка</span><span>Сумма</span><span></span></div>
+    ${goodsRows()}
+  </div>
+  <div class="totals">
+    <div><span>Без скидки</span><span>${fmt(t.base)} ₽</span></div>
+    <div class="d"><span>Скидка</span><span>−${fmt(t.disc)} ₽</span></div>
+    <div class="t"><span>Итого</span><span>${fmt(t.total)} ₽</span></div>
+  </div>
+  <h3 class="sub">Бронь и оплата</h3>
+  <div class="pay">
+    <div class="fl full"><span class="lbl">Тип брони</span>
+      <div class="btype" role="radiogroup" aria-label="Тип брони">
+        <button type="button" class="card" role="radio" aria-checked="false"><span class="dot"></span><span class="ct">Обычная</span><span class="cm">без услуг</span></button>
+        <button type="button" class="card" role="radio" aria-checked="true"><span class="dot"></span><span class="ct">Парение</span><span class="cm">есть «Парение»</span></button>
+        <button type="button" class="card" role="radio" aria-checked="false"><span class="dot"></span><span class="ct">Праздник</span><span class="cm">от 6 гостей</span></button>
+      </div>
+    </div>
+    <div class="fl"><span class="lbl">Способ оплаты</span><div><div class="seg"><button type="button" aria-pressed="true">Предоплата</button><button type="button" aria-pressed="false">Полная</button><button type="button" aria-pressed="false">На месте</button></div></div></div>
+    <label class="fl"><span class="lbl">Сумма предоплаты</span><span class="money"><input class="inp" value="5 000"></span></label>
+    <div class="switch full"><i></i><span>Ссылку на оплату — отправить в чат после создания брони</span></div>
+  </div>`;
+}
+function bodyFields() {
+  const err = !!conf().fieldsErr;
+  return `
+  <div class="df">
+    <div class="df-block">
+      <h3 class="sub">Гости и программа</h3>
+      <div class="df-row pair">
+        <div class="df-f ${err ? 'is-err' : ''}"><span class="df-l">Гостей <i class="req" aria-hidden="true">*</i></span>
+          <div class="df-c"><div class="qty lg ${err ? 'err' : ''}" role="group" aria-label="Гостей" aria-required="true" aria-invalid="${err}"><button type="button">−</button><output>—</output><button type="button">+</button></div></div>
+          <span class="df-e">${I.alert}Укажите число гостей</span></div>
+        <label class="df-f"><span class="df-l">Источник</span><span class="df-c"><select class="inp"><option>WhatsApp</option></select></span></label>
+      </div>
+      <div class="df-row">
+        <div class="df-f ${err ? 'is-err' : ''}"><span class="df-l">Программа <i class="req" aria-hidden="true">*</i></span>
+          <div class="chips" role="radiogroup" aria-label="Программа" aria-required="true">${['Классика', 'Романтик', 'Детская', 'Корпоратив', 'Спорт'].map(v => `<button type="button" class="chip" role="radio" aria-checked="${!err && v === 'Классика'}">${v}</button>`).join('')}</div>
+          <span class="df-e">${I.alert}Обязательное поле</span></div>
+      </div>
+    </div>
+    <div class="df-block">
+      <h3 class="sub">Оплата <span class="r">из настроек группы «Бани»</span></h3>
+      <div class="df-row pair">
+        <div class="df-f"><span class="df-l">Сумма сделки</span><div class="from-goods">${fmt(totals().total)} ₽ <span class="muted" style="font-weight:500;font-size:12.5px">из товаров</span><button type="button" class="lnk js-open" data-sec="goods">Товары →</button></div></div>
+        <label class="df-f"><span class="df-l">Депозит за посуду <span class="tagf def">по умолчанию</span></span><span class="df-c"><span class="money"><input class="inp" value="1 000"></span></span></label>
+      </div>
+      <div class="df-row pair">
+        <label class="df-f"><span class="df-l">Остаток к оплате <span class="tagf fx">ƒ авто</span></span><span class="df-c"><span class="fx-val"><input class="inp r" value="${fmt(totals().total - 5000)} ₽" readonly></span></span><span class="df-h">= Сумма сделки − Предоплата</span></label>
+        <div class="df-f"><span class="df-l">Бонусы к начислению <span class="tagf man">вручную</span></span><div class="df-c"><span class="fx-val man"><input class="inp r" value="300 ₽"></span><button type="button" class="reset" title="Вернуть формулу: 519 ₽" aria-label="Вернуть значение формулы">↺</button></div><span class="df-h">по формуле было бы 519 ₽ (3% суммы)</span></div>
+      </div>
+    </div>
+    <div class="df-block">
+      <h3 class="sub">Дополнительно</h3>
+      <div class="df-row pair">
+        <div class="df-f"><span class="df-l">Дата визита <i class="req" aria-hidden="true">*</i></span><div class="df-c"><input class="inp" value="27.10.2026" aria-required="true"></div>
+          <span class="df-h"><button type="button" class="lnk">сегодня</button> · <button type="button" class="lnk">дата брони</button></span></div>
+        <div class="df-f"><span class="df-l">Нужен трансфер</span><div class="df-c"><div class="seg"><button type="button" aria-pressed="false">Да</button><button type="button" aria-pressed="false">Нет</button><button type="button" aria-pressed="true">—</button></div></div></div>
+      </div>
+      <div class="df-row"><label class="df-f"><span class="df-l">Пожелания гостей</span><textarea class="inp" rows="2" placeholder="Например: без ароматов, детский веник"></textarea></label></div>
+    </div>
+    <div class="ro-line"><span>Ответственный: <b>Анна Ковалёва</b></span><span>Стадия: <b>Новая</b></span><span>ID брони, дата брони, ссылка на оплату — заполнит приложение</span></div>
+  </div>`;
+}
+function bodyReview() {
+  const t = totals();
+  return `
+  <dl class="receipt">
+    <div class="rc"><dt>Клиент</dt><dd><b>Иван Петров</b> · +7 916 555-12-34</dd><button type="button" class="lnk js-open" data-sec="who">Изменить</button></div>
+    <div class="rc"><dt>Сделка</dt><dd>#678 «Баня 25.10» · Визит</dd><button type="button" class="lnk js-open" data-sec="who">Изменить</button></div>
+    <div class="rc"><dt>Группа</dt><dd>Бани</dd><button type="button" class="lnk js-open" data-sec="when">Изменить</button></div>
+    <div class="rc"><dt>Ресурс и время</dt><dd><b>Баня 1</b> · пн 27 октября, <b class="num">14:00–18:00</b> (4 ч) · тех. окно до 18:30</dd><button type="button" class="lnk js-open" data-sec="slot">Изменить</button></div>
+    <div class="rc"><dt>Товары</dt><dd><ul class="rc-lines">
+      ${sel.map(l => { const it = ITEM[l.id], d = lineDisc(l); return `<li><span>${it.name} <span class="x">${l.qty} × ${fmt(l.price || 0)}${d ? ` − ${l.unit === '%' ? l.disc + '%' : fmt(l.disc) + ' ₽'}` : ''}</span></span><span>${fmt(lineBase(l) - d)} ₽</span></li>`; }).join('')}
+      ${t.disc ? `<li class="x"><span>Скидка</span><span>−${fmt(t.disc)} ₽</span></li>` : ''}
+      <li class="tot"><span>Итого</span><span>${fmt(t.total)} ₽</span></li></ul></dd><button type="button" class="lnk js-open" data-sec="goods">Изменить</button></div>
+    <div class="rc"><dt>Оплата</dt><dd>Предоплата <b class="num">5 000 ₽</b> · ссылка — в чат после создания · тип брони «Парение»</dd><button type="button" class="lnk js-open" data-sec="goods">Изменить</button></div>
+    <div class="rc"><dt>Поля сделки</dt><dd><div class="rc-fields">
+      <span class="rq">Гостей: <b>4</b></span><span class="rq">Программа: <b>Классика</b></span><span class="rq">Дата визита: <b>27.10.2026</b></span>
+      <span>Источник: <b>WhatsApp</b></span><span>Депозит: <b>1 000 ₽</b></span><span>Остаток: <b>${fmt(t.total - 5000)} ₽</b></span><span>Бонусы: <b>300 ₽</b></span>
+      <span>Очищено: <b>Прошлая бронь, Комментарий</b></span></div></dd><button type="button" class="lnk js-open" data-sec="fields">Изменить</button></div>
+  </dl>
+  <div class="warns">
+    <div class="notice warn">${I.alert}<span class="grow"><b>Тех. окно пересекается с бронью.</b> Баня 1, уборка 18:00–18:30, следующая бронь в 18:15. Бронь возможна.</span><button type="button" class="btn sm js-open" data-sec="slot">Изменить время</button></div>
+  </div>`;
+}
+const BODY = { who: bodyWho, when: bodyWhen, slot: bodySlot, goods: bodyGoods, fields: bodyFields, review: bodyReview };
+const ASIDE = { who: 'клиент из чата', when: '', slot: 'часы от клика · тех. окно 30 мин', goods: 'по умолчанию · Баня 1', fields: 'обязательных: 3', review: 'только чтение' };
+const NEXT = { who: 'Далее →', when: 'Далее →', slot: 'Далее →', goods: 'Далее →', fields: 'К проверке →' };
+
+/* =====================================================================
+   Рендер
+   ===================================================================== */
+function stIcon(s) {
+  return { done: I.check, warning: I.warn, error: '!', locked: I.lock, empty: '', active: '' }[s] || '';
+}
+function secHTML(sec, c) {
+  const st = c.st[sec.id];
+  const isA = cur.active === sec.id;
+  const sum = typeof st.sum === 'function' ? st.sum() : st.sum;
+  const badge = st.badge ? `<span class="pill ${st.badge[0]}">${st.badge[1]}</span>` : '';
+  const locked = st.s === 'locked';
+  const aside = sec.id === 'fields' && c.fieldsErr ? '<span style="color:#b42318">обязательных: 3 · не заполнено 2</span>' : ASIDE[sec.id];
+  let foot = '';
+  if (sec.id !== 'review') {
+    const hint = sec.id === 'who' && cur.key === 'A' && !cur.dealChosen ? '<span class="hint">Выберите сделку, «Новая сделка» или служебную бронь</span>'
+      : sec.id === 'fields' && c.fieldsErr ? '<span class="hint err">Не заполнено 2: Гостей, Программа</span>' : '<span class="hint">Изменения применяются сразу</span>';
+    foot = `<div class="sec-foot">${hint}<button type="button" class="btn soft js-next" ${sec.id === 'who' && cur.key === 'A' && !cur.dealChosen ? 'disabled' : ''}>${NEXT[sec.id]}</button></div>`;
+  }
+  return `<section class="sec s-${st.s} ${isA ? 'is-active' : ''}" data-sec="${sec.id}">
+    <button type="button" class="bc-row js-row" aria-expanded="${isA}" aria-controls="p-${sec.id}" ${locked ? 'aria-disabled="true" tabindex="-1"' : ''}>
+      <span class="st ${st.s} st-c">${stIcon(st.s)}</span><span class="st active st-a">${SECS.indexOf(sec) + 1}</span>
+      <span class="t">${sec.t}</span>
+      <span class="s"><span>${sum}</span>${badge}</span>
+      ${locked ? '<span></span>' : '<span class="edit">Изменить</span>'}
+      <span class="aside">${aside}</span>
+    </button>
+    <div class="sec-panel" id="p-${sec.id}" role="region"><div class="sec-inner">${isA || BODY_ALWAYS ? `<div class="sec-body">${locked ? '' : BODY[sec.id]()}</div>${foot}` : ''}</div></div>
+  </section>`;
+}
+const BODY_ALWAYS = true;
+function footHTML(c) {
+  const f = c.foot; const t = totals();
+  let sum = f.sum;
+  if (sum.startsWith('slot')) {
+    sum = `<b>Баня 1</b><span class="sep">·</span><span>пн 27.10, 14:00–18:00</span><span class="sep">·</span><span class="tot num">${fmt(t.total)} ₽</span>`;
+    if (f.sum.endsWith('err')) sum += '<span class="pill err">! 2 поля</span>';
+  }
+  const btn = f.warnN ? `${f.btn} <small>· с предупреждениями: ${f.warnN}</small>` : f.btn;
+  const dis = f.dis && !cur.dealChosen;
+  return `<div class="bc-foot"><div class="bc-sum">${sum}</div><div class="bc-acts"><button type="button" class="btn cancel">Отмена</button><button type="button" class="btn primary js-main" ${dis ? 'disabled title="Выберите сделку"' : ''}>${btn}</button></div></div>`;
+}
+function resultHTML() {
+  return `<div class="result">
+    <div class="big">${I.bigcheck}</div>
+    <h2>Бронь #555 создана</h2>
+    <p>Баня 1 · пн 27.10, 14:00–18:00 · Иван Петров · сделка #678</p>
+    <div class="warns">
+      <div class="notice warn">${I.alert}<span class="grow"><b>Товары не записаны в сделку.</b> Битрикс24 не ответил (503). Бронь сохранена, слот занят — повтор запишет только товары.</span><button type="button" class="btn sm">Повторить</button></div>
+      <div class="notice warn">${I.alert}<span class="grow"><b>Поле «Программа» не сохранено:</b> значения «Классика» больше нет в списке сделки.</span><button type="button" class="btn sm">Открыть сделку</button></div>
+      <div class="notice ok">${I.bigcheck.replace('class="i"', 'class="i"')}<span class="grow">Сделка связана с бронью · история брони записана · ссылка на оплату отправится после записи товаров</span></div>
+    </div>
+    <div class="acts"><button type="button" class="btn">Открыть сделку #678</button><button type="button" class="btn">Перейти к предоплате</button><button type="button" class="btn primary">Готово</button></div>
+    <span class="op">Операция сохранена в журнале — повторная отправка безопасна</span>
+  </div>`;
+}
+function dialogHTML() {
+  const d = cur.dialog; const q = d.q.trim().toLowerCase();
+  const all = CAT.reduce((a, s) => a + s.items.length, 0);
+  const nav = [`<button type="button" class="js-dsec" data-sec="all" aria-current="${d.sec === 'all' && !q}"><span class="nm">Все</span><span class="ct">${all}</span>${sel.length ? `<span class="sel">${sel.length}</span>` : ''}</button>`]
+    .concat(CAT.map(s => { const n = secSelCount(s.id); return `<button type="button" class="js-dsec" data-sec="${s.id}" aria-current="${d.sec === s.id && !q}"><span class="nm">${s.name}</span><span class="ct">${s.items.length}</span>${n ? `<span class="sel" aria-label="выбрано ${n}">${n}</span>` : ''}</button>`; }));
+  let groups;
+  if (q) groups = [{ name: `Найдено по «${d.q}»`, items: CAT.flatMap(s => s.items).filter(it => it.name.toLowerCase().includes(q)), search: true }];
+  else if (d.sec === 'all') groups = CAT.map(s => ({ name: s.name, items: s.items }));
+  else groups = [{ name: null, items: CAT.find(s => s.id === d.sec).items }];
+  const hi = s => q ? s.replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>') : s;
+  const row = (it, search) => {
+    const l = sel.find(x => x.id === it.id);
+    const meta = search ? ITEM[it.id].secName + (it.meta ? ' · ' + it.meta : '') : (it.meta || '');
+    const shown = l && l.price !== it.price && it.price != null ? `<small style="display:block;color:#b54708;font-weight:500;font-size:11px">в брони ${fmt(l.price)} ₽</small>` : '';
+    return `<div class="ci ${l ? 'on' : ''}"><div class="nm"><b>${hi(it.name)}</b>${meta ? `<small>${meta}</small>` : ''}</div>
+      <div class="pr ${it.price == null ? 'none' : ''}">${it.price == null ? 'без цены' : fmt(it.price) + ' ₽'}${shown}</div>
+      <div class="act">${l ? `<div class="qty" role="group" aria-label="${it.name}, количество"><button type="button" class="js-dq" data-id="${it.id}" data-d="-1" aria-label="Меньше">−</button><output>${l.qty}</output><button type="button" class="js-dq" data-id="${it.id}" data-d="1" aria-label="Больше">+</button></div>` : `<button type="button" class="add js-dq" data-id="${it.id}" data-d="1" aria-label="Добавить ${it.name}">+</button>`}</div></div>`;
+  };
+  const list = groups.map(g => (g.name && (groups.length > 1 || g.search) ? `<div class="grp-t">${g.name}</div>` : '') + (g.items.length ? g.items.map(it => row(it, g.search)).join('') : `<div class="cat-empty"><b style="color:#111827">Ничего не нашли</b>Проверьте написание или очистите поиск</div>`)).join('');
+  const t = totals();
+  return `<div class="ovl js-ovl"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+    <div class="dlg-head"><div class="r1"><h3 id="dlgT">Каталог <span>· Бани</span></h3><button type="button" class="icon-btn js-dclose" aria-label="Закрыть">${I.x}</button></div>
+      <label class="search">${I.search}<input class="inp js-dsearch" value="${d.q}" placeholder="Поиск по всему каталогу" aria-label="Поиск по каталогу"></label></div>
+    <div class="dlg-main"><nav class="cat-nav" aria-label="Разделы">${nav.join('')}</nav><div class="cat-list">${list}</div></div>
+    <div class="dlg-foot"><span class="grow">Выбрано: <b>${t.n} ${plural(t.n, 'позиция', 'позиции', 'позиций')} · ${fmt(t.total)} ₽</b></span><button type="button" class="btn primary js-dclose">Готово</button></div>
+  </div></div>`;
+}
+function render() {
+  const c = conf();
+  cur.phone = !!c.phone;
+  document.querySelectorAll('.demo-bar button').forEach(b => b.setAttribute('aria-pressed', b.dataset.s === cur.key));
+  document.getElementById('cap').textContent = c.cap;
+  const stage = document.getElementById('stage');
+  stage.className = 'stage' + (c.phone ? ' phone' : '');
+  const head = `<header class="bc-head"><h1>Новая бронь <span>· ${c.head}</span></h1><span class="pill grey src">${c.src}</span>
+    <button type="button" class="icon-btn min" aria-label="Свернуть окно" title="Свернуть">${I.min}</button><button type="button" class="icon-btn" aria-label="Закрыть">${I.x}</button></header>`;
+  if (c.result) {
+    stage.innerHTML = `<div class="bc">${head}<div class="bc-body">${resultHTML()}</div></div>`;
+    return;
+  }
+  const visible = SECS;
+  stage.innerHTML = `<div class="bc">${head}<div class="bc-body">${visible.map(s => secHTML(s, c)).join('')}</div>${footHTML(c)}${cur.dialog ? dialogHTML() : ''}</div>`;
+}
+
+/* =====================================================================
+   Поведение
+   ===================================================================== */
+function setState(k) {
+  const s = STATES[k]; const c = s.base ? { ...STATES[s.base], ...s } : s;
+  cur = { key: k, active: c.active, dialog: c.dialog ? { ...c.dialog } : null, phone: !!c.phone, dealChosen: false, more: false };
+  sel = initialSel();
+  render();
+}
+function openSection(id) {
+  const c = conf();
+  if (!c.st || c.st[id].s === 'locked' || cur.active === id) return;
+  cur.active = id;
+  document.querySelectorAll('.sec').forEach(el => {
+    const on = el.dataset.sec === id;
+    el.classList.toggle('is-active', on);
+    el.querySelector('.bc-row').setAttribute('aria-expanded', on);
+  });
+}
+function rerenderKeepFocus(sel_) {
+  const a = document.activeElement; const isS = a && a.matches(sel_); const pos = isS ? a.selectionStart : 0;
+  render();
+  if (isS) { const n = document.querySelector(sel_); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) { if (e.target.classList.contains('js-ovl')) { cur.dialog = null; render(); } return; }
+  if (t.dataset.s) return setState(t.dataset.s);
+  if (t.classList.contains('js-row')) return openSection(t.closest('.sec').dataset.sec);
+  if (t.classList.contains('js-open')) return openSection(t.dataset.sec);
+  if (t.classList.contains('js-next')) {
+    const order = SECS.map(s => s.id); const c = conf();
+    const nx = order.slice(order.indexOf(cur.active) + 1).find(id => c.st[id].s !== 'locked');
+    if (nx) openSection(nx); return;
+  }
+  if (t.classList.contains('js-main')) { const c = conf(); if (c.fieldsErr) openSection('fields'); else if (cur.key === 'F') setState('H'); else if (c.st) { const o = SECS.map(s => s.id); const nx = o.slice(o.indexOf(cur.active) + 1).find(id => c.st[id].s !== 'locked'); if (nx) openSection(nx); } return; }
+  if (t.classList.contains('js-deal')) {
+    t.closest('.cards').querySelectorAll('.card').forEach(x => x.setAttribute('aria-checked', x === t));
+    if (cur.key === 'A' && !cur.dealChosen) { cur.dealChosen = true; render(); }
+    return;
+  }
+  if (t.getAttribute('role') === 'radio') { t.parentElement.querySelectorAll('[role=radio]').forEach(x => x.setAttribute('aria-checked', x === t)); return; }
+  if (t.parentElement && t.parentElement.classList.contains('seg')) { t.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === t)); return; }
+  if (t.classList.contains('js-tag')) { cur.dialog = { sec: t.dataset.sec, q: '' }; render(); return; }
+  if (t.classList.contains('js-more')) { cur.more = true; render(); return; }
+  if (t.classList.contains('js-q')) { const l = sel[+t.dataset.i]; l.qty = Math.max(0, l.qty + +t.dataset.d); if (!l.qty) sel.splice(+t.dataset.i, 1); render(); return; }
+  if (t.classList.contains('js-del')) { sel.splice(+t.dataset.i, 1); render(); return; }
+  if (t.classList.contains('js-unit')) { const l = sel[+t.dataset.i]; l.unit = l.unit === '%' ? '₽' : '%'; render(); return; }
+  if (t.classList.contains('js-reset')) { const l = sel[+t.dataset.i]; l.price = ITEM[l.id].price; render(); return; }
+  if (t.classList.contains('js-dsec')) { cur.dialog = { sec: t.dataset.sec, q: '' }; render(); return; }
+  if (t.classList.contains('js-dclose')) { cur.dialog = null; sel.forEach(l => { l.flash = false; }); render(); return; }
+  if (t.classList.contains('js-dq')) {
+    const id = t.dataset.id, d = +t.dataset.d, i = sel.findIndex(x => x.id === id);
+    if (i < 0) { sel.forEach(l => { l.isNew = false; }); const it = ITEM[id]; sel.splice(1, 0, { id, qty: 1, price: it.price, disc: 0, unit: '%', isNew: true, flash: true }); }
+    else { sel[i].qty += d; if (sel[i].qty <= 0) sel.splice(i, 1); }
+    render(); return;
+  }
+});
+document.addEventListener('input', e => {
+  if (e.target.classList.contains('js-dsearch')) { cur.dialog.q = e.target.value; rerenderKeepFocus('.js-dsearch'); }
+  if (e.target.classList.contains('js-gsearch') && e.target.value.trim().length >= 2) { cur.dialog = { sec: 'all', q: e.target.value }; render(); const n = document.querySelector('.js-dsearch'); n.focus(); n.setSelectionRange(99, 99); }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && cur.dialog) { cur.dialog = null; render(); } });
+
+setState(document.body.dataset.state || 'C');
+</script>
+</body>
+</html>
