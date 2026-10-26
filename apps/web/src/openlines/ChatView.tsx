@@ -69,6 +69,8 @@ export function ChatView({
   const [busy, setBusy] = useState(false);
   // Отправка — отдельно от прочих действий: блок сообщения закрывается загрузчиком.
   const [sending, setSending] = useState(false);
+  // Шаблон загружается (подстановка данных сделки) — поле ввода заблокировано, как при отправке.
+  const [templating, setTemplating] = useState<string | null>(null);
   const [channels, setChannels] = useState<ChatChannelDto[]>([]);
   const [marking, setMarking] = useState(false);
 
@@ -171,12 +173,15 @@ export function ChatView({
       () => templates && onTemplates(templates.map((x) => (x.id === t.id ? { ...x, uses30d: (x.uses30d ?? 0) + 1 } : x))),
       () => undefined,
     );
+    setTemplating(t.name || 'шаблон');
     try {
       const r = await apiPost<{ texts: string[]; unresolved: string[] }>(`/openlines/chats/${chatId}/render`, { texts: t.steps.map((s) => s.text) });
       setChain(appendTemplate(chain, { ...t, steps: t.steps.map((s, i) => ({ ...s, text: r.texts[i] ?? s.text })) }));
       setNotice(r.unresolved.length ? `Не подставлено: ${r.unresolved.join(', ')} — проверьте текст перед отправкой` : '');
     } catch {
       setChain(appendTemplate(chain, t));
+    } finally {
+      setTemplating(null);
     }
   };
 
@@ -314,24 +319,24 @@ export function ChatView({
       ) : !chat.canSend ? (
         <p className="muted pad">Нет права отправлять сообщения в открытые линии (настраивается в группе).</p>
       ) : (
-        <div className={`composer cv-composer${sending ? ' sending' : ''}`} aria-busy={sending}>
-          {sending && (
+        <div className={`composer cv-composer${sending || templating ? ' sending' : ''}`} aria-busy={sending || !!templating}>
+          {(sending || templating) && (
             <div className="cv-sending" role="status">
               <span className="spinner" aria-hidden="true" />
-              Отправляем сообщение, ожидайте…
+              {sending ? 'Отправляем сообщение, ожидайте…' : `Загружаем шаблон «${templating}» — подставляем данные клиента…`}
             </div>
           )}
           <div className="cv-composer-row">
-            <StepsEditor compact onUploadingChange={setUploading} steps={chain} onChange={setChain} disabled={busy} onSubmitShortcut={() => void send()} />
+            <StepsEditor compact onUploadingChange={setUploading} steps={chain} onChange={setChain} disabled={busy || !!templating} onSubmitShortcut={() => void send()} />
             <div className="cv-composer-side">
-              <button className="primary" disabled={busy || uploading || chain.every(isEmpty)} onClick={() => void send()} title="Ctrl+Enter — отправить">
+              <button className="primary" disabled={busy || uploading || !!templating || chain.every(isEmpty)} onClick={() => void send()} title="Ctrl+Enter — отправить">
                 {busy
                   ? 'Отправка…'
                   : toSteps(chain).length > 1
                     ? `Отправить (${toSteps(chain).length})`
                     : 'Отправить'}
               </button>
-              <button type="button" className="cv-templates-btn" disabled={busy || uploading || !templates} onClick={() => setTemplatesOpen('pick')}>
+              <button type="button" className="cv-templates-btn" disabled={busy || uploading || !!templating || !templates} onClick={() => setTemplatesOpen('pick')}>
                 Шаблоны
               </button>
             </div>

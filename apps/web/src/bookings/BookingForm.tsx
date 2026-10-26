@@ -35,6 +35,7 @@ import { fmtDate, fmtDateTime, fmtMoney, fmtTime, plusMonths, shiftDate } from '
 import { byDays, daysText, durationText, periodToUtc, upcomingPeriod, type PeriodFields } from './booking-form.js';
 import { ClientPicker, ContactName, NewClientForm } from './ClientPicker.js';
 import { WizDialog } from './WizDialog.js';
+import { DealKindIcon, GroupIcon } from './group-icons.js';
 import { Avatar } from '../openlines/Avatar.js';
 import { openCrm } from '../b24.js';
 import { ColorLegend, type LegendItem } from '../ColorLegend.js';
@@ -193,7 +194,7 @@ export function BookingForm({
   const [client, setClient] = useState<{ contactId: number | null; name: string | null }>({ contactId: context.contactId ?? null, name: context.clientName ?? null });
   const [dealList, setDealList] = useState<DealCard[]>(context.openDeals ?? []);
   // Окна раздела «Кто»: поиск клиента (карандаш), «＋ Добавить» клиента, «Найти сделку».
-  const [dialog, setDialog] = useState<'client' | 'new' | 'deal' | null>(null);
+  const [dialog, setDialog] = useState<'client' | 'new' | 'deal' | 'group' | 'kind' | null>(null);
   // Карточка клиента (имя «Имя Фамилия», фото) — из поиска или подгружается по контакту.
   const [clientCard, setClientCard] = useState<CrmContactHit | null>(null);
   useEffect(() => {
@@ -913,26 +914,33 @@ export function BookingForm({
     </>
   );
 
+  // Группа и тип сделки — строкой с иконкой и «Изменить»; остальные варианты — в окне (решение владельца 2026-10-26).
+  const groupOk = groupChoices.some((g) => g.id === groupId);
   const whenSection = (
     <>
-      {groupChoices.length > 1 ? (
-        <div className="wz-groups" role="radiogroup" aria-label="Группа">
-          {groupChoices.map((g) => (
-            <button key={g.id} type="button" role="radio" aria-checked={g.id === groupId} className={`wz-group${g.id === groupId ? ' selected' : ''}`} onClick={() => chooseGroup(g.id)}>
-              <b>{g.name}</b>
-              <span className="muted">
-                ресурсов: {g.resourceIds.length}
-                {dealCategory !== null && g.dealCategoryId === dealCategory ? ' · воронка сделки' : ''}
-              </span>
+      {groupChoices.length > 0 && (
+        <div className="wz-pick-row">
+          <span className="wz-pick-icon">{groupOk && group ? <GroupIcon name={group.name} /> : '?'}</span>
+          <span className="wz-pick-main">
+            <small>Группа</small>
+            {groupOk && group ? (
+              <>
+                <b>{group.name}</b>
+                <span className="muted">
+                  ресурсов: {group.resourceIds.length}
+                  {dealCategory !== null && group.dealCategoryId === dealCategory ? ' · воронка сделки' : ''}
+                </span>
+              </>
+            ) : (
+              <b className="muted">Не выбрана</b>
+            )}
+          </span>
+          {(groupChoices.length > 1 || !groupOk) && (
+            <button type="button" className="wz-pick-change" onClick={() => setDialog('group')}>
+              {groupOk ? 'Изменить' : 'Выбрать'}
             </button>
-          ))}
+          )}
         </div>
-      ) : (
-        group && (
-          <p className="cx-line">
-            Группа: <b>{group.name}</b>
-          </p>
-        )
       )}
       {!groupChoices.length && <p className="notice error">Нет групп, где вам можно создать такую бронь.</p>}
       {groupManual && funnelGroup && funnelGroup.id !== groupId && (
@@ -944,17 +952,80 @@ export function BookingForm({
         </p>
       )}
       {kindsOn && (
-        <>
-          <h4 className="cx-subtitle">Тип сделки</h4>
-          <div className="wz-groups wz-kinds" role="radiogroup" aria-label="Тип сделки">
-            {DEAL_KINDS.map((k) => (
-              <button key={k} type="button" role="radio" aria-checked={kind === k} className={`wz-group${kind === k ? ' selected' : ''}`} onClick={() => setKind(k)}>
-                <b>{DEAL_KIND_LABELS[k]}</b>
-                <span className="muted">{DEAL_KIND_HINTS[k]}</span>
+        <div className="wz-pick-row">
+          <span className="wz-pick-icon">{kind ? <DealKindIcon kind={kind} /> : '?'}</span>
+          <span className="wz-pick-main">
+            <small>Тип сделки</small>
+            {kind ? (
+              <>
+                <b>{DEAL_KIND_LABELS[kind]}</b>
+                <span className="muted">{DEAL_KIND_HINTS[kind]}</span>
+              </>
+            ) : (
+              <b className="muted">Не выбран</b>
+            )}
+          </span>
+          <button type="button" className="wz-pick-change" onClick={() => setDialog('kind')}>
+            {kind ? 'Изменить' : 'Выбрать'}
+          </button>
+        </div>
+      )}
+      {dialog === 'group' && (
+        <WizDialog title="Группа" wide onClose={() => setDialog(null)}>
+          <div className="wz-groups" role="radiogroup" aria-label="Группа">
+            {groupChoices.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                role="radio"
+                aria-checked={g.id === groupId}
+                className={`wz-group wz-icon-card${g.id === groupId ? ' selected' : ''}`}
+                onClick={() => {
+                  chooseGroup(g.id);
+                  setDialog(null);
+                }}
+              >
+                <span className="wz-pick-icon">
+                  <GroupIcon name={g.name} />
+                </span>
+                <span>
+                  <b>{g.name}</b>
+                  <span className="muted">
+                    ресурсов: {g.resourceIds.length}
+                    {dealCategory !== null && g.dealCategoryId === dealCategory ? ' · воронка сделки' : ''}
+                  </span>
+                </span>
               </button>
             ))}
           </div>
-        </>
+        </WizDialog>
+      )}
+      {dialog === 'kind' && (
+        <WizDialog title="Тип сделки" wide onClose={() => setDialog(null)}>
+          <div className="wz-groups wz-kinds" role="radiogroup" aria-label="Тип сделки">
+            {DEAL_KINDS.map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={kind === k}
+                className={`wz-group wz-icon-card${kind === k ? ' selected' : ''}`}
+                onClick={() => {
+                  setKind(k);
+                  setDialog(null);
+                }}
+              >
+                <span className="wz-pick-icon">
+                  <DealKindIcon kind={k} />
+                </span>
+                <span>
+                  <b>{DEAL_KIND_LABELS[k]}</b>
+                  <span className="muted">{DEAL_KIND_HINTS[k]}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </WizDialog>
       )}
     </>
   );

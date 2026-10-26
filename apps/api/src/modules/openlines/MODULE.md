@@ -115,7 +115,7 @@
 в списке шаблонов чата его нет; пока выбран в группе — не удалить и не сменить назначение). Переменные (`renderMessage` в @btx24/shared): `{{Поле сделки}}`,
 `{{Контакт: Поле}}`, `{=Variable:programm}`, `{=Document:…}`, `{client_name}`… — данные собирает
 `MessageContextService` (bookings). При вставке шаблона в чат — `POST …/chats/:chatId/render` по сделке
-чата; страница «Шаблоны» — `GET /openlines/templates/variables`, `POST /openlines/templates/preview`.
+чата (пока идёт — поле ввода заблокировано: «Загружаем шаблон…», как при отправке); страница «Шаблоны» — `GET /openlines/templates/variables`, `POST /openlines/templates/preview`.
 
 **Кэш списка чатов** (запрос владельца 2026-10-22): `OpenlineChat` хранит и сводку чата (название,
 CRM, телефоны, последнее сообщение, автор, превью — превью только при «сборе текстов») — **одна строка на

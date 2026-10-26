@@ -52,6 +52,23 @@ export function timelineHours(startMs: number, endMs: number, timezone: string) 
   return ticks;
 }
 
+/** Имена ресурсов шкалы с прошлой загрузки: пока брони грузятся, строки ресурсов уже видны. */
+const NAMES_KEY = 'btx24:timeline-resource-names';
+function savedNames(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(NAMES_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+function saveNames(resources: { id: number; name: string }[]) {
+  try {
+    localStorage.setItem(NAMES_KEY, JSON.stringify({ ...savedNames(), ...Object.fromEntries(resources.map((r) => [r.id, r.name])) }));
+  } catch {
+    // Нет хранилища (приватный режим) — строки покажутся без имён.
+  }
+}
+
 /** Брони, идущие в момент `now` (полуоткрытый интервал). */
 export function liveBookings<T extends Pick<CalendarBooking, 'start' | 'end'>>(bookings: T[], now: number): T[] {
   return bookings.filter(b => Date.parse(b.start) <= now && Date.parse(b.end) > now);
@@ -121,6 +138,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
 
   const current = data?.key === key && !rangeError ? data : null;
   const allResources = current?.days[0]?.resources ?? [];
+  useEffect(() => { if (allResources.length) saveNames(allResources); }, [allResources]);
   const filter = group ? filters[group.id] : undefined;
   const nowMs = Date.now();
   const running = current && live ? liveBookings(current.bookings, nowMs) : [];
@@ -172,7 +190,11 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
     {!visible.length && <p className="muted">Нет групп с календарём.</p>}
     {(rangeError || error) && <p className="notice error" role="alert">{rangeError || error}</p>}
     {note && <p className="notice">{note}</p>}
-    {group && !current && !rangeError && !error && <p className="muted">Загружаем брони…</p>}
+    {group && !current && !rangeError && !error && <TimelineSkeleton
+      ids={(filters[group.id] ?? group.resourceIds).slice(0, live ? 3 : undefined)}
+      days={days}
+      timezone={timezone}
+    />}
     {current && !resources.length && <p className="muted">{live && allResources.length ? 'Сейчас броней нет.' : allResources.length ? 'Выберите ресурсы для шкалы.' : 'В группе нет ресурсов.'}</p>}
     {current && !!resources.length && <>
       <div className="timeline-rows"><div className="timeline-grid" style={{ minWidth: gridWidth }}>
@@ -372,4 +394,28 @@ function TimelineSetup({ groups, value, onSave, onClose }: { groups: MyGroupDto[
     </div>,
     document.body,
   );
+}
+
+/**
+ * Шкала, пока брони грузятся: ось и строки ресурсов группы (их число известно, имена — с прошлой
+ * загрузки), на месте броней — бегущая полоса загрузки (решение владельца 2026-10-26).
+ */
+function TimelineSkeleton({ ids, days, timezone }: { ids: number[]; days: string[]; timezone: string }) {
+  const names = savedNames();
+  const period = days.length > 1;
+  const startMs = zonedDayRange(days[0], timezone).start.getTime();
+  const endMs = zonedDayRange(days[days.length - 1], timezone).end.getTime();
+  const ticks = period ? [] : timelineHours(startMs, endMs, timezone);
+  const gridWidth = 140 + (period ? days.length * 76 : Math.ceil((endMs - startMs) / 3_600_000) * 40);
+  return <div className="timeline-rows" aria-busy="true">
+    <div className="timeline-grid" style={{ minWidth: gridWidth }}>
+      {period ? <div className="timeline-day-axis">{days.map(d => <span key={d}>{new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, weekday: 'short', day: '2-digit', month: '2-digit' }).format(zonedDayRange(d, timezone).start)}</span>)}</div> :
+        <div className="timeline-axis" aria-hidden="true"><span className="timeline-now">00:00</span>{ticks.map(t => <span key={t.key} className="timeline-tick" style={{ left: `${t.at * 100}%` }}>{t.time}</span>)}<span className="timeline-end">24:00</span></div>}
+      {ids.map(id => <div key={id} className="timeline-row">
+        <span className="timeline-resource">{names[id] ?? <i className="sk-line" aria-hidden="true" />}</span>
+        <div className="timeline-bar loading" aria-hidden="true" />
+      </div>)}
+    </div>
+    <p className="muted timeline-loading" role="status"><span className="spinner" aria-hidden="true" /> Загружаем брони…</p>
+  </div>;
 }
