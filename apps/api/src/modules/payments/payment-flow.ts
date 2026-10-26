@@ -61,6 +61,11 @@ export interface FlowContext {
   client: Bitrix24RestClient;
   /** Кто действует: сотрудник (из интерфейса) или система (worker). */
   actor: { kind: 'user'; userId: number; name: string } | { kind: 'system'; name: string };
+  /**
+   * Рабочего чата нет, а сотрудник в окне оплаты выбрал мессенджер: открыть новый чат с клиентом сделки
+   * этим сообщением (его токеном). Возвращает чат линии; только в запросе сотрудника, у worker'а нет.
+   */
+  newChat?: (text: string) => Promise<number | null>;
 }
 
 /**
@@ -323,8 +328,22 @@ export class PaymentFlow {
    * ответственного за сделку. Не вышло — предупреждение (ссылку можно отправить вручную).
    */
   private async sendToClient(ctx: FlowContext, req: SendTarget, deal: Deal | null, text: string, warnings: string[]): Promise<boolean> {
-    const targets = await this.workingTargets(ctx, req.dealId, Number(deal?.CONTACT_ID) || null, warnings);
-    if (!targets.length) return false;
+    const noChat: string[] = [];
+    const targets = await this.workingTargets(ctx, req.dealId, Number(deal?.CONTACT_ID) || null, noChat);
+    if (!targets.length) {
+      if (!ctx.newChat) {
+        warnings.push(...noChat);
+        return false;
+      }
+      try {
+        const chatId = await ctx.newChat(text);
+        if (chatId) await this.markSystem(ctx, chatId, req.userId, null, req.source);
+        return true;
+      } catch (e) {
+        warnings.push(`Новый чат с клиентом не создан (${msg(e)}) — отправьте ссылку вручную`);
+        return false;
+      }
+    }
     const senders = [...new Set([req.userId ?? 0, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
     let last = '';
     // Чат клиента со временем переходит к его новой сделке: такой (CHAT_NOT_IN_CRM) пропускаем,

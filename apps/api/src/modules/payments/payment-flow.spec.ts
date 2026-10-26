@@ -134,6 +134,23 @@ describe('PaymentFlow', () => {
     expect(t.calls.some(([m]) => m === 'imopenlines.crm.message.add' || m === 'im.message.add')).toBe(false);
   });
 
+  it('рабочего чата нет, сотрудник выбрал мессенджер → ссылка открывает новый чат с клиентом, срок идёт', async () => {
+    const t = setup({ link: 'https://pay.example/x', chats: [], contactChats: [] });
+    const newChat = vi.fn(async () => 7001);
+    const result = await t.flow.awaitLink({ ...t.ctx, newChat }, t.req());
+    expect(newChat).toHaveBeenCalledWith(expect.stringContaining('https://pay.example/x'));
+    expect(result.messageSentAt).not.toBeNull();
+    expect(result.deadlineAt).not.toBeNull();
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('новый чат не открылся → без срока, понятное предупреждение', async () => {
+    const t = setup({ link: 'https://pay.example/x', chats: [], contactChats: [] });
+    const result = await t.flow.awaitLink({ ...t.ctx, newChat: vi.fn(async () => { throw new Error('номер не подключён'); }) }, t.req());
+    expect(result.messageSentAt).toBeNull();
+    expect(result.warnings).toEqual([expect.stringContaining('Новый чат с клиентом не создан (номер не подключён)')]);
+  });
+
   it('paid invoice → paid, success stage, booking history', async () => {
     const t = setup({ stage: 'DT31_2:P', booking: true });
     const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60_000) }));

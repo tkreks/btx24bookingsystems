@@ -5522,7 +5522,7 @@ input[role='switch']:checked::after {
   bottom: 0;
 }
 .wz-res-scale .piece.booked {
-  background: #93c5fd;
+  background: #f04438;
 }
 .wz-res-scale .piece.tech {
   background: #fcd34d;
@@ -5536,6 +5536,13 @@ input[role='switch']:checked::after {
   border-radius: 6px;
   background: rgba(0, 122, 255, 0.18);
   pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+}
+/* Выбранный период — только при наведении на шкалу выбранного ресурса (решение владельца 2026-10-26). */
+.wz-res-scale:hover .pick,
+.wz-res-scale:focus-visible .pick {
+  opacity: 1;
 }
 .wz-res-row.busy .wz-res-scale .pick {
   border-color: #d92d20;
@@ -9209,3 +9216,52 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .msg-reaction b { font-size: 11px; font-weight: 600; color: var(--muted); }
 .msg-reaction.mine { background: var(--info-bg); border-color: transparent; }
 .mt-author { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
+
+/* Окно оплаты: рабочего чата нет — куда отправить ссылку (мессенджеры, где найден клиент). */
+.pay-via { display: grid; gap: 8px; width: 100%; }
+.pay-via-title { font-size: 13px; font-weight: 600; color: var(--muted); }
+.pay-via > p { margin: 0; font-size: 13px; }
+.pay-via-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.pay-via-btn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.pay-via-btn:hover:not(:disabled) { border-color: var(--primary); box-shadow: 0 6px 16px rgba(0, 122, 255, .14); transform: translateY(-1px); }
+.pay-via-btn:disabled { opacity: .5; cursor: default; }
+.pay-via-btn > span { display: flex; flex-direction: column; min-width: 0; }
+.pay-via-btn small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pay-via-only { justify-self: start; font-size: 13px; }
+
+/* Конструктор брони: выбор даты в разделе «Ресурс и время» (стрелки, неделя, календарь месяца). */
+.dp { position: relative; display: grid; gap: 8px; margin: 4px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(180deg, #f8fbff, #fff); }
+.dp-head { display: flex; align-items: center; gap: 8px; }
+.dp-arrow { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
+.dp-arrow:hover { border-color: var(--primary); color: var(--primary); }
+.dp-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border: 1px solid transparent; border-radius: 14px; background: none; text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
+.dp-main:hover, .dp-main[aria-expanded='true'] { border-color: var(--line); background: #fff; }
+.dp-num { flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 12px; background: var(--primary); color: #fff; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; box-shadow: 0 6px 14px rgba(0, 122, 255, .25); }
+.dp-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.dp-text b { font-size: 16px; }
+.dp-text small { color: var(--muted); font-size: 13px; }
+.dp-rel { flex: none; padding: 2px 8px; border-radius: 999px; background: rgba(0, 122, 255, .1); color: var(--primary); font-size: 12px; font-weight: 600; }
+.dp-cal-icon { flex: none; margin-left: auto; color: var(--muted); }
+.dp-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.dp-day { display: grid; place-items: center; gap: 1px; height: 46px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #fff; line-height: 1.1; cursor: pointer; transition: border-color .15s, background .15s; }
+.dp-day small { color: var(--muted); font-size: 11px; }
+.dp-day:hover { border-color: var(--primary); }
+.dp-day.weekend b { color: #d92d20; }
+.dp-day.today { box-shadow: inset 0 -3px 0 var(--primary); }
+.dp-day.past, .dp-cell.past { opacity: .5; }
+.dp-day.active { border-color: var(--primary); background: var(--primary); color: #fff; opacity: 1; }
+.dp-day.active small, .dp-day.active.weekend b { color: #fff; }
+.dp-pop { position: absolute; z-index: 30; top: 64px; left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: 0 18px 40px rgba(15, 23, 42, .18); }
+.dp-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dp-pop-head .dp-arrow { width: 30px; height: 30px; font-size: 17px; }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-wd { padding: 4px 0; color: var(--muted); font-size: 11px; text-align: center; }
+.dp-cell { height: 36px; padding: 0; border: 0; border-radius: 10px; background: none; font-variant-numeric: tabular-nums; cursor: pointer; }
+.dp-cell:hover { background: rgba(0, 122, 255, .08); }
+.dp-cell.other { color: var(--muted); opacity: .45; }
+.dp-cell.weekend { color: #d92d20; }
+.dp-cell.today { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.dp-cell.active { background: var(--primary); color: #fff; opacity: 1; }
+.dp-pop-foot { display: flex; justify-content: center; gap: 16px; margin-top: 8px; font-size: 13px; }
+.wz-hint { margin: 0 0 10px; font-size: 13px; }
+@media (max-width: 480px) { .dp-rel { display: none; } .dp-num { width: 40px; height: 40px; font-size: 19px; } }

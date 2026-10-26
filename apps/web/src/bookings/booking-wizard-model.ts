@@ -4,14 +4,14 @@
  * `BookingForm` в `WizardSnapshot`.
  */
 
-/** Разделы по порядку: кто → группа и дата → ресурс и время | сертификат → товары → поля → проверка. */
+/** Разделы по порядку: кто → группа → дата, ресурс и время | сертификат → товары → поля → проверка. */
 export type SectionKey = 'who' | 'when' | 'slot' | 'certificate' | 'goods' | 'fields' | 'comment' | 'review';
 export type SectionStatus = 'locked' | 'empty' | 'done' | 'warning' | 'error';
 export type DealMode = 'existing' | 'new' | 'service' | 'none';
 
 export const SECTION_TITLES: Record<SectionKey, string> = {
   who: 'Клиент и сделка',
-  when: 'Группа и дата',
+  when: 'Группа',
   slot: 'Ресурс и время',
   certificate: 'Сертификат',
   goods: 'Товары и оплата',
@@ -29,7 +29,7 @@ export interface WizardSnapshot {
   dealBooked: boolean;
   /** Группа выбрана и доступна для такой брони. */
   groupOk: boolean;
-  /** Группа известна заранее (клик по шкале/календарю, одна группа) — «Группа и дата» не открывается первым. */
+  /** Группа известна заранее (клик по шкале/календарю, одна группа) — «Группа» не открывается первым. */
   groupGiven: boolean;
   /** У группы есть типы сделки и тип не выбран. */
   kindMissing: boolean;

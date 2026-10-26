@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional } from '@nestjs/common';
 import {
   PAYMENT_REQUEST_KINDS,
   PAYMENT_MAX_TIMEOUT_HOURS,
@@ -24,6 +24,7 @@ import { AccessService, type GroupAccess } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { isCertificatePurchase } from '../bookings/deal-outcome.js';
+import { MessengerChatsService } from '../messengers/messenger-chats.service.js';
 import { msg, PaymentFlow, type FlowContext } from './payment-flow.js';
 
 const createSchema = z
@@ -38,6 +39,8 @@ const createSchema = z
     purpose: z.string().trim().min(1).max(200).optional(),
     timeoutHours: z.number().int().min(1).max(PAYMENT_MAX_TIMEOUT_HOURS).nullable().optional(),
     message: z.string().trim().min(1).max(4000).optional(),
+    // Рабочего чата нет — сотрудник выбрал, куда отправить ссылку: новый чат с клиентом сделки.
+    via: z.object({ messengerId: z.string().min(1).max(40), to: z.string().min(3).max(100) }).strict().optional(),
   })
   .strict();
 
@@ -56,6 +59,7 @@ export class PaymentsService {
     private readonly access: AccessService,
     private readonly fieldMap: DealFieldMapService,
     private readonly flow: PaymentFlow,
+    @Optional() private readonly chats?: MessengerChatsService,
   ) {}
 
   /** Пауза между проверками ссылки (в тестах подменяется). */
@@ -197,6 +201,9 @@ export class PaymentsService {
       throw new BadRequestException({ code: 'BOOKING_NOT_OF_DEAL', message: `Бронь #${b.bookingId} не относится к сделке #${b.dealId} или уже закончилась` });
     const bookingId = b.bookingId ?? (custom ? null : p.bookingId);
 
+    // Право писать с выбранного номера — до счёта: иначе счёт выставился бы, а ссылка не ушла.
+    const via = b.via && this.chats ? { ...(await this.chats.forUser(user, b.via.messengerId, true, b.via.to)), to: b.via.to } : null;
+
     const g = (await this.access.resolve(user)).groups.find((x) => x.group.id === p.groupId)!;
     const opts = g.group.options as unknown as GroupOptionsDto;
     const inv = opts.payments.invoice!;
@@ -217,7 +224,12 @@ export class PaymentsService {
         message: b.message ?? null,
       },
     });
-    const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
+    const ctx: FlowContext = {
+      portal: user.portal,
+      client: user.client,
+      actor: { kind: 'user', userId: user.userId, name: user.userName },
+      ...(via ? { newChat: async (text: string) => (await this.chats!.send(user, via.m, via.to, text, undefined, b.dealId)).openlineChatId ?? null } : {}),
+    };
     const deal = await this.flow.deal(user, b.dealId);
     try {
       const contactId = Number(deal?.CONTACT_ID) || 0;

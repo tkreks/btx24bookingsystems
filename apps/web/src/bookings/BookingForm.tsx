@@ -38,7 +38,7 @@ import { openCrm } from '../b24.js';
 import { ColorLegend, type LegendItem } from '../ColorLegend.js';
 import { DealFieldsEditor, useDealFieldValues } from './DealFieldsEditor.js';
 import { ProductsEditor, productsTotal, rowTotal, type ProductRow } from './ProductsEditor.js';
-import { DayStrip, isPastStart, SlotPicker, slotStateOf, useNow } from './SlotPicker.js';
+import { isPastStart, SlotPicker, slotStateOf, useNow } from './SlotPicker.js';
 import { MinimizeButton } from '../Minimize.js';
 import {
   allIssues,
@@ -152,7 +152,7 @@ const TONE_WORDS: Record<DealBookingTone, string> = { booked: 'есть брон
 
 /**
  * Конструктор брони в одном окне (`docs/features/booking-constructor.md`, макет
- * `docs/prototype/ui/booking-constructor.html`): разделы Кто → Группа и дата → Ресурс и время (или
+ * `docs/prototype/ui/booking-constructor.html`): разделы Кто → Группа → Ресурс и время (с датой) (или
  * Сертификат) → Товары и оплата → Поля сделки → Проверка. Открыт ровно один раздел, заполненные
  * свёрнуты в строку-сводку, в любой можно вернуться. Создание — только с проверки.
  */
@@ -710,8 +710,8 @@ export function BookingForm({
         )}
       </>
     ),
-    when: group ? [group.name, kindsOn && kind ? DEAL_KIND_LABELS[kind] : null, dayShort(period.startDate)].filter(Boolean).join(' · ') : null,
-    slot: resourceIds.length ? `${resourcesText || 'Ресурс'} · ${whenText}` : null,
+    when: group ? [group.name, kindsOn && kind ? DEAL_KIND_LABELS[kind] : null].filter(Boolean).join(' · ') : null,
+    slot: resourceIds.length ? `${resourcesText || 'Ресурс'} · ${group?.bookingMode === 'interval' ? '' : `${dayShort(period.startDate)} `}${whenText}` : null,
     certificate: certNominal > 0 ? [fmtMoney(certNominal, 'RUB'), CERTIFICATE_KIND_LABELS[cert.kind].toLowerCase(), cert.holder && `на ${cert.holder}`, cert.validUntil && `до ${fmtDate(`${cert.validUntil}T12:00:00Z`, 'UTC')}`].filter(Boolean).join(' · ') : null,
     goods: visited.has('goods') || productRows.length
       ? [`${productRows.length} поз.`, fmtMoney(total, 'RUB'), PAYMENT_MODE_LABELS[effectiveMode], typeTitle ? `«${typeTitle}»` : null].filter(Boolean).join(' · ')
@@ -912,12 +912,6 @@ export function BookingForm({
           </div>
         </>
       )}
-      {!certificateMode && group && (
-        <>
-          <h4 className="cx-subtitle">{group.bookingMode === 'interval' ? 'Дата заезда' : 'Дата'}</h4>
-          <DayStrip date={period.startDate} onDate={(d) => setPeriod(defaultPeriod(group, d, period.startTime))} />
-        </>
-      )}
     </>
   );
 
@@ -925,7 +919,6 @@ export function BookingForm({
     <>
       <SlotPicker
         compact={callPlacement}
-        hideDays={!callPlacement}
         group={group}
         timezone={timezone}
         period={period}

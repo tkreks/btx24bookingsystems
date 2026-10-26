@@ -8,6 +8,7 @@ import {
   type PaymentRequestDto,
 } from '@btx24/shared';
 import { apiPost } from '../api.js';
+import { PaymentSendVia, type PaymentVia } from './PaymentSendVia.js';
 
 /** Срок в часах: пусто — без срока; иначе целое 1–24. */
 export function parseHours(v: string): number | null | 'invalid' {
@@ -38,7 +39,7 @@ export function CustomPaymentForm({ dealId, preview, onSent }: { dealId: number;
   const formError = !purpose.trim() ? 'Укажите основание' : !(sum > 0) ? 'Укажите сумму' : h === 'invalid' ? `Срок — целое число часов от 1 до ${PAYMENT_MAX_TIMEOUT_HOURS}` : '';
   const problems = preview?.problems ?? [];
 
-  const send = async () => {
+  const send = async (via?: PaymentVia) => {
     if (busy || formError || problems.length || !preview || h === 'invalid') return;
     setBusy(true);
     setError('');
@@ -52,6 +53,7 @@ export function CustomPaymentForm({ dealId, preview, onSent }: { dealId: number;
         purpose: purpose.trim(),
         timeoutHours: h,
         message: message.trim() || DEFAULT_PAYMENT_LINK_MESSAGE,
+        ...(via ? { via } : {}),
       });
       key.current = crypto.randomUUID();
       setAmount('');
@@ -116,9 +118,16 @@ export function CustomPaymentForm({ dealId, preview, onSent }: { dealId: number;
         </p>
       ))}
       {error && <p className="notice error" role="alert">{error}</p>}
-      <button type="button" className="pay-custom-send" disabled={busy || !!formError || !preview || problems.length > 0} title={formError || undefined} onClick={() => void send()}>
-        {busy ? 'Выставляем счёт…' : 'Получить оплату'}
-      </button>
+      <PaymentSendVia
+        dealId={dealId}
+        noChat={!!preview?.chatProblem}
+        className="pay-custom-send"
+        disabled={!!formError || !preview || problems.length > 0}
+        busy={busy}
+        label="Получить оплату"
+        busyLabel="Выставляем счёт…"
+        onSend={(via) => void send(via)}
+      />
     </section>
   );
 }

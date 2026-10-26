@@ -16,6 +16,6 @@ import { MessengersService } from './messengers.service.js';
   imports: [AccessModule, Bitrix24Module],
   controllers: [MessengersController, MessengerHookController, MessengerUserController, MessengerPublicFilesController, MessengerScreenController],
   providers: [MessengerCrmService, MediaLinks, MessengerServiceClient, MessengersService, MessengerInboxService, MessengerConnectorService, MessengerChatsService],
-  exports: [MessengerServiceClient],
+  exports: [MessengerServiceClient, MessengerChatsService],
 })
 export class MessengersModule {}

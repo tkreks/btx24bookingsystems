@@ -17,6 +17,7 @@ import { paymentFeedback } from './payment-feedback.js';
 import { Countdown } from './Countdown.js';
 import { MinimizeButton } from '../Minimize.js';
 import { CustomPaymentForm } from './CustomPaymentForm.js';
+import { PaymentSendVia, type PaymentVia } from './PaymentSendVia.js';
 
 const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   fixed: 'фиксированная сумма группы',
@@ -145,7 +146,7 @@ export function PaymentDialog({
   }, [waiting, loadHistory]);
 
   const blocking = (preview?.problems ?? []).filter((p) => !(Number(amount) > 0 && /сумм/i.test(p)));
-  const submit = async () => {
+  const submit = async (via?: PaymentVia) => {
     if (busy || !preview || blocking.length || preview.bookingMissing || !(Number(amount) > 0)) return;
     setBusy(true);
     setError('');
@@ -157,6 +158,7 @@ export function PaymentDialog({
         groupId: preview?.groupId ?? undefined,
         amount: Number(amount) > 0 && Number(amount) !== preview?.amount ? Number(amount) : null,
         bookingId: bookingId ?? null,
+        ...(via ? { via } : {}),
       });
       setSubmitted(result);
       await loadHistory();
@@ -207,9 +209,16 @@ export function PaymentDialog({
               {kind === 'prepayment' ? 'Сумма предоплаты, ₽' : 'Сумма доплаты, ₽'}
               <input type="number" min="0.01" step="0.01" value={amount} disabled={busy || !preview || !!preview.bookingMissing} onChange={(e) => setAmount(e.target.value)} />
             </label>
-            <button type="button" className="primary" disabled={busy || !preview || blocking.length > 0 || !!preview.bookingMissing || !(Number(amount) > 0)} onClick={() => void submit()}>
-              {busy ? 'Отправляем ссылку…' : kind === 'prepayment' ? 'Отправить ссылку на предоплату' : 'Отправить ссылку на доплату'}
-            </button>
+            <PaymentSendVia
+              dealId={dealId}
+              noChat={!!preview?.chatProblem}
+              className="primary"
+              disabled={!preview || blocking.length > 0 || !!preview.bookingMissing || !(Number(amount) > 0)}
+              busy={busy}
+              label={kind === 'prepayment' ? 'Отправить ссылку на предоплату' : 'Отправить ссылку на доплату'}
+              busyLabel="Отправляем ссылку…"
+              onSend={(via) => void submit(via)}
+            />
             {!preview && !error && <p className="muted" role="status">Рассчитываем сумму…</p>}
             {busy && <p className="muted" role="status">Создаём счёт и отправляем сообщение клиенту…</p>}
             {error && <p className="notice error" role="alert">{error}</p>}
@@ -251,11 +260,6 @@ export function PaymentDialog({
             </button>
           ))}
         </div>
-        {preview?.chatProblem && (
-          <p className="notice warning" role="alert">
-            {preview.chatProblem}. Счёт выставить можно, ссылку тогда отправьте клиенту сами.
-          </p>
-        )}
         {kind === 'custom' && (
           <>
             <CustomPaymentForm
@@ -380,14 +384,16 @@ export function PaymentDialog({
         )}
         {!callPlacement && kind !== 'custom' && !preview?.bookingMissing && (
           <div className="sheet-actions">
-            <button
-              type="button"
+            <PaymentSendVia
+              dealId={dealId}
+              noChat={!!preview?.chatProblem}
               className="primary"
-              disabled={busy || !preview || blocking.length > 0 || !(Number(amount) > 0)}
-              onClick={() => void submit()}
-            >
-              {busy ? 'Выставляем счёт…' : 'Выставить счёт и отправить ссылку'}
-            </button>
+              disabled={!preview || blocking.length > 0 || !(Number(amount) > 0)}
+              busy={busy}
+              label="Выставить счёт и отправить ссылку"
+              busyLabel="Выставляем счёт…"
+              onSend={(via) => void submit(via)}
+            />
           </div>
         )}
         <section className="payment-history">

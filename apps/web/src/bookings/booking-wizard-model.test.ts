@@ -32,7 +32,7 @@ describe('firstSection — матрица точек входа', () => {
   it('клик по календарю: клиента нет — «Кто»', () => {
     expect(firstSection({ ...base, dealMode: 'none', groupGiven: true })).toBe('who');
   });
-  it('встройка сделки «Мастер бронирования»: сделка из встройки — «Группа и дата»', () => {
+  it('встройка сделки «Мастер бронирования»: сделка из встройки — «Группа»', () => {
     expect(firstSection({ ...base, dealFixed: true, resourceCount: 0 })).toBe('when');
   });
   it('шкала во встройке: сделка, группа и ресурс известны — товары', () => {
@@ -46,7 +46,7 @@ describe('firstSection — матрица точек входа', () => {
     expect(firstSection({ ...base, dealFixed: true, groupGiven: true, resourceCount: 0 })).toBe('slot');
     expect(firstSection({ ...base, dealFixed: true, groupGiven: true, slotError: 'Баня 1 занята' })).toBe('slot');
   });
-  it('тип сделки не выбран — «Группа и дата», даже если группа известна', () => {
+  it('тип сделки не выбран — «Группа», даже если группа известна', () => {
     expect(firstSection({ ...base, dealFixed: true, groupGiven: true, kindMissing: true })).toBe('when');
   });
 });

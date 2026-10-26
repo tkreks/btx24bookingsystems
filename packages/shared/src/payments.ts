@@ -107,8 +107,8 @@ export interface PaymentPreviewDto {
   /** Чего не хватает, чтобы выставить счёт (настройки, сумма, права). Пусто — можно. */
   problems: string[];
   /**
-   * Нет рабочего чата с клиентом в открытой линии — сообщение со ссылкой не уйдёт (счёт выставить можно,
-   * ссылку — скопировать). null — рабочий чат есть.
+   * Нет рабочего чата с клиентом в открытой линии — окно предлагает мессенджеры, где клиент найден
+   * (`CreatePaymentDto.via`), иначе ссылку отправляют сами. null — рабочий чат есть.
    */
   chatProblem?: string | null;
 }
@@ -137,6 +137,8 @@ export interface CreatePaymentDto {
   /** Своя сумма вместо рассчитанной. */
   amount?: number | null;
   bookingId?: number | null;
+  /** Рабочего чата нет — ссылку отправить новым чатом с клиентом сделки (`GET /messengers/deal-targets`). */
+  via?: { messengerId: string; to: string };
 }
 
 export interface PaymentRequestDto {

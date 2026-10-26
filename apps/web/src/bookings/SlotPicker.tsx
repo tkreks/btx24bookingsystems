@@ -1,6 +1,7 @@
 import { ColorLegend, type LegendItem } from '../ColorLegend.js';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
+  todayIn,
   zonedDayRange,
   zonedTimeToUtc,
   type CalendarBooking,
@@ -12,6 +13,7 @@ import {
 import { availabilityPieces, slotAt } from '../calendar/layout.js';
 import { fmtDayTitle, fmtTime, shiftDate } from '../format.js';
 import { defaultPeriod, periodToUtc, type PeriodFields } from './booking-form.js';
+import { DatePicker } from './DatePicker.js';
 
 /** Занятость ресурса на выбранное время: свободен, тех. окно (можно), пересечение с бронью или стоп ресурса. */
 export type SlotState = { kind: 'free' } | { kind: 'tech' } | { kind: 'busy'; bookings: CalendarBooking[] } | { kind: 'stop'; stop: ResourceStopDto };
@@ -45,24 +47,22 @@ export function useNow(stepMs = 60_000): number {
 /** Начало брони прошло (запас 5 минут на заполнение формы). */
 export const isPastStart = (startMs: number, now: number) => startMs < now - 5 * 60_000;
 
-const DURATIONS_H = [2, 3, 4, 6];
 const NIGHTS = [1, 2, 3, 5, 7];
 
-/**
- * Шаг мастера «Дата и ресурс» (вместо таблицы «ресурсы × часы» с прокруткой во все стороны):
- * сверху — день и время (длительность или заезд/ночи), ниже — список ресурсов сверху вниз со
- * статусом на это время и шкалой занятости. Клик по шкале — время с этого места (почасовые группы).
- */
-/** Цвета таймлайна ресурса: занято, тех. окно, выбранное время. */
+/** Цвета таймлайна ресурса: занято, тех. окно, выбранное время (при наведении на выбранный ресурс). */
 const SLOT_LEGEND: LegendItem[] = [
-  { label: 'Занято', swatch: { background: '#93c5fd' } },
+  { label: 'Занято', swatch: { background: '#f04438' } },
   { label: 'Тех. окно — можно', swatch: { background: '#fcd34d' }, title: 'Пересечение с тех. окном разрешено, с предупреждением' },
-  { label: 'Выбранное время', swatch: { borderColor: 'var(--primary)', background: 'rgba(0, 122, 255, 0.18)' } },
+  { label: 'Выбранное время', swatch: { borderColor: 'var(--primary)', background: 'rgba(0, 122, 255, 0.18)' }, title: 'Видно при наведении на шкалу выбранного ресурса' },
 ];
 
+/**
+ * Раздел «Ресурс и время» (решение владельца 2026-10-26): посередине — выбор даты, ниже — ресурсы со
+ * статусом на выбранное время и шкалой занятости. Почасовые группы: нажатие на шкалу — окно с началом и
+ * завершением от этого места; «заезд/выезд» — время заезда и ночи, шкала выбирает ресурс.
+ */
 export function SlotPicker({
   compact = false,
-  hideDays = false,
   group,
   timezone,
   period,
@@ -73,8 +73,6 @@ export function SlotPicker({
   onResources,
 }: {
   compact?: boolean;
-  /** Лента дней — снаружи (конструктор брони: раздел «Группа и дата»). */
-  hideDays?: boolean;
   group: MyGroupDto;
   timezone: string;
   period: PeriodFields;
@@ -100,34 +98,17 @@ export function SlotPicker({
   const frac = (ms: number) => Math.min(1, Math.max(0, (ms - range.from) / span));
 
   const setDay = (d: string) => onPeriod(defaultPeriod(group, d, period.startTime));
-  /** Новое начало, длительность прежняя. */
-  const setStart = (date: string, time: string) => {
-    const s = zonedTimeToUtc(date, time, timezone).getTime();
-    const e = new Date(s + (durationMs > 0 ? durationMs : group.durationMinutes * 60_000));
-    onPeriod({ startDate: date, startTime: time, endDate: new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(e), endTime: fmtTime(e.toISOString(), timezone) });
-  };
-  const setHours = (h: number) => {
-    const e = new Date(startMs + h * 3_600_000);
-    onPeriod({ ...period, endDate: new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(e), endTime: fmtTime(e.toISOString(), timezone) });
-  };
-  const shiftStart = (min: number) => {
-    const s = new Date(startMs + min * 60_000);
-    setStart(new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(s), fmtTime(s.toISOString(), timezone));
-  };
+  // «Заезд/выезд» вне встройки: шкала выбирает ресурс; иначе — окно времени от места нажатия.
+  const nightsMode = interval && !compact;
   const pickOnBar = (rid: number, e: MouseEvent<HTMLDivElement>) => {
-    if (interval && !compact) return onResources([rid]);
+    if (nightsMode) return onResources([rid]);
     const r = e.currentTarget.getBoundingClientRect();
     const dayMin = span / 60_000;
     const m = slotAt(((e.clientX - r.left) / r.width) * dayMin, dayMin);
     const start = new Date(range.from + m * 60_000);
     const end = new Date(start.getTime() + (durationMs > 0 ? durationMs : group.durationMinutes * 60_000));
     const localDay = (d: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: timezone }).format(d);
-    const next = { startDate: localDay(start), startTime: fmtTime(start.toISOString(), timezone), endDate: localDay(end), endTime: fmtTime(end.toISOString(), timezone) };
-    if (compact) setDraft({ rid, period: next });
-    else {
-      onPeriod(next);
-      onResources([rid]);
-    }
+    setDraft({ rid, period: { startDate: localDay(start), startTime: fmtTime(start.toISOString(), timezone), endDate: localDay(end), endTime: fmtTime(end.toISOString(), timezone) } });
   };
 
   const resources = days?.resources ?? [];
@@ -136,7 +117,7 @@ export function SlotPicker({
   const free = rows.filter((x) => open(x.state)).length;
   const shown = onlyFree ? rows.filter((x) => open(x.state) || resourceIds.includes(x.r.id)) : rows;
   // Метки считаются по местному времени портала, включая дни перехода на летнее время.
-  const ticks = interval && !compact
+  const ticks = nightsMode
     ? Array.from({ length: nights + 1 }, (_, i) => ({ at: (i + 0.5) / (nights + 1), label: `${shiftDate(period.startDate, i).slice(8, 10)}.${shiftDate(period.startDate, i).slice(5, 7)}` }))
     : [0, 4, 8, 12, 16, 20].map((h) => ({
       at: frac(zonedTimeToUtc(period.startDate, `${String(h).padStart(2, '0')}:00`, timezone).getTime()),
@@ -145,65 +126,35 @@ export function SlotPicker({
 
   return (
     <section className="bk-section wz-slot">
-      {!hideDays && <DayStrip date={period.startDate} onDate={setDay} />}
+      <DatePicker date={period.startDate} today={todayIn(timezone)} onDate={setDay} label={interval ? 'Дата заезда' : 'Дата брони'} />
 
-      {!compact && <div className="wz-when">
-        {interval ? (
-          <>
-            <label className="wz-when-field">
-              <span className="df-label">Заезд {fmtDayTitle(period.startDate, timezone)}</span>
-              <input type="time" aria-label="Время заезда" value={period.startTime} onChange={(e) => onPeriod({ ...period, startTime: e.target.value })} />
-            </label>
-            <div className="wz-when-field">
-              <span className="df-label">Ночей</span>
-              <div className="wz-durations" role="group" aria-label="Ночей">
-                {NIGHTS.map((n) => (
-                  <button key={n} type="button" aria-pressed={nights === n} className={nights === n ? 'active' : ''} onClick={() => onPeriod({ ...period, endDate: shiftDate(period.startDate, n) })}>
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="wz-when-field">
-              <span className="df-label">Выезд</span>
-              <span className="bk-dt">
-                <input type="date" aria-label="Дата выезда" value={period.endDate} onChange={(e) => e.target.value && onPeriod({ ...period, endDate: e.target.value })} />
-                <input type="time" aria-label="Время выезда" value={period.endTime} onChange={(e) => onPeriod({ ...period, endTime: e.target.value })} />
-              </span>
-            </label>
-          </>
-        ) : (
-          <>
-            <div className="wz-when-field">
-              <span className="df-label">Начало · {fmtDayTitle(period.startDate, timezone)}</span>
-              <span className="wz-start">
-                <button type="button" aria-label="На 30 минут раньше" onClick={() => shiftStart(-30)}>
-                  −30
+      {nightsMode ? (
+        <div className="wz-when">
+          <label className="wz-when-field">
+            <span className="df-label">Время заезда</span>
+            <input type="time" aria-label="Время заезда" value={period.startTime} onChange={(e) => onPeriod({ ...period, startTime: e.target.value })} />
+          </label>
+          <div className="wz-when-field">
+            <span className="df-label">Ночей</span>
+            <div className="wz-durations" role="group" aria-label="Ночей">
+              {NIGHTS.map((n) => (
+                <button key={n} type="button" aria-pressed={nights === n} className={nights === n ? 'active' : ''} onClick={() => onPeriod({ ...period, endDate: shiftDate(period.startDate, n) })}>
+                  {n}
                 </button>
-                <input type="time" step={1800} aria-label="Время начала" value={period.startTime} onChange={(e) => e.target.value && setStart(period.startDate, e.target.value)} />
-                <button type="button" aria-label="На 30 минут позже" onClick={() => shiftStart(30)}>
-                  +30
-                </button>
-              </span>
+              ))}
             </div>
-            <div className="wz-when-field">
-              <span className="df-label">Длительность</span>
-              <div className="wz-durations" role="group" aria-label="Длительность">
-                {DURATIONS_H.map((h) => (
-                  <button key={h} type="button" aria-pressed={durationMs === h * 3_600_000} className={durationMs === h * 3_600_000 ? 'active' : ''} onClick={() => setHours(h)}>
-                    {h} ч
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="wz-when-field">
-              <span className="df-label">Конец</span>
-              <input type="time" aria-label="Время конца" value={period.endTime} onChange={(e) => onPeriod({ ...period, endTime: e.target.value })} />
-            </label>
-          </>
-        )}
-      </div>}
-      {compact && <p className="muted">Нажмите на таймлайн ресурса, чтобы выбрать начало и завершение брони.</p>}
+          </div>
+          <label className="wz-when-field">
+            <span className="df-label">Выезд</span>
+            <span className="bk-dt">
+              <input type="date" aria-label="Дата выезда" value={period.endDate} onChange={(e) => e.target.value && onPeriod({ ...period, endDate: e.target.value })} />
+              <input type="time" aria-label="Время выезда" value={period.endTime} onChange={(e) => onPeriod({ ...period, endTime: e.target.value })} />
+            </span>
+          </label>
+        </div>
+      ) : (
+        <p className="muted wz-hint">Нажмите на шкалу ресурса — откроется выбор начала и завершения брони.</p>
+      )}
 
       {isPastStart(startMs, now) && (
         <p className="wz-slot-state busy" role="alert">
@@ -259,15 +210,15 @@ export function SlotPicker({
               <div className="wz-res-timeline">
               <div
                 className="wz-res-scale"
-                title={interval && !compact ? 'Выбрать ресурс' : 'Кликните — бронь с этого времени'}
+                title={nightsMode ? 'Выбрать ресурс' : 'Нажмите — бронь с этого времени'}
                 role="button"
                 tabIndex={0}
                 aria-label={`Выбрать время: ${r.name}`}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    if (compact) setDraft({ rid: r.id, period: { ...period } });
-                    else onResources([r.id]);
+                    if (nightsMode) onResources([r.id]);
+                    else setDraft({ rid: r.id, period: { ...period } });
                   }
                 }}
                 onClick={(e) => pickOnBar(r.id, e)}
@@ -275,7 +226,7 @@ export function SlotPicker({
                 {pieces.map((p, i) => (
                   <i key={i} className={`piece ${p.kind}`} style={{ left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` }} />
                 ))}
-                {durationMs > 0 && <i className="pick" style={{ left: `${frac(startMs) * 100}%`, width: `${(frac(endMs) - frac(startMs)) * 100}%` }} />}
+                {on && durationMs > 0 && <i className="pick" style={{ left: `${frac(startMs) * 100}%`, width: `${(frac(endMs) - frac(startMs)) * 100}%` }} />}
                 {ticks.map((t, i) => <i key={i} className="wz-res-tick" style={{ left: `${t.at * 100}%` }} />)}
               </div>
               <div className="wz-res-tick-labels" aria-hidden="true">
@@ -296,37 +247,6 @@ export function SlotPicker({
         onApply={(p) => { onPeriod(p); onResources([draft.rid]); setDraft(null); }}
       />}
     </section>
-  );
-}
-
-/** Лента дней (±): 7 дней вокруг выбранного, стрелки и переход к дате. */
-export function DayStrip({ date, onDate }: { date: string; onDate: (d: string) => void }) {
-  const strip = Array.from({ length: 7 }, (_, i) => shiftDate(date, i - 2));
-  return (
-      <div className="wz-daynav">
-        <button type="button" aria-label="Раньше" onClick={() => onDate(shiftDate(date, -1))}>
-          ‹
-        </button>
-        <div className="wz-days" role="group" aria-label="Дни">
-          {strip.map((d) => {
-            const noon = new Date(`${d}T12:00:00Z`);
-            const weekend = [0, 6].includes(noon.getUTCDay());
-            return (
-              <button key={d} type="button" aria-pressed={d === date} className={`wz-day${d === date ? ' active' : ''}${weekend ? ' weekend' : ''}`} onClick={() => onDate(d)}>
-                <small>{new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short' }).format(noon)}</small>
-                <b>{Number(d.slice(8, 10))}</b>
-              </button>
-            );
-          })}
-        </div>
-        <button type="button" aria-label="Позже" onClick={() => onDate(shiftDate(date, 1))}>
-          ›
-        </button>
-        <label className="wz-date-jump">
-          <span>Быстрый переход к дате</span>
-          <input type="date" aria-label="Дата брони" value={date} onChange={(e) => e.target.value && onDate(e.target.value)} />
-        </label>
-      </div>
   );
 }
 
