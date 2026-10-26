@@ -10,16 +10,18 @@ function setup() {
   return {svc,row,prisma,service,inbox,connector};
 }
 describe('Файлы в переписке мессенджера',()=>{
-  it('отправка файла без текста по LID использует известный телефон и сохраняет автора',async()=>{
+  it('номер без открытой линии не отправляет, неверные данные — 400',async()=>{
     const t=setup();const file={mime:'image/png',name:'Фото.png',data:Buffer.from('image')};
-    const result=await t.svc.sendFile({userId:7} as never,M,'x@lid','',file);
-    expect(t.service.send).toHaveBeenCalledWith('m1','79991234567@c.us','',undefined,file);
-    expect(t.inbox.message).toHaveBeenCalledWith(M,{id:'wa1'},{source:'app',sentByUserId:7});expect(result.queued).toBe(false);
+    // Номер без открытой линии: отправка запрещена (сообщения — только через рабочие линии, 2026-10-26).
+    await expect(t.svc.sendFile({userId:7} as never,M,'x@lid','',file)).rejects.toMatchObject({status:409,response:{code:'NO_OPENLINE'}});
+    expect(t.service.send).not.toHaveBeenCalled();
     await expect(t.svc.sendFile({} as never,M,'bad','x',file)).rejects.toMatchObject({status:400});
     await expect(t.svc.sendFile({} as never,M,'x@lid','x',{...file,data:Buffer.alloc(0)})).rejects.toMatchObject({status:400});
   });
   it('номер с собственной ОЛ открывает/дополняет линию от имени сотрудника',async()=>{
-    const t=setup();const m={...M,lineMode:'own',lineId:14} as Messenger;const file={mime:'application/pdf',name:'x.pdf',data:Buffer.from('pdf')};const user={userId:7} as never;
+    const t=setup();const m={...M,kind:'whatsapp',state:'ready',lineMode:'own',lineId:14} as Messenger;const file={mime:'application/pdf',name:'x.pdf',data:Buffer.from('pdf')};
+    const call=vi.fn(async(method:string)=>method==='imopenlines.config.list.get'?{result:[{ID:'14',ACTIVE:'Y',LINE_NAME:'WhatsApp'}]}:{result:{CONFIGURED:true,STATUS:true,ERROR:false}});
+    const user={userId:7,portal:{id:'p-media'},client:{call}} as never;
     Object.assign(t.row,{b24ChatId:321});
     const result=await t.svc.sendFile(user,m,'x@lid','Caption',file);
     expect(result.openlineChatId).toBe(321);

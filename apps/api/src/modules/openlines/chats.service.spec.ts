@@ -1,3 +1,4 @@
+import { resetLineHealthCache } from './line-health.js';
 import { ChatsService } from './chats.service.js';
 import type { FilesService } from './files.service.js';
 import type { OpenlineIndexService } from './openline-index.service.js';
@@ -205,7 +206,8 @@ describe('ChatsService.send', () => {
       ],
     });
     expect(res).toEqual({ sent: 3, messageIds: [912, 905, 800, 800, 800], error: null });
-    const calls = call.mock.calls.map((c) => [c[0], c[1]]);
+    // Сначала — проверка линии чата (imopenlines.dialog.get), затем отправка.
+    const calls = call.mock.calls.map((c) => [c[0], c[1]]).filter((c) => c[0] !== 'imopenlines.dialog.get');
     expect(calls).toEqual([
       ['im.message.add', { DIALOG_ID: 'chat101', MESSAGE: 'Здравствуйте' }],
       ['im.message.add', { DIALOG_ID: 'chat101', MESSAGE: 'Прайс' }],
@@ -221,7 +223,7 @@ describe('ChatsService.send', () => {
     const { svc, user, call } = setup();
     svc.sleep = async () => {};
     call.mockImplementation(async (method: string) => {
-      if (method === 'im.message.add' && call.mock.calls.length > 1)
+      if (method === 'im.message.add' && call.mock.calls.filter((c) => c[0] === 'im.message.add').length > 1)
         throw new Bitrix24Error('READ_ONLY_MODE', 'blocked');
       return { result: 1 };
     });
@@ -241,6 +243,23 @@ describe('ChatsService.send', () => {
         message: 'Изменения в Битрикс24 сейчас запрещены (режим только чтения)',
       },
     });
+  });
+
+  it('refuses to send into a chat whose open line channel is not connected', async () => {
+    resetLineHealthCache();
+    const { svc, user, call } = setup();
+    call.mockImplementation((async (method: string) => {
+      if (method === 'imopenlines.dialog.get') return { result: { entity_id: 'wz_telegram_ceacd473|8|77|5' } };
+      if (method === 'imopenlines.config.list.get') return { result: [{ ID: '8', LINE_NAME: 'WAZZUP - Telegram', ACTIVE: 'Y' }] };
+      if (method === 'imconnector.status') return { result: { CONFIGURED: false, STATUS: false, ERROR: false } };
+      return { result: 1 };
+    }) as never);
+    await expect(svc.send(user, 101, { steps: [{ text: 'a', fileIds: [] }] })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'CHAT_NOT_WORKING', message: expect.stringContaining('канал линии «WAZZUP - Telegram» не подключён') },
+    });
+    expect(call.mock.calls.some((c) => c[0] === 'im.message.add')).toBe(false);
+    resetLineHealthCache();
   });
 
   it.each([

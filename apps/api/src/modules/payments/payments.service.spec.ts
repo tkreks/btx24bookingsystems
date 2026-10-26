@@ -6,6 +6,7 @@ import type { DealFieldMapService } from '../bookings/deal-field-map.service.js'
 import { PaymentFlow } from './payment-flow.js';
 import { MessageContextService } from '../bookings/message-context.service.js';
 import { PaymentsService } from './payments.service.js';
+import { resetLineHealthCache } from '../openlines/line-health.js';
 import type { BookingJournalService } from '../bookings/booking-journal.service.js';
 
 const options = {
@@ -189,6 +190,26 @@ describe('PaymentsService', () => {
       [6001, 'open', true, 'Баня', '2026-10-22T12:00:00.000Z'],
       [6002, 'paid', true, 'Баня', null],
     ]);
+  });
+
+  it('no working open line chat: preview warns, the link message is not sent', async () => {
+    resetLineHealthCache();
+    const t = setup({ link: 'https://pay.example/x' });
+    const client = t.user.client as unknown as { call: (m: string, p?: Record<string, unknown>) => Promise<unknown> };
+    const orig = client.call;
+    client.call = vi.fn(async (m: string, p: Record<string, unknown> = {}) => {
+      if (m === 'imopenlines.dialog.get') return { result: { entity_id: 'wz_telegram_x|8|3301|1', entity_data_2: 'LEAD|0|COMPANY|0|CONTACT|140|DEAL|678' } };
+      if (m === 'imopenlines.config.list.get') return { result: [{ ID: '8', LINE_NAME: 'WAZZUP - Telegram', ACTIVE: 'Y' }] };
+      if (m === 'imconnector.status') return { result: { CONFIGURED: false, STATUS: false, ERROR: false } };
+      return orig(m, p);
+    });
+    const p = await t.svc.preview(t.user, 678, 'prepayment');
+    expect(p.chatProblem).toContain('создайте работающий чат с клиентом');
+    const r = await t.svc.create(t.user, body());
+    expect(r.messageSent).toBe(false);
+    expect(r.warnings.join(' ')).toContain('канал линии «WAZZUP - Telegram» не подключён');
+    expect(t.calls.some(([m]) => m === 'imopenlines.crm.message.add' || m === 'im.message.add')).toBe(false);
+    resetLineHealthCache();
   });
 
   it('links the invoice to the nearest booking of the deal; foreign booking refused', async () => {

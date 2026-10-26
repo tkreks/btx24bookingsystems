@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { chatNotWorkingMessage, lineProblem } from '../openlines/line-health.js';
 import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerLogin, normalizeMessengerPhone, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
 import type { Messenger, MessengerMessage } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -19,7 +20,8 @@ export const groupIdsOf = (m: Messenger): string[] => (Array.isArray(m.groupIds)
  * - **номер привязан к своей открытой линии** — сотрудник пишет через линию Битрикс24 (`im.message.add`
  *   его токеном: действие видно в Битрикс24), линия присылает событие коннектору, приложение доставляет
  *   в мессенджер (очередь). Права на чаты — права линии; в обход линии читают только администраторы.
- * - **не привязан** — номер работает только в приложении, напрямую через шлюз, для групп номера.
+ * - **не привязан** — отправка запрещена (решение владельца 2026-10-26: сообщения приложения — только через
+ *   рабочие открытые линии); входящие по-прежнему видны в приложении группам номера.
  */
 @Injectable()
 export class MessengerChatsService {
@@ -204,7 +206,7 @@ export class MessengerChatsService {
   /**
    * Написать клиенту. Привязан к линии — через линию (действие сотрудника в Битрикс24); первый контакт
    * (чата в линии ещё нет) — открываем чат в линии сообщением от имени сотрудника и доставляем сами.
-   * Не привязан — напрямую через шлюз.
+   * Не привязан или линия не работает — ошибка «создайте работающий чат».
    */
   async send(user: B24UserContext, m: Messenger, to: string, text: string, expectedDeal?: number | null): Promise<MessengerSendResultDto> {
     const body = String(text ?? '').trim().slice(0, 4096);
@@ -217,11 +219,8 @@ export class MessengerChatsService {
       ? await this.prisma.messengerChat.findFirst({ where: { messengerId: m.id, phone: target.replace(/@.*$/, '') }, orderBy: { lastMessageAt: 'desc' } })
       : await this.prisma.messengerChat.findUnique({ where: { messengerId_chatId: { messengerId: m.id, chatId: target } } });
     const sendTo = known?.phone ? `${known.phone}@c.us` : target;
+    await this.requireWorkingLine(user, m);
     const dealId = this.crm ? await this.crm.sending(user, m, known?.chatId ?? target, expectedDeal) : undefined;
-    if (m.lineMode !== 'own' || !m.lineId) {
-      const w = await this.service.send(m.id, sendTo, body);
-      return { message: toMessageDto(await this.inbox.message(m, w, { source: 'app', sentByUserId: user.userId, ...(dealId !== undefined ? { dealId, awaitingDeal: false } : {}) })), queued: false };
-    }
     const b24ChatId = await this.lineChatOf(m, known?.chatId ?? target, dealId);
     if (b24ChatId) {
       await this.postToLine(user, b24ChatId, body);
@@ -257,14 +256,24 @@ export class MessengerChatsService {
       ? await this.prisma.messengerChat.findFirst({ where: { messengerId: m.id, phone: target.replace(/@.*$/, '') }, orderBy: { lastMessageAt: 'desc' } })
       : await this.prisma.messengerChat.findUnique({ where: { messengerId_chatId: { messengerId: m.id, chatId: target } } });
     const sendTo = known?.phone ? `${known.phone}@c.us` : target;
+    await this.requireWorkingLine(user, m);
     const dealId = this.crm ? await this.crm.sending(user, m, known?.chatId ?? target, expectedDeal) : undefined;
     const caption = String(text ?? '').trim().slice(0, 1024);
-    if (m.lineMode === 'own' && m.lineId) {
-      const first = await this.connector.firstContact(user, m, sendTo, caption, file, dealId);
-      return { message: toMessageDto(first), queued: false, openlineChatId: first.b24ChatId ?? null };
-    }
-    const w = await this.service.send(m.id, sendTo, caption, undefined, file);
-    return { message: toMessageDto(await this.inbox.message(m, w, { source: 'app', sentByUserId: user.userId, ...(dealId !== undefined ? { dealId, awaitingDeal: false } : {}) })), queued: false };
+    const first = await this.connector.firstContact(user, m, sendTo, caption, file, dealId);
+    return { message: toMessageDto(first), queued: false, openlineChatId: first.b24ChatId ?? null };
+  }
+
+  /**
+   * Сообщения приложения клиенту — только через рабочие открытые линии (решение владельца 2026-10-26,
+   * заменяет «номер без линии пишет напрямую»): номер привязан к своей линии, подключён, линия рабочая.
+   */
+  private async requireWorkingLine(user: B24UserContext, m: Messenger): Promise<void> {
+    const label = `${messengerLabel(m.kind)} +${m.phone ?? ''}`.trim();
+    if (m.lineMode !== 'own' || !m.lineId)
+      throw new ConflictException({ code: 'NO_OPENLINE', message: `Номер ${label} не привязан к открытой линии — сообщения уходят только через рабочие открытые линии. Привяжите номер к линии в настройках мессенджеров` });
+    if (m.state !== 'ready') throw new ConflictException({ code: 'CHAT_NOT_WORKING', message: chatNotWorkingMessage(`номер ${label} не подключён`) });
+    const problem = await lineProblem(user.client, this.prisma, user.portal.id, `btx24_${m.kind}`, m.lineId);
+    if (problem) throw new ConflictException({ code: 'CHAT_NOT_WORKING', message: chatNotWorkingMessage(problem) });
   }
 
   /** Изменить своё сообщение: через линию (если оно из линии) или напрямую. Прежний текст — в истории. */

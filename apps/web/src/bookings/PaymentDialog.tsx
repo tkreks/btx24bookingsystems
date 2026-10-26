@@ -251,6 +251,11 @@ export function PaymentDialog({
             </button>
           ))}
         </div>
+        {preview?.chatProblem && (
+          <p className="notice warning" role="alert">
+            {preview.chatProblem}. Счёт выставить можно, ссылку тогда отправьте клиенту сами.
+          </p>
+        )}
         {kind === 'custom' && (
           <>
             <CustomPaymentForm

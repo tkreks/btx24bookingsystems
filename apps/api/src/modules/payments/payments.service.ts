@@ -99,7 +99,7 @@ export class PaymentsService {
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
     const tpl = custom ? { name: null, steps: [{ text: DEFAULT_PAYMENT_LINK_MESSAGE, files: [] }] } : await this.flow.paymentTemplate(user.portal.id, kind, opts);
-    const mc = await this.flow.messages(ctx, dealId);
+    const [mc, chatProblem] = await Promise.all([this.flow.messages(ctx, dealId), this.flow.chatProblem(ctx, dealId).catch(() => null)]);
     const vars = { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' };
     const message = tpl.steps
       .map((st) => [renderMessage(st.text, { ...mc, vars }), ...st.files.map(() => '📎 файл из шаблона')].filter((x) => x.trim()).join('\n'))
@@ -122,6 +122,7 @@ export class PaymentsService {
       bookingId: custom ? null : chosenBooking,
       bookingMissing,
       pastBooking,
+      chatProblem,
     };
   }
 

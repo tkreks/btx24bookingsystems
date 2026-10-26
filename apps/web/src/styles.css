@@ -8882,3 +8882,4 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .deal-ws-timeline { grid-column: 2; grid-row: 2; }
 .deal-ws-actions { grid-column: 2; grid-row: 3; }
 @media (max-width: 860px) { .deal-ws-invoices, .deal-ws-timeline, .deal-ws-actions { grid-column: auto; grid-row: auto; } }
+.notice.warning { border-color: #fedf89; background: var(--warn-bg); color: var(--warn-text); }

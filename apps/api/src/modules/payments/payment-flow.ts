@@ -1,3 +1,4 @@
+import { chatLineProblem, NO_WORKING_CHAT } from '../openlines/line-health.js';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   DEFAULT_CLIENT_MESSAGE,
@@ -322,11 +323,8 @@ export class PaymentFlow {
    * ответственного за сделку. Не вышло — предупреждение (ссылку можно отправить вручную).
    */
   private async sendToClient(ctx: FlowContext, req: SendTarget, deal: Deal | null, text: string, warnings: string[]): Promise<boolean> {
-    const targets = await this.chatTargets(ctx, req.dealId, Number(deal?.CONTACT_ID) || null);
-    if (!targets.length) {
-      warnings.push('У сделки и её контакта нет доступного чата открытой линии — ссылку нужно отправить клиенту вручную');
-      return false;
-    }
+    const targets = await this.workingTargets(ctx, req.dealId, Number(deal?.CONTACT_ID) || null, warnings);
+    if (!targets.length) return false;
     const senders = [...new Set([req.userId ?? 0, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
     let last = '';
     // Чат клиента со временем переходит к его новой сделке: такой (CHAT_NOT_IN_CRM) пропускаем,
@@ -402,7 +400,7 @@ export class PaymentFlow {
       for (const f of st.files) {
         chatId ??= await this.boundChat(ctx, req.dealId);
         if (!chatId) {
-          warnings.push('Файлы не отправлены: у сделки нет чата открытой линии');
+          warnings.push(`Файлы не отправлены: ${NO_WORKING_CHAT}`);
           return false;
         }
         await gap();
@@ -472,9 +470,32 @@ export class PaymentFlow {
     return targets;
   }
 
-  /** Чат для файлов той же цепочки: сделка или её контакт, только с подтверждённой привязкой. */
+  /**
+   * Чаты сделки и контакта только на рабочих линиях (решение владельца 2026-10-26). Нет ни одного —
+   * предупреждение «создайте работающий чат с клиентом» (с причинами по найденным чатам).
+   */
+  private async workingTargets(ctx: FlowContext, dealId: number, contactId: number | null, warnings: string[]): Promise<{ chatId: number; type: 'deal' | 'contact'; entityId: number }[]> {
+    const all = await this.chatTargets(ctx, dealId, contactId);
+    const out: typeof all = [];
+    const why = new Set<string>();
+    for (const t of all) {
+      const problem = await chatLineProblem(ctx.client, this.prisma, ctx.portal.id, t.chatId);
+      if (problem) why.add(problem);
+      else out.push(t);
+    }
+    if (!out.length) warnings.push(`${NO_WORKING_CHAT}${why.size ? ` (${[...why].join('; ')})` : ''} — сообщение не отправлено`);
+    return out;
+  }
+
+  /** Есть ли у сделки рабочий чат: null — есть; иначе текст «создайте работающий чат» (для окна оплаты). */
+  async chatProblem(ctx: FlowContext, dealId: number): Promise<string | null> {
+    const w: string[] = [];
+    return (await this.workingTargets(ctx, dealId, null, w)).length ? null : (w[0] ?? NO_WORKING_CHAT).replace(/ — сообщение не отправлено$/, '');
+  }
+
+  /** Чат для файлов той же цепочки: сделка или её контакт, только с подтверждённой привязкой и рабочей линией. */
   private async boundChat(ctx: FlowContext, dealId: number): Promise<number | null> {
-    for (const { chatId, type, entityId } of await this.chatTargets(ctx, dealId)) {
+    for (const { chatId, type, entityId } of await this.workingTargets(ctx, dealId, null, [])) {
       try {
         const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
         if (bindingEntity(d.result?.entity_data_2, type) === entityId) return chatId;

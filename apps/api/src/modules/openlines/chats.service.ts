@@ -1,5 +1,6 @@
+import { chatLineProblem, chatNotWorkingMessage } from './line-health.js';
 import { clientPhoneVariants, messageChannel, todayIn, zonedDayRange } from '@btx24/shared';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { FAVORITES_FOLDER, hasTokens, renderMessage, TEMPLATE_VARIABLES, unresolvedTokens, type TemplateVariablesDto } from '@btx24/shared';
 import type {
   ChatHistoryDto,
@@ -976,6 +977,9 @@ export class ChatsService {
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_CHAIN', message: 'Цепочка пуста или шаг без текста и вложений' });
     const steps: TemplateStepDto[] = parsed.data.steps;
+    // Только через рабочую открытую линию (решение владельца 2026-10-26).
+    const problem = await chatLineProblem(user.client, this.prisma, user.portal.id, chatId);
+    if (problem) throw new ConflictException({ code: 'CHAT_NOT_WORKING', message: chatNotWorkingMessage(problem) });
     const files = await this.files.loadOwned(user, [...new Set(steps.flatMap((s) => s.fileIds))]);
     const dialogId = `chat${chatId}`;
     const messageIds: number[] = [];

@@ -106,6 +106,11 @@ export interface PaymentPreviewDto {
   pastBooking: PaymentBookingOption | null;
   /** Чего не хватает, чтобы выставить счёт (настройки, сумма, права). Пусто — можно. */
   problems: string[];
+  /**
+   * Нет рабочего чата с клиентом в открытой линии — сообщение со ссылкой не уйдёт (счёт выставить можно,
+   * ссылку — скопировать). null — рабочий чат есть.
+   */
+  chatProblem?: string | null;
 }
 
 export interface PaymentBookingOption {

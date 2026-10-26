@@ -225,3 +225,9 @@ CRM_ENTITY_TYPE/CRM_ENTITY и USER_ID участника с доступом к 
 `imopenlines.config.get` принимает CONFIG_ID и WITH_QUEUE/SHOW_OFFLINE=Y; живое чтение
 подтвердило ACTIVE=Y и по два оператора в собственных линиях14/16. Подписки Wazzup и MAX
 не менялись. План и ограничения — [переход мессенджеров](../features/messenger-transition.md).
+
+### Рабочая ли открытая линия (2026-10-26, проверено на портале чтением)
+`imconnector.status {CONNECTOR, LINE}` (контекст приложения) отвечает и для чужих коннекторов: код — из
+`entity_id` чата (`wz_telegram_<hash>|8|…`). Живое чтение: Wazzup Telegram (линия 8) и Wazzup WhatsApp
+(линия 4) — `CONFIGURED=false, STATUS=false`; свои линии 14/16, Instagram (6), MAX Wazzup (10) — `true`.
+`imopenlines.config.list.get` (`PARAMS.select: ID, LINE_NAME, ACTIVE`) — все 9 линий ACTIVE=Y.
