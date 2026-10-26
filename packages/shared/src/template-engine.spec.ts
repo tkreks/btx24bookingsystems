@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyMessageContext, renderMessage, unresolvedTokens } from './template-engine.js';
+import { emptyMessageContext, hasPaymentLinkToken, renderMessage, unresolvedTokens } from './template-engine.js';
 
 const confirmation = `Мы с радостью подтверждаем Вашу бронь на имя {{Контакт: Имя}} :
 
@@ -41,5 +41,18 @@ describe('renderMessage', () => {
     const r = renderMessage('{{Нет такого поля}} {=Variable:x} {unknown}', ctx);
     expect(r).toBe('{{Нет такого поля}} {=Variable:x} {unknown}');
     expect(unresolvedTokens(r)).toEqual(['{{Нет такого поля}}', '{=Variable:x}', '{unknown}']);
+  });
+});
+
+describe('переменные БП оплаты', () => {
+  it('paymentlink_new и paymentsum_new — ссылка и сумма приложения', () => {
+    const ctx = { vars: { link: 'https://p/x', prepayment: '5 000' }, dealByTitle: {}, dealByCode: {}, contact: { имя: 'Анна' }, variables: {} };
+    expect(renderMessage('{{Контакт: Имя}}, предоплата {=Variable:paymentsum_new > printable} рублей по ссылке\n{=Variable:paymentlink_new > printable}', ctx)).toBe('Анна, предоплата 5 000 рублей по ссылке\nhttps://p/x');
+  });
+  it('ссылка на оплату в тексте — в любой записи', () => {
+    expect(hasPaymentLinkToken('оплата {link}')).toBe(true);
+    expect(hasPaymentLinkToken('{=Variable:paymentlink_new > printable}')).toBe(true);
+    expect(hasPaymentLinkToken('{{Ссылка на оплату}}')).toBe(true);
+    expect(hasPaymentLinkToken('без ссылки')).toBe(false);
   });
 });

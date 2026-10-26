@@ -3,12 +3,12 @@ import {
   BOOKING_REQUIRED_MESSAGE,
   invoiceInWork,
   PAYMENT_KIND_LABELS,
-  PAYMENT_KINDS,
+  PAYMENT_REQUEST_KINDS,
   PAYMENT_STATUS_LABELS,
   type DealInvoiceDto,
   type DealInvoicesDto,
   type PaymentDealOptionsDto,
-  type PaymentKind,
+  type PaymentRequestKind,
   type PaymentPreviewDto,
   type PaymentRequestDto,
 } from '@btx24/shared';
@@ -16,6 +16,7 @@ import { apiGet, apiPost } from '../api.js';
 import { paymentFeedback } from './payment-feedback.js';
 import { Countdown } from './Countdown.js';
 import { MinimizeButton } from '../Minimize.js';
+import { CustomPaymentForm } from './CustomPaymentForm.js';
 
 const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   fixed: 'фиксированная сумма группы',
@@ -82,7 +83,8 @@ export function PaymentDialog({
     setInvoices(null);
     setError('');
   };
-  const [kind, setKind] = useState<PaymentKind>('prepayment');
+  // «Произвольная» — по умолчанию (2026-10-26); после брони и в карточке звонка — предоплата группы.
+  const [kind, setKind] = useState<PaymentRequestKind>(callPlacement || initialAmount || initialBookingId ? 'prepayment' : 'custom');
   // Группа счёта: null — решает сервер (группа брони, иначе группа воронки сделки); в одной воронке
   // бывает несколько групп (домики, домики на воде, беседки) — тогда сотрудник выбирает.
   const [groupId, setGroupId] = useState<string | null>(null);
@@ -112,7 +114,7 @@ export function PaymentDialog({
       ),
     [dealId],
   );
-  const chooseKind = (k: PaymentKind) => {
+  const chooseKind = (k: PaymentRequestKind) => {
     setKind(k);
     setSubmitted(null);
     setPreview(null);
@@ -235,42 +237,9 @@ export function PaymentDialog({
             </select>
           </label>
         )}
-        <section className="payment-history">
-          <div className="segmented" role="group" aria-label="Счета">
-            <button
-              type="button"
-              aria-pressed={tab === 'work'}
-              className={tab === 'work' ? 'active' : ''}
-              onClick={() => setTab('work')}
-            >
-              В работе {inWork.length}
-            </button>
-            <button
-              type="button"
-              aria-pressed={tab === 'all'}
-              className={tab === 'all' ? 'active' : ''}
-              onClick={() => setTab('all')}
-            >
-              Все счета {invoices?.length ?? ''}
-            </button>
-          </div>
-          {!invoices && <p className="muted">Загрузка счетов…</p>}
-          {invoices && tab === 'work' && !inWork.length && <p className="muted">Счетов, ожидающих оплаты, нет.</p>}
-          {invoices && tab === 'all' && !invoices.length && <p className="muted">У сделки нет счетов.</p>}
-          {(tab === 'work' ? inWork : (invoices ?? [])).map((i) => (
-            <InvoiceRow
-              key={`${i.invoiceId}:${i.request?.id ?? ''}`}
-              i={i}
-              work={tab === 'work'}
-              fmt={fmt}
-              copied={copied}
-              onCopy={copy}
-            />
-          ))}
-        </section>
-        <h4 className="payment-new">{callPlacement ? 'Параметры платежа' : 'Выставить счёт'}</h4>
-        <div className="segmented" role="group" aria-label="Что выставить">
-          {PAYMENT_KINDS.map((k) => (
+        <h4 className="payment-new">{callPlacement ? 'Параметры платежа' : 'Получить оплату'}</h4>
+        <div className="segmented payment-kinds" role="group" aria-label="Что выставить">
+          {PAYMENT_REQUEST_KINDS.map((k) => (
             <button
               key={k}
               type="button"
@@ -282,8 +251,27 @@ export function PaymentDialog({
             </button>
           ))}
         </div>
-        {!preview && !error && <p className="muted">Расчёт…</p>}
-        {preview && (
+        {kind === 'custom' && (
+          <>
+            <CustomPaymentForm
+              dealId={dealId}
+              preview={preview?.kind === 'custom' ? preview : null}
+              onSent={(r) => {
+                setSubmitted(r);
+                void loadHistory();
+                setTab('work');
+              }}
+            />
+            {submitted?.kind === 'custom' && (
+              <div className="call-payment-result" role="status">
+                <p className={submitted.error || (submitted.status === 'sent' && !submitted.messageSent) ? 'notice error' : 'notice success'}>{paymentFeedback(submitted)}</p>
+                {submitted.warnings.map((w) => <p key={w} className="muted">{w}</p>)}
+              </div>
+            )}
+          </>
+        )}
+        {kind !== 'custom' && !preview && !error && <p className="muted">Расчёт…</p>}
+        {kind !== 'custom' && preview && (
           <>
             {preview.groupOptions.length > 1 ? (
               <label>
@@ -385,7 +373,7 @@ export function PaymentDialog({
             {error}
           </p>
         )}
-        {!callPlacement && !preview?.bookingMissing && (
+        {!callPlacement && kind !== 'custom' && !preview?.bookingMissing && (
           <div className="sheet-actions">
             <button
               type="button"
@@ -397,6 +385,39 @@ export function PaymentDialog({
             </button>
           </div>
         )}
+        <section className="payment-history">
+          <div className="segmented" role="group" aria-label="Счета">
+            <button
+              type="button"
+              aria-pressed={tab === 'work'}
+              className={tab === 'work' ? 'active' : ''}
+              onClick={() => setTab('work')}
+            >
+              В работе {inWork.length}
+            </button>
+            <button
+              type="button"
+              aria-pressed={tab === 'all'}
+              className={tab === 'all' ? 'active' : ''}
+              onClick={() => setTab('all')}
+            >
+              Все счета {invoices?.length ?? ''}
+            </button>
+          </div>
+          {!invoices && <p className="muted">Загрузка счетов…</p>}
+          {invoices && tab === 'work' && !inWork.length && <p className="muted">Счетов, ожидающих оплаты, нет.</p>}
+          {invoices && tab === 'all' && !invoices.length && <p className="muted">У сделки нет счетов.</p>}
+          {(tab === 'work' ? inWork : (invoices ?? [])).map((i) => (
+            <InvoiceRow
+              key={`${i.invoiceId}:${i.request?.id ?? ''}`}
+              i={i}
+              work={tab === 'work'}
+              fmt={fmt}
+              copied={copied}
+              onCopy={copy}
+            />
+          ))}
+        </section>
       </div>
     </div>
   );

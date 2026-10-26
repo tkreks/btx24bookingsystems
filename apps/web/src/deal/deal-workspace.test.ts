@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { withPaymentLink, type MyGroupDto } from '@btx24/shared';
 import { dealGroups } from './DealHome.js';
-import { defaultHours, parseHours } from './PaymentLinkWizard.js';
+import { parseHours } from '../bookings/CustomPaymentForm.js';
 
-describe('мастер «Ссылка на оплату»', () => {
-  it('срок по умолчанию — из группы, в часах, не больше 24', () => {
-    expect(defaultHours(90)).toBe('2');
-    expect(defaultHours(60 * 48)).toBe('24');
-    expect(defaultHours(null)).toBe('');
-  });
+describe('произвольная оплата', () => {
   it('срок — пусто (без срока) или целое 1–24', () => {
     expect(parseHours('')).toBeNull();
     expect(parseHours('3')).toBe(3);

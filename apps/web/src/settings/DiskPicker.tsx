@@ -113,6 +113,11 @@ function Browser({ path, setPath, start, endpoint, onPick, onClose }: { path: Pl
             </button>
           </div>
         )}
+        {start?.admin && (path.length > 1 || path[0].query !== '') && (
+          <button type="button" className="disk-up" title="Администратор: подняться на уровень выше — до списка всех хранилищ" onClick={() => switchTo(path.length > 1 ? path.slice(0, -1) : ROOT)}>
+            ↑ Уровень выше
+          </button>
+        )}
         <nav className="disk-path" aria-label="Путь">
           {path.map((p, i) => (
             <button key={i} className="link" disabled={i === path.length - 1} onClick={() => { setSearch(''); setPath(path.slice(0, i + 1)); }}>

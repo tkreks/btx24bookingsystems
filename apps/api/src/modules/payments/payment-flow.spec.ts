@@ -171,6 +171,13 @@ describe('PaymentFlow', () => {
     expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Оплатите, пожалуйста\nhttps://pay.example/x');
   });
 
+  it('произвольная без своего текста — стандартный текст со ссылкой, поле ссылки сделки не трогаем', async () => {
+    const t = setup({ link: 'https://pay.example/x' });
+    await t.flow.awaitLink(t.ctx, t.req({ kind: 'custom', purpose: 'Аренда инвентаря' }));
+    expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Просим Вам произвести оплату https://pay.example/x');
+    expect(t.calls.some((c) => c[0] === 'crm.deal.update')).toBe(false);
+  });
+
   it('срок доплаты вышел → ссылка аннулирована, бронь, стадия и клиент не тронуты', async () => {
     const t = setup({ booking: true, payments: [{ id: 9001, paid: 'N' }] });
     const r = await t.flow.watch(t.ctx, t.req({ kind: 'surcharge', status: 'sent', timeoutMinutes: 60, deadlineAt: new Date(Date.now() - 1000) }));

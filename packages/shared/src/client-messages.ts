@@ -160,6 +160,8 @@ export interface DiskStartDto {
   shared: DiskPlaceDto[] | null;
   /** Мой диск; null — недоступен. */
   user: DiskPlaceDto[] | null;
+  /** Администратор приложения: «Уровень выше» — до списка всех доступных хранилищ. */
+  admin?: boolean;
 }
 
 /** Папка шаблонов на общем диске (решение владельца 2026-10-26). */

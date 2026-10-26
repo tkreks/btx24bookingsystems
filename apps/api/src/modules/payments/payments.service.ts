@@ -1,12 +1,13 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import {
-  PAYMENT_KINDS,
+  PAYMENT_REQUEST_KINDS,
   PAYMENT_MAX_TIMEOUT_HOURS,
+  DEFAULT_PAYMENT_LINK_MESSAGE,
+  type PaymentRequestKind,
   moneyValue,
   paymentAmount,
   renderMessage,
   type GroupOptionsDto,
-  type PaymentKind,
   type PaymentAmountSource,
   BOOKING_REQUIRED_MESSAGE,
   type DealInvoicesDto,
@@ -28,7 +29,7 @@ const createSchema = z
   .object({
     idempotencyKey: z.string().min(8).max(64),
     dealId: z.number().int().positive(),
-    kind: z.enum(PAYMENT_KINDS),
+    kind: z.enum(PAYMENT_REQUEST_KINDS),
     groupId: z.string().min(1).max(40).optional(),
     amount: z.number().positive().max(10_000_000).nullable().optional(),
     bookingId: z.number().int().positive().nullable().optional(),
@@ -59,7 +60,9 @@ export class PaymentsService {
   /** Пауза между проверками ссылки (в тестах подменяется). */
   sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-  async preview(user: B24UserContext, dealId: number, kind: PaymentKind, groupId?: string, bookingId?: number): Promise<PaymentPreviewDto> {
+  async preview(user: B24UserContext, dealId: number, kind: PaymentRequestKind, groupId?: string, bookingId?: number): Promise<PaymentPreviewDto> {
+    // Произвольная: сумму, основание и срок задаёт сотрудник; брони не требует, шаблон — свой текст.
+    const custom = kind === 'custom';
     const deal = await this.flow.deal(user, dealId);
     if (!deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена или нет доступа` });
     // Бронь сделки: к ней привязывается счёт (неоплата в срок снимает именно её), её группа — группа счёта.
@@ -74,8 +77,9 @@ export class PaymentsService {
     // Покупка сертификата: платят весь номинал (сумма сделки), брони у такой сделки не бывает.
     const certificate = isCertificatePurchase(deal, await this.fieldMap.outcome(user.portal.id, user.client).catch(() => ({ certificateTypeId: null })));
     const opportunity = Number(deal.OPPORTUNITY) || null;
-    const a: { amount: number | null; source: PaymentAmountSource } =
-      certificate && kind === 'prepayment'
+    const a: { amount: number | null; source: PaymentAmountSource } = custom
+      ? { amount: null, source: 'none' }
+      : certificate && kind === 'prepayment'
         ? { amount: opportunity, source: opportunity ? 'certificate' : 'none' }
         : paymentAmount(kind, {
             fixed: opts?.payments.prepaymentAmount ?? null,
@@ -83,17 +87,17 @@ export class PaymentsService {
             opportunity,
             percent: opts?.payments.prepaymentPercent ?? null,
           });
-    if (a.amount === null)
+    if (a.amount === null && !custom)
       problems.push(kind === 'surcharge' ? 'Заполните «Ручную сумму доплаты» в сделке или укажите сумму' : 'Нет суммы: заполните сделку или укажите сумму');
     if (deal.STAGE_SEMANTIC_ID && deal.STAGE_SEMANTIC_ID !== 'P') problems.push(`Сделка #${dealId} закрыта — выберите сделку в работе`);
-    const requireBooking = opts?.payments.requireBooking !== false && !certificate;
+    const requireBooking = opts?.payments.requireBooking !== false && !certificate && !custom;
     const bookingMissing = requireBooking && !bookings.length;
     // Бронь у сделки есть, но уже прошла: счёт к ней не привязать (неоплата снимает будущую бронь).
     const pastBooking = bookingMissing ? await this.lastPastBooking(user, dealId) : null;
     if (bookingMissing) problems.push(BOOKING_REQUIRED_MESSAGE);
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
-    const tpl = await this.flow.paymentTemplate(user.portal.id, kind, opts);
+    const tpl = custom ? { name: null, steps: [{ text: DEFAULT_PAYMENT_LINK_MESSAGE, files: [] }] } : await this.flow.paymentTemplate(user.portal.id, kind, opts);
     const mc = await this.flow.messages(ctx, dealId);
     const vars = { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' };
     const message = tpl.steps
@@ -114,7 +118,7 @@ export class PaymentsService {
       problems,
       requireBooking,
       bookings,
-      bookingId: chosenBooking,
+      bookingId: custom ? null : chosenBooking,
       bookingMissing,
       pastBooking,
     };
@@ -177,16 +181,19 @@ export class PaymentsService {
 
     const p = await this.preview(user, b.dealId, b.kind, b.groupId, b.bookingId ?? undefined);
     const amount = b.amount ?? p.amount;
+    const custom = b.kind === 'custom';
+    if (custom && (!b.amount || !b.purpose)) throw new BadRequestException({ code: 'INVALID_PAYMENT', message: 'Произвольная оплата: укажите основание и сумму' });
     const blocking = p.problems.filter((x) => !(b.amount && x.includes('сумм')));
     if (blocking.length || !p.groupId || !amount) throw new BadRequestException({ code: 'PAYMENT_NOT_READY', message: blocking.join('; ') || 'Нет суммы' });
-    const active = await this.prisma.paymentRequest.findFirst({
+    // Произвольных счетов может быть несколько одновременно (разные основания).
+    const active = custom ? null : await this.prisma.paymentRequest.findFirst({
       where: { portalId: user.portal.id, dealId: b.dealId, kind: b.kind, status: { in: ['link_pending', 'sent'] } },
     });
     if (active) throw new ConflictException({ code: 'PAYMENT_ACTIVE', message: 'По этой сделке уже выставлен такой счёт и ждём оплату' });
     // Бронь — только действующая бронь этой сделки; при требовании брони без неё счёт не выставить.
     if (b.bookingId && !p.bookings.some((x) => x.bookingId === b.bookingId))
       throw new BadRequestException({ code: 'BOOKING_NOT_OF_DEAL', message: `Бронь #${b.bookingId} не относится к сделке #${b.dealId} или уже закончилась` });
-    const bookingId = b.bookingId ?? p.bookingId;
+    const bookingId = b.bookingId ?? (custom ? null : p.bookingId);
 
     const g = (await this.access.resolve(user)).groups.find((x) => x.group.id === p.groupId)!;
     const opts = g.group.options as unknown as GroupOptionsDto;
@@ -216,9 +223,9 @@ export class PaymentsService {
         entityTypeId: 31,
         fields: {
           // Сделка и бронь — в названии: у одного клиента бывает несколько сделок (в разных воронках).
-          title: `${b.purpose ? b.purpose : `Счёт на ${b.kind === 'prepayment' ? 'предоплату' : 'доплату'}`} по сделке #${b.dealId}${bookingId ? `, бронь #${bookingId}` : ''}`.slice(0, 255),
+          title: `${b.purpose ? b.purpose : `Счёт на ${b.kind === 'surcharge' ? 'доплату' : 'предоплату'}`} по сделке #${b.dealId}${bookingId ? `, бронь #${bookingId}` : ''}`.slice(0, 255),
           categoryId: inv.categoryId,
-          stageId: b.kind === 'prepayment' ? inv.prepaymentStageId : inv.surchargeStageId,
+          stageId: b.kind === 'surcharge' ? inv.surchargeStageId : inv.prepaymentStageId,
           assignedById: Number(deal?.ASSIGNED_BY_ID) || user.userId,
           ...(contactId ? { contactId, contactIds: [contactId] } : {}),
           currencyId: 'RUB',
@@ -240,8 +247,9 @@ export class PaymentsService {
     // ID счёта в сделку (по нему автоматизация портала считает внесённые оплаты), стадия оплаты.
     const warnings: string[] = [];
     const map = await this.fieldMap.get(user.portal.id);
-    const idField = b.kind === 'prepayment' ? map.prepaymentInvoiceId : map.surchargeInvoiceId;
-    const step = opts.payments[b.kind];
+    // Произвольная — без поля счёта в сделке и без смены стадии (это не предоплата и не доплата группы).
+    const idField = custom ? null : b.kind === 'prepayment' ? map.prepaymentInvoiceId : map.surchargeInvoiceId;
+    const step = b.kind === 'custom' ? { moveStage: false, stageId: '' } : opts.payments[b.kind];
     // Стадия группы из другой воронки (бронь «Бань» по сделке воронки домиков) — сделку не переносим.
     const moveStage = step.moveStage && !!step.stageId;
     const sameFunnel = moveStage && stageCategory(step.stageId) === Number(deal?.CATEGORY_ID ?? 0);

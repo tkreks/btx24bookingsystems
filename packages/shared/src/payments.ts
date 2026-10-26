@@ -4,7 +4,15 @@
 
 export const PAYMENT_KINDS = ['prepayment', 'surcharge'] as const;
 export type PaymentKind = (typeof PAYMENT_KINDS)[number];
-export const PAYMENT_KIND_LABELS: Record<PaymentKind, string> = { prepayment: 'Предоплата', surcharge: 'Доплата' };
+/**
+ * Вид заявки на оплату: к предоплате и доплате группы добавлена «Произвольная» (решение владельца
+ * 2026-10-26) — основание, сумма и срок задаёт сотрудник; стадию и поля оплаты сделки она не трогает.
+ */
+export const PAYMENT_REQUEST_KINDS = ['custom', 'prepayment', 'surcharge'] as const;
+export type PaymentRequestKind = (typeof PAYMENT_REQUEST_KINDS)[number];
+export const PAYMENT_KIND_LABELS: Record<PaymentRequestKind, string> = { custom: 'Произвольная', prepayment: 'Предоплата', surcharge: 'Доплата' };
+/** Основание произвольной оплаты — быстрый выбор. */
+export const PAYMENT_PURPOSES = ['Предоплата за бронирование', 'Доплата за бронирование', 'Дополнительные услуги', 'Сертификат', 'Аренда инвентаря'];
 
 /**
  * link_pending — счёт создан, ждём ссылку от портала; sent — ссылка у клиента, ждём оплату;
@@ -73,7 +81,7 @@ export function moneyValue(v: unknown): number | null {
 /** `GET /api/payments/preview?dealId&kind` — что будет, если выставить счёт. */
 export interface PaymentPreviewDto {
   dealId: number;
-  kind: PaymentKind;
+  kind: PaymentRequestKind;
   groupId: string | null;
   groupName: string | null;
   /** Группы, по которым можно выставить счёт (одна воронка — несколько групп); выбор — в окне. */
@@ -120,7 +128,7 @@ export const BOOKING_REQUIRED_MESSAGE = 'Создайте бронировани
 export interface CreatePaymentDto {
   idempotencyKey: string;
   dealId: number;
-  kind: PaymentKind;
+  kind: PaymentRequestKind;
   /** Своя сумма вместо рассчитанной. */
   amount?: number | null;
   bookingId?: number | null;
@@ -130,7 +138,7 @@ export interface PaymentRequestDto {
   id: string;
   dealId: number;
   bookingId: number | null;
-  kind: PaymentKind;
+  kind: PaymentRequestKind;
   amount: number;
   invoiceId: number | null;
   /** Ссылка на оплату (для сотрудника — скопировать); в журналы не пишется. */

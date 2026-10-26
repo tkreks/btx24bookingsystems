@@ -50,9 +50,19 @@ function bitrixToken(inner: string, ctx: MessageContext): string | null {
   return null;
 }
 
+/** Переменные БП оплаты (тексты из БП портала, 2026-10-26) → переменные приложения. */
+const BP_VARIABLE_ALIASES: Record<string, string> = {
+  paymentlink_new: 'link',
+  paymentlink: 'link',
+  paymentsum_new: 'prepayment',
+  paymentsum: 'prepayment',
+};
+
 function bpToken(kind: string, path: string, ctx: MessageContext): string | null {
   const name = path.trim();
   if (/^variable$/i.test(kind)) {
+    const alias = BP_VARIABLE_ALIASES[name.toLowerCase()];
+    if (alias && present(ctx.vars[alias])) return String(ctx.vars[alias]);
     const v = ctx.variables[name] ?? ctx.variables[name.toLowerCase()];
     return present(v) ? String(v) : null;
   }
@@ -102,3 +112,8 @@ export interface TemplateVariablesDto {
   app: { token: string; label: string }[];
 }
 
+
+/** Есть ли в тексте ссылка на оплату: {link}, {{Ссылка на оплату}} или переменная БП paymentlink. */
+export function hasPaymentLinkToken(text: string): boolean {
+  return /\{link\}|\{\{\s*ссылка на оплату\s*\}\}|\{=\s*Variable\s*:\s*paymentlink(_new)?\b/i.test(text);
+}

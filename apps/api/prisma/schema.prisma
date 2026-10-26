@@ -728,6 +728,8 @@ model ChatFolderItem {
 enum PaymentKind {
   prepayment
   surcharge
+  /// Произвольная (встройка сделки, окно оплаты): основание, сумма и срок — от сотрудника.
+  custom
 }
 
 enum PaymentRequestStatus {

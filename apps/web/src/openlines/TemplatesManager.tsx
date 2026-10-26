@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DEFAULT_CLIENT_MESSAGE, type MessageTemplateDto, type MessageTemplatePurpose, type SaveTemplateDto } from '@btx24/shared';
+import { DEFAULT_CLIENT_MESSAGE, hasPaymentLinkToken, type MessageTemplateDto, type MessageTemplatePurpose, type SaveTemplateDto } from '@btx24/shared';
 import { apiDelete, apiPost, apiPut } from '../api.js';
 import { isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { StepsEditor } from './StepsEditor.js';
@@ -19,7 +19,16 @@ export function TemplatesManager({
   initial,
   admin = false,
   embedded = false,
+  open,
+  onSaved,
+  onDone,
 }: {
+  /** Открыть сразу этот шаблон (id) или новый с текстом (id null) — из списка «Системные». */
+  open?: { id: string | null; name: string; steps: ChainStep[]; purpose: MessageTemplatePurpose };
+  /** Шаблон сохранён (до закрытия редактора) — например, назначить его группе. */
+  onSaved?: (t: MessageTemplateDto) => Promise<void> | void;
+  /** Редактор, открытый через `open`, закрыт (сохранили или отменили). */
+  onDone?: () => void;
   templates: MessageTemplateDto[];
   onChanged: (templates: MessageTemplateDto[]) => void;
   onClose: () => void;
@@ -29,7 +38,11 @@ export function TemplatesManager({
   admin?: boolean;
   embedded?: boolean;
 }) {
-  const [editing, setEditing] = useState<Editing | null>(initial ? { id: null, name: '', steps: initial, shared: false, purpose: 'chat' } : null);
+  const [editing, setEditingState] = useState<Editing | null>(open ? { ...open, shared: open.purpose !== 'chat' } : initial ? { id: null, name: '', steps: initial, shared: false, purpose: 'chat' } : null);
+  const setEditing = (e: Editing | null) => {
+    setEditingState(e);
+    if (!e && open) onDone?.();
+  };
   // В чате шаблоны оплаты не нужны (ссылку подставляет автоматизация); на странице «Шаблоны» — администраторам.
   const shown = templates.filter((t) => t.purpose === 'chat' || (admin && embedded));
   const [uploading, setUploading] = useState(false);
@@ -52,6 +65,7 @@ export function TemplatesManager({
       onChanged(
         [...templates.filter((t) => t.id !== saved.id), saved].sort((a, b) => Number(b.shared) - Number(a.shared) || a.name.localeCompare(b.name, 'ru')),
       );
+      await onSaved?.(saved);
       setEditing(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить шаблон');
@@ -132,7 +146,7 @@ export function TemplatesManager({
             <p className="muted">К каждому сообщению можно добавить файлы из устройства или Диска Битрикс24.</p>
             {editing.purpose === 'payment' ? (
               <p className="muted">
-                Уйдёт клиенту автоматически, когда портал выдаст ссылку на оплату. {'{link}'} — ссылка (обязательно), {'{prepayment}'} — сумма к оплате,{' '}
+                Уйдёт клиенту автоматически, когда портал выдаст ссылку на оплату. {'{link}'} или {'{=Variable:paymentlink_new}'} — ссылка (обязательно), {'{prepayment}'} или {'{=Variable:paymentsum_new}'} — сумма к оплате,{' '}
                 {'{minutes}'} — минут на оплату, {'{deadline}'} — оплатить до; остальные переменные — по сделке. Сообщения — по порядку, файлы — после текста.
               </p>
             ) : editing.purpose === 'auto' ? (
@@ -146,8 +160,8 @@ export function TemplatesManager({
                 {'{=Variable:programm}'} и др.) подставятся по сделке чата при вставке шаблона.
               </p>
             )}
-            {editing.purpose === 'payment' && !editing.steps.some((st) => st.text.includes('{link}')) && (
-              <p className="notice error">В шаблоне нет {'{link}'} — клиент не получит ссылку на оплату.</p>
+            {editing.purpose === 'payment' && !editing.steps.some((st) => hasPaymentLinkToken(st.text)) && (
+              <p className="notice error">В шаблоне нет ссылки на оплату ({'{link}'} или {'{=Variable:paymentlink_new}'}) — клиент её не получит.</p>
             )}
             <StepsEditor
               variables

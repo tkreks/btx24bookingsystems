@@ -5,6 +5,8 @@ import {
   DEFAULT_SURCHARGE_MESSAGE,
   renderMessage,
   withPaymentLink,
+  PAYMENT_KIND_LABELS,
+  DEFAULT_PAYMENT_LINK_MESSAGE,
   type ClientMessageStep,
   type MessageContext,
   type GroupOptionsDto,
@@ -90,7 +92,7 @@ export class PaymentFlow {
 
   /** Действие автоматизации оплат — в журнал действий (⚙ → «Журнал действий»). */
   private audit(req: PaymentRequest, action: string, summary: string, details: Record<string, unknown> = {}): Promise<void> | undefined {
-    const kind = req.kind === 'prepayment' ? 'предоплата' : 'доплата';
+    const kind = PAYMENT_KIND_LABELS[req.kind].toLowerCase();
     return this.actions?.log(req.portalId, { kind: 'system', name: 'Система: автоматизация оплат' }, {
       action: `payment.${action}`,
       summary: `${summary} — ${kind} ${money(Number(req.amount))} ₽${req.invoiceId ? `, счёт #${req.invoiceId}` : ''}, сделка #${req.dealId}`,
@@ -148,7 +150,7 @@ export class PaymentFlow {
   private async deliver(ctx: FlowContext, req: PaymentRequest & { link: string }, opts: GroupOptionsDto): Promise<PaymentRequest> {
     const warnings = this.warningsOf(req);
     const map = await this.fieldMap.get(ctx.portal.id);
-    const linkField = req.kind === 'prepayment' ? map.prepaymentLink : map.surchargeLink;
+    const linkField = req.kind === 'custom' ? null : req.kind === 'prepayment' ? map.prepaymentLink : map.surchargeLink;
     if (linkField) await this.dealUpdate(ctx, req.dealId, { [linkField]: req.link }, warnings, 'ссылка на оплату');
 
     const mc = await this.messages(ctx, req.dealId);
@@ -164,8 +166,9 @@ export class PaymentFlow {
       deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
     };
     // Свой текст из встройки сделки — одним сообщением, `{{СсылкаНаОплату}}` — ссылка.
-    const tpl = req.message
-      ? { name: null, steps: [{ text: withPaymentLink(req.message, req.link), files: [] }] }
+    const own = req.message ?? (req.kind === 'custom' ? DEFAULT_PAYMENT_LINK_MESSAGE : null);
+    const tpl = own !== null || req.kind === 'custom'
+      ? { name: null, steps: [{ text: withPaymentLink(own ?? DEFAULT_PAYMENT_LINK_MESSAGE, req.link), files: [] }] }
       : await this.paymentTemplate(ctx.portal.id, req.kind, opts, warnings);
     const steps = await this.withFileData(
       ctx.portal.id,
@@ -178,7 +181,7 @@ export class PaymentFlow {
       deadline: sent ? deadline?.toISOString() : null,
       warnings,
     });
-    await this.comment(ctx, req.dealId, `Ссылка на оплату (${req.kind === 'prepayment' ? 'предоплата' : 'доплата'} ${money(Number(req.amount))} ₽, счёт #${req.invoiceId}) ${sent ? 'отправлена клиенту' : 'НЕ отправлена — отправьте вручную'}:\n${text}`, warnings);
+    await this.comment(ctx, req.dealId, `Ссылка на оплату (${req.purpose ?? PAYMENT_KIND_LABELS[req.kind].toLowerCase()} ${money(Number(req.amount))} ₽, счёт #${req.invoiceId}) ${sent ? 'отправлена клиенту' : 'НЕ отправлена — отправьте вручную'}:\n${text}`, warnings);
     // Срок — только если клиент получил ссылку: иначе бронь снялась бы без его вины.
     return this.prisma.paymentRequest.update({
       where: { id: req.id },
@@ -273,7 +276,7 @@ export class PaymentFlow {
       await this.sendToClient(ctx, target(req), mc.deal, text, warnings);
     }
     const removed = pre && req.bookingId ? `, бронь #${req.bookingId} снята` : '';
-    await this.comment(ctx, req.dealId, `${pre ? 'Предоплата' : 'Доплата'} по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${removed}.`, warnings);
+    await this.comment(ctx, req.dealId, `${req.purpose ?? PAYMENT_KIND_LABELS[req.kind]} по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${removed}.`, warnings);
     await this.refreshPaid(ctx, req);
     await this.audit(req, 'expired', `Срок оплаты вышел: ссылка аннулирована${removed}`, {
       failStageId: opts?.payments.failStageId ?? null,

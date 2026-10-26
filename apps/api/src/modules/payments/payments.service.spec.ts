@@ -129,6 +129,18 @@ describe('PaymentsService', () => {
     await expect(t.svc.create(t.user, body({ timeoutHours: 25 }))).rejects.toMatchObject({ status: 400 });
   });
 
+  it('произвольная: без брони и расчёта, несколько сразу, без поля счёта и стадии сделки', async () => {
+    const t = setup({ active: true });
+    const p = await t.svc.preview(t.user, 678, 'custom');
+    expect(p).toMatchObject({ kind: 'custom', amount: null, requireBooking: false, bookingMissing: false, bookingId: null, message: 'Просим Вам произвести оплату {{СсылкаНаОплату}}' });
+    expect(p.problems).toEqual([]);
+    await expect(t.svc.create(t.user, body({ kind: 'custom', amount: 1500 }))).rejects.toMatchObject({ status: 400 });
+    await t.svc.create(t.user, body({ kind: 'custom', amount: 1500, purpose: 'Аренда инвентаря', timeoutHours: 2 }));
+    expect((t.calls.find((c) => c[0] === 'crm.item.add')![1].fields as { title: string }).title).toBe('Аренда инвентаря по сделке #678');
+    expect(t.calls.some((c) => c[0] === 'crm.deal.update')).toBe(false);
+    expect(t.prisma.paymentRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: 'custom', bookingId: null, timeoutMinutes: 120 }) });
+  });
+
   it('link not ready yet → stays pending for the worker', async () => {
     const t = setup();
     expect(await t.svc.create(t.user, body({ amount: 30000 }))).toMatchObject({ status: 'link_pending', amount: 30000 });

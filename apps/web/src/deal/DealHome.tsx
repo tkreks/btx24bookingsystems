@@ -20,7 +20,6 @@ import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
 import { ChatView } from '../openlines/ChatView.js';
 import { HideChatDialog } from '../openlines/DashboardPage.js';
 import { Icon, type IconName } from '../openlines/icons.js';
-import { PaymentLinkWizard } from './PaymentLinkWizard.js';
 
 /** Чат клиента сделки, где Wazzup сообщил «канал выключен» (по последнему сообщению). */
 export function brokenChat(items: ChatSummary[]): ChatSummary | null {
@@ -54,7 +53,7 @@ export function dealGroups(groups: MyGroupDto[], categoryId: number | null | und
 
 type Action = { key: 'pay' | 'book' | 'template'; icon: IconName; title: string; hint: string };
 const ACTIONS: Action[] = [
-  { key: 'pay', icon: 'coin', title: 'Ссылка на оплату', hint: 'Основание, сумма, срок — и сообщение клиенту' },
+  { key: 'pay', icon: 'coin', title: 'Получить оплату', hint: 'Ссылка на оплату: основание, сумма, срок' },
   { key: 'book', icon: 'calendar', title: 'Мастер бронирования', hint: 'Новая бронь по этой сделке' },
   { key: 'template', icon: 'send', title: 'Отправить шаблон', hint: 'Шаблон сообщения в чат клиента' },
 ];
@@ -240,8 +239,9 @@ export function DealHome({
       </section>
 
       {paying && (
-        <PaymentLinkWizard
+        <PaymentDialog
           dealId={dealId}
+          timezone={timezone}
           onClose={() => {
             setPaying(false);
             setPaymentRev((n) => n + 1);

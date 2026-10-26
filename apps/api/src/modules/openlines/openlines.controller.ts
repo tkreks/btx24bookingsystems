@@ -442,7 +442,8 @@ export class OpenlinesController {
   @Get('openlines/disk/start')
   async diskStart(@B24User() user: B24UserContext): Promise<DiskStartDto> {
     await this.require(user, 'openlines.send');
-    return this.files.diskStart(user);
+    const admin = (await this.access.resolve(user)).isAppAdmin;
+    return { ...(await this.files.diskStart(user)), admin };
   }
 
   @Get('openlines/disk')
