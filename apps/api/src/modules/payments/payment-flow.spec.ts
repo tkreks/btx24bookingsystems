@@ -67,7 +67,7 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
     (row = {
       id: 'q1', portalId: 'p1', idempotencyKey: 'k', dealId: 678, bookingId: o.booking ? 5918 : null, groupId: 'g1', kind: 'prepayment',
       amount: 25000 as unknown as PaymentRequest['amount'], invoiceId: 6001, link: null, status: 'link_pending', deadlineAt: null, messageSentAt: null,
-      paidAt: null, closedAt: null, createdByUserId: 242, createdByName: 'Тест', error: null, warnings: [], attempts: 0, createdAt: new Date(), updatedAt: new Date(),
+      paidAt: null, closedAt: null, createdByUserId: 242, createdByName: 'Тест', error: null, warnings: [], attempts: 0, purpose: null, timeoutMinutes: null, message: null, createdAt: new Date(), updatedAt: new Date(),
       ...over,
     } as PaymentRequest);
   const ctx = { portal, client, actor: { kind: 'system' as const, name: 'test' } };
@@ -154,6 +154,29 @@ describe('PaymentFlow', () => {
     expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 678, fields: { STAGE_ID: 'NEW' } });
     expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Бронь на 01.06.2020 снята');
     expect(m.indexOf('crm.item.payment.delete')).toBeLessThan(m.indexOf('booking.v1.booking.delete'));
+  });
+
+  it('встройка сделки: свой текст со {{СсылкаНаОплату}} и свой срок в часах — и для доплаты', async () => {
+    const t = setup({ link: 'https://pay.example/x' });
+    const before = Date.now();
+    const r = await t.flow.awaitLink(t.ctx, t.req({ kind: 'surcharge', message: 'Просим Вам произвести оплату {{СсылкаНаОплату}}', timeoutMinutes: 180 }));
+    expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Просим Вам произвести оплату https://pay.example/x');
+    expect(r.deadlineAt!.getTime()).toBeGreaterThanOrEqual(before + 180 * 60_000);
+    expect(r.deadlineAt!.getTime()).toBeLessThan(before + 181 * 60_000);
+  });
+
+  it('встройка сделки: переменную убрали — ссылка отдельной строкой в конце', async () => {
+    const t = setup({ link: 'https://pay.example/x' });
+    await t.flow.awaitLink(t.ctx, t.req({ message: 'Оплатите, пожалуйста' }));
+    expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Оплатите, пожалуйста\nhttps://pay.example/x');
+  });
+
+  it('срок доплаты вышел → ссылка аннулирована, бронь, стадия и клиент не тронуты', async () => {
+    const t = setup({ booking: true, payments: [{ id: 9001, paid: 'N' }] });
+    const r = await t.flow.watch(t.ctx, t.req({ kind: 'surcharge', status: 'sent', timeoutMinutes: 60, deadlineAt: new Date(Date.now() - 1000) }));
+    expect(r.status).toBe('expired');
+    expect(t.calls.filter((c) => c[0] === 'crm.item.payment.delete').map((c) => c[1].id)).toEqual([9001]);
+    expect(t.calls.some((c) => c[0] === 'booking.v1.booking.delete' || c[0] === 'crm.deal.update' || c[0] === 'imopenlines.crm.message.add')).toBe(false);
   });
 
   it('invoice set to «not paid» by hand → waiting stops at once, link annulled, booking and client untouched', async () => {

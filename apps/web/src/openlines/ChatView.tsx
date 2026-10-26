@@ -35,12 +35,16 @@ export function ChatView({
   status,
   onStatus,
   onOpenChat,
+  templatesRequest = 0,
 }: {
+  /** Сменился (больше 0) — открыть окно «Шаблоны» (быстрое действие во встройке сделки). */
+  templatesRequest?: number;
   chatId: number;
   timezone: string;
   templates: MessageTemplateDto[] | null;
   onTemplates: (t: MessageTemplateDto[]) => void;
-  onBack: () => void;
+  /** Нет — кнопки «назад» нет (встройка сделки, чат клиента один). */
+  onBack?: () => void;
   /** Что-то отправили/присоединились — список чатов стоит обновить. */
   onChanged: () => void;
   /** Счёт и ссылка на оплату по сделке чата (есть право `payment.send`). */
@@ -94,6 +98,12 @@ export function ChatView({
   // Окно «Шаблоны» (выбор по частоте); управление и новый шаблон — в TemplatesManager.
   const [templatesOpen, setTemplatesOpen] = useState<'pick' | 'list' | 'new' | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  // Запрос «Шаблоны» снаружи — открыть окно выбора, как кнопкой под «Отправить».
+  const [seenRequest, setSeenRequest] = useState(templatesRequest);
+  if (templatesRequest !== seenRequest) {
+    setSeenRequest(templatesRequest);
+    if (templatesRequest > 0) setTemplatesOpen('pick');
+  }
 
   const load = useCallback(async () => {
     try {
@@ -371,16 +381,18 @@ function ChatHeader({
   subtitle?: ReactNode;
   /** Под каналом: клиент, его статистика и брони. */
   details?: ReactNode;
-  onBack: () => void;
+  onBack?: () => void;
   /** Маленькие кнопки в правом верхнем углу. */
   children?: ReactNode;
 }) {
   return (
     <header className="cv-head">
       <div className="cv-contact-line">
-        <button className="cl-btn chat-back" aria-label="К списку чатов" title="К чатам" onClick={onBack}>
-          <Icon name="back" />
-        </button>
+        {onBack && (
+          <button className="cl-btn chat-back" aria-label="К списку чатов" title="К чатам" onClick={onBack}>
+            <Icon name="back" />
+          </button>
+        )}
         <Avatar src={avatar} name={title} size={null} tone={avatarTone(chatId)} className="large" />
         <div className="cv-contact-info">
           {onTitle ? (

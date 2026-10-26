@@ -4,6 +4,7 @@ import {
   DEFAULT_FAIL_MESSAGE,
   DEFAULT_SURCHARGE_MESSAGE,
   renderMessage,
+  withPaymentLink,
   type ClientMessageStep,
   type MessageContext,
   type GroupOptionsDto,
@@ -152,7 +153,8 @@ export class PaymentFlow {
 
     const mc = await this.messages(ctx, req.dealId);
     const deal = mc.deal;
-    const minutes = req.kind === 'prepayment' ? opts.payments.timeoutMinutes : null;
+    // Свой срок из встройки сделки — и для доплаты; иначе срок группы (только предоплата).
+    const minutes = req.timeoutMinutes ?? (req.kind === 'prepayment' ? opts.payments.timeoutMinutes : null);
     const deadline = minutes ? new Date(Date.now() + minutes * 60_000) : null;
     const vars = {
       ...mc.vars,
@@ -161,7 +163,10 @@ export class PaymentFlow {
       minutes: minutes ?? '',
       deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
     };
-    const tpl = await this.paymentTemplate(ctx.portal.id, req.kind, opts, warnings);
+    // Свой текст из встройки сделки — одним сообщением, `{{СсылкаНаОплату}}` — ссылка.
+    const tpl = req.message
+      ? { name: null, steps: [{ text: withPaymentLink(req.message, req.link), files: [] }] }
+      : await this.paymentTemplate(ctx.portal.id, req.kind, opts, warnings);
     const steps = await this.withFileData(
       ctx.portal.id,
       tpl.steps.map((st) => ({ ...st, text: renderMessage(st.text, { ...mc, vars }) })),
@@ -251,23 +256,26 @@ export class PaymentFlow {
       await this.safe(warnings, 'счёт → «Не оплачен»', () => ctx.client.call('crm.item.update', { entityTypeId: 31, id: req.invoiceId, fields: { stageId: `DT31_${cat}:D` } }));
     if (req.invoiceId) await this.annulPayments(ctx, req.invoiceId, warnings);
 
-    if (req.bookingId) {
+    // Срок доплаты (свой срок из встройки сделки) только аннулирует ссылку: бронь и стадию не трогаем.
+    const pre = req.kind === 'prepayment';
+    if (pre && req.bookingId) {
       const rec = await this.journal.find(ctx.portal.id, req.bookingId);
       if (rec?.status === 'active') {
         const removed = await this.safe(warnings, `снять бронь #${req.bookingId}`, () => ctx.client.call('booking.v1.booking.delete', { id: req.bookingId }));
         if (removed) await this.journal.recordCancelled(ctx.portal.id, req.bookingId, { reason: 'payment_timeout', actor: SYSTEM.paymentTimeout, via: 'worker' });
       }
     }
-    if (opts?.payments.failStageId) await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.failStageId }, warnings, 'стадия «не оплачено»');
-    const failText = opts?.payments.failMessage ?? DEFAULT_FAIL_MESSAGE;
+    if (pre && opts?.payments.failStageId) await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.failStageId }, warnings, 'стадия «не оплачено»');
+    const failText = pre ? (opts?.payments.failMessage ?? DEFAULT_FAIL_MESSAGE) : '';
     if (failText.trim()) {
       const mc = await this.messages(ctx, req.dealId);
-      const text = renderMessage(failText, { ...mc, vars: { ...mc.vars, minutes: opts?.payments.timeoutMinutes ?? '' } });
+      const text = renderMessage(failText, { ...mc, vars: { ...mc.vars, minutes: req.timeoutMinutes ?? opts?.payments.timeoutMinutes ?? '' } });
       await this.sendToClient(ctx, target(req), mc.deal, text, warnings);
     }
-    await this.comment(ctx, req.dealId, `Предоплата по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}.`, warnings);
+    const removed = pre && req.bookingId ? `, бронь #${req.bookingId} снята` : '';
+    await this.comment(ctx, req.dealId, `${pre ? 'Предоплата' : 'Доплата'} по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${removed}.`, warnings);
     await this.refreshPaid(ctx, req);
-    await this.audit(req, 'expired', `Срок оплаты вышел: ссылка аннулирована${req.bookingId ? `, бронь #${req.bookingId} снята` : ''}`, {
+    await this.audit(req, 'expired', `Срок оплаты вышел: ссылка аннулирована${removed}`, {
       failStageId: opts?.payments.failStageId ?? null,
       warnings,
     });

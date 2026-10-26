@@ -248,7 +248,7 @@ export function CalendarPage({
   const dealChecked = dealBookingsInfo !== null || dealBookingsFailed;
   // «Новая бронь» из встройки сделки — мастер брони поверх календаря.
   const startBooking = () => {
-    setScreen({ name: 'calendar' });
+    if (screen.name !== 'deal-home') setScreen({ name: 'calendar' });
     setBookingForm({ date });
   };
   // Проверка закончилась, пока открыто окно, и брони нет — сразу мастер брони.
@@ -271,18 +271,61 @@ export function CalendarPage({
     }
   };
 
+  // Мастер брони и окно оплаты — и поверх календаря, и поверх встройки сделки.
+  const overlays = (
+    <>
+      {bookingForm && (
+        <ErrorBoundary where="booking-form" onClose={() => setBookingForm(null)}>
+          <BookingForm
+            groups={groups ?? []}
+            timezone={tz}
+            context={{
+              ...bookingForm,
+              groupId: activeGroup?.id ?? null,
+              dealId: placement.dealId,
+              contactId: dealBookingsInfo?.contactId ?? null,
+              openDeals: dealBookingsInfo?.openDeals ?? [],
+            }}
+            onClose={() => setBookingForm(null)}
+            onDone={(r) => {
+              setBookingForm(null);
+              if (r.payment && r.dealId && groups?.some((g) => g.permissions.includes('payment.send')))
+                setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal });
+              setCreatedNote(r.note);
+              setSettingsRevision((n) => n + 1);
+            }}
+          />
+        </ErrorBoundary>
+      )}
+      {payment && (
+        <PaymentDialog
+          dealId={payment.dealId}
+          bookingId={payment.bookingId}
+          initialAmount={payment.amount}
+          fixedDeal={payment.fixedDeal}
+          timezone={tz}
+          onClose={() => setPayment(null)}
+          onCreateBooking={() => {
+            setPayment(null);
+            setBookingForm({ date });
+          }}
+        />
+      )}
+    </>
+  );
+
   if (screen.name === 'deal-home' && placement.dealId)
     return (
       <>
         <DealHome
           dealId={placement.dealId}
           timezone={tz}
+          groups={groups ?? []}
+          dealInfo={dealBookingsInfo}
           canBook={session.canManageApp || permissions.has('booking.create')}
-          onOpenChat={(chatId) => setScreen({ name: 'chats', deal: true, chatId })}
-          onOpen={(target) => {
-            if (target === 'chats') setScreen({ name: 'chats', deal: true });
-            else if (target === 'calendar') setScreen({ name: 'calendar' });
-            else if (dealChecked && !dealBooking) startBooking();
+          canPay={session.canManageApp || permissions.has('payment.send')}
+          onBooking={() => {
+            if (dealChecked && !dealBooking) startBooking();
             else {
               setNewDealError('');
               setDealWarning(true);
@@ -304,6 +347,7 @@ export function CalendarPage({
             onClose={() => !creatingDeal && setDealWarning(false)}
           />
         )}
+        {overlays}
       </>
     );
 
@@ -394,7 +438,7 @@ export function CalendarPage({
       <header className="toolbar">
         <div className="toolbar-title">
           {placement.dealId && (
-            <button className="deal-back" title="К меню сделки: чат, календарь, новая бронь" onClick={() => setScreen({ name: 'deal-home' })}>
+            <button className="deal-back" title="К встройке сделки: чат, шкала, быстрые действия" onClick={() => setScreen({ name: 'deal-home' })}>
               ‹ Сделка
             </button>
           )}
@@ -568,43 +612,7 @@ export function CalendarPage({
           onChanged={() => setDayRev((n) => n + 1)}
         />
       )}
-      {bookingForm && (
-        <ErrorBoundary where="booking-form" onClose={() => setBookingForm(null)}>
-          <BookingForm
-            groups={groups ?? []}
-            timezone={tz}
-            context={{
-              ...bookingForm,
-              groupId: activeGroup?.id ?? null,
-              dealId: placement.dealId,
-              contactId: dealBookingsInfo?.contactId ?? null,
-              openDeals: dealBookingsInfo?.openDeals ?? [],
-            }}
-            onClose={() => setBookingForm(null)}
-            onDone={(r) => {
-              setBookingForm(null);
-              if (r.payment && r.dealId && groups?.some((g) => g.permissions.includes('payment.send')))
-                setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal });
-              setCreatedNote(r.note);
-              setSettingsRevision((n) => n + 1);
-            }}
-          />
-        </ErrorBoundary>
-      )}
-      {payment && (
-        <PaymentDialog
-          dealId={payment.dealId}
-          bookingId={payment.bookingId}
-          initialAmount={payment.amount}
-          fixedDeal={payment.fixedDeal}
-          timezone={tz}
-          onClose={() => setPayment(null)}
-          onCreateBooking={() => {
-            setPayment(null);
-            setBookingForm({ date });
-          }}
-        />
-      )}
+      {overlays}
     </div>
   );
 }

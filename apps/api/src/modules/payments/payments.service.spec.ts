@@ -96,7 +96,7 @@ function setup(
   const svc = new PaymentsService(prisma, access, fieldMap, flow);
   svc.sleep = async () => {};
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 242, userName: 'Тест', client: { call, listAll } } as unknown as B24UserContext;
-  return { svc, user, calls };
+  return { svc, user, calls, prisma };
 }
 
 const body = (over: Record<string, unknown> = {}) => ({ idempotencyKey: 'pay-12345678', dealId: 678, kind: 'prepayment', ...over });
@@ -117,6 +117,16 @@ describe('PaymentsService', () => {
     });
     expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 678, fields: { UF_INV: 6001, STAGE_ID: 'UC_DIZN23' } });
     expect(r).toMatchObject({ status: 'sent', invoiceId: 6001, amount: 45000, messageSent: true });
+  });
+
+  it('встройка сделки: основание в названии и комментарии счёта, свой текст и срок пишутся в заявку', async () => {
+    const t = setup();
+    await t.svc.create(t.user, body({ amount: 3000, purpose: 'Аренда мангала', timeoutHours: 3, message: 'Просим Вам произвести оплату {{СсылкаНаОплату}}' }));
+    const f = t.calls.find((c) => c[0] === 'crm.item.add')![1].fields as { title: string; comments: string };
+    expect(f.title).toMatch(/^Аренда мангала по сделке #678/);
+    expect(f.comments).toContain('Основание: Аренда мангала');
+    expect(t.prisma.paymentRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ purpose: 'Аренда мангала', timeoutMinutes: 180, message: 'Просим Вам произвести оплату {{СсылкаНаОплату}}' }) });
+    await expect(t.svc.create(t.user, body({ timeoutHours: 25 }))).rejects.toMatchObject({ status: 400 });
   });
 
   it('link not ready yet → stays pending for the worker', async () => {

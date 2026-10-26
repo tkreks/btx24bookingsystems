@@ -1,0 +1,31 @@
+import { describe, expect, it } from 'vitest';
+import { withPaymentLink, type MyGroupDto } from '@btx24/shared';
+import { dealGroups } from './DealHome.js';
+import { defaultHours, parseHours } from './PaymentLinkWizard.js';
+
+describe('мастер «Ссылка на оплату»', () => {
+  it('срок по умолчанию — из группы, в часах, не больше 24', () => {
+    expect(defaultHours(90)).toBe('2');
+    expect(defaultHours(60 * 48)).toBe('24');
+    expect(defaultHours(null)).toBe('');
+  });
+  it('срок — пусто (без срока) или целое 1–24', () => {
+    expect(parseHours('')).toBeNull();
+    expect(parseHours('3')).toBe(3);
+    expect(parseHours('25')).toBe('invalid');
+    expect(parseHours('1.5')).toBe('invalid');
+  });
+  it('{{СсылкаНаОплату}} — ссылкой; без переменной — ссылка в конце', () => {
+    expect(withPaymentLink('Просим Вам произвести оплату {{СсылкаНаОплату}}', 'https://p/x')).toBe('Просим Вам произвести оплату https://p/x');
+    expect(withPaymentLink('Оплатите', 'https://p/x')).toBe('Оплатите\nhttps://p/x');
+  });
+});
+
+describe('шкала во встройке сделки', () => {
+  const g = (id: string, dealCategoryId: number | null, view = true) => ({ id, dealCategoryId, permissions: view ? ['calendar.view'] : [] }) as unknown as MyGroupDto;
+  it('группы воронки сделки; воронка неизвестна — все', () => {
+    const groups = [g('a', 1), g('b', 2), g('c', 1, false), g('d', 1)];
+    expect(dealGroups(groups, 1)).toEqual(['a', 'd']);
+    expect(dealGroups(groups, undefined)).toEqual([]);
+  });
+});

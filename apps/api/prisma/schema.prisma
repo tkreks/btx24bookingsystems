@@ -765,6 +765,12 @@ model PaymentRequest {
   error           String?              @db.VarChar(1000)
   warnings        Json?
   attempts        Int                  @default(0)
+  /// Основание платежа (встройка сделки); в названии и комментарии счёта.
+  purpose         String?              @db.VarChar(255)
+  /// Свой срок оплаты (встройка сделки, до 24 ч); null — срок группы.
+  timeoutMinutes  Int?
+  /// Свой текст клиенту, `{{СсылкаНаОплату}}` — ссылка; null — шаблон оплаты группы.
+  message         String?              @db.Text
   createdAt       DateTime             @default(now()) @db.DateTime(3)
   updatedAt       DateTime             @updatedAt @db.DateTime(3)
 

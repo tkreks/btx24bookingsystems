@@ -198,3 +198,18 @@ export function invoiceInWork(i: DealInvoiceDto): boolean {
   if (i.request) return i.request.status === 'link_pending' || i.request.status === 'sent';
   return true;
 }
+
+/**
+ * Ссылка на оплату из встройки сделки (решение владельца 2026-10-26): основание, сумма, срок до 24 ч и
+ * свой текст клиенту. `{{СсылкаНаОплату}}` в тексте заменяется ссылкой.
+ */
+export const PAYMENT_LINK_VAR = '{{СсылкаНаОплату}}';
+export const DEFAULT_PAYMENT_LINK_MESSAGE = `Просим Вам произвести оплату ${PAYMENT_LINK_VAR}`;
+export const PAYMENT_MAX_TIMEOUT_HOURS = 24;
+
+/** Текст клиенту со ссылкой: переменную — ссылкой; убрали переменную — ссылка отдельной строкой в конце. */
+export function withPaymentLink(text: string, link: string): string {
+  const body = text.trim();
+  if (body.includes(PAYMENT_LINK_VAR)) return body.split(PAYMENT_LINK_VAR).join(link);
+  return body ? `${body}\n${link}` : link;
+}

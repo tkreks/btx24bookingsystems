@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import {
   PAYMENT_KINDS,
+  PAYMENT_MAX_TIMEOUT_HOURS,
   moneyValue,
   paymentAmount,
   renderMessage,
@@ -31,6 +32,10 @@ const createSchema = z
     groupId: z.string().min(1).max(40).optional(),
     amount: z.number().positive().max(10_000_000).nullable().optional(),
     bookingId: z.number().int().positive().nullable().optional(),
+    // Встройка сделки: основание, свой срок (часы) и свой текст клиенту (`{{СсылкаНаОплату}}` — ссылка).
+    purpose: z.string().trim().min(1).max(200).optional(),
+    timeoutHours: z.number().int().min(1).max(PAYMENT_MAX_TIMEOUT_HOURS).nullable().optional(),
+    message: z.string().trim().min(1).max(4000).optional(),
   })
   .strict();
 
@@ -198,6 +203,9 @@ export class PaymentsService {
         createdByUserId: user.userId,
         createdByName: user.userName,
         warnings: [],
+        purpose: b.purpose ?? null,
+        timeoutMinutes: b.timeoutHours ? b.timeoutHours * 60 : null,
+        message: b.message ?? null,
       },
     });
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
@@ -208,7 +216,7 @@ export class PaymentsService {
         entityTypeId: 31,
         fields: {
           // Сделка и бронь — в названии: у одного клиента бывает несколько сделок (в разных воронках).
-          title: `Счёт на ${b.kind === 'prepayment' ? 'предоплату' : 'доплату'} по сделке #${b.dealId}${bookingId ? `, бронь #${bookingId}` : ''}`,
+          title: `${b.purpose ? b.purpose : `Счёт на ${b.kind === 'prepayment' ? 'предоплату' : 'доплату'}`} по сделке #${b.dealId}${bookingId ? `, бронь #${bookingId}` : ''}`.slice(0, 255),
           categoryId: inv.categoryId,
           stageId: b.kind === 'prepayment' ? inv.prepaymentStageId : inv.surchargeStageId,
           assignedById: Number(deal?.ASSIGNED_BY_ID) || user.userId,
@@ -216,7 +224,7 @@ export class PaymentsService {
           currencyId: 'RUB',
           isManualOpportunity: 'Y',
           opportunity: amount,
-          comments: `Выставлен из приложения бронирования (${p.source === 'fixed' ? 'фиксированная сумма группы' : p.source === 'manual' ? 'ручная сумма из сделки' : p.source === 'percent' ? 'процент от суммы сделки' : p.source === 'certificate' ? 'номинал сертификата' : 'сумма указана сотрудником'})`,
+          comments: `Выставлен из приложения бронирования (${p.source === 'fixed' ? 'фиксированная сумма группы' : p.source === 'manual' ? 'ручная сумма из сделки' : p.source === 'percent' ? 'процент от суммы сделки' : p.source === 'certificate' ? 'номинал сертификата' : 'сумма указана сотрудником'})${b.purpose ? `. Основание: ${b.purpose}` : ''}`,
           parentId2: b.dealId,
           ...inv.fields,
         },

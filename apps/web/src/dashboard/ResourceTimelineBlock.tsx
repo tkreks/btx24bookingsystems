@@ -61,8 +61,12 @@ export function liveBookings<T extends Pick<CalendarBooking, 'start' | 'end'>>(b
  * Локальная дата шкалы независима от периода показателей: день — часы, 2–7 дней — суточные ячейки.
  * `live` — «Брони — шкала — текущие»: сегодня, только ресурсы с идущей сейчас бронью и только эти брони.
  */
-export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, live = false }: {
-  groups: MyGroupDto[]; config: string[] | undefined; timezone: string; onConfigure: (groupIds: string[]) => void; live?: boolean;
+export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, live = false, deal, groupTabs = false }: {
+  groups: MyGroupDto[]; config: string[] | undefined; timezone: string; onConfigure?: (groupIds: string[]) => void; live?: boolean;
+  /** Встройка сделки: бронь со шкалы — по этой сделке (клиент и открытые сделки — для мастера). */
+  deal?: { dealId: number; contactId: number | null; openDeals: ClientBookingsDto['openDeals'] };
+  /** Группы — кнопками рядом с заголовком (встройка сделки), а не только в окне выбора ресурсов. */
+  groupTabs?: boolean;
 }) {
   const visible = groups.filter(g => g.permissions.includes('calendar.view'));
   const chosen = config?.length ? visible.filter(g => config.includes(g.id)) : visible;
@@ -148,8 +152,11 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
     <div className="timeline-heading">
       <p className="dash-attention-title muted">{live ? 'Брони · шкала · текущие' : 'Брони · шкала'}</p>
       {group && <button type="button" className="timeline-resources-trigger" onClick={() => setPicker(true)} aria-label="Выбрать группу и ресурсы шкалы"><b>{group.name}</b><span>{filter ? `Ресурсов: ${resources.length}` : 'Все ресурсы'} ⌄</span></button>}
-      {visible.length > 1 && <button type="button" className="dash-kpi-setup" aria-label="Выбрать группы шкалы" title="Какие группы показывать" onClick={() => setSetup(true)}>⚙</button>}
+      {visible.length > 1 && onConfigure && <button type="button" className="dash-kpi-setup" aria-label="Выбрать группы шкалы" title="Какие группы показывать" onClick={() => setSetup(true)}>⚙</button>}
     </div>
+    {groupTabs && chosen.length > 1 && <div className="timeline-group-tabs" role="radiogroup" aria-label="Группа шкалы">
+      {chosen.map(g => <button key={g.id} type="button" role="radio" aria-checked={g.id === group?.id} className={g.id === group?.id ? 'active' : ''} onClick={() => setGroupId(g.id)}>{g.name}</button>)}
+    </div>}
     {!live && <div className="timeline-controls">
       <div className="timeline-date-nav">
         <button type="button" aria-label={period ? 'Предыдущий период шкалы' : 'Предыдущий день шкалы'} onClick={() => move(-1)}>‹</button>
@@ -201,10 +208,10 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
       <p className="timeline-legend muted">{live ? 'Брони, которые идут сейчас; синяя черта — текущее время. ' : period ? 'Красный день — есть хотя бы одна бронь. Нажмите день для часовой шкалы. ' : 'Зелёное — свободно, красное — бронь. '}{!live && 'Серый штрих — стоп, бронирование закрыто.'}</p>
     </>}
     {selected && <TimelineBooking booking={selected} resources={new Map(allResources.map(r => [r.id, r.name]))} timezone={timezone} onClose={() => setSelected(null)} />}
-    {form && group && <ErrorBoundary where="booking-form" onClose={() => setForm(null)}><BookingForm groups={groups} timezone={timezone} context={{ ...form, groupId: group.id }} onClose={() => setForm(null)} onDone={(r: WizardResult) => { setForm(null); if (r.payment && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal }); setNote(r.note); setRev(n => n + 1); }} /></ErrorBoundary>}
+    {form && group && <ErrorBoundary where="booking-form" onClose={() => setForm(null)}><BookingForm groups={groups} timezone={timezone} context={{ ...form, groupId: group.id, ...(deal ? { dealId: deal.dealId, contactId: deal.contactId, openDeals: deal.openDeals } : {}) }} onClose={() => setForm(null)} onDone={(r: WizardResult) => { setForm(null); if (r.payment && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal }); setNote(r.note); setRev(n => n + 1); }} /></ErrorBoundary>}
     {payment && <PaymentDialog dealId={payment.dealId} bookingId={payment.bookingId} initialAmount={payment.amount} fixedDeal={payment.fixedDeal} timezone={timezone} onClose={() => setPayment(null)} />}
     {picker && group && <TimelineResourcesPicker groups={chosen} groupId={group.id} resources={allResources} filter={filter} stops={current?.stops ?? []} loading={!current} onGroup={setGroupId} onFilter={ids => setFilters(prev => ({ ...prev, [group.id]: ids }))} onClose={() => setPicker(false)} />}
-    {setup && <TimelineSetup groups={visible} value={chosen.map(g => g.id)} onClose={() => setSetup(false)} onSave={ids => { setSetup(false); onConfigure(ids.length === visible.length ? [] : ids); }} />}
+    {setup && <TimelineSetup groups={visible} value={chosen.map(g => g.id)} onClose={() => setSetup(false)} onSave={ids => { setSetup(false); onConfigure?.(ids.length === visible.length ? [] : ids); }} />}
   </section>;
 }
 
