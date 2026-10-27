@@ -77,6 +77,19 @@ export class MessengerScreenController {
     return this.service.uploadScreenFile(id, { mime: file.mimetype || 'application/octet-stream', name, data: file.buffer });
   }
 
+  /** Содержимое файла экрана (миниатюры картинок в окне файлов). */
+  @Get(':id/screen-files/:fileId/content')
+  async content(@B24User() user: B24UserContext, @Param('id') id: string, @Param('fileId') fileId: string, @Res() res: Response): Promise<void> {
+    await this.chats.forUser(user, id, true);
+    if (!FILE_ID_RE.test(fileId)) throw new NotFoundException();
+    const f = await this.service.screenFile(id, fileId);
+    if (!f) throw new NotFoundException({ code: 'NO_FILE', message: 'Файл удалён: прошёл час или его убрали' });
+    // Только картинки показываем как есть; остальное — скачиванием (не исполняется в странице приложения).
+    res.setHeader('Content-Type', f.mime.startsWith('image/') && f.mime !== 'image/svg+xml' ? f.mime : 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(f.data);
+  }
+
   @Delete(':id/screen-files/:fileId')
   async remove(@B24User() user: B24UserContext, @Param('id') id: string, @Param('fileId') fileId: string): Promise<MessengerScreenFilesDto> {
     await this.chats.forUser(user, id, true);
@@ -101,9 +114,11 @@ export class MessengerScreenController {
   @HttpCode(200)
   async pasteText(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<{ ok: boolean }> {
     await this.chats.forUser(user, id, true);
-    const text = (body as { text?: unknown } | null)?.text;
-    if (typeof text !== 'string' || !text || text.length > 20_000) throw new BadRequestException({ code: 'NO_TEXT', message: 'Нет текста (до 20 000 знаков)' });
-    return this.service.screenPaste(id, { text });
+    const b = (body ?? {}) as { text?: unknown; fileId?: unknown };
+    // Файл, уже загруженный в файлы экрана (двойной клик в окне файлов), — вставить в открытый чат.
+    if (typeof b.fileId === 'string' && FILE_ID_RE.test(b.fileId)) return this.service.screenPaste(id, { fileId: b.fileId });
+    if (typeof b.text !== 'string' || !b.text || b.text.length > 20_000) throw new BadRequestException({ code: 'NO_TEXT', message: 'Нет текста (до 20 000 знаков)' });
+    return this.service.screenPaste(id, { text: b.text });
   }
 
   @Post(':id/screen-paste-file')

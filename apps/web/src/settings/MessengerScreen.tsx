@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MessengerScreenFilesDto, MessengerVncTicketDto } from '@btx24/shared';
+import type { MessengerScreenFileDto, MessengerScreenFilesDto, MessengerVncTicketDto } from '@btx24/shared';
+import { Icon } from '../openlines/icons.js';
 import { apiBlob, apiDelete, apiGet, apiPost, apiUpload } from '../api.js';
 
 /**
@@ -110,39 +111,60 @@ export function MessengerScreen({ id, onClose, base = '/admin/messengers', files
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet messenger-screen" role="dialog" aria-modal="true" aria-label="Экран мессенджера" onClick={(e) => e.stopPropagation()}>
-        <header>
+        <header className="ms-head">
           <h2>{title}</h2>
-          <button type="button" onClick={() => setMode(mode === 'vnc' ? 'shot' : 'vnc')}>
-            {mode === 'vnc' ? 'Снимок экрана' : 'Живой экран (VNC)'}
+          <span className="muted ms-note" role="status" title={status || pasteNote || PASTE_HINT}>
+            {status || pasteNote || (mode === 'vnc' ? PASTE_HINT : 'Снимок экрана, обновляется раз в 3 секунды')}
+          </span>
+          {files && <ScreenFilesButton id={id} />}
+          <button
+            type="button"
+            className={`ms-icon${mode === 'shot' ? ' active' : ''}`}
+            aria-pressed={mode === 'shot'}
+            title={mode === 'vnc' ? 'Снимок экрана (если живой экран не открывается)' : 'Вернуться к живому экрану'}
+            aria-label={mode === 'vnc' ? 'Снимок экрана' : 'Живой экран'}
+            onClick={() => setMode(mode === 'vnc' ? 'shot' : 'vnc')}
+          >
+            <Icon name="camera" size={18} />
           </button>
-          <button type="button" aria-label="Закрыть экран" onClick={onClose}>
+          <button type="button" className="ms-icon" aria-label="Закрыть экран" title="Закрыть" onClick={onClose}>
             ×
           </button>
         </header>
-        {status && <p className="muted" role="status">{status}</p>}
-        {mode === 'vnc' && !status && (
-          <p className="muted messenger-paste-hint" role="status">
-            {pasteNote || 'Ctrl+V — вставить текст или файл с вашего компьютера в поле под курсором; файлы можно перетащить на экран.'}
-          </p>
-        )}
         {mode === 'vnc' ? <div ref={box} className="messenger-vnc" /> : shot && <img className="messenger-shot" src={shot} alt="Снимок экрана браузера" />}
-        {files && <ScreenFiles id={id} />}
       </div>
     </div>
   );
 }
 
+const PASTE_HINT = 'Ctrl+V — вставить текст или файл в поле под курсором; файлы можно перетащить на экран';
 const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
+/** Тип файла для значка «папки»: подпись и цвет как у программы, которая его откроет. */
+export function fileKind(name: string, mime: string): { label: string; tone: string; app: string } {
+  const ext = (name.split('.').pop() ?? '').toLowerCase();
+  if (mime === 'application/pdf' || ext === 'pdf') return { label: 'PDF', tone: 'pdf', app: 'PDF-просмотрщик' };
+  if (['doc', 'docx', 'rtf', 'odt'].includes(ext)) return { label: 'W', tone: 'word', app: 'Word' };
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(ext)) return { label: 'X', tone: 'excel', app: 'Excel' };
+  if (['ppt', 'pptx', 'odp'].includes(ext)) return { label: 'P', tone: 'ppt', app: 'PowerPoint' };
+  if (['zip', 'rar', '7z', 'gz', 'tar'].includes(ext)) return { label: 'ZIP', tone: 'zip', app: 'Архиватор' };
+  if (mime.startsWith('video/')) return { label: '▶', tone: 'video', app: 'Видеоплеер' };
+  if (mime.startsWith('audio/')) return { label: '♪', tone: 'audio', app: 'Аудиоплеер' };
+  if (mime.startsWith('image/')) return { label: 'IMG', tone: 'image', app: 'Просмотр фото' };
+  if (mime.startsWith('text/') || ['txt', 'md', 'log'].includes(ext)) return { label: 'TXT', tone: 'text', app: 'Блокнот' };
+  return { label: ext.slice(0, 4).toUpperCase() || 'FILE', tone: 'other', app: 'Файл' };
+}
+
 /**
- * Файлы для отправки с экрана: загрузить (хранятся час), «Прикрепить» — следующее окно выбора файла
- * в мессенджере получит этот файл (нажмите 📎 на экране), дальше — отправить как обычно.
+ * Скрепка в шапке экрана: загрузить файл; есть загруженные — кружок с числом, по нажатию — окно
+ * файлов в виде папки (миниатюры картинок, значки документов). Ожидание 📎 — строкой под шапкой.
  */
-function ScreenFiles({ id }: { id: string }) {
+function ScreenFilesButton({ id }: { id: string }) {
   const [state, setState] = useState<MessengerScreenFilesDto | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const path = `/messengers/${id}/screen-files`;
   const run = (p: Promise<MessengerScreenFilesDto>) => {
@@ -165,42 +187,134 @@ function ScreenFiles({ id }: { id: string }) {
     for (const f of Array.from(list ?? [])) await run(apiUpload<MessengerScreenFilesDto>(path, f));
     if (input.current) input.current.value = '';
   };
+  const count = state?.files.length ?? 0;
 
   return (
-    <section className="screen-files" aria-label="Файлы для отправки">
-      <div className="screen-files-head">
-        <b>Файлы для отправки</b>
-        <span className="muted">хранятся час, потом удаляются</span>
-        <button type="button" className="primary" disabled={busy} onClick={() => input.current?.click()}>
-          Загрузить файл
+    <>
+      <span className="ms-files">
+        <button type="button" className="ms-icon" disabled={busy} title="Загрузить файл для отправки с экрана (хранится час)" aria-label="Загрузить файл" onClick={() => input.current?.click()}>
+          <Icon name="clip" size={18} />
         </button>
-        <input ref={input} type="file" multiple hidden onChange={(e) => void upload(e.target.files)} />
-      </div>
-      {error && <p className="notice error" role="alert">{error}</p>}
-      {offer && (
-        <p className="notice screen-files-offer" role="status">
-          Нажмите 📎 в окне мессенджера и выберите «Документ» или «Фото и видео» — файл
-          «{state?.files.find((f) => f.id === offer.fileId)?.name ?? 'файл'}» подставится сам (до {hhmm(offer.until)}). Затем отправьте сообщение.{' '}
-          <button type="button" className="link" onClick={() => void run(apiDelete(path))}>
-            Отменить
+        {count > 0 && (
+          <button type="button" className="ms-files-count" title={`Загруженные файлы: ${count}`} aria-label={`Открыть загруженные файлы: ${count}`} onClick={() => setOpen(true)}>
+            {count}
           </button>
+        )}
+        <input ref={input} type="file" multiple hidden onChange={(e) => void upload(e.target.files)} />
+      </span>
+      {(error || offer) && (
+        <p className={`notice ms-files-line${error ? ' error' : ''}`} role={error ? 'alert' : 'status'}>
+          {error ||
+            `Нажмите 📎 в окне мессенджера — файл «${state?.files.find((f) => f.id === offer!.fileId)?.name ?? 'файл'}» подставится сам (до ${hhmm(offer!.until)}).`}{' '}
+          {offer && !error && (
+            <button type="button" className="link" onClick={() => void run(apiDelete(path))}>
+              Отменить
+            </button>
+          )}
         </p>
       )}
-      {state && !state.files.length && <p className="muted">Файлов нет. Загрузите файл — его можно будет прикрепить в окне мессенджера.</p>}
-      <ul className="screen-files-list">
-        {state?.files.map((f) => (
-          <li key={f.id}>
-            <span className="screen-file-name" title={f.name}>{f.name}</span>
-            <span className="muted">{fmtSize(f.size)} · удалится в {hhmm(f.expiresAt)}{f.attachedAt ? ` · прикреплён в ${hhmm(f.attachedAt)}` : ''}</span>
-            <button type="button" disabled={busy} className={offer?.fileId === f.id ? 'active' : ''} onClick={() => void run(apiPost(`${path}/${f.id}/attach`))}>
-              {offer?.fileId === f.id ? 'Ждём 📎…' : 'Прикрепить'}
-            </button>
-            <button type="button" aria-label={`Удалить ${f.name}`} disabled={busy} onClick={() => void run(apiDelete(`${path}/${f.id}`))}>
-              ×
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
+      {open && state && (
+        <FilesFolder
+          id={id}
+          state={state}
+          busy={busy}
+          onUpload={() => input.current?.click()}
+          onAttach={(fileId) => void run(apiPost(`${path}/${fileId}/attach`)).then(() => setOpen(false))}
+          onPaste={(fileId) => {
+            setOpen(false);
+            void apiPost(`/messengers/${id}/screen-paste`, { fileId }).catch((e) => setError(e instanceof Error ? e.message : 'Не вставилось'));
+          }}
+          onRemove={(fileId) => void run(apiDelete(`${path}/${fileId}`))}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** Окно файлов экрана в виде папки Проводника: плитки, двойной клик — вставить в открытый чат. */
+function FilesFolder({ id, state, busy, onUpload, onAttach, onPaste, onRemove, onClose }: {
+  id: string;
+  state: MessengerScreenFilesDto;
+  busy: boolean;
+  onUpload: () => void;
+  onAttach: (fileId: string) => void;
+  onPaste: (fileId: string) => void;
+  onRemove: (fileId: string) => void;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const sel = state.files.find((f) => f.id === selected) ?? null;
+  return (
+    <div className="sheet-backdrop folder-backdrop" onClick={onClose}>
+      <div className="folder" role="dialog" aria-modal="true" aria-label="Файлы для отправки" onClick={(e) => e.stopPropagation()}>
+        <header className="folder-title">
+          <Icon name="folder" size={16} />
+          <span>Файлы для отправки</span>
+          <button type="button" className="folder-close" aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <div className="folder-toolbar">
+          <button type="button" disabled={busy} onClick={onUpload}>
+            <Icon name="clip" size={14} /> Загрузить
+          </button>
+          <button type="button" disabled={!sel || busy} onClick={() => sel && onPaste(sel.id)} title="Вставить в открытый чат мессенджера (как Ctrl+V)">
+            Вставить в чат
+          </button>
+          <button type="button" disabled={!sel || busy} onClick={() => sel && onAttach(sel.id)} title="Подставить в окно выбора файла: потом нажмите 📎 в мессенджере">
+            Прикрепить через 📎
+          </button>
+          <button type="button" disabled={!sel || busy} onClick={() => sel && onRemove(sel.id)}>
+            Удалить
+          </button>
+          <span className="folder-path muted">Экран › Файлы</span>
+        </div>
+        <ul className="folder-grid" role="listbox" aria-label="Файлы">
+          {state.files.map((f) => (
+            <li key={f.id} role="option" aria-selected={selected === f.id}>
+              <button type="button" className={`folder-item${selected === f.id ? ' selected' : ''}`} title={`${f.name}\n${fmtSize(f.size)} · удалится в ${hhmm(f.expiresAt)}${f.attachedAt ? ` · прикреплён в ${hhmm(f.attachedAt)}` : ''}\nДвойной клик — вставить в чат`} onClick={() => setSelected(f.id)} onDoubleClick={() => onPaste(f.id)}>
+                <FileThumb id={id} file={f} />
+                <span className="folder-name">{f.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <footer className="folder-status muted">
+          Объектов: {state.files.length}
+          {sel ? ` · выбран «${sel.name}», ${fmtSize(sel.size)}` : ''} · файлы хранятся час
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/** Миниатюра: картинка — сама картинка, остальное — значок программы, которая откроет файл. */
+function FileThumb({ id, file }: { id: string; file: MessengerScreenFileDto }) {
+  const image = file.mime.startsWith('image/') && file.mime !== 'image/svg+xml';
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!image) return;
+    let active = true;
+    let made: string | null = null;
+    void apiBlob(`/messengers/${id}/screen-files/${file.id}/content`).then(
+      (b) => {
+        if (!active) return;
+        made = URL.createObjectURL(b);
+        setUrl(made);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [id, file.id, image]);
+  if (url) return <img className="folder-thumb" src={url} alt="" />;
+  const k = fileKind(file.name, file.mime);
+  return (
+    <span className={`folder-doc ${k.tone}`} title={`Откроется в: ${k.app}`} aria-hidden="true">
+      <i>{k.label}</i>
+    </span>
   );
 }

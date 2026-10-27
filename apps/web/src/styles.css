@@ -8225,14 +8225,60 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
   border-radius: 12px;
 }
 .messenger-kind-icon { font-size: 28px; }
-.messenger-screen { max-width: 1320px; width: calc(100vw - 32px); }
+/* Экран мессенджера: минимальные рамки, кнопки — иконками справа в шапке (2026-10-27). */
+.sheet.messenger-screen { display: flex; flex-direction: column; max-width: 1400px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 6px 8px 8px; gap: 4px; border-radius: 10px; }
+.ms-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; padding: 0; border: 0; }
+.ms-head h2 { margin: 0; font-size: 15px; white-space: nowrap; }
+.ms-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.ms-icon { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 18px; line-height: 1; }
+.ms-icon.active { color: var(--primary); border-color: var(--primary); }
+.ms-files { position: relative; display: inline-flex; }
+.ms-files-count { position: absolute; top: -6px; right: -8px; min-width: 18px; height: 18px; padding: 0 5px; border: 0; border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; cursor: pointer; }
+.ms-files-line { flex-basis: 100%; margin: 0; padding: 4px 8px; font-size: 12.5px; }
 .messenger-vnc {
   width: 100%;
-  height: min(75vh, 820px);
+  height: calc(100dvh - 70px);
+  max-height: 900px;
   background: #111;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
+
+/* Окно файлов экрана — как папка Проводника: заголовок, панель, плитки, строка состояния. */
+/* Контурные иконки (как на странице чатов) — окно экрана открывается и вне неё (дашборд, настройки). */
+.ms-head .icon, .folder .icon { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.folder-title .icon { color: #c48f00; fill: #f5c542; }
+.folder-backdrop { z-index: 1100; }
+.folder { display: flex; flex-direction: column; width: min(760px, calc(100vw - 24px)); max-height: min(560px, calc(100dvh - 24px)); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 18px 50px rgba(15, 23, 42, .35); }
+.folder-title { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; background: var(--neutral-bg); font-size: 13px; font-weight: 600; }
+.folder-close { margin-left: auto; width: 32px; height: 26px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 18px; }
+.folder-close:hover { background: #e81123; color: #fff; }
+.folder-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.folder-toolbar button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text); font-size: 12.5px; }
+.folder-toolbar button:not(:disabled):hover { background: var(--hover); border-color: var(--line); }
+.folder-toolbar button:disabled { opacity: .45; }
+.folder-path { margin-left: auto; font-size: 12px; }
+.folder-grid { flex: 1; min-height: 160px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); align-content: start; gap: 4px; margin: 0; padding: 10px; list-style: none; }
+.folder-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; padding: 8px 4px 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text); cursor: default; }
+.folder-item:hover { background: var(--hover); }
+.folder-item.selected { background: var(--info-bg); border-color: color-mix(in srgb, var(--primary) 45%, transparent); }
+.folder-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 3px; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); background: #fff; }
+.folder-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; font-size: 12px; line-height: 1.3; text-align: center; word-break: break-word; }
+.folder-status { padding: 4px 10px; border-top: 1px solid var(--line); font-size: 12px; }
+/* Значок документа: лист с загнутым углом и плашкой программы. */
+.folder-doc { position: relative; display: block; width: 56px; height: 72px; border-radius: 3px 14px 3px 3px; background: #fff; box-shadow: inset 0 0 0 1px #c9ced6, 0 1px 3px rgba(0, 0, 0, .15); }
+.folder-doc::after { content: ''; position: absolute; top: 0; right: 0; width: 14px; height: 14px; border-radius: 0 0 0 3px; background: linear-gradient(225deg, transparent 50%, #dfe3ea 50%); }
+.folder-doc i { position: absolute; left: -6px; bottom: 10px; min-width: 34px; padding: 3px 5px; border-radius: 3px; color: #fff; font-size: 12px; font-style: normal; font-weight: 800; text-align: center; }
+.folder-doc.pdf i { background: #c4161c; }
+.folder-doc.word i { background: #185abd; }
+.folder-doc.excel i { background: #107c41; }
+.folder-doc.ppt i { background: #c43e1c; }
+.folder-doc.zip i { background: #8a6d00; }
+.folder-doc.video i { background: #5b2c8f; }
+.folder-doc.audio i { background: #0e7490; }
+.folder-doc.image i { background: #0f766e; }
+.folder-doc.text i { background: #4b5563; }
+.folder-doc.other i { background: #6b7280; }
 .messenger-shot { width: 100%; height: auto; border-radius: 8px; }
 
 /* ---------- переписка мессенджера (ADR 0014) ---------- */
@@ -8487,21 +8533,6 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
 .dash-messenger-status.login { background: var(--warn-bg); color: #b54708; }
 .dash-messenger-status.other { background: var(--neutral-bg); color: var(--muted); }
 .dash-messenger-screen { flex: none; min-height: 30px; padding: 0 12px; border-radius: 8px; color: var(--primary); background: var(--surface-2); font-weight: 600; }
-
-/* Экран мессенджера: файлы для отправки (хранятся час). */
-.screen-files { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.screen-files-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.screen-files-head .primary { margin-left: auto; }
-.screen-files-offer { margin: 0; }
-.screen-files-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
-.screen-files-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; }
-.screen-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.screen-files-list li > .muted { font-size: 12px; white-space: nowrap; }
-.screen-files-list button.active { color: var(--primary); border-color: var(--primary); }
-@media (max-width: 640px) {
-  .screen-files-list li { flex-wrap: wrap; }
-  .screen-file-name { flex-basis: 100%; }
-}
 
 .exclude-call { max-width: 520px; display: flex; flex-direction: column; gap: 10px; }
 .exclude-call .field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }

@@ -178,6 +178,11 @@ export class MessengerServiceClient {
     return this.request('DELETE', `/instances/${id}/screen-files`);
   }
 
+  async screenFile(id: string, fileId: string): Promise<{ data: Buffer; mime: string } | null> {
+    const res = await fetch(`${this.base}/instances/${id}/screen-files/${fileId}/content`, { headers: this.headers(), signal: AbortSignal.timeout(120_000) }).catch(() => null);
+    return res?.ok ? { data: Buffer.from(await res.arrayBuffer()), mime: res.headers.get('content-type') ?? 'application/octet-stream' } : null;
+  }
+
   async screenshot(id: string): Promise<Buffer | null> {
     const res = await fetch(`${this.base}/instances/${id}/screenshot`, { headers: this.headers(), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
     return res?.ok ? Buffer.from(await res.arrayBuffer()) : null;

@@ -23,6 +23,7 @@
 | `POST /api/messengers/:id/vnc-ticket`, `GET …/:id/screenshot` (B24AuthGuard; группа номера с `openlines.send` или администратор приложения) | экран номера из дашборда |
 | `GET\|POST /api/messengers/:id/screen-files`, `DELETE …/:fileId`, `POST …/:fileId/attach`, `DELETE …/screen-files` (то же право) | файлы для отправки с экрана: хранятся в сервисе час; `attach` — подставить в следующее окно выбора файла (сотрудник жмёт 📎 на экране), `DELETE` без файла — отменить ожидание |
 | `POST /api/messengers/:id/screen-paste` `{ text }`, `POST …/:id/screen-paste-file` (файл; то же право) | Ctrl+V / перетаскивание на живой экран (2026-10-27): текст — вводом в поле под курсором (CDP insertText — кириллица; буфер VNC её не передаёт), файл — в файлы экрана и событием «вставить» с файлом в открытый чат |
+| `GET /api/messengers/:id/screen-files/:fileId/content` (то же право) | содержимое файла экрана для миниатюр окна файлов; не картинки — `application/octet-stream`. `screen-paste` принимает и `{ fileId }` — вставить уже загруженный файл (двойной клик в окне файлов) |
 | `POST /api/messengers/hook` (без B24AuthGuard: только сеть стенда, nginx закрывает снаружи; `MESSENGER_TOKEN`) | события сервиса: сообщения, правки, удаления, статусы |
 
 ## Инварианты

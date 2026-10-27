@@ -55,6 +55,15 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
     }
     const sp = /^\/instances\/([^/]+)\/screen-paste$/.exec(url.pathname);
     if (req.method === 'POST' && sp && ID_RE.test(sp[1]) && files) return screenPaste(req, res, sp[1], files);
+    // Содержимое файла экрана — для миниатюр в окне файлов.
+    const sfc = /^\/instances\/([^/]+)\/screen-files\/([0-9a-f]{24})\/content$/.exec(url.pathname);
+    if (req.method === 'GET' && sfc && ID_RE.test(sfc[1]) && files) {
+      const f = await files.get(sfc[1], sfc[2]);
+      if (!f) return json(res, 404, { error: 'Файл удалён' });
+      const data = await readFile(files.path(sfc[1], f));
+      res.writeHead(200, { 'content-type': f.mime, 'content-length': data.length, 'cache-control': 'private, max-age=3600' });
+      return res.end(data);
+    }
     const sf = /^\/instances\/([^/]+)\/screen-files(?:\/([0-9a-f]{24})(\/attach)?)?$/.exec(url.pathname);
     if (sf && ID_RE.test(sf[1]) && files) return screenFiles(req, res, sf[1], sf[2], !!sf[3], files);
     const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact|avatar|names))?$/.exec(url.pathname);
