@@ -55,6 +55,7 @@ export function ChatsPage({
   groups = [],
   onOpenDay,
   deal,
+  onOpenedChat,
 }: {
   timezone: string;
   canSend: boolean;
@@ -68,6 +69,8 @@ export function ChatsPage({
   onOpenDay?: (date: string) => void;
   /** Открыто из встройки сделки: вкладка с именем клиента (чаты сделки и клиента), открыта по умолчанию. */
   deal?: { id: number };
+  /** Открыт/закрыт чат — запомнить (F5 вернёт в него). */
+  onOpenedChat?: (chatId: number | null) => void;
 }) {
   // По умолчанию — все доступные чаты и все статусы (решение владельца); из сделки — чаты её клиента.
   const [tab, setTab] = useState<ViewTab>(deal ? 'deal' : initialWaiting ? 'waiting' : 'all');
@@ -102,6 +105,7 @@ export function ChatsPage({
   const [error, setError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
   const [openId, setOpenId] = useState<number | null>(initialChatId ?? null);
+  useEffect(() => onOpenedChat?.(openId), [openId, onOpenedChat]);
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState<{ chatId: number; data: ClientBookingsDto | null; dealId?: number } | null>(null);

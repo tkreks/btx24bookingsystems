@@ -57,7 +57,7 @@ export function DashboardSyncStatus() {
   const state = useSyncExternalStore(store.subscribeSync, store.syncSnapshot);
   const cacheText = state.fromCache ? `из кэша: ${state.fromCache} из ${state.active}` : '';
   const label = state.pending
-    ? cacheText ? `Данные ${cacheText} · обновляем из Битрикс24…` : 'Синхронизация с Битрикс24…'
+    ? cacheText ? `Данные ${cacheText} · обновляем из Битрикс24…` : `Синхронизация с Битрикс24… загружено ${Math.max(0, state.active - state.pending)} из ${state.active}`
     : state.errors ? 'Не всё удалось обновить · повторим автоматически'
     : cacheText ? `Данные ${cacheText}` : state.updatedAt ? 'Данные обновлены' : 'Загрузка данных…';
   return <div className={`dashboard-sync-status${state.errors ? ' has-error' : ''}`} role="status" aria-live="polite"><span className={state.pending ? 'sync-dot active' : 'sync-dot'} aria-hidden="true" /><span className="sync-label" title={label}>{label}</span><time dateTime={state.updatedAt ? new Date(state.updatedAt).toISOString() : undefined}>{state.updatedAt ? new Date(state.updatedAt).toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'}) : '—'}</time><button type="button" className="link" disabled={!!state.pending} onClick={() => store.refreshActive(true)} aria-label="Обновить данные дашборда">↻</button></div>;

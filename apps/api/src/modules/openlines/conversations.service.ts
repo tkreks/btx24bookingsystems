@@ -27,6 +27,10 @@ const DISCOVER_MAX = 50;
 
 type Client = Pick<Bitrix24RestClient, 'call' | 'batch'>;
 
+/** Доставка своего сообщения — по хранимому `mid` (сообщения, сохранённые до появления поля, тоже). */
+const withDelivery = (dto: ChatMessageDto, mid: string | null): ChatMessageDto =>
+  dto.author?.kind === 'employee' && !dto.viaPhone ? { ...dto, delivery: mid ? 'delivered' : 'sent' } : dto;
+
 export interface ImPage {
   messages?: ImMessage[];
   users?: ImUser[];
@@ -394,7 +398,7 @@ export class ConversationsService {
             take: FEED_LIMIT,
           });
           if (rows.length === FEED_LIMIT || row!.msgComplete || attempt === 1)
-            return { messages: rows.map((r) => ({ ...(r.dto as unknown as ChatMessageDto), chatId, mid: r.mid })), more: rows.length === FEED_LIMIT || !row!.msgComplete };
+            return { messages: rows.map((r) => ({ ...withDelivery(r.dto as unknown as ChatMessageDto, r.mid), chatId, mid: r.mid })), more: rows.length === FEED_LIMIT || !row!.msgComplete };
           // Хранимого мало — догружаем старше диапазона и читаем снова.
           const older = await this.fetch(user.client, chatId, row!.msgFromId!);
           await this.store(portalId, chatId, older, row!.msgFromId!, FEED_LIMIT);

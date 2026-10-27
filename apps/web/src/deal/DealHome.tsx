@@ -15,6 +15,7 @@ import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { AttentionMessage } from '../dashboard/AttentionMessage.js';
 import { ChatRowMenu } from '../dashboard/ChatRowMenu.js';
 import { ClientInvoicesBlock } from './ClientInvoicesBlock.js';
+import { LoadProgress } from '../dashboard/LoadProgress.js';
 import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
 import { DealNewChatDialog } from '../messengers/DealNewChatDialog.js';
 import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
@@ -195,7 +196,7 @@ export function DealHome({
                 <Icon name="refresh" />
               </button>
             </p>
-            {!data && !error && <p className="muted">Загрузка чатов…</p>}
+            {!data && !error && <p className="muted"><LoadProgress name="deal-chats" label="Загрузка чатов" /></p>}
             {error && <p className="notice error" role="alert">{error}</p>}
             {flagError && <p className="notice error" role="alert">{flagError}</p>}
             {data && !items.length && <p className="muted">Чатов с клиентом сделки нет.</p>}

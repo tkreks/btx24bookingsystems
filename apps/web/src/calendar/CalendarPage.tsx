@@ -1,6 +1,6 @@
 import { freshPoll } from '../fresh-poll.js';
 import { DashboardSyncProvider, dashboardScope } from '../dashboard/DashboardSync.js';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   todayIn,
   type CalendarBooking,
@@ -55,6 +55,43 @@ function initialView(): CalendarView {
   return isNarrow() ? 'list' : 'calendar';
 }
 
+type AppScreen =
+  | { name: 'calendar' }
+  | { name: 'dashboard' }
+  | { name: 'deal-home' }
+  | { name: 'deal' }
+  | { name: 'chats'; chatId?: number; waiting?: boolean; from?: string; to?: string; deal?: boolean }
+  | { name: 'alerts'; alertId?: string | null }
+  | { name: 'templates' }
+  | { name: 'certificates' }
+  | { name: 'settings'; back: 'dashboard' | 'templates' };
+
+const SCREEN_KEY = 'btx24:screen';
+/** Экраны приложения, куда F5 возвращает (экраны встройки сделки — нет). */
+const RESTORABLE = new Set(['calendar', 'dashboard', 'chats', 'alerts', 'templates', 'certificates', 'settings']);
+
+/** Экран до перезагрузки страницы (sessionStorage вкладки; недоступен — дашборд). */
+export function savedScreen(): AppScreen | null {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(SCREEN_KEY) ?? 'null') as AppScreen | null;
+    if (!v || typeof v !== 'object' || !RESTORABLE.has(v.name)) return null;
+    if (v.name === 'chats') return { name: 'chats', ...(Number.isSafeInteger(v.chatId) && v.chatId! > 0 ? { chatId: v.chatId } : {}), ...(v.waiting ? { waiting: true } : {}) };
+    if (v.name === 'settings') return { name: 'settings', back: v.back === 'templates' ? 'templates' : 'dashboard' };
+    if (v.name === 'alerts') return { name: 'alerts' };
+    return { name: v.name } as AppScreen;
+  } catch {
+    return null;
+  }
+}
+
+function saveScreen(screen: AppScreen): void {
+  try {
+    if (RESTORABLE.has(screen.name)) sessionStorage.setItem(SCREEN_KEY, JSON.stringify(screen));
+  } catch {
+    /* хранилище недоступно — после F5 просто дашборд */
+  }
+}
+
 export function CalendarPage({
   session: initialSession,
   placement,
@@ -87,22 +124,23 @@ export function CalendarPage({
   const [groupsError, setGroupsError] = useState<string | null>(null);
   // Экран приложения. Состояние календаря (дата, вид) живёт здесь и не теряется при переходах.
   // Ссылка из чата уведомлений (`?alert=<id>`) открывает сразу «Уведомления о бронях».
-  const [screen, setScreen] = useState<
-    | { name: 'calendar' }
-    | { name: 'dashboard' }
-    | { name: 'deal-home' }
-    | { name: 'deal' }
-    | { name: 'chats'; chatId?: number; waiting?: boolean; from?: string; to?: string; deal?: boolean }
-    | { name: 'alerts'; alertId?: string | null }
-    | { name: 'templates' }
-    | { name: 'certificates' }
-    | { name: 'settings'; back: 'dashboard' | 'templates' }
-  >(() => {
+  const [screen, setScreen] = useState<AppScreen>(() => {
     const alertId = new URLSearchParams(window.location.search).get('alert');
     if (alertId) return { name: 'alerts', alertId };
-    // Открыли не из сделки — сначала дашборд (руководителю — свой); из карточки сделки — «Чат · Сделка · Календарь».
-    return placement.dealId ? { name: 'deal-home' } : { name: 'dashboard' };
+    // Открыли не из сделки — сначала дашборд (руководителю — свой), а после F5 — экран, где были;
+    // из карточки сделки — «Чат · Сделка · Календарь».
+    return placement.dealId ? { name: 'deal-home' } : (savedScreen() ?? { name: 'dashboard' });
   });
+  // Приложение (не встройка): экран и открытый чат — в sessionStorage вкладки, F5 возвращает туда же.
+  useEffect(() => {
+    if (!placement.dealId) saveScreen(screen);
+  }, [screen, placement.dealId]);
+  const rememberChat = useCallback(
+    (chatId: number | null) => {
+      if (!placement.dealId && screen.name === 'chats') saveScreen({ ...screen, chatId: chatId ?? undefined });
+    },
+    [screen, placement.dealId],
+  );
   // Встройка сделки → «Календарь»: по сделке уже есть бронь — предупреждение (новая сделка или игнорировать).
   const [dealWarning, setDealWarning] = useState(false);
   const [dealBookingsFailed, setDealBookingsFailed] = useState(false);
@@ -425,6 +463,7 @@ export function CalendarPage({
         initialWaiting={screen.waiting}
         period={screen.from && screen.to ? { from: screen.from, to: screen.to } : undefined}
         deal={screen.deal && placement.dealId ? { id: placement.dealId } : undefined}
+        onOpenedChat={rememberChat}
         onClose={() => setScreen(screen.deal ? { name: 'deal-home' } : { name: 'dashboard' })}
         groups={groups ?? []}
         onOpenDay={(d) => {

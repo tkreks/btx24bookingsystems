@@ -145,6 +145,7 @@ export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): Ch
       kind,
     },
     ...(phone ? { viaPhone: true } : {}),
+    ...(kind === 'employee' && !phone ? { delivery: connectorMidOf(m) ? ('delivered' as const) : ('sent' as const) } : {}),
     text: plainText(phone ? phone.text : m.text),
     files: files
       .filter((f) => ids.has(Number(f.id)))

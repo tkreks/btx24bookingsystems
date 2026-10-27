@@ -2865,6 +2865,14 @@ button.warn-outline {
   flex-direction: column;
   background: #fff;
 }
+/* Статус своего сообщения: ⏳ отправляется, ✓ принято линией, ✓✓ доставлено; ошибка — красный «?». */
+.cv-delivery { font-size: 11px; letter-spacing: -2px; color: var(--muted); cursor: default; }
+.cv-delivery.delivered { color: var(--primary); }
+.cv-delivery.sending { letter-spacing: 0; }
+.cv-delivery.error { display: inline-grid; place-items: center; width: 16px; height: 16px; letter-spacing: 0; border-radius: 50%; background: var(--status-fail-text); color: var(--status-fail-bg); font-weight: 800; cursor: help; }
+.cv-outgoing .cv-bubble { opacity: .85; }
+.cv-outgoing.failed .cv-bubble { opacity: 1; background: var(--status-fail-bg); color: var(--status-fail-text); box-shadow: inset 0 0 0 1px var(--danger); }
+.cv-outgoing-actions { display: flex; gap: 12px; margin-top: 4px; font-size: 12px; }
 /* Лента из базы приложения, сверка с Битрикс24 в фоне — плашка поверх ленты, без сдвига сообщений. */
 .cv-has-sync { position: relative; }
 .cv-syncing {
@@ -8626,6 +8634,9 @@ button.tl-piece.free { cursor: copy; }
 button.tl-piece.free:hover { filter: brightness(1.06); }
 .tl-piece.busy { background: linear-gradient(90deg, #ff4b55, #ee3f4d); color: #fff; cursor: pointer; box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.5); }
 .tl-piece.busy:hover { filter: brightness(1.08); }
+/* Спорная бронь (удалена в Битрикс24, в приложении есть) — опознавательная лента, как в календаре. */
+.tl-piece.busy.missing { background: repeating-linear-gradient(135deg, #b91c1c 0 6px, #9ca3af 6px 12px); }
+.timeline-period-cell.has-missing { background-image: repeating-linear-gradient(135deg, rgba(185, 28, 28, .85) 0 5px, rgba(156, 163, 175, .85) 5px 10px); color: #fff; }
 .timeline-booking { max-width: 520px; }
 .timeline-booking-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 0; }
 .timeline-booking-facts dt { color: var(--muted); }
@@ -8947,7 +8958,11 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .deal-ws-chats .attention-title .cl-channel { width: auto; }
 .deal-ws-chats .attention-title .cl-channel-label { display: none; }
 .deal-ws-chats .attention-preview { position: relative; display: flex; align-items: flex-end; gap: 8px; z-index: 4; min-width: 0; padding: 6px 10px; font-size: 13px; line-height: 18px; }
-.deal-ws-timeline { min-width: 0; min-height: 0; overflow: auto; }
+/* Место под вертикальную полосу всегда занято, горизонтальная — только у самой шкалы: иначе полосы
+   внешнего блока и шкалы включали друг друга по кругу и шкала «дрожала» при загрузке (2026-10-27). */
+.deal-ws-timeline { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; }
+.timeline-rows { overscroll-behavior-x: contain; }
 .deal-ws-timeline > .dash-timeline { margin: 0; min-height: 100%; box-sizing: border-box; }
 .timeline-group-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .timeline-group-tabs button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: #5c6a80; font-size: 12.5px; font-weight: 500; }
@@ -9450,3 +9465,10 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .line-channels-table select {
   max-width: 100%;
 }
+
+/* Примерный прогресс загрузки блока (LoadProgress): подпись и тонкая полоса. */
+.load-progress { display: inline-grid; gap: 4px; min-width: 160px; max-width: 280px; font-size: 12px; text-align: left; }
+.load-progress-text { color: var(--muted); font-variant-numeric: tabular-nums; }
+.load-progress-text b { color: var(--text); font-weight: 600; }
+.load-progress-track { display: block; height: 4px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.load-progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .25s linear; }

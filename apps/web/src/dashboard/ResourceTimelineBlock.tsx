@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { todayIn, zonedDayRange, type CalendarBooking, type CalendarDay, type CalendarTechWindow, type ClientBookingsDto, type MyGroupDto, type ResourceStopDto } from '@btx24/shared';
-import { apiGet } from '../api.js';
+import { apiGet, apiPost } from '../api.js';
 import { openCrm } from '../b24.js';
 import { BookingForm, type WizardResult } from '../bookings/BookingForm.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { SLOT_MINUTES } from '../calendar/layout.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
+import { LoadProgress } from './LoadProgress.js';
 import { resourceDayState, timelinePieces, withPast } from './timeline-data.js';
 import { fmtDateTime, fmtMoney, fmtTime, shiftDate } from '../format.js';
 import { dayKey } from '../openlines/chat-list.js';
@@ -211,7 +212,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
               const state = resourceDayState(d, r.id, timezone, nowMs);
               const status = state.bookings.length ? `Броней: ${state.bookings.length}` : state.kind === 'past' ? 'Прошло' : state.stops.length ? 'Стоп' : 'Свободно';
               const stopText = state.stops.map(s => s.reason).join('; ');
-              return <button type="button" key={d.date} className={`timeline-period-cell ${state.kind}${state.stops.length ? ' has-stop' : ''}`} title={`${d.date} · ${r.name} · ${status}${stopText ? ` · Стоп: ${stopText}` : ''}`} aria-label={`${d.date}, ${r.name}: ${status}. Открыть день`} onClick={() => openDay(d.date)}>{state.bookings.length || (state.kind !== 'past' && state.stops.length ? 'Стоп' : '')}</button>;
+              return <button type="button" key={d.date} className={`timeline-period-cell ${state.kind}${state.stops.length ? ' has-stop' : ''}${state.bookings.some(b => b.missing) ? ' has-missing' : ''}`} title={`${d.date} · ${r.name} · ${status}${stopText ? ` · Стоп: ${stopText}` : ''}`} aria-label={`${d.date}, ${r.name}: ${status}. Открыть день`} onClick={() => openDay(d.date)}>{state.bookings.length || (state.kind !== 'past' && state.stops.length ? 'Стоп' : '')}</button>;
             })}
           </div> : <div className={`timeline-bar${live ? ' live' : ''}`} role="group" aria-label={`Занятость: ${r.name}`}>
             {ticks.map(t => <i key={t.key} className="timeline-hour" style={{ left: `${t.at * 100}%` }} aria-hidden="true" />)}
@@ -219,11 +220,11 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
             {live ? running.filter(b => b.resourceIds.includes(r.id)).map(b => {
               const from = Math.max(0, (Date.parse(b.start) - current.startMs) / span);
               const to = Math.min(1, (Date.parse(b.end) - current.startMs) / span);
-              return <button key={b.id} type="button" className="tl-piece busy" style={{ left: `${from * 100}%`, width: `${(to - from) * 100}%` }} title={`${fmtDateTime(b.start, timezone)} → ${fmtDateTime(b.end, timezone)}${b.deal ? ` · ${b.deal.title}` : ''}`} aria-label={`Бронь ${fmtDateTime(b.start, timezone)} — ${fmtDateTime(b.end, timezone)}`} onClick={() => setSelected(b)}>{to - from >= 0.08 && <span>{fmtTime(b.start, timezone)}–{fmtTime(b.end, timezone)}</span>}</button>;
+              return <button key={b.id} type="button" className={`tl-piece busy${b.missing ? ' missing' : ''}`} style={{ left: `${from * 100}%`, width: `${(to - from) * 100}%` }} title={`${fmtDateTime(b.start, timezone)} → ${fmtDateTime(b.end, timezone)}${b.deal ? ` · ${b.deal.title}` : ''}${b.missing ? MISSING_HINT : ''}`} aria-label={`Бронь ${fmtDateTime(b.start, timezone)} — ${fmtDateTime(b.end, timezone)}`} onClick={() => setSelected(b)}>{to - from >= 0.08 && <span>{fmtTime(b.start, timezone)}–{fmtTime(b.end, timezone)}</span>}</button>;
             }) : withPast(timelinePieces(current, r.id, current.startMs, current.endMs), current.startMs, current.endMs, nowMs).map((p, i) => {
               const style = { left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` };
               const booking = p.kind === 'booked' && p.bookingId !== null ? current.bookings.find(b => b.id === p.bookingId) : undefined;
-              if (booking) return <button key={i} type="button" className="tl-piece busy" style={style} title={`${fmtDateTime(booking.start, timezone)} → ${fmtDateTime(booking.end, timezone)}${booking.deal ? ` · ${booking.deal.title}` : ''}`} aria-label={`Бронь ${fmtDateTime(booking.start, timezone)} — ${fmtDateTime(booking.end, timezone)}`} onClick={() => setSelected(booking)}>{p.to - p.from >= 0.08 && <span>{fmtTime(booking.start, timezone)}–{fmtTime(booking.end, timezone)}</span>}</button>;
+              if (booking) return <button key={i} type="button" className={`tl-piece busy${booking.missing ? ' missing' : ''}`} style={style} title={`${fmtDateTime(booking.start, timezone)} → ${fmtDateTime(booking.end, timezone)}${booking.deal ? ` · ${booking.deal.title}` : ''}${booking.missing ? MISSING_HINT : ''}`} aria-label={`Бронь ${fmtDateTime(booking.start, timezone)} — ${fmtDateTime(booking.end, timezone)}`} onClick={() => setSelected(booking)}>{p.to - p.from >= 0.08 && <span>{fmtTime(booking.start, timezone)}–{fmtTime(booking.end, timezone)}</span>}</button>;
               if (p.kind === 'past') return <span key={i} className="tl-piece past" style={style} title="Время прошло — бронь только на будущее" aria-hidden="true" />;
               if (p.kind === 'stop') return <span key={i} className="tl-piece stopped" style={style} title={`Стоп: ${p.reason}`} aria-label={`${r.name}: стоп — ${p.reason}`}>{p.to - p.from >= 0.08 ? 'Стоп' : ''}</span>;
               const title = p.kind === 'tech' ? 'Тех. окно — бронь возможна · нажмите, чтобы забронировать' : 'Свободно · нажмите, чтобы забронировать';
@@ -234,7 +235,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
       </div></div>
       <p className="timeline-legend muted">{live ? 'Брони, которые идут сейчас; синяя черта — текущее время. ' : period ? 'Красный день — есть хотя бы одна бронь, серый — прошедший день без брони. Нажмите день для часовой шкалы. ' : 'Зелёное — свободно, красное — бронь, серое — прошедшее время (бронь только на будущее). '}{!live && 'Серый штрих — стоп, бронирование закрыто.'}</p>
     </>}
-    {selected && <TimelineBooking booking={selected} resources={new Map(allResources.map(r => [r.id, r.name]))} timezone={timezone} onClose={() => setSelected(null)} />}
+    {selected && <TimelineBooking booking={selected} resources={new Map(allResources.map(r => [r.id, r.name]))} timezone={timezone} canCreate={!!group?.permissions.includes('booking.create')} canCancel={!!group?.permissions.includes('booking.cancel')} onResolved={text => { setSelected(null); setNote(text); setRev(n => n + 1); }} onClose={() => setSelected(null)} />}
     {form && group && <ErrorBoundary where="booking-form" onClose={() => setForm(null)}><BookingForm groups={groups} timezone={timezone} context={{ ...form, groupId: group.id, ...(deal ? { dealId: deal.dealId, contactId: deal.contactId, openDeals: deal.openDeals } : {}) }} onClose={() => setForm(null)} onDone={(r: WizardResult) => { setForm(null); if (r.payment && r.dealId && canPay) setPayment({ dealId: r.dealId, bookingId: r.booking?.bookingId ?? null, amount: r.payment.amount, fixedDeal: r.payment.fixedDeal }); setNote(r.note); setRev(n => n + 1); }} /></ErrorBoundary>}
     {payment && <PaymentDialog dealId={payment.dealId} bookingId={payment.bookingId} initialAmount={payment.amount} fixedDeal={payment.fixedDeal} timezone={timezone} onClose={() => setPayment(null)} />}
     {picker && group && <TimelineResourcesPicker groups={chosen} groupId={group.id} resources={allResources} filter={filter} stops={current?.stops ?? []} loading={!current} onGroup={setGroupId} onFilter={ids => setFilters(prev => ({ ...prev, [group.id]: ids }))} onClose={() => setPicker(false)} />}
@@ -254,10 +255,36 @@ function TimelineResourcesPicker({ groups, groupId, resources, filter, stops, lo
   </div></div>, document.body);
 }
 
-/** Окно брони со шкалы: время, ресурсы, сделка и клиент (клиент — по сделке, правами сотрудника). */
-function TimelineBooking({ booking, resources, timezone, onClose }: { booking: CalendarBooking; resources: Map<number, string>; timezone: string; onClose: () => void }) {
+const MISSING_HINT = ' · удалена в Битрикс24 — нажмите, чтобы решить: восстановить или удалить в приложении';
+
+/**
+ * Окно брони со шкалы: время, ресурсы, сделка и клиент (клиент — по сделке, правами сотрудника).
+ * Бронь удалена в Битрикс24, а в приложении есть (`missing`) — пояснение и решение: восстановить или
+ * удалить в приложении (как в карточке брони календаря; права в группе ресурса проверит сервер).
+ */
+function TimelineBooking({ booking, resources, timezone, canCreate, canCancel, onResolved, onClose }: {
+  booking: CalendarBooking; resources: Map<number, string>; timezone: string; canCreate: boolean; canCancel: boolean; onResolved: (note: string) => void; onClose: () => void;
+}) {
   const [client, setClient] = useState<ClientBookingsDto | null>(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [decideError, setDecideError] = useState('');
+  const decide = async (what: 'recreate' | 'remove-in-app') => {
+    const text = what === 'recreate'
+      ? 'Восстановить бронь? Она будет создана в Битрикс24 заново на то же время и ресурс, у брони будет новый номер.'
+      : 'Удалить бронь в приложении? В истории останется запись об удалении.';
+    if (!confirm(text)) return;
+    setBusy(true);
+    setDecideError('');
+    try {
+      await apiPost(`/bookings/${booking.id}/${what}`, {});
+      window.dispatchEvent(new Event('btx24:mutation'));
+      onResolved(what === 'recreate' ? `Бронь #${booking.id} восстановлена — создана в Битрикс24 заново.` : `Бронь #${booking.id} удалена в приложении.`);
+    } catch (e) {
+      setDecideError(e instanceof Error ? e.message : 'Не удалось выполнить действие');
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     if (!booking.dealId) return;
     let active = true;
@@ -278,10 +305,28 @@ function TimelineBooking({ booking, resources, timezone, onClose }: { booking: C
       <div className="sheet timeline-booking" role="dialog" aria-modal="true" aria-label={`Бронь #${booking.id}`} onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>Бронь #{booking.id}</h2>
-          <button type="button" aria-label="Закрыть" onClick={onClose}>
+          <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}>
             ×
           </button>
         </header>
+        {booking.missing && (
+          <div className="missing-decision" role="alert">
+            <b>Спорная бронь: удалена в Битрикс24, а в приложении осталась</b>
+            <span className="muted">
+              Слот в Битрикс24 сейчас свободен — его может занять другая бронь. «Восстановить бронь» — бронь снова создаётся в Битрикс24 на это же
+              время и ресурс (со связью со сделкой, номер будет новый); «Удалить бронь в приложении» — бронь уходит в историю как удалённая.
+            </span>
+            <div className="form-actions">
+              <button type="button" className="primary" disabled={busy || !canCreate} title={canCreate ? undefined : 'Нет права создавать брони'} onClick={() => void decide('recreate')}>
+                Восстановить бронь
+              </button>
+              <button type="button" className="danger-outline" disabled={busy || !canCancel} title={canCancel ? undefined : 'Нет права снимать брони'} onClick={() => void decide('remove-in-app')}>
+                Удалить бронь в приложении
+              </button>
+            </div>
+            {decideError && <p className="notice error">{decideError}</p>}
+          </div>
+        )}
         <dl className="timeline-booking-facts">
           <dt>Время</dt>
           <dd>
@@ -420,6 +465,6 @@ function TimelineSkeleton({ ids, days, timezone }: { ids: number[]; days: string
         <div className="timeline-bar loading" aria-hidden="true" />
       </div>)}
     </div>
-    <p className="muted timeline-loading" role="status"><span className="spinner" aria-hidden="true" /> Загружаем брони…</p>
+    <p className="muted timeline-loading" role="status"><span className="spinner" aria-hidden="true" /> <LoadProgress name={`timeline:${days.length}`} label="Загружаем брони" /></p>
   </div>;
 }

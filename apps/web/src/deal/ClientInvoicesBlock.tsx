@@ -4,6 +4,7 @@ import { apiGet } from '../api.js';
 import { openPortalPath } from '../b24.js';
 import { freshPoll } from '../fresh-poll.js';
 import { fmtDateTime, fmtMoney } from '../format.js';
+import { LoadProgress } from '../dashboard/LoadProgress.js';
 
 /** «ещё 1 ч 20 мин» до конца срока ссылки; срок вышел — «срок вышел»; без срока — пусто. */
 export function linkTimeLeft(deadline: string | null, now: number): string {
@@ -53,7 +54,7 @@ export function ClientInvoicesBlock({ dealId, timezone, revision = 0 }: { dealId
         Счета клиента
         {data && <span className="pill">{items.length}</span>}
       </p>
-      {!data && !error && <p className="muted">Загрузка счетов…</p>}
+      {!data && !error && <p className="muted"><LoadProgress name="deal-invoices" label="Загрузка счетов" /></p>}
       {error && <p className="notice error" role="alert">{error}</p>}
       {data && !items.length && <p className="muted">Нет счетов, ждущих оплаты, и оплаченных по действующим броням.</p>}
       {items.length > 0 && (

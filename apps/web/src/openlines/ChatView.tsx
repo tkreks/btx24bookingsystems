@@ -4,7 +4,7 @@ import { apiGet, apiPost, apiPut } from '../api.js';
 import { pollEvery } from '../fresh-poll.js';
 import { openCrm, openMessenger } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
-import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
+import { appendTemplate, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
 import { avatarTone, dayKey, initials } from './chat-list.js';
 import { ChatDealCard } from './ChatDealCard.js';
 import { Avatar } from './Avatar.js';
@@ -19,9 +19,47 @@ import { ChatFile } from './ChatFile.js';
 import { ChannelRecovery } from './ChannelRecovery.js';
 import { hasDisabledWazzupChannel } from './channel-error.js';
 import { Reactions } from '../messengers/Reactions.js';
+import { LoadProgress } from '../dashboard/LoadProgress.js';
 
 /** Новые сообщения открытого чата подтягиваем раз в 15 секунд. */
 const POLL_MS = 15_000;
+/** Лента пришла из базы, а сверка с Битрикс24 идёт в фоне — перечитать вскоре, не ждать опроса. */
+const SYNC_RELOAD_MS = 2_500;
+
+/**
+ * Отправленное сообщение до появления в ленте (2026-10-27): показывается сразу, с песочными часами;
+ * ушло — ✓ (исчезнет, когда придёт из Битрикс24 со статусом доставки); ошибка — красным, «?» с текстом.
+ */
+export interface Outgoing {
+  key: string;
+  text: string;
+  files: string[];
+  date: string;
+  status: 'sending' | 'sent' | 'error';
+  error?: string;
+  /** ID сообщений Битрикс24 (текст и каждый файл — отдельным сообщением). */
+  ids: number[];
+  step: ReturnType<typeof toSteps>[number];
+}
+
+/** Результат отправки цепочки → статусы её сообщений в «исходящих». */
+export function applySendResult(items: Outgoing[], res: SendResultDto): Outgoing[] {
+  let at = 0;
+  return items.map((o, i) => {
+    const count = (o.step.text.trim() ? 1 : 0) + o.step.fileIds.length;
+    const ids = res.messageIds.slice(at, at + count);
+    at += count;
+    if (i < res.sent) return { ...o, status: 'sent', ids };
+    if (res.error && i === res.error.step) return { ...o, status: 'error', error: res.error.message, ids };
+    return { ...o, status: 'error', error: 'Не отправлено: предыдущее сообщение цепочки не ушло', ids };
+  });
+}
+
+/** Ушедшие сообщения, которые уже пришли в ленте, из «исходящих» убираем. */
+export function pendingOutgoing(items: Outgoing[], messages: { id: number }[]): Outgoing[] {
+  const shown = new Set(messages.map((m) => m.id));
+  return items.filter((o) => o.status !== 'sent' || !o.ids.length || !o.ids.every((id) => shown.has(id)));
+}
 
 /** Открытый диалог: история, «Присоединиться», цепочка сообщений с шаблонами. */
 export function ChatView({
@@ -71,8 +109,9 @@ export function ChatView({
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Отправка — отдельно от прочих действий: блок сообщения закрывается загрузчиком.
-  const [sending, setSending] = useState(false);
+  // Отправленные, но ещё не пришедшие в ленте сообщения; поле ввода не блокируется.
+  const [outbox, setOutbox] = useState<Outgoing[]>([]);
+  const queue = useRef<Promise<void>>(Promise.resolve());
   // Шаблон загружается (подстановка данных сделки) — поле ввода заблокировано, как при отправке.
   const [templating, setTemplating] = useState<string | null>(null);
   const [channels, setChannels] = useState<ChatChannelDto[]>([]);
@@ -147,11 +186,24 @@ export function ChatView({
     };
   }, [chatId, load]);
 
+  // Пришли в ленте — убрать из «исходящих».
+  const messages = chat?.messages;
+  useEffect(() => {
+    if (messages) setOutbox((prev) => (prev.length ? pendingOutgoing(prev, messages) : prev));
+  }, [messages]);
+  // Сверка с Битрикс24 идёт в фоне — перечитать вскоре (новые сообщения не ждут опроса).
+  const syncing = !!chat?.syncing;
+  useEffect(() => {
+    if (!syncing) return;
+    const t = setTimeout(() => void load(), SYNC_RELOAD_MS);
+    return () => clearTimeout(t);
+  }, [syncing, chat, load]);
+
   const lastId = chat?.messages[chat.messages.length - 1]?.id;
   // Новое сообщение — прокрутить ленту вниз (внутри ленты, не всю страницу фрейма).
   useEffect(() => {
     if (list.current) list.current.scrollTop = list.current.scrollHeight;
-  }, [lastId]);
+  }, [lastId, outbox.length]);
 
   const older = async () => {
     if (!chat?.messages.length) return;
@@ -192,30 +244,49 @@ export function ChatView({
     }
   };
 
-  const send = async () => {
-    if (uploading) return;
+  /** Отправка по очереди (порядок у клиента важен); статусы — в «исходящих». */
+  const dispatch = (items: Outgoing[]) => {
+    const keys = new Set(items.map((o) => o.key));
+    const mark = (f: (list: Outgoing[]) => Outgoing[]) => setOutbox((prev) => [...prev.filter((o) => !keys.has(o.key)), ...f(prev.filter((o) => keys.has(o.key)))]);
+    queue.current = queue.current.then(async () => {
+      try {
+        const res = await apiPost<SendResultDto>(`/openlines/chats/${target}/send`, { steps: items.map((o) => o.step) });
+        mark((list) => applySendResult(list, res));
+        await load(true);
+        onChanged();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Не удалось отправить';
+        mark((list) => list.map((o) => ({ ...o, status: 'error', error: message })));
+      }
+    });
+  };
+
+  const send = () => {
+    if (uploading || busy) return;
     const steps = toSteps(chain);
-    if (!steps.length || busy) return;
-    setBusy(true);
-    setSending(true);
+    if (!steps.length) return;
     setError('');
     setNotice('');
-    try {
-      const res = await apiPost<SendResultDto>(`/openlines/chats/${target}/send`, { steps });
-      setChain(dropSent(chain, res.sent));
-      if (res.error)
-        setError(
-          `${res.sent ? `Отправлено ${res.sent} из ${steps.length}. ` : ''}Сообщение ${res.error.step + 1} не ушло: ${res.error.message}`,
-        );
-      else setNotice(steps.length > 1 ? `Отправлено сообщений: ${res.sent}` : '');
-      await load(true);
-      onChanged();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось отправить');
-    } finally {
-      setBusy(false);
-      setSending(false);
-    }
+    const now = new Date().toISOString();
+    const items: Outgoing[] = steps.map((step, i) => ({
+      key: `${now}:${i}:${Math.random()}`,
+      text: step.text,
+      files: chain.filter((c) => !isEmpty(c))[i]?.files.map((f) => f.name) ?? [],
+      date: now,
+      status: 'sending',
+      ids: [],
+      step,
+    }));
+    // Сообщение сразу в ленте (⏳), поле ввода свободно для следующего.
+    setOutbox((prev) => [...prev, ...items]);
+    setChain([newStep()]);
+    dispatch(items);
+  };
+
+  const retry = (o: Outgoing) => {
+    const again = { ...o, status: 'sending' as const, error: undefined, ids: [] };
+    setOutbox((prev) => prev.map((x) => (x.key === o.key ? again : x)));
+    dispatch([again]);
   };
 
   if (!chat)
@@ -227,7 +298,7 @@ export function ChatView({
             {loadError}
           </div>
         ) : (
-          <p className="muted pad">Загрузка сообщений…</p>
+          <p className="muted pad"><LoadProgress name="chat-messages" label="Загрузка сообщений" /></p>
         )}
       </main>
     );
@@ -325,6 +396,9 @@ export function ChatView({
             </Fragment>
           );
         })}
+        {outbox.map((o) => (
+          <OutgoingMessage key={o.key} o={o} timezone={timezone} onRetry={() => retry(o)} onDrop={() => setOutbox((prev) => prev.filter((x) => x.key !== o.key))} />
+        ))}
       </div>
 
       {(error || loadError) && (
@@ -348,11 +422,11 @@ export function ChatView({
       ) : !chat.canSend ? (
         <p className="muted pad">Нет права отправлять сообщения в открытые линии (настраивается в группе).</p>
       ) : (
-        <div className={`composer cv-composer${sending || templating ? ' sending' : ''}`} aria-busy={sending || !!templating}>
-          {(sending || templating) && (
+        <div className={`composer cv-composer${templating ? ' sending' : ''}`} aria-busy={!!templating}>
+          {templating && (
             <div className="cv-sending" role="status">
               <span className="spinner" aria-hidden="true" />
-              {sending ? 'Отправляем сообщение, ожидайте…' : `Загружаем шаблон «${templating}» — подставляем данные клиента…`}
+              Загружаем шаблон «{templating}» — подставляем данные клиента…
             </div>
           )}
           <div className="cv-composer-row">
@@ -455,6 +529,57 @@ function ChatHeader({
   );
 }
 
+const DELIVERY: Record<'sending' | 'sent' | 'delivered', { mark: string; title: string }> = {
+  sending: { mark: '⏳', title: 'Отправляется…' },
+  sent: { mark: '✓', title: 'Принято открытой линией Битрикс24' },
+  delivered: { mark: '✓✓', title: 'Доставлено в мессенджер клиента' },
+};
+
+function DeliveryMark({ status }: { status: keyof typeof DELIVERY }) {
+  return (
+    <span className={`cv-delivery ${status}`} title={DELIVERY[status].title} aria-label={DELIVERY[status].title}>
+      {DELIVERY[status].mark}
+    </span>
+  );
+}
+
+/** Своё сообщение до прихода в ленту: ⏳ / ✓, ошибка — красным, «?» с причиной и «Повторить». */
+function OutgoingMessage({ o, timezone, onRetry, onDrop }: { o: Outgoing; timezone: string; onRetry: () => void; onDrop: () => void }) {
+  return (
+    <div className={`cv-row out cv-outgoing${o.status === 'error' ? ' failed' : ''}`}>
+      <div className="cv-bubble">
+        <div className="cv-bubble-meta">
+          <strong>Вы</strong>
+          <time dateTime={o.date} title={fmtDateTime(o.date, timezone)}>
+            {fmtTime(o.date, timezone)}
+          </time>
+          {o.status === 'error' ? (
+            <span className="cv-delivery error" tabIndex={0} title={`Не отправлено: ${o.error ?? 'ошибка'}`} aria-label={`Не отправлено: ${o.error ?? 'ошибка'}`}>
+              ?
+            </span>
+          ) : (
+            <DeliveryMark status={o.status} />
+          )}
+        </div>
+        {o.text && <div className="cv-bubble-text">{o.text}</div>}
+        {o.files.map((f) => (
+          <div key={f} className="muted">📎 {f}</div>
+        ))}
+        {o.status === 'error' && (
+          <div className="cv-outgoing-actions">
+            <button type="button" className="link" onClick={onRetry}>
+              Повторить
+            </button>
+            <button type="button" className="link" onClick={onDrop}>
+              Убрать
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: number; title: string; timezone: string }) {
   if (m.author.kind === 'system')
     return (
@@ -477,6 +602,7 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
           <time dateTime={m.date} title={fmtDateTime(m.date, timezone)}>
             {fmtTime(m.date, timezone)}
           </time>
+          {m.delivery && <DeliveryMark status={m.delivery} />}
         </div>
         {m.text && <div className="cv-bubble-text">{m.text}</div>}
         {m.files.map((f) => (
