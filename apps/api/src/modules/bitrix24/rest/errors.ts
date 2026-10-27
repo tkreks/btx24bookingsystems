@@ -17,3 +17,7 @@ export const TOKEN_EXPIRED_CODES = new Set(['expired_token']);
 export const RATE_LIMIT_CODES = new Set(['QUERY_LIMIT_EXCEEDED']);
 /** Авторизация недействительна целиком — нужна переустановка или новый вход пользователя. */
 export const REAUTH_CODES = new Set(['invalid_token', 'NO_AUTH_FOUND', 'INVALID_CREDENTIALS', 'invalid_grant', 'PORTAL_DELETED', 'user_access_error']);
+
+/** Клиент ушёл, не дождавшись ответа: чтение из портала не выполнялось (см. `clientGone`). */
+export const CLIENT_GONE = 'CLIENT_GONE';
+export const isClientGone = (e: unknown): boolean => e instanceof Bitrix24Error && e.code === CLIENT_GONE;

@@ -18,6 +18,7 @@ import { ErrorBoundary } from '../ErrorBoundary.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { ClientBookings } from '../bookings/ClientBookings.js';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api.js';
+import { pollEvery } from '../fresh-poll.js';
 import { ChatView } from './ChatView.js';
 import {
   avatarTone,
@@ -163,10 +164,10 @@ export function ChatsPage({
       (page) => active && setList({ key: listKey, ...page }),
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить чаты'),
     );
-    const timer = setInterval(() => void refresh(), POLL_MS);
+    const stop = pollEvery(refresh, POLL_MS);
     return () => {
       active = false;
-      clearInterval(timer);
+      stop();
     };
   }, [listKey, listUrl, refresh]);
 
@@ -185,10 +186,10 @@ export function ChatsPage({
         (e) => active && setDealError(e instanceof Error ? e.message : 'Не удалось загрузить чаты клиента'),
       );
     void load();
-    const timer = setInterval(() => void load(), POLL_MS);
+    const stop = pollEvery(load, POLL_MS);
     return () => {
       active = false;
-      clearInterval(timer);
+      stop();
     };
   }, [dealId]);
 

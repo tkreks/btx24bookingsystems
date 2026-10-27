@@ -6,7 +6,15 @@ import type { CacheTag } from './swr-cache.js';
  * Ответ текущего запроса — чтобы кэш дашборда сообщил клиенту, откуда данные (заголовки `X-Cache*`);
  * `rest` — REST-вызовы Битрикс24 запроса и ожидание в очереди лимита (для журнала медленных запросов).
  */
-export const requestContext = new AsyncLocalStorage<{ res: Response; rest?: RestStats }>();
+export const requestContext = new AsyncLocalStorage<{ res: Response; rest?: RestStats; closed?: boolean }>();
+
+/**
+ * Клиент закрыл соединение, не дождавшись ответа (вкладка ушла, внешний прокси оборвал по таймауту):
+ * чтения из Битрикс24 для такого запроса уже не нужны и не должны тратить лимит портала.
+ */
+export function clientGone(): boolean {
+  return requestContext.getStore()?.closed === true;
+}
 
 export interface RestStats {
   calls: number;

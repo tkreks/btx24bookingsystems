@@ -21,6 +21,16 @@ describe('RateLimiter', () => {
     expect(c.sleeps).toEqual([500, 500]);
   });
 
+  it('skips a cancelled request without spending the budget', async () => {
+    const c = fakeClock();
+    const limiter = new RateLimiter(2, 1, c.now, c.sleep);
+    expect(await limiter.acquire('a')).toBe(true);
+    expect(await limiter.acquire('a', () => true)).toBe(false);
+    // Место не потрачено: следующий ждёт только восполнения первого.
+    expect(await limiter.acquire('a')).toBe(true);
+    expect(c.sleeps).toEqual([500]);
+  });
+
   it('keeps separate budgets per portal', async () => {
     const c = fakeClock();
     const limiter = new RateLimiter(2, 1, c.now, c.sleep);

@@ -22,7 +22,7 @@ import { reachedInChat, type CallClient, type ChatReach } from './call-stats.js'
 import { selectedPeriod } from '../../common/period.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { bitrix24ErrorMessage } from '../bitrix24/http/bitrix24-error.filter.js';
-import { Bitrix24Error } from '../bitrix24/rest/errors.js';
+import { Bitrix24Error, isClientGone } from '../bitrix24/rest/errors.js';
 import {
   connectorMidOf,
   connectorOf,
@@ -253,7 +253,8 @@ export class ChatsService {
       }
       return out;
     } catch (err) {
-      if (err instanceof Bitrix24Error) return new Map();
+      // Клиент ушёл — ошибка, а не «нет непрочитанных»: пустые счётчики попали бы в общий кэш.
+      if (err instanceof Bitrix24Error && !isClientGone(err)) return new Map();
       throw err;
     }
   }

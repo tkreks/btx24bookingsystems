@@ -56,7 +56,8 @@ import { DashboardLayoutService } from './dashboard-layout.service.js';
 import { CACHE_TAGS, invalidate, SwrCache, type CacheTag, type SwrOptions } from '../../common/swr-cache.js';
 import { CallExclusionsService } from './call-exclusions.service.js';
 import { DealKanbanService } from './deal-kanban.service.js';
-import { requestContext } from '../../common/cache-invalidation.js';
+import { clientGone, requestContext } from '../../common/cache-invalidation.js';
+import { isClientGone } from '../bitrix24/rest/errors.js';
 
 /** Воронки групп пользователя (уникальные, в порядке групп). */
 function funnelsOf(a: UserAccess): number[] {
@@ -71,6 +72,13 @@ function funnelsOf(a: UserAccess): number[] {
 const DASHBOARD_SWR: SwrOptions = { freshMs: 20_000, staleMs: 10 * 60_000 };
 /** Брони на дашборде и очередь закрытия — устаревший ответ не дольше 2 минут. */
 const BOOKINGS_SWR: SwrOptions = { freshMs: 15_000, staleMs: 2 * 60_000 };
+/**
+ * Чаты (список, папки, чаты сделки, переписка) опрашиваются каждые 15 секунд — встройкой и вкладкой
+ * приложения сразу: одинаковые запросы сотрудника за несколько секунд — один ответ, без устаревшего
+ * (отправка сообщения из приложения сбрасывает раздел `chats`).
+ */
+const CHATS_SWR: SwrOptions = { freshMs: 8_000, staleMs: 8_000 };
+const MESSAGES_SWR: SwrOptions = { freshMs: 5_000, staleMs: 5_000 };
 /** Ответы только из базы приложения — без кэша. */
 const FROM_DB = new Set(['chat-attention']);
 /** Из копии CRM, когда она загружена (иначе — запросы к порталу и кэш, как раньше). */
@@ -265,14 +273,14 @@ export class OpenlinesController {
   @Get('openlines/chats')
   async list(@B24User() user: B24UserContext, @Query() query: unknown): Promise<ChatListDto> {
     await this.require(user, 'openlines.read');
-    return this.chats.list(user, query);
+    return this.cached(user, 'chats', query, ['chats'], () => this.chats.list(user, query), CHATS_SWR);
   }
 
   /** Мои папки чатов — со сводкой (последнее сообщение, непрочитанные). */
   @Get('openlines/folders')
   async folders(@B24User() user: B24UserContext): Promise<ChatFolderDto[]> {
     await this.require(user, 'openlines.read');
-    return this.folderService.list(user);
+    return this.cached(user, 'folders', null, ['chats'], () => this.folderService.list(user), CHATS_SWR);
   }
 
   @Post('openlines/folders')
@@ -348,7 +356,7 @@ export class OpenlinesController {
   @Get('openlines/deal-chats/:dealId')
   async dealChats(@B24User() user: B24UserContext, @Param('dealId', ParseIntPipe) dealId: number): Promise<DealChatsDto> {
     await this.require(user, 'openlines.read');
-    return this.chats.byDeal(user, dealId);
+    return this.cached(user, 'deal-chats', dealId, ['chats', 'deals'], () => this.chats.byDeal(user, dealId), CHATS_SWR);
   }
 
   @Get('openlines/chats/:chatId/messages')
@@ -358,7 +366,8 @@ export class OpenlinesController {
     @Query() query: unknown,
   ): Promise<ChatHistoryDto> {
     await this.require(user, 'openlines.read');
-    return this.chats.history(user, chatId, query, await this.can(user, 'openlines.send'));
+    const canSend = await this.can(user, 'openlines.send');
+    return this.cached(user, 'messages', [chatId, query, canSend], ['chats'], () => this.chats.history(user, chatId, query, canSend), MESSAGES_SWR);
   }
 
   /** Файл сообщения (картинки и видео в чате приложения) — через сервер, с правами сотрудника. */
@@ -526,7 +535,9 @@ export class OpenlinesController {
       if (res && !res.headersSent) res.setHeader('X-Cache', 'db');
       return compute();
     }
-    const { value, meta } = await swr.get(JSON.stringify([user.portal.id, user.userId, name, params]), compute, { ...opts, scope: user.portal.memberId, tags });
+    const get = () => swr.get(JSON.stringify([user.portal.id, user.userId, name, params]), compute, { ...opts, scope: user.portal.memberId, tags });
+    // Общий запрос считала вкладка, которая ушла (CLIENT_GONE) — эта ещё ждёт: считаем заново.
+    const { value, meta } = await get().catch((e: unknown) => (isClientGone(e) && !clientGone() ? get() : Promise.reject(e)));
     const res = requestContext.getStore()?.res;
     if (res && !res.headersSent) {
       res.setHeader('X-Cache', meta.state);

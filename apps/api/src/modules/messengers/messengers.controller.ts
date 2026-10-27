@@ -12,6 +12,10 @@ import { PermanentAdminGuard } from '../access/permanent-admin.guard.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { MessengersService, toDto } from './messengers.service.js';
+import { invalidate, SwrCache } from '../../common/swr-cache.js';
+
+/** Сделки клиента в чате (опрос раз в 15 с, встройка и вкладка): одинаковые запросы за 8 с — один ответ. */
+const contextCache = new SwrCache<unknown>();
 
 /**
  * ⚙ → «Мессенджеры» (ADR 0014): подключённые к порталу мессенджеры. Только постоянные администраторы
@@ -184,7 +188,9 @@ export class MessengerUserController {
   @Get('openlines/:chatId/context')
   async lineContext(@B24User() user: B24UserContext, @Param('chatId') id: string) {
     const { m, chatId } = await this.chatsService.fromOpenline(user, Number(id));
-    return { ...await this.crm.context(user, m, chatId), messenger: toDto(m, null), chatId };
+    const compute = async () => ({ ...await this.crm.context(user, m, chatId), messenger: toDto(m, null), chatId });
+    const key = JSON.stringify([user.portal.id, user.userId, m.id, chatId]);
+    return (await contextCache.get(key, compute, { freshMs: 8_000, staleMs: 8_000, scope: user.portal.memberId, tags: ['chats', 'deals'] })).value as Awaited<ReturnType<typeof compute>>;
   }
 
   @Put('openlines/:chatId/deal')
@@ -194,6 +200,8 @@ export class MessengerUserController {
     const dealId = Number(body?.dealId);
     if (!Number.isSafeInteger(dealId) || dealId < 1) throw new BadRequestException('Укажите сделку');
     const context = await this.crm.choose(user, permitted, chatId, dealId);
+    // Запросы /messengers кэш не сбрасывают (tagsForRequest) — выбранная сделка меняет сделки чата.
+    invalidate(user.portal.memberId, ['chats']);
     await this.chatsService.publishChosen(permitted, chatId);
     return context;
   }

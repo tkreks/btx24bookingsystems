@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChatChannelDto, ChatHistoryDto, ChatMessageDto, ChatReplyStatusDto, ChatSummary, MessageTemplateDto, SendResultDto } from '@btx24/shared';
 import { apiGet, apiPost, apiPut } from '../api.js';
+import { pollEvery } from '../fresh-poll.js';
 import { openCrm, openMessenger } from '../b24.js';
 import { fmtDateTime, fmtDayTitle, fmtTime } from '../format.js';
 import { appendTemplate, dropSent, isEmpty, newStep, toSteps, type ChainStep } from './chain.js';
@@ -133,10 +134,10 @@ export function ChatView({
       (c) => active && setChat(c),
       (e) => active && setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить чат'),
     );
-    const timer = setInterval(() => void load(), POLL_MS);
+    const stop = pollEvery(load, POLL_MS);
     return () => {
       active = false;
-      clearInterval(timer);
+      stop();
     };
   }, [chatId, load]);
 

@@ -98,9 +98,12 @@ export class WebSessionService {
       this.inflight.set(s.id, running);
       accessToken = await running;
     }
-    // Скользящий срок: заходил сегодня — сессия продлевается (запись не чаще раза в час).
+    // Скользящий срок: заходил сегодня — сессия продлевается (запись не чаще раза в час). Вкладка шлёт
+    // несколько запросов сразу: продлевает один (условие по lastSeenAt), конфликт записи — не ошибка входа.
     if (Date.now() - s.lastSeenAt.getTime() > 3600_000)
-      await this.prisma.webSession.update({ where: { id: s.id }, data: { lastSeenAt: new Date(), expiresAt: new Date(Date.now() + SESSION_TTL_MS) } });
+      await this.prisma.webSession
+        .updateMany({ where: { id: s.id, lastSeenAt: s.lastSeenAt }, data: { lastSeenAt: new Date(), expiresAt: new Date(Date.now() + SESSION_TTL_MS) } })
+        .catch((e: unknown) => this.logger.warn(`web session ${s.id}: extend skipped (${e instanceof Error ? e.message.split('\n').pop() : String(e)})`));
     return { portal: s.portal, accessToken };
   }
 

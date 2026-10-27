@@ -1,8 +1,8 @@
 import { encodeParams } from './encode-params.js';
-import { Bitrix24Error, RATE_LIMIT_CODES, TOKEN_EXPIRED_CODES } from './errors.js';
+import { Bitrix24Error, CLIENT_GONE, isClientGone, RATE_LIMIT_CODES, TOKEN_EXPIRED_CODES } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
 import { isReadMethod } from './read-only.js';
-import { countRest } from '../../../common/cache-invalidation.js';
+import { clientGone, countRest } from '../../../common/cache-invalidation.js';
 
 /** Источник access-токена. Для токенов приложения умеет обновлять, для токена пользователя — нет. */
 export interface AccessProvider {
@@ -74,6 +74,15 @@ export interface RestFailure {
 }
 
 const METHOD_RE = /^[a-z][a-z0-9_.]*$/i;
+
+/** Чтение: метод на чтение или пакет только из чтений (команды batch — строки `method?query`). */
+function readOnlyCall(method: string, params: Record<string, unknown>): boolean {
+  if (method !== 'batch') return isReadMethod(method);
+  const cmd = params.cmd;
+  return !!cmd && typeof cmd === 'object' && Object.values(cmd).every((c) => typeof c === 'string' && isReadMethod(c.split('?')[0]!));
+}
+
+const goneError = (method: string) => new Bitrix24Error(CLIENT_GONE, 'Клиент не дождался ответа — запрос к Битрикс24 не отправлялся', 499, { method });
 const BATCH_MAX = 50;
 
 /**
@@ -96,7 +105,7 @@ export class Bitrix24RestClient {
     try {
       return await this.callOnce<T>(method, params);
     } catch (err) {
-      if (err instanceof Bitrix24Error && this.opts.onFailure)
+      if (err instanceof Bitrix24Error && !isClientGone(err) && this.opts.onFailure)
         try {
           this.opts.onFailure({ method, code: String(err.code), message: err.message, write: method !== 'batch' && !isReadMethod(method), actor: this.actor });
         } catch {
@@ -109,11 +118,13 @@ export class Bitrix24RestClient {
   private async callOnce<T>(method: string, params: Record<string, unknown>): Promise<RestResponse<T>> {
     if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
     const viaPolicy = await this.assertAllowed(method, params);
+    // Чтение для ушедшего клиента не отправляем; запись — всегда до конца (журнал операций, компенсация).
+    const cancelled = readOnlyCall(method, params) ? clientGone : undefined;
     let token = await this.opts.access.getAccessToken();
     let refreshed = false;
     for (let attempt = 0; ; attempt++) {
       const queued = Date.now();
-      await this.opts.limiter.acquire(this.opts.limiterKey);
+      if (!(await this.opts.limiter.acquire(this.opts.limiterKey, cancelled))) throw goneError(method);
       countRest(method, Date.now() - queued);
       const body = await this.post(method, { ...params, auth: token });
       if (!body.error) {
@@ -146,7 +157,7 @@ export class Bitrix24RestClient {
     let refreshed = false;
     for (let attempt = 0; ; attempt++) {
       const queued = Date.now();
-      await this.opts.limiter.acquire(this.opts.limiterKey);
+      if (!(await this.opts.limiter.acquire(this.opts.limiterKey, clientGone))) throw goneError(method);
       countRest(method, Date.now() - queued);
       const body = await this.post(`api/${method}`, { ...params, auth: token }, '');
       const err = body.error as unknown;

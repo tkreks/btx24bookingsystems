@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClientBookingsDto, DealBookingTone, MessengerClientContextDto } from '@btx24/shared';
 import { apiGet, apiPut } from '../api.js';
+import { pollEvery } from '../fresh-poll.js';
 import { openCrm } from '../b24.js';
 import { fmtDate, fmtDateTime, fmtMoney } from '../format.js';
 import { Icon } from './icons.js';
@@ -47,15 +48,16 @@ export function ChatDealCard({ chatId, dealId, appChat, timezone, extra }: { cha
   const [error, setError] = useState('');
   useEffect(() => {
     let active = true;
-    const load = () => {
-      if (appChat) void apiGet<MessengerClientContextDto>(`/messengers/openlines/${chatId}/context`).then((v) => active && setCtx({ id: chatId, v }), () => undefined);
-      void apiGet<ClientBookingsDto>(`/openlines/chats/${chatId}/bookings`).then((v) => active && setClient({ id: chatId, v }), () => undefined);
-    };
-    load();
-    const timer = setInterval(load, POLL_MS);
+    const load = () =>
+      Promise.all([
+        appChat ? apiGet<MessengerClientContextDto>(`/messengers/openlines/${chatId}/context`).then((v) => active && setCtx({ id: chatId, v }), () => undefined) : null,
+        apiGet<ClientBookingsDto>(`/openlines/chats/${chatId}/bookings`).then((v) => active && setClient({ id: chatId, v }), () => undefined),
+      ]);
+    void load();
+    const stop = pollEvery(load, POLL_MS);
     return () => {
       active = false;
-      clearInterval(timer);
+      stop();
     };
   }, [chatId, appChat]);
   const context = ctx?.id === chatId ? ctx.v : null;

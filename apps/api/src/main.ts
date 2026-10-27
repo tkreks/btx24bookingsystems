@@ -37,7 +37,12 @@ async function bootstrap() {
         http.warn(`slow ${req.method} ${req.path}${part} ${res.statusCode} ${ms}ms${restSummary(rest)}`);
       }
     });
-    requestContext.run({ res, rest }, next);
+    const ctx: { res: Response; rest: RestStats; closed?: boolean } = { res, rest };
+    // Соединение закрылось до ответа — клиент ответа не ждёт (см. clientGone).
+    res.on('close', () => {
+      if (!res.writableFinished) ctx.closed = true;
+    });
+    requestContext.run(ctx, next);
   });
   app.enableShutdownHooks();
   app.useGlobalFilters(new Bitrix24ErrorFilter());

@@ -1,6 +1,7 @@
 import { Bitrix24RestClient, type AccessProvider } from './rest-client.js';
 import { Bitrix24Error } from './errors.js';
 import { RateLimiter } from './rate-limiter.js';
+import { requestContext } from '../../../common/cache-invalidation.js';
 
 type Reply = { status?: number; body: unknown } | Error;
 
@@ -30,6 +31,15 @@ function setup(replies: Reply[], access?: Partial<AccessProvider>) {
 }
 
 describe('Bitrix24RestClient.call', () => {
+  it('does not send reads for a client that has gone, but finishes writes', async () => {
+    const { client, calls } = setup([{ body: { result: 5 } }]);
+    const gone = { res: {} as never, closed: true };
+    await expect(requestContext.run(gone, () => client.call('crm.deal.list'))).rejects.toMatchObject({ code: 'CLIENT_GONE' });
+    await expect(requestContext.run(gone, () => client.batch({ a: { method: 'crm.deal.get', params: { id: 1 } } }))).rejects.toMatchObject({ code: 'CLIENT_GONE' });
+    expect(calls).toHaveLength(0);
+    await expect(requestContext.run(gone, () => client.call('crm.deal.add', { fields: {} }))).resolves.toMatchObject({ result: 5 });
+  });
+
   it('posts JSON with auth to <endpoint><method>.json', async () => {
     const { client, calls } = setup([{ body: { result: { ID: 1 }, total: 1 } }]);
     const res = await client.call('crm.deal.get', { id: 1 });

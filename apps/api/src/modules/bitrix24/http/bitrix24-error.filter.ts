@@ -18,6 +18,8 @@ const STATUS: Record<string, number> = {
   HTTP_ERROR: HttpStatus.SERVICE_UNAVAILABLE,
   ERROR_UNEXPECTED_ANSWER: HttpStatus.SERVICE_UNAVAILABLE,
   INTERNAL_SERVER_ERROR: HttpStatus.SERVICE_UNAVAILABLE,
+  // Клиент уже ушёл (nginx: 499) — ответ никто не прочитает, в журнал не пишем.
+  CLIENT_GONE: 499,
 };
 
 /** Портал не выполнил запрос (перегрузка, сеть, сбой) — действие не выполнено, можно повторить. */
@@ -36,6 +38,7 @@ const MESSAGE: Record<string, string> = {
   HTTP_ERROR: RETRY_LATER,
   ERROR_UNEXPECTED_ANSWER: RETRY_LATER,
   INTERNAL_SERVER_ERROR: RETRY_LATER,
+  CLIENT_GONE: 'Запрос отменён: ответ не дождались',
 };
 
 /** Понятный пользователю текст ошибки Битрикс24 (для ответов, где ошибка — часть результата). */

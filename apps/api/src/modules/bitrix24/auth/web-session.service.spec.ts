@@ -24,6 +24,11 @@ async function setup() {
       return r ? { ...r, portal: ctx.portals.find((p) => p.id === r.portalId) } : null;
     },
     update: async ({ where, data }: { where: { id: string }; data: object }) => Object.assign(rows.find((x) => x.id === where.id)!, data),
+    updateMany: async ({ where, data }: { where: { id: string; lastSeenAt?: Date }; data: object }) => {
+      const r = rows.find((x) => x.id === where.id && (!where.lastSeenAt || (x.lastSeenAt as Date).getTime() === where.lastSeenAt.getTime()));
+      if (r) Object.assign(r, data);
+      return { count: r ? 1 : 0 };
+    },
     deleteMany: async ({ where }: { where: { id?: string; tokenHash?: string } }) => {
       const i = rows.findIndex((x) => x.id === where.id || x.tokenHash === where.tokenHash);
       if (i >= 0) rows.splice(i, 1);
@@ -95,6 +100,19 @@ describe('WebSessionService', () => {
     b24.oauth = () => ({ status: 401, body: { error: 'invalid_grant' } });
     await expect(sessions.resolve(secret)).rejects.toMatchObject({ response: { code: 'SESSION_EXPIRED' } });
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('WebSessionService.resolve — sliding expiry', () => {
+  it('a write conflict while extending does not fail the request', async () => {
+    const { sessions, portal, rows } = await setup();
+    const secret = await sessions.create(portal, { accessToken: 'user-a', refreshToken: 'r', expiresAt: new Date(Date.now() + 3600_000), memberId: MEMBER, clientEndpoint: CLIENT_ENDPOINT, serverEndpoint: '', scope: '', userId: 242, status: null }, 'oauth.bitrix.info', { id: 242, name: 'Анна' });
+    rows[0]!.lastSeenAt = new Date(Date.now() - 2 * 3600_000);
+    const prisma = (sessions as unknown as { prisma: { webSession: Record<string, unknown> } }).prisma;
+    prisma.webSession.updateMany = async () => {
+      throw new Error("Record has changed since last read in table 'WebSession'");
+    };
+    await expect(sessions.resolve(secret)).resolves.toMatchObject({ accessToken: 'user-a' });
   });
 });
 

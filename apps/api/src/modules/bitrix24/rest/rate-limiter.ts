@@ -4,7 +4,7 @@
  * api и worker ограничиваются независимо, поэтому лимиты по умолчанию консервативные.
  */
 export class RateLimiter {
-  private readonly buckets = new Map<string, { tokens: number; updatedAt: number; queue: Promise<void> }>();
+  private readonly buckets = new Map<string, { tokens: number; updatedAt: number; queue: Promise<unknown> }>();
 
   constructor(
     private readonly ratePerSec: number,
@@ -13,8 +13,11 @@ export class RateLimiter {
     private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {}
 
-  /** Ждёт, пока для ключа (member_id) можно отправить ещё один запрос. Порядок вызовов сохраняется. */
-  acquire(key: string): Promise<void> {
+  /**
+   * Ждёт, пока для ключа (member_id) можно отправить ещё один запрос. Порядок вызовов сохраняется.
+   * `cancelled` — запрос стал не нужен, пока ждал очереди: false, и место в лимите не тратится.
+   */
+  acquire(key: string, cancelled?: () => boolean): Promise<boolean> {
     let bucket = this.buckets.get(key);
     if (!bucket) {
       bucket = { tokens: this.burst, updatedAt: this.now(), queue: Promise.resolve() };
@@ -23,12 +26,13 @@ export class RateLimiter {
     const b = bucket;
     const turn = b.queue.then(async () => {
       for (;;) {
+        if (cancelled?.()) return false;
         const t = this.now();
         b.tokens = Math.min(this.burst, b.tokens + ((t - b.updatedAt) / 1000) * this.ratePerSec);
         b.updatedAt = t;
         if (b.tokens >= 1) {
           b.tokens -= 1;
-          return;
+          return true;
         }
         await this.sleep(Math.ceil(((1 - b.tokens) / this.ratePerSec) * 1000));
       }
