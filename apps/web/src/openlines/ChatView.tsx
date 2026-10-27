@@ -392,7 +392,7 @@ export function ChatView({
                   {connectorLabel(source.connector)} · {source.title}
                 </div>
               )}
-              <Message m={m} chatId={m.chatId ?? chat.chatId} title={chat.title} timezone={timezone} />
+              <Message m={m} chatId={m.chatId ?? chat.chatId} title={chat.title} timezone={timezone} clientAvatar={status?.clientAvatar} />
             </Fragment>
           );
         })}
@@ -529,10 +529,11 @@ function ChatHeader({
   );
 }
 
-const DELIVERY: Record<'sending' | 'sent' | 'delivered', { mark: string; title: string }> = {
+const DELIVERY: Record<'sending' | 'sent' | 'delivered' | 'read', { mark: string; title: string }> = {
   sending: { mark: '⏳', title: 'Отправляется…' },
   sent: { mark: '✓', title: 'Принято открытой линией Битрикс24' },
   delivered: { mark: '✓✓', title: 'Доставлено в мессенджер клиента' },
+  read: { mark: '✓✓', title: 'Прочитано клиентом (подтверждение мессенджера)' },
 };
 
 function DeliveryMark({ status }: { status: keyof typeof DELIVERY }) {
@@ -580,7 +581,23 @@ function OutgoingMessage({ o, timezone, onRetry, onDrop }: { o: Outgoing; timezo
   );
 }
 
-function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: number; title: string; timezone: string }) {
+/**
+ * Аватар отправителя (решение владельца 2026-10-27): фото из Битрикс24/мессенджера, нет — инициалы;
+ * сообщение с телефона без смены (автор неизвестен) — «?».
+ */
+function SenderAvatar({ m, chatId, title, clientAvatar }: { m: ChatMessageDto; chatId: number; title: string; clientAvatar?: string | null }) {
+  if (m.author.phone === 'unknown' || m.author.phone === 'shared')
+    return (
+      <span className="avatar cv-msg-avatar unknown" title={m.author.phone === 'shared' ? 'Смены совпали — автор не определён' : 'Отправлено с телефона вне смены — автор неизвестен'} aria-hidden="true">
+        ?
+      </span>
+    );
+  const incoming = m.author.kind === 'client';
+  const src = m.author.avatar ?? (incoming ? clientAvatar : null);
+  return <Avatar src={src} name={m.author.name || (incoming ? title : 'Оператор')} size={null} tone={incoming ? avatarTone(chatId) : undefined} className="cv-msg-avatar" />;
+}
+
+function Message({ m, chatId, title, timezone, clientAvatar }: { m: ChatMessageDto; chatId: number; title: string; timezone: string; clientAvatar?: string | null }) {
   if (m.author.kind === 'system')
     return (
       <div className="cv-system">
@@ -590,12 +607,23 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
   const incoming = m.author.kind === 'client';
   return (
     <div className={`cv-row${incoming ? '' : ' out'}`}>
-      {incoming && <span className={`cv-msg-avatar a${avatarTone(chatId)}`}>{initials(m.author.name || title)}</span>}
+      {incoming && <SenderAvatar m={m} chatId={chatId} title={title} clientAvatar={clientAvatar} />}
       <div className="cv-bubble">
         <div className="cv-bubble-meta">
           <strong>{m.author.name}</strong>
           {m.viaPhone && (
-            <span className="via-phone" title="Отправлено менеджером с телефона, не из Битрикс24 и не из приложения">
+            <span
+              className="via-phone"
+              title={
+                m.author.phone === 'shift'
+                  ? 'Отправлено с телефона; автор — по смене (на смене был только он)'
+                  : m.author.phone === 'shared'
+                    ? 'Отправлено с телефона; на смене было несколько сотрудников — автор не определён'
+                    : m.author.phone === 'unknown'
+                      ? 'Отправлено с телефона вне смены — автор неизвестен'
+                      : 'Отправлено менеджером с телефона, не из Битрикс24 и не из приложения'
+              }
+            >
               📱 с телефона
             </span>
           )}
@@ -610,7 +638,7 @@ function Message({ m, chatId, title, timezone }: { m: ChatMessageDto; chatId: nu
         ))}
         <Reactions items={m.reactions} />
       </div>
-      {!incoming && <span className="cv-msg-avatar agent">{initials(m.author.name || 'Оператор')}</span>}
+      {!incoming && <SenderAvatar m={m} chatId={chatId} title={title} />}
     </div>
   );
 }

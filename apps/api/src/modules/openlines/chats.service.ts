@@ -33,6 +33,8 @@ import {
   messageText,
   preview,
   toMessageDto,
+  deliveryFromAck,
+  withAvatars,
   withoutPhoneEchoes,
   type ImFile,
   type ImMessage,
@@ -45,6 +47,7 @@ import { MessageContextService } from '../bookings/message-context.service.js';
 import { FilesService } from './files.service.js';
 import { OpenlineIndexService } from './openline-index.service.js';
 import { ACCESS_MAX_AGE_MS, ConversationsService } from './conversations.service.js';
+import { ActivityService } from './activity.service.js';
 import { entityParts, ownKey, channelOfKey } from './conversation-keys.js';
 import { stepsSchema } from './templates.service.js';
 
@@ -131,7 +134,14 @@ export class ChatsService {
     private readonly portals?: PortalService,
     private readonly messageContext?: MessageContextService,
     private readonly conversations?: ConversationsService,
+    private readonly activity?: ActivityService,
   ) {}
+
+  /** Лента для показа: фото авторов полными адресами, автор сообщений «с телефона» — по сменам. */
+  private present(user: B24UserContext, messages: ChatMessageDto[]): { messages: ChatMessageDto[]; pending: boolean } {
+    const withPhotos = withAvatars(messages, user.portal.domain);
+    return this.activity ? this.activity.phoneAuthors(user, withPhotos) : { messages: withPhotos, pending: false };
+  }
 
   /**
    * Подставить переменные шаблона (`{{Поле сделки}}`, `{=Variable:…}`, `{client_name}`…) по сделке,
@@ -783,6 +793,7 @@ export class ChatsService {
       await this.touchTails(user, feed.tails);
       if (top && !live) this.syncFeed(user, chatId, store);
       const send = feed.members.find((m) => m.chatId === feed.sendChatId)!;
+      const shown = this.present(user, feed.messages);
       const row = await this.prisma!.openlineChat.findUnique({ where: { portalId_chatId: { portalId: user.portal.id, chatId: send.chatId } }, select: { crm: true } });
       return {
         chatId,
@@ -791,12 +802,12 @@ export class ChatsService {
         joined: send.joined,
         canSend: send.joined && canSendRight,
         crm: feed.sendDialog ? crmLinksOf(feed.sendDialog.entity_data_2) : ((row?.crm as ChatSummary['crm'] | null) ?? { leadId: null, contactId: null, companyId: null, dealId: null }),
-        messages: feed.messages,
+        messages: shown.messages,
         hasMore: feed.hasMore,
         sendChatId: feed.sendChatId,
         chats: feed.members.map((m) => ({ chatId: m.chatId, connector: m.connector, title: m.title ?? `Чат #${m.chatId}`, sessionClosed: m.completed, lastMessageAt: m.lastMessageAt?.toISOString() ?? null })),
         hiddenChats: feed.hidden,
-        ...(feed.syncing ? { syncing: true } : {}),
+        ...(feed.syncing || shown.pending ? { syncing: true } : {}),
       };
     }
     // Диалог (права, роль) и сообщения — одним пакетом: переписка опрашивается, лимит портала — на запросы.
@@ -824,7 +835,7 @@ export class ChatsService {
       joined,
       canSend: joined && canSendRight,
       crm: crmLinksOf(dialog.entity_data_2),
-      messages: await this.withReactions(user.portal.id, dialog.entity_id, raw, raw.map((m) => toMessageDto(m, users, files)).sort((a, b) => a.id - b.id)),
+      messages: this.present(user, await this.withReactions(user.portal.id, dialog.entity_id, raw, raw.map((m) => toMessageDto(m, users, files)).sort((a, b) => a.id - b.id))).messages,
       hasMore: fetched.length >= HISTORY_LIMIT,
     };
   }
@@ -844,11 +855,13 @@ export class ChatsService {
     if (!mids.size) return messages;
     const messenger = await this.prisma.messenger.findFirst({ where: { portalId, lineMode: 'own', lineId: Number(line) }, select: { id: true } });
     if (!messenger) return messages;
-    const rows = await this.prisma.messengerMessage.findMany({ where: { portalId, messengerId: messenger.id, externalId: { in: [...new Set(mids.values())] } }, select: { externalId: true, reactions: true } });
-    const byMid = new Map(rows.map((r) => [r.externalId, groupReactions(r.reactions)]));
+    const rows = await this.prisma.messengerMessage.findMany({ where: { portalId, messengerId: messenger.id, externalId: { in: [...new Set(mids.values())] } }, select: { externalId: true, reactions: true, ack: true } });
+    const byMid = new Map(rows.map((r) => [r.externalId, { reactions: groupReactions(r.reactions), ack: r.ack }]));
     return messages.map((m) => {
-      const reactions = byMid.get(mids.get(m.id) ?? '');
-      return reactions?.length ? { ...m, reactions } : m;
+      const hit = byMid.get(mids.get(m.id) ?? '');
+      if (!hit) return m;
+      const delivery = deliveryFromAck(m, hit.ack);
+      return { ...m, ...(hit.reactions.length ? { reactions: hit.reactions } : {}), ...(delivery ? { delivery } : {}) };
     });
   }
 

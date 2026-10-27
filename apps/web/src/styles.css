@@ -2867,7 +2867,8 @@ button.warn-outline {
 }
 /* Статус своего сообщения: ⏳ отправляется, ✓ принято линией, ✓✓ доставлено; ошибка — красный «?». */
 .cv-delivery { font-size: 11px; letter-spacing: -2px; color: var(--muted); cursor: default; }
-.cv-delivery.delivered { color: var(--primary); }
+.cv-delivery.delivered { color: var(--muted); }
+.cv-delivery.read { color: var(--primary); font-weight: 800; }
 .cv-delivery.sending { letter-spacing: 0; }
 .cv-delivery.error { display: inline-grid; place-items: center; width: 16px; height: 16px; letter-spacing: 0; border-radius: 50%; background: var(--status-fail-text); color: var(--status-fail-bg); font-weight: 800; cursor: help; }
 .cv-outgoing .cv-bubble { opacity: .85; }
@@ -3069,6 +3070,10 @@ button.warn-outline {
   font-size: 11px;
   font-weight: 720;
 }
+
+/* Аватар отправителя — фото или инициалы того же размера (класс .avatar задаёт 50px — переопределяем). */
+.avatar.cv-msg-avatar { width: 32px; height: 32px; font-size: 11px; }
+.cv-msg-avatar.unknown { background: var(--neutral-bg); color: var(--muted); font-size: 15px; font-weight: 800; border: 1px dashed var(--muted); box-sizing: border-box; }
 
 .cv-msg-avatar.agent {
   color: #5d67b0;

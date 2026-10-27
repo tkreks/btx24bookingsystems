@@ -3,7 +3,7 @@ import type { ChatChannelsAdminDto, ChatCrmLinks, ChatMessageDto } from '@btx24/
 import type { Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
-import { connectorMidOf, connectorOf, crmLinksOf, groupReactions, phoneEchoIds, toMessageDto, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
+import { connectorMidOf, connectorOf, crmLinksOf, deliveryFromAck, groupReactions, phoneEchoIds, toMessageDto, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
 import { autoChannel, conversationKey, entityParts, lineChannel, ownKey } from './conversation-keys.js';
 
 /** Сообщений на страницу ленты (как прежняя история чата). */
@@ -439,12 +439,14 @@ export class ConversationsService {
     const byLine = new Map(messengers.map((m) => [m.lineId, m.id]));
     const rows = await this.prisma.messengerMessage.findMany({
       where: { portalId, messengerId: { in: messengers.map((m) => m.id) }, externalId: { in: [...new Set(wanted.map((m) => m.mid!))] } },
-      select: { messengerId: true, externalId: true, reactions: true },
+      select: { messengerId: true, externalId: true, reactions: true, ack: true },
     });
-    const byMid = new Map(rows.map((r) => [`${r.messengerId}:${r.externalId}`, groupReactions(r.reactions)]));
+    const byMid = new Map(rows.map((r) => [`${r.messengerId}:${r.externalId}`, { reactions: groupReactions(r.reactions), ack: r.ack }]));
     return messages.map((m) => {
-      const reactions = m.mid ? byMid.get(`${byLine.get(lineOf.get(m.chatId) ?? -1)}:${m.mid}`) : undefined;
-      return reactions?.length ? { ...strip(m), reactions } : strip(m);
+      const hit = m.mid ? byMid.get(`${byLine.get(lineOf.get(m.chatId) ?? -1)}:${m.mid}`) : undefined;
+      if (!hit) return strip(m);
+      const delivery = deliveryFromAck(m, hit.ack);
+      return { ...strip(m), ...(hit.reactions.length ? { reactions: hit.reactions } : {}), ...(delivery ? { delivery } : {}) };
     });
   }
 }

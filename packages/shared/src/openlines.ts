@@ -107,7 +107,18 @@ export interface ChatFileDto {
 export interface ChatMessageDto {
   id: number;
   date: string;
-  author: { id: number; name: string; kind: MessageAuthorKind };
+  author: {
+    id: number;
+    name: string;
+    kind: MessageAuthorKind;
+    /** Фото отправителя (сотрудник — из Битрикс24, клиент — из мессенджера). */
+    avatar?: string | null;
+    /**
+     * Сообщение с телефона: кто отправил по сменам — `shift` (на смене один сотрудник, имя и фото — его),
+     * `shared` (на смене несколько — `name` перечисляет их), `unknown` (смены нет — «Телефон», аватар «?»).
+     */
+    phone?: 'shift' | 'shared' | 'unknown';
+  };
   text: string;
   files: ChatFileDto[];
   /** Отправлено менеджером с телефона (рабочий WhatsApp через Wazzup) — наше сообщение. */
@@ -118,9 +129,10 @@ export interface ChatMessageDto {
   chatId?: number;
   /**
    * Сообщение сотрудника из Битрикс24: `sent` — принято открытой линией, `delivered` — мессенджер
-   * подтвердил доставку (у сообщения появился `CONNECTOR_MID`). Прочтение клиентом REST не отдаёт.
+   * подтвердил доставку (у сообщения появился `CONNECTOR_MID`), `read` — клиент прочитал (только наши
+   * номера приложения: подтверждение прочтения из самого мессенджера; REST Битрикс24 его не отдаёт).
    */
-  delivery?: 'sent' | 'delivered';
+  delivery?: 'sent' | 'delivered' | 'read';
 }
 
 /** Чат открытой линии в переписке (ADR 0017): из него собрана часть ленты. */

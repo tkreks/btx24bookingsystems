@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import type { ChatMessageDto } from '@btx24/shared';
 import { classifyActionLog, todayIn, zonedDayRange, type MyActivityDto, type ClientTimelineEvent, type ActivityDayDto, type ActivityEventDto } from '@btx24/shared';
 import { selectedPeriod } from '../../common/period.js';
 import { callDurationSec, callStatus, type CallActivity } from './call-stats.js';
@@ -18,6 +19,24 @@ const SHARED_NAME = 'Совместное использование';
 
 type Row = Record<string, unknown>;
 
+/** Сотрудники групп портала — для автора сообщений «с телефона»; смены дня — сегодня 5 мин, прошлые 6 ч. */
+const PEOPLE_TTL_MS = 10 * 60_000;
+const SHIFTS_TODAY_TTL_MS = 5 * 60_000;
+const SHIFTS_PAST_TTL_MS = 6 * 60 * 60_000;
+type People = Map<number, { name: string; photo: string | null }>;
+type Cached<T> = { at: number; value: T | null; loading: Promise<unknown> | null };
+
+/** Кому приписать сообщение с телефона: смена покрывает ровно одного — ему, нескольких — спорно, никого — неизвестно. */
+export function phoneAuthorAt(shifts: Shift[], people: People, at: number, now = Date.now()): Pick<ChatMessageDto['author'], 'name' | 'phone' | 'avatar'> & { userId?: number } {
+  const covering = [...new Set(shifts.filter((s) => s.start <= at && at <= (s.end ?? now)).map((s) => s.userId))].sort((a, b) => a - b);
+  if (covering.length === 1) {
+    const p = people.get(covering[0]);
+    return { userId: covering[0], name: p?.name ?? `#${covering[0]}`, avatar: p?.photo ?? null, phone: 'shift' };
+  }
+  if (covering.length > 1) return { name: `Спорно: на смене ${covering.map((id) => people.get(id)?.name ?? `#${id}`).join(', ')}`, phone: 'shared' };
+  return { name: 'Телефон', phone: 'unknown' };
+}
+
 /**
  * «Активность сотрудников» за день (решение владельца 2026-10-23, только администраторам приложения).
  * Сотрудники — участники групп (сотрудники и отделы). Смена — timeman. Действия — по Битрикс24:
@@ -29,6 +48,60 @@ type Row = Record<string, unknown>;
 export class ActivityService {
 
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly peopleCache = new Map<string, Cached<People>>();
+  private readonly shiftCache = new Map<string, Cached<Shift[]>>();
+
+  /** Из кэша; нет или устарело — загрузка в фоне (ответ чата её не ждёт). `null` — ещё не загружено. */
+  private cachedValue<T>(map: Map<string, Cached<T>>, key: string, ttl: number, load: () => Promise<T>): T | null {
+    const hit = map.get(key);
+    if (hit && (Date.now() - hit.at < ttl || hit.loading)) return hit.value;
+    if (map.size > 2000) map.clear();
+    const entry: Cached<T> = hit ?? { at: 0, value: null, loading: null };
+    entry.loading = load().then(
+      (value) => Object.assign(entry, { value, at: Date.now(), loading: null }),
+      () => Object.assign(entry, { at: Date.now(), loading: null }),
+    );
+    map.set(key, entry);
+    return entry.value;
+  }
+
+  /**
+   * Автор сообщений «с телефона» в ленте чата (решение владельца 2026-10-27): по сменам сотрудников
+   * групп — на смене один сотрудник, его имя и фото; несколько — «Спорно: на смене …»; смены нет —
+   * «Телефон» (веб ставит «?» вместо аватарки). Метка Wazzup с именем («автор: Елена») не трогается.
+   * Смены и сотрудники — из кэша; пока грузятся — `pending` (лента перечитается через пару секунд).
+   */
+  phoneAuthors<T extends ChatMessageDto>(user: B24UserContext, messages: T[]): { messages: T[]; pending: boolean } {
+    const phone = messages.filter((m) => m.viaPhone && (m.author.name === 'Телефон' || !m.author.name));
+    if (!phone.length) return { messages, pending: false };
+    const portalId = user.portal.id;
+    const tz = user.portal.timezone;
+    const people = this.cachedValue(this.peopleCache, portalId, PEOPLE_TTL_MS, () => this.employees(user));
+    if (!people) return { messages, pending: true };
+    const ids = [...people.keys()];
+    const today = todayIn(tz);
+    const dayOf = (at: number) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+    const shiftsByDay = new Map<string, Shift[] | null>();
+    for (const m of phone) {
+      const day = dayOf(Date.parse(m.date));
+      if (shiftsByDay.has(day)) continue;
+      const { start, end } = zonedDayRange(day, tz);
+      shiftsByDay.set(day, this.cachedValue(this.shiftCache, `${portalId}:${day}`, day === today ? SHIFTS_TODAY_TTL_MS : SHIFTS_PAST_TTL_MS, () => this.shifts(user, ids, start.getTime(), end.getTime())));
+    }
+    let pending = false;
+    const out = messages.map((m) => {
+      if (!phone.includes(m)) return m;
+      const shifts = shiftsByDay.get(dayOf(Date.parse(m.date)));
+      if (!shifts) {
+        pending = true;
+        return m;
+      }
+      const a = phoneAuthorAt(shifts, people, Date.parse(m.date));
+      return { ...m, author: { ...m.author, ...(a.userId ? { id: a.userId } : {}), name: a.name, phone: a.phone, ...(a.avatar ? { avatar: a.avatar } : {}) } };
+    });
+    return { messages: out, pending };
+  }
 
   async day(user: B24UserContext, query: { date?: unknown }): Promise<ActivityDayDto> {
     const tz = user.portal.timezone;

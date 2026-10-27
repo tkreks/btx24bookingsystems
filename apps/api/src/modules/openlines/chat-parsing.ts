@@ -143,6 +143,8 @@ export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): Ch
       id: Number(m.author_id),
       name: phone ? phone.author || 'Телефон' : kind === 'system' ? 'Система' : (user?.name ?? `#${m.author_id}`),
       kind,
+      // Как отдал портал (путь бывает относительным) — в адрес превращает `withAvatars` при выдаче.
+      ...(!phone && kind !== 'system' && user?.avatar ? { avatar: user.avatar } : {}),
     },
     ...(phone ? { viaPhone: true } : {}),
     ...(kind === 'employee' && !phone ? { delivery: connectorMidOf(m) ? ('delivered' as const) : ('sent' as const) } : {}),
@@ -197,4 +199,18 @@ export function groupReactions(list: unknown): ChatReactionDto[] {
     } else out.push({ emoji: r.emoji, count: 1, mine: !!r.mine });
   }
   return out;
+}
+
+/**
+ * Статус своего сообщения по подтверждению самого мессенджера (наши номера, `MessengerMessage.ack`:
+ * 1 на сервере · 2 доставлено · 3 прочитано) — точнее признака доставки из Битрикс24.
+ */
+export function deliveryFromAck(m: ChatMessageDto, ack: number | null | undefined): ChatMessageDto['delivery'] {
+  if (m.author.kind !== 'employee' || m.viaPhone) return m.delivery;
+  return ack === 3 ? 'read' : ack === 2 ? 'delivered' : m.delivery;
+}
+
+/** Фото авторов — полными адресами портала (в базе и в ответе портала путь бывает относительным). */
+export function withAvatars<T extends ChatMessageDto>(messages: T[], domain: string): T[] {
+  return messages.map((m) => (m.author.avatar ? { ...m, author: { ...m.author, avatar: photoUrl(m.author.avatar, domain) } } : m));
 }
