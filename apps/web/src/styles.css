@@ -8666,7 +8666,7 @@ button.tl-piece.free:hover { filter: brightness(1.06); }
 @media (max-width: 560px) { .channel-recovery-actions { margin-left: 0; } .channel-recovery-actions > * { flex: 1 1 100%; } }
 
 /* Часы поверх каждого ресурса; длинная шкала сохраняет читаемый шаг. */
-.timeline-rows { display: block; overflow-x: auto; }
+.timeline-rows { display: block; overflow-x: auto; overflow-y: hidden; }
 .timeline-grid { display: grid; gap: 6px; }
 .timeline-axis { height: 36px; }
 .timeline-axis .timeline-tick { top: 18px; font-size: 10px; white-space: nowrap; }

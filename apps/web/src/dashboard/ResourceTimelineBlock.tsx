@@ -456,7 +456,9 @@ function TimelineSkeleton({ ids, days, timezone }: { ids: number[]; days: string
   const endMs = zonedDayRange(days[days.length - 1], timezone).end.getTime();
   const ticks = period ? [] : timelineHours(startMs, endMs, timezone);
   const gridWidth = 140 + (period ? days.length * 76 : Math.ceil((endMs - startMs) / 3_600_000) * 40);
-  return <div className="timeline-rows" aria-busy="true">
+  // Строка загрузки — вне прокручиваемой шкалы: крутящийся спиннер внутри неё на 1–2 px менял высоту
+  // содержимого, и вертикальная полоса шкалы включалась и выключалась («дрожание», 2026-10-27).
+  return <><div className="timeline-rows" aria-busy="true">
     <div className="timeline-grid" style={{ minWidth: gridWidth }}>
       {period ? <div className="timeline-day-axis">{days.map(d => <span key={d}>{new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, weekday: 'short', day: '2-digit', month: '2-digit' }).format(zonedDayRange(d, timezone).start)}</span>)}</div> :
         <div className="timeline-axis" aria-hidden="true"><span className="timeline-now">00:00</span>{ticks.map(t => <span key={t.key} className="timeline-tick" style={{ left: `${t.at * 100}%` }}>{t.time}</span>)}<span className="timeline-end">24:00</span></div>}
@@ -465,6 +467,6 @@ function TimelineSkeleton({ ids, days, timezone }: { ids: number[]; days: string
         <div className="timeline-bar loading" aria-hidden="true" />
       </div>)}
     </div>
-    <p className="muted timeline-loading" role="status"><span className="spinner" aria-hidden="true" /> <LoadProgress name={`timeline:${days.length}`} label="Загружаем брони" /></p>
-  </div>;
+  </div>
+  <p className="muted timeline-loading" role="status"><span className="spinner" aria-hidden="true" /> <LoadProgress name={`timeline:${days.length}`} label="Загружаем брони" /></p></>;
 }
