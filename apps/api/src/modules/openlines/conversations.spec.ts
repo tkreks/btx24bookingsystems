@@ -123,6 +123,7 @@ describe('ConversationsService.discover', () => {
         upsert,
       },
       chatLineChannel: { findMany: vi.fn(async () => [{ lineId: 4, channel: 'whatsapp:74993467272' }]) },
+      crmEntity: { findMany: vi.fn(async () => []) },
     };
     const svc = new ConversationsService(prisma as unknown as PrismaService);
     const call = vi.fn(async () => ({ result: [{ CHAT_ID: '4394' }, { CHAT_ID: '1200' }] }));

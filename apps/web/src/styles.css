@@ -8044,34 +8044,26 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
   margin: 0 0 8px;
 }
 
-/* Подпись блока дашборда: откуда данные — «из кэша · данные на 14:02 · обновляем…» / «обновлено 14:05».
-   Высота постоянная: смена подписи не сдвигает блоки. */
+/* Точка свежести данных под блоком: зелёная — актуальны, синяя — обновляем,
+   оранжевая — старше минуты, красная — старше 10 минут. Высота постоянная: смена не сдвигает блоки. */
 .dash-cell-body > .dash-cell-sync {
   flex: none;
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 5px;
   height: 16px;
   margin: 3px 4px 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 16px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .dash-cell-sync .sync-dot {
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ok-text);
 }
-.dash-cell-sync.cache .sync-dot { background: var(--status-wait-text); }
 .dash-cell-sync.sync .sync-dot { background: var(--primary); animation: sync-pulse 1.2s ease-in-out infinite; }
-.dash-cell-sync.cache { color: var(--status-wait-text); }
-.dash-cell-sync.error .sync-dot { background: var(--warn-text); }
+.dash-cell-sync.stale .sync-dot { background: #f59e0b; }
+.dash-cell-sync.old .sync-dot { background: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .dash-cell-sync.sync .sync-dot { animation: none; } }
 
 /* Блок в загрузке: заготовка строк и надпись поверх. */

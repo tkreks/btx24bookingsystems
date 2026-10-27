@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { OpenlineChat, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { followMergedContacts } from './merged-contacts.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { entityParts } from './conversation-keys.js';
@@ -158,6 +159,8 @@ export class OpenlineIndexService {
         const m = (res.result[`c${chatId}`] ?? {}) as { messages?: ImMessage[]; users?: ImUser[] };
         const last = lastMeaningful(m.messages ?? [], m.users ?? []);
         const c = chats.get(chatId)!;
+        const crm = crmLinksOf(c.entityData2);
+        await followMergedContacts(this.prisma, portal.id, [crm]);
         const meta = {
           sessionId: c.session,
           responsibleId: Number(c.activity.RESPONSIBLE_ID) || null,
@@ -171,7 +174,7 @@ export class OpenlineIndexService {
           // Среди последних сообщений нет человеческих — прежнюю дату не затираем.
           ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}),
           ...(c.title !== null ? { title: c.title.slice(0, 255) } : {}),
-          crm: crmLinksOf(c.entityData2) as unknown as Prisma.InputJsonValue,
+          crm: crm as unknown as Prisma.InputJsonValue,
           ...(m.users?.length ? { clientAvatar: clientAvatarOf(m.users, portal.domain) } : {}),
           ...(last
             ? {

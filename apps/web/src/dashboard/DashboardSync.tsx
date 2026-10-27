@@ -2,15 +2,14 @@ import { captureDashboardScroll } from './scroll-anchor.js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { MyGroupDto, SessionInfo } from '@btx24/shared';
 import { apiGetMeta } from '../api.js';
-import { DashboardCache, fromCacheOf, WithMeta, type DashboardSnapshot } from './dashboard-cache.js';
+import { DashboardCache, WithMeta, type DashboardSnapshot } from './dashboard-cache.js';
 
 const Context = createContext<DashboardCache | null>(null);
 const EMPTY: DashboardSnapshot<never> = { data: null, error: '', fetching: false, updatedAt: null, cached: false, dataAt: null, source: null, serverRefreshing: false };
 /** Ответ с отметкой серверного кэша (X-Cache) — хранилище покажет, откуда данные. */
 const transport = (path: string) => apiGetMeta(path).then((r) => new WithMeta(r.data, r.meta));
-/** Блок дашборда собирает пути своих запросов — для подписи «из кэша / обновлено». */
+/** Блок дашборда собирает пути своих запросов — для точки свежести данных. */
 const BlockPaths = createContext<((path: string) => () => void) | null>(null);
-const hhmm = (at: number) => new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 export function dashboardScope(session: SessionInfo, groups: MyGroupDto[] | null): string {
   return JSON.stringify([session.portal.domain, session.user.id, session.canManageApp, session.appAccess, (groups ?? []).map(g => [g.id, g.role, [...g.permissions].sort(), [...g.resourceIds].sort((a,b)=>a-b)])]);
 }
@@ -65,7 +64,8 @@ export function DashboardSyncStatus() {
 
 /**
  * Обёртка блока: запросы внутри неё (и переданные `paths` — запросы страницы, из которых блок взял
- * данные) дают подпись внизу блока — «из кэша · данные на 14:02 · обновляем…» или «обновлено 14:05».
+ * данные) дают точку-индикатор внизу блока: зелёная — свежие, синяя — обновляем,
+ * оранжевая — данным больше минуты, красная — больше 10 минут.
  */
 export function BlockSync({ paths = [], children }: { paths?: string[]; children: ReactNode }) {
   const [own, setOwn] = useState<string[]>([]);
@@ -82,25 +82,31 @@ export function BlockSync({ paths = [], children }: { paths?: string[]; children
   );
 }
 
+const STALE_MS = 60_000;
+const OLD_MS = 10 * 60_000;
+const DOT_TITLE: Record<string, string> = { live: 'Данные актуальны', sync: 'Обновляем из Битрикс24…', stale: 'Данным больше минуты', old: 'Данным больше 10 минут' };
+
 function BlockSyncNote({ paths }: { paths: string[] }) {
   const store = useContext(Context);
   const key = paths.join('\n');
   const read = useCallback(() => {
     const snaps = store ? key.split('\n').filter(Boolean).flatMap((p) => store.peek(p) ?? []) : [];
     if (!snaps.length || snaps.some((s) => s.data === null)) return '';
-    const refreshing = snaps.some((s) => s.fetching || s.serverRefreshing);
+    if (snaps.some((s) => s.fetching || s.serverRefreshing)) return 'sync';
     const dates = snaps.flatMap((s) => (s.dataAt === null ? [] : [s.dataAt]));
-    const at = dates.length ? Math.min(...dates) : null;
-    if (snaps.some((s) => s.error)) return `error|не удалось обновить${at ? ` · данные на ${hhmm(at)}` : ''}`;
-    if (snaps.some(fromCacheOf)) return `cache|из кэша${at ? ` · данные на ${hhmm(at)}` : ''}${refreshing ? ' · обновляем…' : ''}`;
-    return refreshing ? 'sync|обновляем…' : `live|обновлено${at ? ` ${hhmm(at)}` : ''}`;
+    const age = dates.length ? Date.now() - Math.min(...dates) : 0;
+    return age > OLD_MS ? 'old' : age > STALE_MS ? 'stale' : 'live';
   }, [store, key]);
-  const note = useSyncExternalStore(store?.subscribeSync ?? noopSubscribe, read);
-  const [kind, text] = note ? note.split('|') : ['', ''];
+  // Возраст данных растёт и без событий хранилища — перечитываем раз в 15 с.
+  const subscribe = useCallback((listener: () => void) => {
+    const off = (store?.subscribeSync ?? noopSubscribe)(listener);
+    const timer = window.setInterval(listener, 15_000);
+    return () => { window.clearInterval(timer); off(); };
+  }, [store]);
+  const kind = useSyncExternalStore(subscribe, read);
   return (
     <p className={`dash-cell-sync${kind ? ` ${kind}` : ''}`} role="status" aria-live="off">
-      {kind && <span className="sync-dot" aria-hidden="true" />}
-      {text}
+      {kind && <span className="sync-dot" title={DOT_TITLE[kind]} aria-label={DOT_TITLE[kind]} />}
     </p>
   );
 }

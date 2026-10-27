@@ -42,6 +42,7 @@ import {
 } from './chat-parsing.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { followMergedContacts } from './merged-contacts.js';
 import { dealOfBindings, PortalService } from '../bitrix24/portals/portal.service.js';
 import { MessageContextService } from '../bookings/message-context.service.js';
 import { FilesService } from './files.service.js';
@@ -484,6 +485,7 @@ export class ChatsService {
       };
       return { summary, sortKey, last, s, d, entityId: d.entity_id ?? null, avatar: m.users?.length ? clientAvatarOf(m.users, user.portal.domain) : undefined };
     });
+    if (this.prisma) await followMergedContacts(this.prisma, user.portal.id, summaries.map((x) => x.summary.crm)).catch(() => undefined);
     await this.persist(
       user,
       summaries,
@@ -630,6 +632,8 @@ export class ChatsService {
     if (!row) return; // строки нет — её создаст список или worker (нужна сессия)
     const last = lastMeaningful(messages, users);
     const texts = (await this.prisma.portalSettings.findUnique({ where: { portalId: user.portal.id }, select: { dialogTextsEnabled: true } }))?.dialogTextsEnabled === true;
+    const crm = dialog.entity_data_2 !== undefined ? crmLinksOf(dialog.entity_data_2) : null;
+    if (crm) await followMergedContacts(this.prisma, user.portal.id, [crm]);
     await this.prisma.openlineChat.update({
       where: { id: row.id },
       data: {
@@ -638,7 +642,7 @@ export class ChatsService {
           const parts = entityParts(dialog.entity_id);
           return parts.lineId ? { lineId: parts.lineId, extChatId: parts.extChatId } : {};
         })(),
-        ...(dialog.entity_data_2 !== undefined ? { crm: crmLinksOf(dialog.entity_data_2) as unknown as Prisma.InputJsonValue } : {}),
+        ...(crm ? { crm: crm as unknown as Prisma.InputJsonValue } : {}),
         ...(users.length ? { clientAvatar: clientAvatarOf(users, user.portal.domain) } : {}),
         ...(last
           ? {
@@ -795,13 +799,15 @@ export class ChatsService {
       const send = feed.members.find((m) => m.chatId === feed.sendChatId)!;
       const shown = this.present(user, feed.messages);
       const row = await this.prisma!.openlineChat.findUnique({ where: { portalId_chatId: { portalId: user.portal.id, chatId: send.chatId } }, select: { crm: true } });
+      const crm = feed.sendDialog ? crmLinksOf(feed.sendDialog.entity_data_2) : ((row?.crm as ChatSummary['crm'] | null) ?? { leadId: null, contactId: null, companyId: null, dealId: null });
+      await followMergedContacts(this.prisma!, user.portal.id, [crm]).catch(() => undefined);
       return {
         chatId,
         title: feed.sendDialog?.name ?? send.title ?? `Чат #${send.chatId}`,
         connector: send.connector,
         joined: send.joined,
         canSend: send.joined && canSendRight,
-        crm: feed.sendDialog ? crmLinksOf(feed.sendDialog.entity_data_2) : ((row?.crm as ChatSummary['crm'] | null) ?? { leadId: null, contactId: null, companyId: null, dealId: null }),
+        crm,
         messages: shown.messages,
         hasMore: feed.hasMore,
         sendChatId: feed.sendChatId,
@@ -828,13 +834,15 @@ export class ChatsService {
     // Открытая переписка — самые свежие данные: обновляем строку чата в кэше списка (например,
     // после ответа чат сразу уходит из «Ждут ответа»), и свой доступ.
     if (!parsed.data.beforeId) await this.touch(user, chatId, dialog, fetched, users, joined).catch(() => undefined);
+    const crm = crmLinksOf(dialog.entity_data_2);
+    if (this.prisma) await followMergedContacts(this.prisma, user.portal.id, [crm]).catch(() => undefined);
     return {
       chatId,
       title: dialog.name ?? `Чат #${chatId}`,
       connector: connectorOf(dialog.entity_id),
       joined,
       canSend: joined && canSendRight,
-      crm: crmLinksOf(dialog.entity_data_2),
+      crm,
       messages: this.present(user, await this.withReactions(user.portal.id, dialog.entity_id, raw, raw.map((m) => toMessageDto(m, users, files)).sort((a, b) => a.id - b.id))).messages,
       hasMore: fetched.length >= HISTORY_LIMIT,
     };

@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import type { ChatChannelsAdminDto, ChatCrmLinks, ChatMessageDto } from '@btx24/shared';
 import type { Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { followMergedContacts } from './merged-contacts.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { connectorMidOf, connectorOf, crmLinksOf, deliveryFromAck, groupReactions, phoneEchoIds, toMessageDto, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
 import { autoChannel, conversationKey, entityParts, lineChannel, ownKey } from './conversation-keys.js';
@@ -278,6 +279,7 @@ export class ConversationsService {
       if (!d?.id) continue;
       const { lineId, extChatId } = entityParts(d.entity_id);
       const links = crmLinksOf(d.entity_data_2);
+      await followMergedContacts(this.prisma, portalId, [links]);
       const connector = connectorOf(d.entity_id).slice(0, 64);
       const convKey = conversationKey({ chatId: id, crm: links, connector, lineId, extChatId }, channels);
       // Сессия, время и сводка — с первым открытием/проходом worker'а; checkedAt — «ещё не индексирован».
