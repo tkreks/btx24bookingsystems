@@ -47,6 +47,11 @@ export interface ChatSummary {
   favorite: boolean;
   /** Почему писать в чат нельзя (линия выключена, канал не подключён); null — рабочий. Только во встройке сделки. */
   lineProblem?: string | null;
+  /**
+   * Переписка (ADR 0017): клиент × наш канал. `chatId` строки — последний чат переписки; `chatIds` — все
+   * её доступные сотруднику чаты открытых линий (Wazzup и наш коннектор на одном номере, прежние диалоги).
+   */
+  conversation?: { chatIds: number[]; channel: string };
 }
 
 /** Псевдопапка «★ Избранное» в списке папок и `?folder=` списка чатов. */
@@ -109,6 +114,17 @@ export interface ChatMessageDto {
   viaPhone?: boolean;
   /** Реакции из мессенджера (свои линии приложения): эмодзи, сколько, есть ли наша. Только просмотр. */
   reactions?: ChatReactionDto[];
+  /** Чат открытой линии, где сообщение (лента переписки собирает несколько чатов); файлы — через него. */
+  chatId?: number;
+}
+
+/** Чат открытой линии в переписке (ADR 0017): из него собрана часть ленты. */
+export interface ConversationChatDto {
+  chatId: number;
+  connector: string;
+  title: string;
+  sessionClosed: boolean;
+  lastMessageAt: string | null;
 }
 
 export interface ChatReactionDto {
@@ -130,6 +146,14 @@ export interface ChatHistoryDto {
   messages: ChatMessageDto[];
   /** Есть сообщения старше первого — запросить с `beforeId`. */
   hasMore: boolean;
+  /**
+   * Переписка: куда пишем (последний чат своей линии, иначе последний доступный) — отправка, «Присоединиться»,
+   * шаблоны и отметки идут в этот чат; `joined`/`canSend` — о нём. `chats` — чаты ленты, `hiddenChats` —
+   * сколько чатов переписки Битрикс24 сотруднику не показывает.
+   */
+  sendChatId?: number;
+  chats?: ConversationChatDto[];
+  hiddenChats?: number;
 }
 
 /** Шаг цепочки: текст и/или вложения (`StoredFile.id`). Отправляются по порядку. */
@@ -553,4 +577,24 @@ export interface MyActivityDto {
   to: string;
   events: import('./calls.js').ClientTimelineEvent[];
   notes: string[];
+}
+
+/**
+ * ⚙ → «Мессенджеры» → «Каналы линий» (ADR 0017): в какой наш канал (номер) попадают чаты линии. Чаты
+ * клиента в линиях одного канала — одна переписка. `GET/PUT /api/admin/chat-channels[/:lineId]`.
+ */
+export interface ChatLineChannelDto {
+  lineId: number;
+  lineName: string;
+  /** `whatsapp:74993467272`, `telegram:79895793606` или `line:<id>` — своя переписка у линии. */
+  channel: string;
+  /** Подобран автоматически (своя линия номера, цифры номера в названии); false — выбрал администратор. */
+  auto: boolean;
+  chats: number;
+}
+
+export interface ChatChannelsAdminDto {
+  lines: ChatLineChannelDto[];
+  /** Наши номера: канал и подпись (`WhatsApp +7 499 346-72-72`). */
+  numbers: { channel: string; label: string }[];
 }

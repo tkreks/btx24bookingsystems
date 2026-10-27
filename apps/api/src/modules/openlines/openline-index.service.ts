@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { OpenlineChat, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import type { Prisma } from '../../generated/prisma/client.js';
+import { entityParts } from './conversation-keys.js';
+import { ConversationsService } from './conversations.service.js';
 import { clientAvatarOf, connectorOf, crmLinksOf, lastMeaningful, messageText, preview, type ImMessage, type ImUser } from './chat-parsing.js';
 
 /** Индекс считается живым, если обновлялся не позже этого (иначе — запасной способ без индекса). */
@@ -38,7 +40,11 @@ interface Activity {
 export class OpenlineIndexService {
   private readonly logger = new Logger(OpenlineIndexService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    /** Хранение сообщений для ленты переписок (ADR 0017); в тестах индекса может не быть. */
+    @Optional() private readonly conversations?: ConversationsService,
+  ) {}
 
   /** Включён сбор метаданных и индекс свежий — список можно строить по нему. */
   async isActive(portalId: string, now = new Date()): Promise<boolean> {
@@ -116,7 +122,7 @@ export class OpenlineIndexService {
       if (Number(a.ASSOCIATED_ENTITY_ID) > 0) sessions.set(Number(a.ASSOCIATED_ENTITY_ID), a);
 
     // Сессия → чат; у чата берём последнюю (наибольшую) сессию.
-    const chats = new Map<number, { session: number; activity: Activity; connector: string; title: string | null; entityData2: string | null }>();
+    const chats = new Map<number, { session: number; activity: Activity; connector: string; title: string | null; entityData2: string | null; entityId: string | null }>();
     const list = [...sessions.entries()];
     for (let i = 0; i < list.length; i += BATCH) {
       const part = list.slice(i, i + BATCH);
@@ -130,7 +136,7 @@ export class OpenlineIndexService {
         if (!d?.id) continue;
         const prev = chats.get(d.id);
         if (!prev || prev.session < sid)
-          chats.set(d.id, { session: sid, activity: a, connector: connectorOf(d.entity_id), title: d.name ?? null, entityData2: d.entity_data_2 ?? null });
+          chats.set(d.id, { session: sid, activity: a, connector: connectorOf(d.entity_id), title: d.name ?? null, entityData2: d.entity_data_2 ?? null, entityId: d.entity_id ?? null });
       }
     }
 
@@ -157,6 +163,10 @@ export class OpenlineIndexService {
           responsibleId: Number(c.activity.RESPONSIBLE_ID) || null,
           completed: c.activity.COMPLETED === 'Y',
           connector: c.connector.slice(0, 64),
+          ...(() => {
+            const { lineId, extChatId } = entityParts(c.entityId);
+            return lineId ? { lineId, extChatId } : {};
+          })(),
           checkedAt: now,
           // Среди последних сообщений нет человеческих — прежнюю дату не затираем.
           ...(last?.human ? { lastMessageAt: new Date(last.message.date), lastAuthor: last.kind, clientStreak: last.streak } : {}),
@@ -177,6 +187,8 @@ export class OpenlineIndexService {
           create: { portalId: portal.id, chatId, ...meta },
           update: meta,
         });
+        // История для ленты переписки (ADR 0017) — при «сборе текстов».
+        if (texts && this.conversations) await this.conversations.store(portal.id, chatId, m, null, MESSAGES_PER_CHAT);
         updated++;
       }
     }

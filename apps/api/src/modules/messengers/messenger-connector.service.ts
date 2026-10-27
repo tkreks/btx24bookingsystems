@@ -337,10 +337,13 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     for (const r of rows) await this.relayOne(m, r, null, 'send');
   }
 
-  private async relayTarget(m: Messenger, msg: MessengerMessage): Promise<string> {
-    const prior = msg.dealId ? await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null }, dealId: msg.dealId }, orderBy: { sentAt: 'desc' } }) : null;
-    const other = msg.dealId && !prior ? await this.prisma.messengerMessage.findFirst({ where: { portalId: m.portalId, messengerId: m.id, chatId: msg.chatId, b24ChatId: { not: null }, dealId: { not: null } } }) : null;
-    return msg.relayChatId ?? prior?.relayChatId ?? (prior ? msg.chatId : msg.dealId && other ? `${msg.chatId}::deal:${msg.dealId}` : msg.chatId);
+  /**
+   * Диалог линии для сообщения: всегда диалог собеседника (ADR 0017 — сделка только метка сообщения,
+   * отдельных диалогов под сделку нет). Правка и удаление — в диалог, куда ушло исходное (`relayChatId`,
+   * в том числе прежние `<чат>::deal:<id>`).
+   */
+  private async relayTarget(_m: Messenger, msg: MessengerMessage): Promise<string> {
+    return msg.relayChatId ?? msg.chatId;
   }
 
   private async toBitrix(m: Messenger, msg: MessengerMessage, name: string | null, op: 'send' | 'update' | 'delete', explicitChannel = false): Promise<void> {

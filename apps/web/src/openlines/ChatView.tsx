@@ -9,7 +9,7 @@ import { avatarTone, dayKey, initials } from './chat-list.js';
 import { ChatDealCard } from './ChatDealCard.js';
 import { Avatar } from './Avatar.js';
 import { ChannelSwitch } from './ChannelSwitch.js';
-import { clipName } from './format.js';
+import { clipName, connectorLabel } from './format.js';
 import { Icon } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
@@ -87,11 +87,13 @@ export function ChatView({
     };
   }, [chatId]);
 
+  // Переписка (ADR 0017): лента собрана из нескольких чатов, действия — в чат, куда пишем.
+  const target = chat?.sendChatId ?? chatId;
   const setReply = async (needed: boolean) => {
     setMarking(true);
     setError('');
     try {
-      onStatus?.(await apiPut<ChatReplyStatusDto>(`/openlines/chats/${chatId}/reply-status`, { needed }));
+      onStatus?.(await apiPut<ChatReplyStatusDto>(`/openlines/chats/${target}/reply-status`, { needed }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось изменить статус');
     } finally {
@@ -157,7 +159,7 @@ export function ChatView({
     setBusy(true);
     setError('');
     try {
-      await apiPost(`/openlines/chats/${chatId}/join`);
+      await apiPost(`/openlines/chats/${target}/join`);
       await load();
       onChanged();
     } catch (e) {
@@ -176,7 +178,7 @@ export function ChatView({
     );
     setTemplating(t.name || 'шаблон');
     try {
-      const r = await apiPost<{ texts: string[]; unresolved: string[] }>(`/openlines/chats/${chatId}/render`, { texts: t.steps.map((s) => s.text) });
+      const r = await apiPost<{ texts: string[]; unresolved: string[] }>(`/openlines/chats/${target}/render`, { texts: t.steps.map((s) => s.text) });
       setChain(appendTemplate(chain, { ...t, steps: t.steps.map((s, i) => ({ ...s, text: r.texts[i] ?? s.text })) }));
       setNotice(r.unresolved.length ? `Не подставлено: ${r.unresolved.join(', ')} — проверьте текст перед отправкой` : '');
     } catch {
@@ -195,7 +197,7 @@ export function ChatView({
     setError('');
     setNotice('');
     try {
-      const res = await apiPost<SendResultDto>(`/openlines/chats/${chatId}/send`, { steps });
+      const res = await apiPost<SendResultDto>(`/openlines/chats/${target}/send`, { steps });
       setChain(dropSent(chain, res.sent));
       if (res.error)
         setError(
@@ -227,6 +229,9 @@ export function ChatView({
     );
 
   const crm = chat.crm;
+  const memberIds = chat.chats?.map((c) => c.chatId) ?? [chat.chatId];
+  const currentChannel = channels.find((c) => memberIds.includes(c.chatId))?.chatId ?? chat.chatId;
+  const sourceOf = new Map((chat.chats ?? []).map((c) => [c.chatId, c]));
   return (
     <main className="chat-view">
       <ChatHeader
@@ -236,9 +241,9 @@ export function ChatView({
         onTitle={crm.contactId ? () => openCrm('contact', crm.contactId!) : undefined}
         subtitle={
           <>
-            <ChannelSwitch channels={channels} current={chat.chatId} connector={chat.connector} timezone={timezone} onOpen={onOpenChat} />
+            <ChannelSwitch channels={channels} current={currentChannel} connector={chat.connector} timezone={timezone} onOpen={onOpenChat} />
             <ChatDealCard
-              chatId={chatId}
+              chatId={target}
               dealId={crm.dealId}
               appChat={chat.connector.startsWith('btx24_')}
               timezone={timezone}
@@ -269,7 +274,7 @@ export function ChatView({
         )}
         <button
           className="cl-btn cv-open"
-          onClick={() => openMessenger(chat.chatId)}
+          onClick={() => openMessenger(target)}
           title="Открыть диалог в Битрикс24"
           aria-label="Открыть диалог в Битрикс24"
         >
@@ -282,6 +287,11 @@ export function ChatView({
       )}
 
       <div className="cv-conversation" ref={list} aria-live="polite" aria-label="История сообщений">
+        {!!chat.hiddenChats && (
+          <div className="cv-system muted">
+            Ещё {chat.hiddenChats} {chat.hiddenChats === 1 ? 'диалог' : 'диалога'} с клиентом в этом канале скрыты: нет доступа в Битрикс24
+          </div>
+        )}
         {chat.hasMore && (
           <button className="link older" onClick={() => void older()}>
             Показать более ранние
@@ -290,10 +300,18 @@ export function ChatView({
         {chat.messages.map((m, i) => {
           const day = dayKey(m.date, timezone);
           const newDay = i === 0 || dayKey(chat.messages[i - 1].date, timezone) !== day;
+          // Переписка из нескольких чатов: где сменился чат открытой линии — подпись источника.
+          const source = m.chatId ? sourceOf.get(m.chatId) : undefined;
+          const newSource = sourceOf.size > 1 && source && (i === 0 || chat.messages[i - 1].chatId !== m.chatId);
           return (
             <Fragment key={m.id}>
               {newDay && <div className="cv-date">{fmtDayTitle(day, timezone)}</div>}
-              <Message m={m} chatId={chat.chatId} title={chat.title} timezone={timezone} />
+              {newSource && (
+                <div className="cv-source" title={source.title}>
+                  {connectorLabel(source.connector)} · {source.title}
+                </div>
+              )}
+              <Message m={m} chatId={m.chatId ?? chat.chatId} title={chat.title} timezone={timezone} />
             </Fragment>
           );
         })}

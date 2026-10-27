@@ -11,11 +11,11 @@ function setup(prior:MessengerMessage|null,other:MessengerMessage|null) {
  svc.onModuleInit();
  return {svc,db,call,incoming:(row:MessengerMessage)=>svc.publishChosen(m,row),automatic:(row:MessengerMessage)=>listener.incoming(m,row,'Клиент'),edited:(row:MessengerMessage)=>listener.edited(m,row)};
 }
-it('первая сделка переиспользует существующий remote, следующая имеет отдельный диалог без CRM дубля',async()=>{
+it('сообщения любой сделки идут в один диалог собеседника (ADR 0017)',async()=>{
  const first=setup(null,null);
  try {await first.incoming(msg(11));expect(first.call.mock.calls[0][1]).toMatchObject({MESSAGES:[{chat:{id:'client@lid'},message:{disable_crm:'Y'}}]});}finally{first.svc.onApplicationShutdown();}
  const second=setup(null,msg(11,'client@lid'));
- try {await second.incoming(msg(12));expect(second.call.mock.calls[0][1]).toMatchObject({MESSAGES:[{chat:{id:'client@lid::deal:12'}}]});}finally{second.svc.onApplicationShutdown();}
+ try {await second.incoming(msg(12));expect(second.call.mock.calls[0][1]).toMatchObject({MESSAGES:[{chat:{id:'client@lid'}}]});}finally{second.svc.onApplicationShutdown();}
 });
 it('правка после смены сделки возвращается в исходный relayChatId',async()=>{
  const t=setup(msg(11,'client@lid'),msg(12,'client@lid::deal:12'));

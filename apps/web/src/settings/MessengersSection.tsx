@@ -5,6 +5,7 @@ import { fmtDateTime } from '../format.js';
 import { MessengerScreen } from './MessengerScreen.js';
 import { MessengerChatsDialog } from '../messengers/MessengerChatsDialog.js';
 import { MessengerLinkDialog } from '../messengers/MessengerLinkDialog.js';
+import { LineChannels } from './LineChannels.js';
 
 const KIND_ICONS: Record<MessengerKind, string> = { whatsapp: '🟢', telegram: '✈️', max: '🟣' };
 const label = (kind: MessengerKind) => MESSENGER_KINDS.find((k) => k.kind === kind)?.label ?? kind;
@@ -127,6 +128,7 @@ export function MessengersSection({ timezone }: { timezone: string }) {
           </li>
         ))}
       </ul>
+      <LineChannels />
       {adding && (
         <AddMessengerWizard
           onClose={() => setAdding(false)}

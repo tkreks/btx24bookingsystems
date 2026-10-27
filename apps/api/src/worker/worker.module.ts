@@ -8,6 +8,7 @@ import { BookingAlertsService } from '../modules/bookings/booking-alerts.service
 import { BookingJournalService } from '../modules/bookings/booking-journal.service.js';
 import { BookingSyncService } from '../modules/bookings/booking-sync.service.js';
 import { OpenlineIndexService } from '../modules/openlines/openline-index.service.js';
+import { ConversationsService } from '../modules/openlines/conversations.service.js';
 import { BookingSyncJob } from './booking-sync.job.js';
 import { HeartbeatService } from './heartbeat.service.js';
 import { OpenlineIndexJob } from './openline-index.job.js';
@@ -34,6 +35,7 @@ import { CrmMirrorJob } from './crm-mirror.job.js';
   providers: [
     HeartbeatService,
     OpenlineIndexService,
+    ConversationsService,
     OpenlineIndexJob,
     BookingJournalService,
     BookingAlertsService,

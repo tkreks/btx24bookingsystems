@@ -108,5 +108,5 @@ npm workspaces, Node 24, TypeScript, ESM везде.
 режим времени: «часы от клика» = `duration`, «заезд/выезд» = `interval` · сделка = `Deal` ·
 воронка = `DealCategory` · предоплата/доплата = `prepayment`/`surcharge` · БП = `bizproc` ·
 внешний пользователь (прямая ссылка) = `ExternalUser`, роли `viewer`/`technologist` ·
-портал = `Portal` (`memberId`, `domain`) · встройка = `Placement` · установка = `install`.
+переписка (клиент × наш номер, ADR 0017) = `convKey` / `ConversationsService` · портал = `Portal` (`memberId`, `domain`) · встройка = `Placement` · установка = `install`.
 Глоссарий для поиска — `tools/mcp-server/domain-aliases.json`; расширяйте его вместе с доменом.

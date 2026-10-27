@@ -80,6 +80,8 @@ model Portal {
   workdayStates        WorkdayState[]
   workdayEvents        WorkdayEvent[]
   callExclusions       CallExclusion[]
+  chatLineChannels     ChatLineChannel[]
+  openlineMessages     OpenlineMessage[]
 }
 
 enum PortalStatus {
@@ -399,10 +401,56 @@ model OpenlineChat {
   flagAt           DateTime? @db.DateTime(3)
   flagByUserId     Int?
   flagByName       String?   @db.VarChar(255)
+  /// Переписка (ADR 0017): линия и внешний чат коннектора из `entity_id` (`::deal:<id>` отрезан),
+  /// ключ переписки «клиент × наш канал» — все чаты с одним ключом показываются одним чатом.
+  lineId           Int?
+  extChatId        String?   @db.VarChar(190)
+  convKey          String?   @db.VarChar(191)
+  /// Хранимая история (`OpenlineMessage`): непрерывный диапазон ID сообщений `[msgFromId, msgToId]`;
+  /// `msgComplete` — старше `msgFromId` сообщений нет.
+  msgFromId        Int?
+  msgToId          Int?
+  msgComplete      Boolean   @default(false)
 
   @@unique([portalId, chatId])
   @@index([portalId, lastMessageAt])
   @@index([portalId, responsibleId, lastMessageAt])
+  @@index([portalId, convKey])
+}
+
+/// Наш канал линии открытых линий (ADR 0017): `whatsapp:74993467272`, `telegram:79895793606` или
+/// `line:<id>` (своя переписка у линии). Строки заводит worker по списку линий; `auto` — канал подобран
+/// по номеру (своя линия номера или цифры номера в названии линии), администратор может поменять.
+model ChatLineChannel {
+  id       String   @id @default(cuid())
+  portalId String
+  portal   Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  lineId   Int
+  lineName String   @db.VarChar(255)
+  channel  String   @db.VarChar(64)
+  auto     Boolean  @default(true)
+  syncedAt DateTime @db.DateTime(3)
+
+  @@unique([portalId, lineId])
+}
+
+/// Сообщение чата открытой линии (ADR 0017): копия для быстрой ленты переписки. `dto` — сообщение в виде
+/// для интерфейса (`ChatMessageDto`), `mid` — ID сообщения в мессенджере (реакции своих линий).
+/// Хранится при включённом «сборе текстов»; кто видит — решает доступ к чату (`OpenlineChatAccess`).
+model OpenlineMessage {
+  id         String   @id @default(cuid())
+  portalId   String
+  portal     Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  chatId     Int
+  messageId  Int
+  date       DateTime @db.DateTime(3)
+  authorKind String   @db.VarChar(10)
+  mid        String?  @db.VarChar(190)
+  dto        Json
+  syncedAt   DateTime @db.DateTime(3)
+
+  @@unique([portalId, messageId])
+  @@index([portalId, chatId, messageId])
 }
 
 /// Чат, скрытый сотрудником с его дашборда (решение владельца 2026-10-23): в списке чатов остаётся.

@@ -299,5 +299,15 @@
   "тема": [
     "theme",
     "dark"
+  ],
+  "переписка": [
+    "conversation",
+    "convKey",
+    "ConversationsService"
+  ],
+  "переписки": [
+    "conversation",
+    "convKey",
+    "ConversationsService"
   ]
 }

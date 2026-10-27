@@ -579,7 +579,7 @@ export function ChatsPage({
             <div key={c.chatId} className="cl-card-wrap">
               <ChatCard
                 c={c}
-                active={openId === c.chatId}
+                active={openId === c.chatId || !!(openId && c.conversation?.chatIds.includes(openId))}
                 timezone={timezone}
                 onOpen={() => {
                   setOpenId(c.chatId);
@@ -674,7 +674,7 @@ export function ChatsPage({
           onTemplates={setTemplates}
           onBack={() => setOpenId(null)}
           onChanged={() => void refresh()}
-          status={(list?.items ?? []).concat(phoneHits?.items ?? [], dealChats?.items ?? []).find((c) => c.chatId === openId)}
+          status={(list?.items ?? []).concat(phoneHits?.items ?? [], dealChats?.items ?? []).find((c) => c.chatId === openId || !!c.conversation?.chatIds.includes(openId))}
           onStatus={(r) => {
             // Отметка общая: в списке сразу, остальные сотрудники увидят при обновлении.
             const apply = (items: ChatSummary[]) => items.map((c) => (c.chatId === r.chatId ? { ...c, waitingReply: r.waitingReply, noReply: r.noReply } : c));

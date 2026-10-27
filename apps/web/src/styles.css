@@ -2992,6 +2992,26 @@ button.warn-outline {
   text-transform: uppercase;
 }
 
+/* Переписка из нескольких чатов (ADR 0017): откуда дальше сообщения — линия и диалог. */
+.cv-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+  color: #8592a7;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-source::before,
+.cv-source::after {
+  content: '';
+  flex: 1 1 24px;
+  border-top: 1px dashed #d5dce6;
+}
+
 .cv-system {
   margin: 0 auto 15px;
   max-width: 80%;
@@ -9383,3 +9403,26 @@ button.cb-tag:hover { border-color: var(--line); background: var(--surface-2); c
 .bk-client-add:hover, .bk-client-add:focus-visible { background: #079455; }
 .bk-client-card.empty { color: var(--muted); }
 .wz-find-deal { justify-self: start; margin: 2px 0 0; font-size: 13.5px; }
+
+/* ⚙ → «Мессенджеры» → «Каналы линий» (ADR 0017). */
+.line-channels {
+  margin-top: 24px;
+}
+
+.line-channels-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.line-channels-table th,
+.line-channels-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #e6ebf1;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.line-channels-table select {
+  max-width: 100%;
+}
