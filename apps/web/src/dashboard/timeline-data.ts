@@ -33,6 +33,29 @@ export function withPast(pieces: TimelinePiece[], start: number, end: number, no
   });
 }
 
+/**
+ * Какая доля участка брони уже прошла (0..1) — прошедшую бронь шкала красит тёмно-красным
+ * (решение владельца 2026-10-27), у идущей сейчас темнеет только прошедшая часть.
+ */
+export function pastShare(piece: Pick<TimelinePiece, 'from' | 'to'>, start: number, end: number, now: number): number {
+  const at = (now - start) / (end - start);
+  if (at <= piece.from) return 0;
+  if (at >= piece.to) return 1;
+  return (at - piece.from) / (piece.to - piece.from);
+}
+
+/** Ширина колонки названий ресурса на шкале (132px + отступ 8px) — от неё отсчитывается время. */
+export const TIMELINE_LABEL_PX = 140;
+
+/**
+ * Прокрутка шкалы, когда она шире экрана (решение владельца 2026-10-27): по центру — текущее время
+ * (`fraction` — его доля суток), в периоде — середина периода.
+ */
+export function centeredScrollLeft(gridWidth: number, clientWidth: number, fraction: number): number {
+  const x = TIMELINE_LABEL_PX + fraction * (gridWidth - TIMELINE_LABEL_PX);
+  return Math.max(0, Math.min(gridWidth - clientWidth, Math.round(x - clientWidth / 2)));
+}
+
 /** В периоде день занят при любом пересечении брони с местными сутками, включая прошлые часы; прошедший день без брони — «past». */
 export function resourceDayState(day: CalendarDay, resourceId: number, timezone: string, now = Date.now()): { bookings: CalendarDay['bookings']; stops: ResourceStopDto[]; kind: 'booked' | 'stop' | 'free' | 'past' } {
   const { start, end } = zonedDayRange(day.date, timezone);

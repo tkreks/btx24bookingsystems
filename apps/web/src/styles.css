@@ -8639,6 +8639,11 @@ button.tl-piece.free { cursor: copy; }
 button.tl-piece.free:hover { filter: brightness(1.06); }
 .tl-piece.busy { background: linear-gradient(90deg, #ff4b55, #ee3f4d); color: #fff; cursor: pointer; box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.5); }
 .tl-piece.busy:hover { filter: brightness(1.08); }
+/* Прошедшая бронь — тёмно-красная; идущая сейчас — темнеет прошедшая часть (до --past). */
+.tl-piece.busy.done { background: linear-gradient(90deg, #8a1c25, #7a1720); }
+.tl-piece.busy.partly-done { background: linear-gradient(90deg, #8a1c25 0 var(--past), #ff4b55 var(--past) 100%); }
+.tl-amount { font-weight: 800; }
+.tl-piece .tl-amount.only { font-size: 10.5px; }
 /* Спорная бронь (удалена в Битрикс24, в приложении есть) — опознавательная лента, как в календаре. */
 .tl-piece.busy.missing { background: repeating-linear-gradient(135deg, #b91c1c 0 6px, #9ca3af 6px 12px); }
 .timeline-period-cell.has-missing { background-image: repeating-linear-gradient(135deg, rgba(185, 28, 28, .85) 0 5px, rgba(156, 163, 175, .85) 5px 10px); color: #fff; }

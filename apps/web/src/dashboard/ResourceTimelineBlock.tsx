@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { todayIn, zonedDayRange, type CalendarBooking, type CalendarDay, type CalendarTechWindow, type ClientBookingsDto, type MyGroupDto, type ResourceStopDto } from '@btx24/shared';
 import { apiGet, apiPost } from '../api.js';
@@ -8,7 +8,7 @@ import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { SLOT_MINUTES } from '../calendar/layout.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
 import { LoadProgress } from './LoadProgress.js';
-import { resourceDayState, timelinePieces, withPast } from './timeline-data.js';
+import { centeredScrollLeft, pastShare, resourceDayState, timelinePieces, withPast } from './timeline-data.js';
 import { fmtDateTime, fmtMoney, fmtTime, shiftDate } from '../format.js';
 import { dayKey } from '../openlines/chat-list.js';
 import { DashBadge } from '../openlines/RecentCalls.js';
@@ -152,6 +152,25 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
   const ticks = current && !period ? timelineHours(current.startMs, current.endMs, timezone) : [];
   const gridWidth = 140 + (period ? days.length * 76 : Math.ceil(span / 3_600_000) * 40);
 
+  // Шкала шире экрана — по центру текущее время (в периоде — середина); один раз на загрузку периода.
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useCenteredScroll(rowsRef, current?.key ?? null, gridWidth, centerFraction(period, current?.startMs ?? 0, current?.endMs ?? 1, nowMs));
+
+  /** Бронь на шкале: прошедшая — тёмно-красная (идущая — темнеет прошедшая часть), время и сумма сделки. */
+  const bookingPiece = (b: CalendarBooking, key: number, from: number, to: number) => {
+    const share = current ? pastShare({ from, to }, current.startMs, current.endMs, nowMs) : 0;
+    const amount = b.deal?.opportunity !== null && b.deal?.opportunity !== undefined ? fmtMoney(b.deal.opportunity, b.deal.currency) : '';
+    const style = { left: `${from * 100}%`, width: `${(to - from) * 100}%`, ...(share > 0 && share < 1 ? { '--past': `${share * 100}%` } : {}) } as CSSProperties;
+    const cls = `tl-piece busy${share >= 1 ? ' done' : share > 0 ? ' partly-done' : ''}${b.missing ? ' missing' : ''}`;
+    const wide = to - from;
+    return <button key={key} type="button" className={cls} style={style}
+      title={`${fmtDateTime(b.start, timezone)} → ${fmtDateTime(b.end, timezone)}${b.deal ? ` · ${b.deal.title}` : ''}${amount ? ` · ${amount}` : ''}${share >= 1 ? ' · прошла' : ''}${b.missing ? MISSING_HINT : ''}`}
+      aria-label={`Бронь ${fmtDateTime(b.start, timezone)} — ${fmtDateTime(b.end, timezone)}${amount ? `, ${amount}` : ''}`} onClick={() => setSelected(b)}>
+      {wide >= 0.08 && <span>{fmtTime(b.start, timezone)}–{fmtTime(b.end, timezone)}{amount && wide >= 0.16 && <b className="tl-amount"> · {amount}</b>}</span>}
+      {amount && wide >= 0.05 && wide < 0.08 && <b className="tl-amount only">{amount}</b>}
+    </button>;
+  };
+
   const changeDate = (next: string) => {
     if (!next) return;
     const duration = Math.max(0, Math.min(6, Math.round((Date.parse(until) - Date.parse(date)) / 86_400_000)));
@@ -202,7 +221,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
     />}
     {current && !resources.length && <p className="muted">{live && allResources.length ? 'Сейчас броней нет.' : allResources.length ? 'Выберите ресурсы для шкалы.' : 'В группе нет ресурсов.'}</p>}
     {current && !!resources.length && <>
-      <div className="timeline-rows"><div className="timeline-grid" style={{ minWidth: gridWidth }}>
+      <div className="timeline-rows" ref={rowsRef}><div className="timeline-grid" style={{ minWidth: gridWidth }}>
         {period ? <div className="timeline-day-axis">{current.days.map(d => <span key={d.date}>{new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, weekday: 'short', day: '2-digit', month: '2-digit' }).format(zonedDayRange(d.date, timezone).start)}</span>)}</div> :
           <div className="timeline-axis" aria-hidden="true"><span className="timeline-now">00:00</span>{ticks.map(t => <span key={t.key} className="timeline-tick" style={{ left: `${t.at * 100}%` }}>{t.time}</span>)}<span className="timeline-end">24:00</span></div>}
         {resources.map(r => <div key={r.id} className="timeline-row">
@@ -220,11 +239,11 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
             {live ? running.filter(b => b.resourceIds.includes(r.id)).map(b => {
               const from = Math.max(0, (Date.parse(b.start) - current.startMs) / span);
               const to = Math.min(1, (Date.parse(b.end) - current.startMs) / span);
-              return <button key={b.id} type="button" className={`tl-piece busy${b.missing ? ' missing' : ''}`} style={{ left: `${from * 100}%`, width: `${(to - from) * 100}%` }} title={`${fmtDateTime(b.start, timezone)} → ${fmtDateTime(b.end, timezone)}${b.deal ? ` · ${b.deal.title}` : ''}${b.missing ? MISSING_HINT : ''}`} aria-label={`Бронь ${fmtDateTime(b.start, timezone)} — ${fmtDateTime(b.end, timezone)}`} onClick={() => setSelected(b)}>{to - from >= 0.08 && <span>{fmtTime(b.start, timezone)}–{fmtTime(b.end, timezone)}</span>}</button>;
+              return bookingPiece(b, b.id, from, to);
             }) : withPast(timelinePieces(current, r.id, current.startMs, current.endMs), current.startMs, current.endMs, nowMs).map((p, i) => {
               const style = { left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` };
               const booking = p.kind === 'booked' && p.bookingId !== null ? current.bookings.find(b => b.id === p.bookingId) : undefined;
-              if (booking) return <button key={i} type="button" className={`tl-piece busy${booking.missing ? ' missing' : ''}`} style={style} title={`${fmtDateTime(booking.start, timezone)} → ${fmtDateTime(booking.end, timezone)}${booking.deal ? ` · ${booking.deal.title}` : ''}${booking.missing ? MISSING_HINT : ''}`} aria-label={`Бронь ${fmtDateTime(booking.start, timezone)} — ${fmtDateTime(booking.end, timezone)}`} onClick={() => setSelected(booking)}>{p.to - p.from >= 0.08 && <span>{fmtTime(booking.start, timezone)}–{fmtTime(booking.end, timezone)}</span>}</button>;
+              if (booking) return bookingPiece(booking, i, p.from, p.to);
               if (p.kind === 'past') return <span key={i} className="tl-piece past" style={style} title="Время прошло — бронь только на будущее" aria-hidden="true" />;
               if (p.kind === 'stop') return <span key={i} className="tl-piece stopped" style={style} title={`Стоп: ${p.reason}`} aria-label={`${r.name}: стоп — ${p.reason}`}>{p.to - p.from >= 0.08 ? 'Стоп' : ''}</span>;
               const title = p.kind === 'tech' ? 'Тех. окно — бронь возможна · нажмите, чтобы забронировать' : 'Свободно · нажмите, чтобы забронировать';
@@ -449,6 +468,24 @@ function TimelineSetup({ groups, value, onSave, onClose }: { groups: MyGroupDto[
  * Шкала, пока брони грузятся: ось и строки ресурсов группы (их число известно, имена — с прошлой
  * загрузки), на месте броней — бегущая полоса загрузки (решение владельца 2026-10-26).
  */
+/** Что держать по центру прокрутки: период — середина, день — текущее время (не сегодня — начало дня). */
+function centerFraction(period: boolean, startMs: number, endMs: number, now: number): number | null {
+  if (period) return 0.5;
+  return now >= startMs && now < endMs ? (now - startMs) / (endMs - startMs) : null;
+}
+
+/** Прокрутить шкалу к нужному месту — один раз на `key` (опрос раз в минуту прокрутку не сбивает). */
+function useCenteredScroll(ref: RefObject<HTMLDivElement | null>, key: string | null, gridWidth: number, fraction: number | null) {
+  const done = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || key === null || done.current === key) return;
+    done.current = key;
+    if (el.scrollWidth <= el.clientWidth) return;
+    el.scrollLeft = fraction === null ? 0 : centeredScrollLeft(gridWidth, el.clientWidth, fraction);
+  });
+}
+
 function TimelineSkeleton({ ids, days, timezone }: { ids: number[]; days: string[]; timezone: string }) {
   const names = savedNames();
   const period = days.length > 1;
@@ -456,9 +493,11 @@ function TimelineSkeleton({ ids, days, timezone }: { ids: number[]; days: string
   const endMs = zonedDayRange(days[days.length - 1], timezone).end.getTime();
   const ticks = period ? [] : timelineHours(startMs, endMs, timezone);
   const gridWidth = 140 + (period ? days.length * 76 : Math.ceil((endMs - startMs) / 3_600_000) * 40);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useCenteredScroll(rowsRef, days.join(','), gridWidth, centerFraction(period, startMs, endMs, Date.now()));
   // Строка загрузки — вне прокручиваемой шкалы: крутящийся спиннер внутри неё на 1–2 px менял высоту
   // содержимого, и вертикальная полоса шкалы включалась и выключалась («дрожание», 2026-10-27).
-  return <><div className="timeline-rows" aria-busy="true">
+  return <><div className="timeline-rows" aria-busy="true" ref={rowsRef}>
     <div className="timeline-grid" style={{ minWidth: gridWidth }}>
       {period ? <div className="timeline-day-axis">{days.map(d => <span key={d}>{new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, weekday: 'short', day: '2-digit', month: '2-digit' }).format(zonedDayRange(d, timezone).start)}</span>)}</div> :
         <div className="timeline-axis" aria-hidden="true"><span className="timeline-now">00:00</span>{ticks.map(t => <span key={t.key} className="timeline-tick" style={{ left: `${t.at * 100}%` }}>{t.time}</span>)}<span className="timeline-end">24:00</span></div>}
