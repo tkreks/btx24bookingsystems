@@ -79,6 +79,7 @@ export function DealHome({
   canBook,
   canPay,
   onBooking,
+  timelinePending = false,
 }: {
   dealId: number;
   timezone: string;
@@ -91,6 +92,8 @@ export function DealHome({
   canPay: boolean;
   /** Мастер брони (с проверкой: есть ли уже бронь по сделке). */
   onBooking: () => void;
+  /** Группы и воронка сделки ещё грузятся — шкала ждёт, не показывая чужую группу. */
+  timelinePending?: boolean;
 }) {
   const [data, setData] = useState<DealChatsDto | null>(null);
   const [error, setError] = useState('');
@@ -253,6 +256,7 @@ export function DealHome({
           config={timelineGroups}
           timezone={timezone}
           groupTabs
+          pending={timelinePending}
           deal={{ dealId, contactId: dealInfo?.contactId ?? null, openDeals: dealInfo?.openDeals ?? [] }}
         />
       </div>

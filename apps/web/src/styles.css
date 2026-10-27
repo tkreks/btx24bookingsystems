@@ -8087,12 +8087,13 @@ body:has(.call-payment-backdrop.minimized) .minimized-dock { top: 8px; bottom: a
   width: 35%;
 }
 @keyframes sk-shimmer { to { background-position: -200% 0; } }
-/* Шкала броней, пока грузится: строки ресурсов и бегущая полоса вместо броней. */
+/* Шкала броней, пока грузится: строки ресурсов и спокойная пульсация вместо броней. Бегущий
+   градиент на ширину суток проходил ~1500 px/с во всех строках разом — мерцал (2026-10-27). */
 .timeline-bar.loading {
-  background: linear-gradient(90deg, var(--line) 0%, color-mix(in srgb, var(--line) 35%, transparent) 50%, var(--line) 100%);
-  background-size: 200% 100%;
-  animation: sk-shimmer 1.4s linear infinite;
+  background: var(--line);
+  animation: tl-loading 2.4s ease-in-out infinite;
 }
+@keyframes tl-loading { 50% { opacity: .45; } }
 .timeline-resource .sk-line { width: 70%; }
 .timeline-loading { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .sk-avatar, .sk-line, .timeline-bar.loading { animation: none; } }

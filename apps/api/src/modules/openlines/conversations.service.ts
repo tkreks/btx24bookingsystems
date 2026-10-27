@@ -3,7 +3,7 @@ import type { ChatChannelsAdminDto, ChatCrmLinks, ChatMessageDto } from '@btx24/
 import type { Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
-import { connectorMidOf, connectorOf, crmLinksOf, groupReactions, toMessageDto, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
+import { connectorMidOf, connectorOf, crmLinksOf, groupReactions, phoneEchoIds, toMessageDto, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
 import { autoChannel, conversationKey, entityParts, lineChannel, ownKey } from './conversation-keys.js';
 
 /** Сообщений на страницу ленты (как прежняя история чата). */
@@ -350,7 +350,10 @@ export class ConversationsService {
     }
 
     const pages = await Promise.all(members.map((m) => this.page(user, m.chatId, beforeId, opts.store)));
-    const combined = pages.flatMap((p) => p.messages).sort((a, b) => b.id - a.id);
+    const fetched = pages.flatMap((p) => p.messages);
+    // Эхо своих сообщений от Wazzup («с телефона» с тем же MID) — не второе сообщение.
+    const echoes = phoneEchoIds(fetched);
+    const combined = fetched.filter((m) => !echoes.has(m.id)).sort((a, b) => b.id - a.id);
     const messages = (await this.withReactions(portalId, members, combined.slice(0, FEED_LIMIT))).sort((a, b) => a.id - b.id);
     const send = members.find((m) => m.connector.startsWith('btx24_')) ?? members[0];
     return {

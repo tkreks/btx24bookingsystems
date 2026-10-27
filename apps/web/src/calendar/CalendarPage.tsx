@@ -322,6 +322,7 @@ export function CalendarPage({
           timezone={tz}
           groups={groups ?? []}
           dealInfo={dealBookingsInfo}
+          timelinePending={(groups === null && !groupsError) || !dealChecked}
           canBook={session.canManageApp || permissions.has('booking.create')}
           canPay={session.canManageApp || permissions.has('payment.send')}
           onBooking={() => {

@@ -166,6 +166,24 @@ export function connectorMidOf(m: ImMessage): string | null {
   return typeof v === 'string' && v ? v : null;
 }
 
+/**
+ * Эхо своих сообщений: Wazzup возвращает в линию отправленное из Битрикс24 сообщение ещё раз — как
+ * «с телефона», с тем же `CONNECTOR_MID` (сверено на портале 2026-10-27). Такое «с телефона» —
+ * не второе сообщение: ID эхо, которые надо скрыть.
+ */
+export function phoneEchoIds(messages: { id: number; mid?: string | null; viaPhone?: boolean }[]): Set<number> {
+  const own = new Set(messages.filter((m) => m.mid && !m.viaPhone).map((m) => m.mid));
+  return new Set(messages.filter((m) => m.viaPhone && m.mid && own.has(m.mid)).map((m) => m.id));
+}
+
+/** Сообщения линии без эхо своих (см. `phoneEchoIds`). */
+export function withoutPhoneEchoes(messages: ImMessage[], users: ImUser[]): ImMessage[] {
+  const echoes = phoneEchoIds(
+    messages.map((m) => ({ id: Number(m.id), mid: connectorMidOf(m), viaPhone: authorKind(m.author_id, users) === 'client' && !!phoneOutgoing(m.text) })),
+  );
+  return echoes.size ? messages.filter((m) => !echoes.has(Number(m.id))) : messages;
+}
+
 /** Реакции (по одной на поставившего) → по эмодзи, в порядке появления. */
 export function groupReactions(list: unknown): ChatReactionDto[] {
   const out: ChatReactionDto[] = [];

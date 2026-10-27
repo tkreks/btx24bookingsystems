@@ -33,6 +33,7 @@ import {
   messageText,
   preview,
   toMessageDto,
+  withoutPhoneEchoes,
   type ImFile,
   type ImMessage,
   type ImUser,
@@ -781,11 +782,13 @@ export class ChatsService {
     const res = { result: pack.result.messages as ImMessages | undefined };
     const users = res.result?.users ?? [];
     const files = res.result?.files ?? [];
-    const raw = res.result?.messages ?? [];
+    const fetched = res.result?.messages ?? [];
+    // Эхо своих сообщений от Wazzup не показываем вторым сообщением.
+    const raw = withoutPhoneEchoes(fetched, users);
     const joined = isMember(dialog.role);
     // Открытая переписка — самые свежие данные: обновляем строку чата в кэше списка (например,
     // после ответа чат сразу уходит из «Ждут ответа»), и свой доступ.
-    if (!parsed.data.beforeId) await this.touch(user, chatId, dialog, raw, users, joined).catch(() => undefined);
+    if (!parsed.data.beforeId) await this.touch(user, chatId, dialog, fetched, users, joined).catch(() => undefined);
     return {
       chatId,
       title: dialog.name ?? `Чат #${chatId}`,
@@ -794,7 +797,7 @@ export class ChatsService {
       canSend: joined && canSendRight,
       crm: crmLinksOf(dialog.entity_data_2),
       messages: await this.withReactions(user.portal.id, dialog.entity_id, raw, raw.map((m) => toMessageDto(m, users, files)).sort((a, b) => a.id - b.id)),
-      hasMore: raw.length >= HISTORY_LIMIT,
+      hasMore: fetched.length >= HISTORY_LIMIT,
     };
   }
 

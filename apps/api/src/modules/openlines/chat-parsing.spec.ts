@@ -9,6 +9,7 @@ import {
   plainText,
   preview,
   toMessageDto,
+  withoutPhoneEchoes,
 } from './chat-parsing.js';
 
 describe('chat parsing', () => {
@@ -107,6 +108,16 @@ describe('сообщения менеджера с телефона (Wazzup)', (
     expect(toMessageDto(messages[1], users, [])).toMatchObject({ author: { kind: 'employee', name: 'Телефон' }, viaPhone: true, text: 'Да, на субботу есть' });
     expect(toMessageDto(messages[0], users, [])).toMatchObject({ author: { kind: 'client', name: 'Клиент Иван' } });
     expect(toMessageDto(messages[0], users, [])).not.toHaveProperty('viaPhone');
+  });
+
+  it('a Wazzup echo of our own message (same MID) is dropped, a real phone message stays', () => {
+    const withMid = (m: ReturnType<typeof msg>, mid: string) => ({ ...m, params: { CONNECTOR_MID: [mid] } });
+    const messages = [
+      withMid(msg(1, 42, 'test'), 'wa-1'),
+      withMid(msg(2, 900, '=== Исходящее сообщение, автор: Телефон ===\ntest'), 'wa-1'),
+      withMid(msg(3, 900, '=== Исходящее сообщение, автор: Телефон ===\nс телефона'), 'wa-2'),
+    ];
+    expect(withoutPhoneEchoes(messages, users).map((m) => m.id)).toEqual([1, 3]);
   });
 
   it('an employee message with the same text is not affected', () => {

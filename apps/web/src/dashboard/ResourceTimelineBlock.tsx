@@ -78,12 +78,15 @@ export function liveBookings<T extends Pick<CalendarBooking, 'start' | 'end'>>(b
  * Локальная дата шкалы независима от периода показателей: день — часы, 2–7 дней — суточные ячейки.
  * `live` — «Брони — шкала — текущие»: сегодня, только ресурсы с идущей сейчас бронью и только эти брони.
  */
-export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, live = false, deal, groupTabs = false }: {
+export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, live = false, deal, groupTabs = false, pending = false }: {
   groups: MyGroupDto[]; config: string[] | undefined; timezone: string; onConfigure?: (groupIds: string[]) => void; live?: boolean;
   /** Встройка сделки: бронь со шкалы — по этой сделке (клиент и открытые сделки — для мастера). */
   deal?: { dealId: number; contactId: number | null; openDeals: ClientBookingsDto['openDeals'] };
   /** Группы — кнопками рядом с заголовком (встройка сделки), а не только в окне выбора ресурсов. */
   groupTabs?: boolean;
+  /** Группы ещё не известны (встройка: ждём группы и воронку сделки) — только заглушка, без запросов:
+   *  иначе шкала успевает показать чужую группу и перескакивает. */
+  pending?: boolean;
 }) {
   const visible = groups.filter(g => g.permissions.includes('calendar.view'));
   const chosen = config?.length ? visible.filter(g => config.includes(g.id)) : visible;
@@ -113,7 +116,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
   const key = `${group?.id ?? ''}|${timezone}|${days.join(',')}`;
 
   useEffect(() => {
-    if (!group || !days.length) return;
+    if (pending || !group || !days.length) return;
     let active = true;
     let request = 0;
     const load = () => {
@@ -134,7 +137,7 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
     return () => { active = false; clearInterval(timer); window.removeEventListener('focus', load); window.removeEventListener('btx24:mutation', load); };
     // `days` и выбранная группа выражены ключом; фильтр ресурсов не перезапрашивает календарь.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, rev]);
+  }, [key, rev, pending]);
 
   const current = data?.key === key && !rangeError ? data : null;
   const allResources = current?.days[0]?.resources ?? [];
@@ -187,10 +190,11 @@ export function ResourceTimelineBlock({ groups, config, timezone, onConfigure, l
       </div>
       {mode === 'range' && <label className="timeline-until">по <input type="date" aria-label="Конец периода шкалы" value={until} min={date} max={shiftDate(date, 6)} onChange={e => setUntil(e.target.value)} /><span className="muted">до 7 дней</span></label>}
     </div>}
-    {!visible.length && <p className="muted">Нет групп с календарём.</p>}
+    {pending && <TimelineSkeleton ids={[]} days={days} timezone={timezone} />}
+    {!pending && !visible.length && <p className="muted">Нет групп с календарём.</p>}
     {(rangeError || error) && <p className="notice error" role="alert">{rangeError || error}</p>}
     {note && <p className="notice">{note}</p>}
-    {group && !current && !rangeError && !error && <TimelineSkeleton
+    {!pending && group && !current && !rangeError && !error && <TimelineSkeleton
       ids={(filters[group.id] ?? group.resourceIds).slice(0, live ? 3 : undefined)}
       days={days}
       timezone={timezone}

@@ -7,7 +7,7 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { FROM_HOUR, TO_HOUR, isSystemMessage, shiftOwner, shiftSpan, summarize, type Shift } from './activity.js';
 import { photoUrl } from '../bitrix24/rest/photo-url.js';
-import { authorKind, phoneOutgoing, preview, type ImMessage, type ImUser } from './chat-parsing.js';
+import { authorKind, phoneOutgoing, preview, withoutPhoneEchoes, type ImMessage, type ImUser } from './chat-parsing.js';
 
 /** Чатов дня, переписку которых смотрим (последние 50 сообщений каждого). */
 const MAX_CHATS = 150;
@@ -124,7 +124,8 @@ export class ActivityService {
     });
     const chatName = new Map(chats.map((c) => [c.chatId, c.clientName || c.title || `Чат #${c.chatId}`]));
     for (const [chatId, { messages, users }] of msgs) {
-      for (const m of messages) {
+      // Эхо своих сообщений от Wazzup — не сообщение «с телефона».
+      for (const m of withoutPhoneEchoes(messages, users)) {
         const at = Date.parse(m.date);
         if (!(at >= start.getTime() && at < end.getTime())) continue;
         const kind = authorKind(m.author_id, users);
