@@ -34,6 +34,7 @@ function setup(
     if (method === 'im.recent.list') return { result: { items: [{ id: 'chat101', chat_id: 101, counter: 3 }, { id: 'chat999', counter: 0 }] } };
     if (method === 'im.message.add') return { result: 900 + Number(String(params?.MESSAGE).length) };
     if (method === 'im.v2.File.upload') return { result: { messageId: 800 } };
+    if (method === 'imopenlines.session.join') return { result: true };
     throw new Error(method);
   });
   const batch = vi.fn(async (cmds: Record<string, { method: string }>) => ({
@@ -97,6 +98,10 @@ function setup(
       upsert: vi.fn(async ({ where, create, update }: { where: W; create: Record<string, unknown>; update: Record<string, unknown> }) => {
         const k = `${where.portalId_userId_chatId!.userId}:${where.portalId_userId_chatId!.chatId}`;
         access.set(k, { ...(access.get(k) ?? create), ...update });
+      }),
+      updateMany: vi.fn(async ({ where, data }: { where: { userId: number; chatId: number }; data: Record<string, unknown> }) => {
+        const k = `${where.userId}:${where.chatId}`;
+        if (access.has(k)) access.set(k, { ...access.get(k), ...data });
       }),
     },
     $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
@@ -190,6 +195,16 @@ describe('ChatsService.list', () => {
     expect(call.mock.calls[0][1]).toMatchObject({ filter: { PROVIDER_ID: 'IMOPENLINES_SESSION' }, start: 50 });
     expect((call.mock.calls[0][1] as { filter: object }).filter).not.toHaveProperty('RESPONSIBLE_ID');
     await expect(svc.list(user, { scope: 'everyone' })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('ChatsService.join', () => {
+  it('joins the session and makes the saved access stale: the next feed re-checks the role at once', async () => {
+    const t = setup();
+    t.cache.access.set('7:101', { chatId: 101, allowed: true, joined: false, checkedAt: new Date() });
+    await t.svc.join(t.user, 101);
+    expect(t.call).toHaveBeenCalledWith('imopenlines.session.join', { CHAT_ID: 101 });
+    expect((t.cache.access.get('7:101')!.checkedAt as Date).getTime()).toBe(0);
   });
 });
 

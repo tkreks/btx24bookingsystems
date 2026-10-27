@@ -30,6 +30,7 @@ export function ChatView({
   templates,
   onTemplates,
   onBack,
+  onRefresh,
   onChanged,
   onPayment,
   paymentRevision = 0,
@@ -47,6 +48,8 @@ export function ChatView({
   onTemplates: (t: MessageTemplateDto[]) => void;
   /** Нет — кнопки «назад» нет (встройка сделки, чат клиента один). */
   onBack?: () => void;
+  /** Кнопка «обновить» рядом с «назад» (встройка сделки): перечитать чат и список. */
+  onRefresh?: () => void;
   /** Что-то отправили/присоединились — список чатов стоит обновить. */
   onChanged: () => void;
   /** Счёт и ссылка на оплату по сделке чата (есть право `payment.send`). */
@@ -217,7 +220,7 @@ export function ChatView({
   if (!chat)
     return (
       <main className="chat-view">
-        <ChatHeader chatId={chatId} title="Чат" onBack={onBack} />
+        <ChatHeader chatId={chatId} title="Чат" onBack={onBack} onRefresh={onRefresh} />
         {loadError ? (
           <div className="notice error" role="alert">
             {loadError}
@@ -252,6 +255,7 @@ export function ChatView({
           </>
         }
         onBack={onBack}
+        onRefresh={onRefresh}
         details={bookings}
       >
         {status && !status.sessionClosed && onStatus && (status.waitingReply || status.noReply) && (
@@ -395,6 +399,7 @@ function ChatHeader({
   subtitle,
   details,
   onBack,
+  onRefresh,
   children,
 }: {
   chatId: number;
@@ -407,6 +412,7 @@ function ChatHeader({
   /** Под каналом: клиент, его статистика и брони. */
   details?: ReactNode;
   onBack?: () => void;
+  onRefresh?: () => void;
   /** Маленькие кнопки в правом верхнем углу. */
   children?: ReactNode;
 }) {
@@ -416,6 +422,11 @@ function ChatHeader({
         {onBack && (
           <button className="cl-btn chat-back" aria-label="К списку чатов" title="К чатам" onClick={onBack}>
             <Icon name="back" />
+          </button>
+        )}
+        {onRefresh && (
+          <button className="cl-btn chat-refresh" aria-label="Обновить чат" title="Обновить чат" onClick={onRefresh}>
+            <Icon name="refresh" />
           </button>
         )}
         <Avatar src={avatar} name={title} size={null} tone={avatarTone(chatId)} className="large" />

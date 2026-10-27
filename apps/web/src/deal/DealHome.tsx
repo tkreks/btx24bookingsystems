@@ -66,7 +66,8 @@ const ACTIONS: Action[] = [
 
 /**
  * Встройка сделки (решение владельца 2026-10-26): слева — чаты клиента (больше одного — список как
- * «Последние сообщения» дашборда; нажатие открывает только чат, «назад» — к списку), справа сверху —
+ * «Последние сообщения» дашборда; нажатие открывает только чат, «назад» — к списку, рядом
+ * «обновить» — перечитать чат и список), справа сверху —
  * шкала броней ресурсов воронки сделки (дата и группа), справа снизу — быстрые действия: ссылка на
  * оплату, мастер бронирования, шаблон в чат.
  */
@@ -95,6 +96,10 @@ export function DealHome({
   const [error, setError] = useState('');
   const [rev, setRev] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
+  /** Нажали «назад» в единственном чате — показать список, а не снова этот чат. */
+  const [listed, setListed] = useState(false);
+  /** «Обновить» — чат перечитывается заново (как перезагрузка страницы, но только блок). */
+  const [reload, setReload] = useState(0);
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
   const [templatesRequest, setTemplatesRequest] = useState(0);
   const [hiding, setHiding] = useState<AttentionChatDto | null>(null);
@@ -126,9 +131,13 @@ export function DealHome({
   }, []);
 
   const items = data?.items ?? [];
-  // Чат один и рабочий — сразу он, без списка и без «назад». Неработающий — список с «Создать новый чат».
+  // Чат один и рабочий — сразу он, «назад» — к списку. Неработающий — список с «Создать новый чат».
   const single = items.length === 1 && !isDeadChat(items[0]);
-  const shownId = openId ?? (single ? items[0].chatId : null);
+  const shownId = openId ?? (single && !listed ? items[0].chatId : null);
+  const refresh = () => {
+    setReload((n) => n + 1);
+    setRev((n) => n + 1);
+  };
   const shown = items.find((c) => c.chatId === shownId);
   const broken = brokenChat(items);
   const hasWorking = items.some((c) => !isDeadChat(c));
@@ -156,13 +165,17 @@ export function DealHome({
       <section className="day-panel dash-block deal-ws-chat">
         {shownId ? (
           <ChatView
-            key={shownId}
+            key={`${shownId}:${reload}`}
             chatId={shownId}
             timezone={timezone}
             templates={templates}
             onTemplates={setTemplates}
             templatesRequest={templatesRequest}
-            onBack={single ? undefined : () => setOpenId(null)}
+            onBack={() => {
+              setOpenId(null);
+              setListed(true);
+            }}
+            onRefresh={refresh}
             onChanged={() => setRev((n) => n + 1)}
             status={shown}
             onStatus={(r) => setData((d) => (d ? { ...d, items: d.items.map((c) => (c.chatId === r.chatId ? { ...c, waitingReply: r.waitingReply, noReply: r.noReply } : c)) } : d))}
@@ -175,6 +188,9 @@ export function DealHome({
             <p className="dash-attention-title muted">
               Чаты клиента
               {data && <span className="pill">{items.length}</span>}
+              <button type="button" className="cl-btn chat-refresh" aria-label="Обновить чаты" title="Обновить чаты" onClick={refresh}>
+                <Icon name="refresh" />
+              </button>
             </p>
             {!data && !error && <p className="muted">Загрузка чатов…</p>}
             {error && <p className="notice error" role="alert">{error}</p>}

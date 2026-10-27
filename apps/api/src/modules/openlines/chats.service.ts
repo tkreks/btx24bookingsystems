@@ -1087,6 +1087,11 @@ export class ChatsService {
 
   async join(user: B24UserContext, chatId: number): Promise<void> {
     await user.client.call('imopenlines.session.join', { CHAT_ID: chatId });
+    // Сохранённый доступ («гость») иначе живёт до 5 минут — поле ввода не появилось бы: перепроверить сразу.
+    await this.prisma?.openlineChatAccess.updateMany({
+      where: { portalId: user.portal.id, userId: user.userId, chatId },
+      data: { checkedAt: new Date(0) },
+    });
   }
 
   /** Пауза между сообщениями цепочки: каналы (WhatsApp через Wazzup и др.) доставляют асинхронно. */

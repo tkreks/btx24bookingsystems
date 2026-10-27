@@ -436,6 +436,8 @@ export class OpenlinesController {
   async join(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<void> {
     await this.require(user, 'openlines.send');
     await this.chats.join(user, chatId);
+    // До ответа: следующая лента уже не из кэша — с полем ввода.
+    invalidate(user.portal.memberId, ['chats']);
   }
 
   @Post('openlines/chats/:chatId/send')
