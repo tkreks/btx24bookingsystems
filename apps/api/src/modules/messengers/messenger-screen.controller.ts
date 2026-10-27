@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MESSENGER_ERROR_STATES, MESSENGER_MAX_FILE_BYTES, MESSENGER_STATE_LABELS, type MessengerScreenFilesDto, type MessengerStatusDto, type MessengerVncTicketDto } from '@btx24/shared';
 import type { Response } from 'express';
@@ -91,6 +91,33 @@ export class MessengerScreenController {
     await this.chats.forUser(user, id, true);
     if (!FILE_ID_RE.test(fileId)) throw new NotFoundException();
     return this.service.offerScreenFile(id, fileId);
+  }
+
+  /**
+   * Ctrl+V / перетаскивание на экран (решение владельца 2026-10-27): текст вводится в поле под курсором,
+   * файл загружается в файлы экрана и «вставляется» в открытый чат — как вставка на своём компьютере.
+   */
+  @Post(':id/screen-paste')
+  @HttpCode(200)
+  async pasteText(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body: unknown): Promise<{ ok: boolean }> {
+    await this.chats.forUser(user, id, true);
+    const text = (body as { text?: unknown } | null)?.text;
+    if (typeof text !== 'string' || !text || text.length > 20_000) throw new BadRequestException({ code: 'NO_TEXT', message: 'Нет текста (до 20 000 знаков)' });
+    return this.service.screenPaste(id, { text });
+  }
+
+  @Post(':id/screen-paste-file')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MESSENGER_MAX_FILE_BYTES, files: 1 } }))
+  async pasteFile(@B24User() user: B24UserContext, @Param('id') id: string, @UploadedFile() file: { originalname: string; mimetype: string; buffer: Buffer } | undefined): Promise<{ ok: boolean }> {
+    await this.chats.forUser(user, id, true);
+    if (!file?.buffer?.length) throw new BadRequestException({ code: 'NO_FILE', message: 'Нет файла' });
+    const before = new Set((await this.service.screenFiles(id)).files.map((f) => f.id));
+    const name = Buffer.from(file.originalname, 'latin1').toString('utf8').slice(0, 150);
+    const after = await this.service.uploadScreenFile(id, { mime: file.mimetype || 'application/octet-stream', name, data: file.buffer });
+    const added = after.files.find((f) => !before.has(f.id));
+    if (!added) throw new BadRequestException({ code: 'NO_FILE', message: 'Файл не сохранился' });
+    return this.service.screenPaste(id, { fileId: added.id });
   }
 
   @Delete(':id/screen-files')

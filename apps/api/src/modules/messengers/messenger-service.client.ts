@@ -170,6 +170,10 @@ export class MessengerServiceClient {
   offerScreenFile(id: string, fileId: string): Promise<MessengerScreenFilesDto> {
     return this.request('POST', `/instances/${id}/screen-files/${fileId}/attach`);
   }
+  /** Вставить на экран: текст — в поле под курсором, файл экрана — событием «вставить» в открытый чат. */
+  screenPaste(id: string, what: { text: string } | { fileId: string }): Promise<{ ok: boolean }> {
+    return this.request('POST', `/instances/${id}/screen-paste`, what);
+  }
   cancelScreenOffer(id: string): Promise<MessengerScreenFilesDto> {
     return this.request('DELETE', `/instances/${id}/screen-files`);
   }

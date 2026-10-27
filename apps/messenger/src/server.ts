@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import { timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { WebSocketServer } from 'ws';
 import { vncPort } from './instance.js';
 import type { Manager } from './manager.js';
@@ -52,6 +53,8 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
       res.writeHead(200, { 'content-type': got.meta.mime, 'content-length': got.data.length, 'x-file-name': encodeURIComponent(got.meta.name ?? 'file') });
       return res.end(got.data);
     }
+    const sp = /^\/instances\/([^/]+)\/screen-paste$/.exec(url.pathname);
+    if (req.method === 'POST' && sp && ID_RE.test(sp[1]) && files) return screenPaste(req, res, sp[1], files);
     const sf = /^\/instances\/([^/]+)\/screen-files(?:\/([0-9a-f]{24})(\/attach)?)?$/.exec(url.pathname);
     if (sf && ID_RE.test(sf[1]) && files) return screenFiles(req, res, sf[1], sf[2], !!sf[3], files);
     const m = /^\/instances\/([^/]+)(?:\/(restart|stop|screenshot|send|edit|delete|history|media|contact|avatar|names))?$/.exec(url.pathname);
@@ -160,6 +163,39 @@ export function createMessengerServer(manager: Manager, token: string, files?: S
       return inst ? json(res, 200, inst.info) : json(res, 404, { error: 'not found' });
     }
     return json(res, 405, { error: 'method not allowed' });
+  }
+
+  /**
+   * Вставка с компьютера сотрудника на экран (Ctrl+V, перетаскивание): текст — вводом в поле под курсором
+   * (CDP insertText: кириллица и эмодзи, буфер VNC их не передаёт); файл экрана — событием «вставить»
+   * с файлом в открытый чат, мессенджер показывает обычное окно отправки.
+   */
+  async function screenPaste(req: IncomingMessage, res: ServerResponse, id: string, files: ScreenFiles) {
+    const page = manager.get(id)?.filePage();
+    if (!page) return json(res, 422, { error: 'Мессенджер не подключён' });
+    const b = (await readJson(req, 1024 * 1024)) as { text?: unknown; fileId?: unknown };
+    if (typeof b.text === 'string' && b.text) {
+      await page.keyboard.sendCharacter(b.text.slice(0, 20_000));
+      return json(res, 200, { ok: true });
+    }
+    if (typeof b.fileId !== 'string' || !/^[0-9a-f]{24}$/.test(b.fileId)) return json(res, 400, { error: 'Нечего вставить' });
+    const f = await files.get(id, b.fileId);
+    if (!f) return json(res, 404, { error: 'Файл удалён' });
+    const data = (await readFile(files.path(id, f))).toString('base64');
+    const ok = await page.evaluate(
+      (b64: string, name: string, mime: string) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], name, { type: mime }));
+        const target = (document.activeElement as HTMLElement | null) ?? document.body;
+        return target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })) === false;
+      },
+      data,
+      f.name,
+      f.mime,
+    );
+    await files.markAttached(id, f.id);
+    return json(res, 200, { ok: true, handled: ok });
   }
 
   /** Файлы для экрана мессенджера: загрузить, список, удалить, подставить в окно выбора файла. */

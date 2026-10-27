@@ -12,6 +12,52 @@ export function MessengerScreen({ id, onClose, base = '/admin/messengers', files
   const [mode, setMode] = useState<'vnc' | 'shot'>('vnc');
   const [status, setStatus] = useState('Подключаемся к экрану…');
   const [shot, setShot] = useState<string | null>(null);
+  const [pasteNote, setPasteNote] = useState('');
+
+  // Ctrl+V и перетаскивание с компьютера на живой экран (решение владельца 2026-10-27): буфер VNC
+  // кириллицу не передаёт, поэтому текст и файлы вставляет сервис мессенджеров в браузер номера.
+  useEffect(() => {
+    const el = box.current;
+    if (mode !== 'vnc' || !el) return;
+    const paste = async (what: { text: string } | { file: File }) => {
+      setPasteNote('text' in what ? 'Вставляем текст…' : `Вставляем файл «${what.file.name}»…`);
+      try {
+        if ('text' in what) await apiPost(`/messengers/${id}/screen-paste`, { text: what.text });
+        else await apiUpload(`/messengers/${id}/screen-paste-file`, what.file);
+        setPasteNote('');
+      } catch (e) {
+        setPasteNote(e instanceof Error ? `Не вставилось: ${e.message}` : 'Не вставилось');
+      }
+    };
+    const pasteAll = (files: File[], text: string) => {
+      if (files.length) files.reduce((p, file) => p.then(() => paste({ file })), Promise.resolve());
+      else if (text) void paste({ text });
+    };
+    // Ctrl+V не отдаём noVNC (он нажал бы его на экране с пустым буфером) — браузер пришлёт событие «вставить».
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') e.stopPropagation();
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      if (!el.contains(document.activeElement)) return;
+      e.preventDefault();
+      pasteAll([...(e.clipboardData?.files ?? [])], e.clipboardData?.getData('text/plain') ?? '');
+    };
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      pasteAll([...(e.dataTransfer?.files ?? [])], e.dataTransfer?.getData('text/plain') ?? '');
+    };
+    el.addEventListener('keydown', onKey, true);
+    document.addEventListener('paste', onPaste);
+    el.addEventListener('dragover', onDragOver);
+    el.addEventListener('drop', onDrop);
+    return () => {
+      el.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('paste', onPaste);
+      el.removeEventListener('dragover', onDragOver);
+      el.removeEventListener('drop', onDrop);
+    };
+  }, [id, mode]);
 
   useEffect(() => {
     if (mode !== 'vnc' || !box.current) return;
@@ -74,6 +120,11 @@ export function MessengerScreen({ id, onClose, base = '/admin/messengers', files
           </button>
         </header>
         {status && <p className="muted" role="status">{status}</p>}
+        {mode === 'vnc' && !status && (
+          <p className="muted messenger-paste-hint" role="status">
+            {pasteNote || 'Ctrl+V — вставить текст или файл с вашего компьютера в поле под курсором; файлы можно перетащить на экран.'}
+          </p>
+        )}
         {mode === 'vnc' ? <div ref={box} className="messenger-vnc" /> : shot && <img className="messenger-shot" src={shot} alt="Снимок экрана браузера" />}
         {files && <ScreenFiles id={id} />}
       </div>
