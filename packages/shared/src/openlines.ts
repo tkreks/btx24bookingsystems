@@ -154,6 +154,8 @@ export interface ChatHistoryDto {
   sendChatId?: number;
   chats?: ConversationChatDto[];
   hiddenChats?: number;
+  /** Лента отдана из базы приложения, сверка с Битрикс24 идёт в фоне — показать «Синхронизация…». */
+  syncing?: boolean;
 }
 
 /** Шаг цепочки: текст и/или вложения (`StoredFile.id`). Отправляются по порядку. */

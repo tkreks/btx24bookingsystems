@@ -114,9 +114,10 @@ export function ChatView({
     if (templatesRequest > 0) setTemplatesOpen('pick');
   }
 
-  const load = useCallback(async () => {
+  // `sync` — сверить с Битрикс24 до ответа (после своих действий); обычно лента — из базы, сверка в фоне.
+  const load = useCallback(async (sync = false) => {
     try {
-      const fresh = await apiGet<ChatHistoryDto>(`/openlines/chats/${chatId}/messages`);
+      const fresh = await apiGet<ChatHistoryDto>(`/openlines/chats/${chatId}/messages${sync ? '?fresh=1' : ''}`);
       setChat((prev) => {
         // Подгруженные ранее старые сообщения сохраняем.
         if (!prev || prev.chatId !== chatId) return fresh;
@@ -139,7 +140,7 @@ export function ChatView({
       (c) => active && setChat(c),
       (e) => active && setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить чат'),
     );
-    const stop = pollEvery(load, POLL_MS);
+    const stop = pollEvery(() => load(), POLL_MS);
     return () => {
       active = false;
       stop();
@@ -163,7 +164,7 @@ export function ChatView({
     setError('');
     try {
       await apiPost(`/openlines/chats/${target}/join`);
-      await load();
+      await load(true);
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось присоединиться');
@@ -207,7 +208,7 @@ export function ChatView({
           `${res.sent ? `Отправлено ${res.sent} из ${steps.length}. ` : ''}Сообщение ${res.error.step + 1} не ушло: ${res.error.message}`,
         );
       else setNotice(steps.length > 1 ? `Отправлено сообщений: ${res.sent}` : '');
-      await load();
+      await load(true);
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось отправить');
@@ -236,7 +237,7 @@ export function ChatView({
   const currentChannel = channels.find((c) => memberIds.includes(c.chatId))?.chatId ?? chat.chatId;
   const sourceOf = new Map((chat.chats ?? []).map((c) => [c.chatId, c]));
   return (
-    <main className="chat-view">
+    <main className="chat-view cv-has-sync">
       <ChatHeader
         chatId={chat.chatId}
         title={status?.clientName || chat.title}
@@ -290,6 +291,11 @@ export function ChatView({
         <ChannelRecovery key={chat.chatId} connector={chat.connector} channels={channels} phones={status?.phones ?? []} timezone={timezone} onOpen={onOpenChat} />
       )}
 
+      {chat.syncing && (
+        <p className="cv-syncing" role="status">
+          <span className="sync-dot active" aria-hidden="true" /> Синхронизация с Битрикс24…
+        </p>
+      )}
       <div className="cv-conversation" ref={list} aria-live="polite" aria-label="История сообщений">
         {!!chat.hiddenChats && (
           <div className="cv-system muted">

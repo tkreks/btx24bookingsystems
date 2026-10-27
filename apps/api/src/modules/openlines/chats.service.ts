@@ -44,7 +44,7 @@ import { dealOfBindings, PortalService } from '../bitrix24/portals/portal.servic
 import { MessageContextService } from '../bookings/message-context.service.js';
 import { FilesService } from './files.service.js';
 import { OpenlineIndexService } from './openline-index.service.js';
-import { ConversationsService } from './conversations.service.js';
+import { ACCESS_MAX_AGE_MS, ConversationsService } from './conversations.service.js';
 import { entityParts, ownKey, channelOfKey } from './conversation-keys.js';
 import { stepsSchema } from './templates.service.js';
 
@@ -96,6 +96,8 @@ const SUMMARY_MESSAGES = 20;
 const SUMMARY_STALE_MS = 30_000;
 /** Доступ сотрудника к чату перепроверяем (его токеном) не реже этого. */
 const ACCESS_STALE_MS = 5 * 60_000;
+/** Фоновая сверка открытой ленты — не чаще (опрос ленты — раз в 5 с). */
+const FEED_SYNC_MS = 4_000;
 const listQuery = z
   .object({
     scope: z.enum(['mine', 'department', 'all']).default('all'),
@@ -108,7 +110,8 @@ const listQuery = z
     folder: z.string().min(1).max(40).optional(),
   })
   .strict();
-const historyQuery = z.object({ beforeId: z.coerce.number().int().positive().optional() }).strict();
+/** `fresh=1` — сверить с Битрикс24 до ответа (после отправки и «Присоединиться»), иначе — из базы и сверка в фоне. */
+const historyQuery = z.object({ beforeId: z.coerce.number().int().positive().optional(), fresh: z.literal('1').optional() }).strict();
 const sendBody = z.object({ steps: stepsSchema }).strict();
 
 /**
@@ -552,16 +555,17 @@ export class ChatsService {
     const byChat = new Map(rows.map((r) => [r.chatId, r]));
     const acc = new Map(access.map((a) => [a.chatId, a]));
     const texts = settings?.dialogTextsEnabled === true;
+    const now = Date.now();
     const complete = ids.every((id) => {
       const r = byChat.get(id);
       const a = acc.get(id);
-      if (!a) return false;
+      // Ответ о доступе старше 3 дней не используем (такие строки удаляет worker).
+      if (!a || now - a.checkedAt.getTime() > ACCESS_MAX_AGE_MS) return false;
       if (!a.allowed) return true;
       return !!r?.summaryAt && r.title !== null && (!texts || r.lastMessageId === null || r.lastPreview !== null);
     });
     if (!complete) return null;
 
-    const now = Date.now();
     const stale = ids.some((id) => {
       const r = byChat.get(id);
       const a = acc.get(id)!;
@@ -637,6 +641,26 @@ export class ChatsService {
         summaryAt: now,
       },
     });
+  }
+
+  /** Свежий хвост открытых чатов — в сводку списка (после ответа чат сразу уходит из «Ждут ответа»). */
+  private async touchTails(user: B24UserContext, tails: Map<number, { dialog: { role?: string }; page: { messages?: ImMessage[]; users?: ImUser[] } }>): Promise<void> {
+    for (const [id, t] of tails)
+      await this.touch(user, id, t.dialog as ImDialog, t.page.messages ?? [], t.page.users ?? [], isMember(t.dialog.role)).catch(() => undefined);
+  }
+
+  /** Фоновая сверка ленты с Битрикс24 (токеном сотрудника): одна на сотрудника и чат, не чаще раза в `FEED_SYNC_MS`. */
+  private readonly feedSyncs = new Map<string, number>();
+  private syncFeed(user: B24UserContext, chatId: number, store: boolean): void {
+    const key = `${user.portal.id}:${user.userId}:${chatId}`;
+    const last = this.feedSyncs.get(key);
+    if (last !== undefined && (last === 0 || Date.now() - last < FEED_SYNC_MS)) return;
+    if (this.feedSyncs.size > 5000) this.feedSyncs.clear();
+    this.feedSyncs.set(key, 0);
+    void this.conversations!.feed(user, chatId, null, { store, live: true })
+      .then((feed) => feed && this.touchTails(user, feed.tails))
+      .catch((e) => this.logger.warn(`chat feed sync failed: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => this.feedSyncs.set(key, Date.now()));
   }
 
   /** Фоновая сверка страницы с Битрикс24 (токеном сотрудника); одна на сотрудника и страницу. */
@@ -747,14 +771,17 @@ export class ChatsService {
     const parsed = historyQuery.safeParse(query);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_QUERY', message: 'Неверный параметр beforeId' });
-    // Переписка (ADR 0017): лента всех доступных чатов клиента в этом канале — из базы приложения.
+    // Переписка (ADR 0017): лента всех доступных чатов клиента в этом канале — из базы приложения;
+    // сверка с Битрикс24 (доступ, новые сообщения, прежние чаты) — в фоне, кроме `fresh=1`.
+    const top = !parsed.data.beforeId;
+    const live = parsed.data.fresh === '1';
+    const store = this.conversations && this.prisma ? await this.textsEnabled(user.portal.id) : false;
     const feed = this.conversations && this.prisma
-      ? await this.conversations.feed(user, chatId, parsed.data.beforeId ?? null, { store: await this.textsEnabled(user.portal.id) })
+      ? await this.conversations.feed(user, chatId, parsed.data.beforeId ?? null, { store, live })
       : null;
     if (feed) {
-      // Свежий хвост открытых чатов — в сводку списка (после ответа чат сразу уходит из «Ждут ответа»).
-      for (const [id, t] of feed.tails)
-        await this.touch(user, id, t.dialog as ImDialog, t.page.messages ?? [], t.page.users ?? [], isMember(t.dialog.role)).catch(() => undefined);
+      await this.touchTails(user, feed.tails);
+      if (top && !live) this.syncFeed(user, chatId, store);
       const send = feed.members.find((m) => m.chatId === feed.sendChatId)!;
       const row = await this.prisma!.openlineChat.findUnique({ where: { portalId_chatId: { portalId: user.portal.id, chatId: send.chatId } }, select: { crm: true } });
       return {
@@ -769,6 +796,7 @@ export class ChatsService {
         sendChatId: feed.sendChatId,
         chats: feed.members.map((m) => ({ chatId: m.chatId, connector: m.connector, title: m.title ?? `Чат #${m.chatId}`, sessionClosed: m.completed, lastMessageAt: m.lastMessageAt?.toISOString() ?? null })),
         hiddenChats: feed.hidden,
+        ...(feed.syncing ? { syncing: true } : {}),
       };
     }
     // Диалог (права, роль) и сообщения — одним пакетом: переписка опрашивается, лимит портала — на запросы.

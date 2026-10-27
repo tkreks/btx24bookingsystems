@@ -2865,6 +2865,26 @@ button.warn-outline {
   flex-direction: column;
   background: #fff;
 }
+/* Лента из базы приложения, сверка с Битрикс24 в фоне — плашка поверх ленты, без сдвига сообщений. */
+.cv-has-sync { position: relative; }
+.cv-syncing {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 6px 0 0;
+  padding: 3px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--info-text);
+  background: var(--info-bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  pointer-events: none;
+}
+.cv-syncing .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); animation: sync-pulse 1.2s ease-in-out infinite; }
 
 .empty-chat {
   align-items: center;

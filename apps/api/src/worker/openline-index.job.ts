@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PortalService } from '../modules/bitrix24/portals/portal.service.js';
 import { OpenlineIndexService } from '../modules/openlines/openline-index.service.js';
-import { ConversationsService } from '../modules/openlines/conversations.service.js';
+import { ACCESS_MAX_AGE_MS, ConversationsService } from '../modules/openlines/conversations.service.js';
 
 /** Раз в минуту: индекс диалогов там, где включён «сбор метаданных», и удаление, где выключен. */
 export const OPENLINE_INDEX_INTERVAL_MS = 60_000;
@@ -12,6 +12,7 @@ export class OpenlineIndexJob implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(OpenlineIndexJob.name);
   private timer: NodeJS.Timeout | undefined;
   private running = false;
+  private lastPrune = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -58,6 +59,11 @@ export class OpenlineIndexJob implements OnModuleInit, OnApplicationShutdown {
             `portal ${portal.id}: index refresh failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      }
+      if (Date.now() - this.lastPrune >= 3600_000) {
+        this.lastPrune = Date.now();
+        // Ответы о доступе к чатам старше 3 дней не используются — удаляем, чтобы не копились.
+        await this.prisma.openlineChatAccess.deleteMany({ where: { checkedAt: { lt: new Date(Date.now() - ACCESS_MAX_AGE_MS) } } });
       }
     } finally {
       this.running = false;

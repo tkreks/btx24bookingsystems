@@ -8,8 +8,13 @@ import { autoChannel, conversationKey, entityParts, lineChannel, ownKey } from '
 
 /** Сообщений на страницу ленты (как прежняя история чата). */
 export const FEED_LIMIT = 50;
-/** Доступ сотрудника к чату переписки перепроверяем его токеном не реже этого. */
+/** Доступ сотрудника к чату переписки перепроверяем его токеном (в фоне) не реже этого. */
 const ACCESS_STALE_MS = 5 * 60_000;
+/**
+ * Сохранённый ответ о доступе годен столько (решение владельца 2026-10-27: права можно держать
+ * 2–3 дня — не критично); старше — ждём проверку, а worker удаляет такие строки.
+ */
+export const ACCESS_MAX_AGE_MS = 3 * 24 * 60 * 60_000;
 /** Чатов без линии, дочитываемых за проход worker'а. */
 const FILL_PER_PASS = 500;
 const BATCH = 50;
@@ -66,6 +71,8 @@ export interface Feed {
   hasMore: boolean;
   /** Свежий хвост открытых чатов (для сводки списка). */
   tails: Map<number, { dialog: Dialog; page: ImPage }>;
+  /** Лента — из базы, а сверка с Битрикс24 (доступ, новые сообщения, прежние чаты) нужна: её стоит запустить в фоне. */
+  syncing: boolean;
 }
 
 const MEMBER_SELECT = {
@@ -297,11 +304,13 @@ export class ConversationsService {
     user: { portal: Portal; userId: number; client: Client },
     chatId: number,
     beforeId: number | null,
-    opts: { store: boolean },
+    opts: { store: boolean; live?: boolean },
   ): Promise<Feed | null> {
     const portalId = user.portal.id;
+    // `live: false` — только база (и то, без чего ленты нет); сверку вызывающий запускает в фоне.
+    const sync = opts.live !== false;
     // Первое открытие: прежние чаты клиента — в переписку (сбой поиска ленту не ломает).
-    if (beforeId === null)
+    if (beforeId === null && sync)
       await this.discover(user, chatId).catch((e) => this.logger.warn(`discover chats failed: ${e instanceof Error ? e.message : String(e)}`));
     const all = await this.membersOf(portalId, chatId);
     if (!all.length) return null;
@@ -310,12 +319,14 @@ export class ConversationsService {
     const access = new Map((await this.prisma.openlineChatAccess.findMany({ where: { portalId, userId: user.userId, chatId: { in: all.map((m) => m.chatId) } } })).map((a) => [a.chatId, a]));
     const now = Date.now();
     const top = beforeId === null;
-    const stale = all.filter((m) => {
-      const a = access.get(m.chatId);
-      // Доступ без ответа Битрикс24 или старше 5 минут — проверяем токеном сотрудника; свежий — из базы.
-      return !a || now - a.checkedAt.getTime() > ACCESS_STALE_MS;
-    });
-    const tailOf = all.filter((m) => top && opts.store && (!m.completed || m.msgToId === null || (m.lastMessageId ?? 0) > (m.msgToId ?? 0)));
+    const age = (m: MemberChat) => now - (access.get(m.chatId)?.checkedAt.getTime() ?? 0);
+    // Доступ без ответа Битрикс24 (или старше 3 дней) — ждём проверку токеном сотрудника; старше
+    // 5 минут — из базы, а проверка — со сверкой в фоне.
+    const stale = all.filter((m) => age(m) > (sync ? ACCESS_STALE_MS : ACCESS_MAX_AGE_MS));
+    const wantsTail = (m: MemberChat) => top && opts.store && (!m.completed || m.msgToId === null || (m.lastMessageId ?? 0) > (m.msgToId ?? 0));
+    const tailOf = sync ? all.filter(wantsTail) : [];
+    // Заметно отстаёт: доступ давно не проверяли или известно о сообщениях новее хранимых.
+    const syncing = !sync && all.some((m) => age(m) > ACCESS_STALE_MS || (top && opts.store && (m.msgToId === null || (m.lastMessageId ?? 0) > m.msgToId)));
     const commands: Record<string, { method: string; params: Record<string, unknown> }> = {};
     for (const m of stale) commands[`d${m.chatId}`] = { method: 'imopenlines.dialog.get', params: { CHAT_ID: m.chatId } };
     for (const m of tailOf) commands[`t${m.chatId}`] = { method: 'im.dialog.messages.get', params: { DIALOG_ID: `chat${m.chatId}`, LIMIT: FEED_LIMIT } };
@@ -364,6 +375,7 @@ export class ConversationsService {
       messages,
       hasMore: combined.length > FEED_LIMIT || pages.some((p) => p.more),
       tails,
+      syncing,
     };
   }
 

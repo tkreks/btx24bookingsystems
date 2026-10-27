@@ -65,6 +65,27 @@ describe('ConversationsService', () => {
     expect(call).not.toHaveBeenCalled();
   });
 
+  it('без live: открытый чат и доступ старше 5 минут — из базы без запросов, сверка нужна (syncing)', async () => {
+    const t = setup([row(1, { completed: false, lastMessageId: 40, msgFromId: 10, msgToId: 30, msgComplete: true })], [{ chatId: 1, allowed: true }]);
+    for (const a of (await t.prisma.openlineChatAccess.findMany())) a.checkedAt = new Date(Date.now() - 60 * 60_000);
+    for (const id of [10, 20, 30]) t.messages.set(id, { chatId: 1, messageId: id, dto: { id, text: `m${id}` }, mid: null });
+    const call = vi.fn();
+    const batch = vi.fn();
+    const feed = await t.svc.feed({ portal: { id: 'p1' } as never, userId: 7, client: { call, batch } as never }, 1, null, { store: true, live: false });
+    expect(feed!.messages.map((m) => m.id)).toEqual([10, 20, 30]);
+    expect(feed!.syncing).toBe(true);
+    expect(call).not.toHaveBeenCalled();
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it('без live: доступ старше 3 дней — ждём проверку портала', async () => {
+    const t = setup([row(1, { msgFromId: 10, msgToId: 30, msgComplete: true })], [{ chatId: 1, allowed: true }]);
+    for (const a of (await t.prisma.openlineChatAccess.findMany())) a.checkedAt = new Date(Date.now() - 4 * 24 * 60 * 60_000);
+    const batch = vi.fn(async () => ({ result: { d1: { id: 1, role: 'member' } } }));
+    await t.svc.feed({ portal: { id: 'p1' } as never, userId: 7, client: { call: vi.fn(), batch } as never }, 1, null, { store: true, live: false });
+    expect(batch).toHaveBeenCalledOnce();
+  });
+
   it('страница старше начала полной истории — из базы, пустая, без запросов', async () => {
     const t = setup([row(1, { msgFromId: 10, msgToId: 30, msgComplete: true })], [{ chatId: 1, allowed: true }]);
     const call = vi.fn();
