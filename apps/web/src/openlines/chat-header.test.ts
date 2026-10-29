@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSummary } from '@btx24/shared';
+import type { ChatSummary, ClientBookingsDto, MessengerDto } from '@btx24/shared';
 import { clipTitle, dealDate } from './ChatDealCard.js';
 import { asAttention } from './ChannelSwitch.js';
-import { brokenChat, isDeadChat } from '../deal/DealHome.js';
+import { dealBookingStart, deadReason, isDeadChat } from '../deal/DealHome.js';
+import { kindsOf } from '../deal/DealChatStart.js';
 
 const tz = 'Europe/Moscow';
 
@@ -27,15 +28,37 @@ describe('окно «Чаты клиента»', () => {
 
 describe('встройка сделки: ошибка канала Wazzup', () => {
   const chat = (chatId: number, connector: string, preview: string) => ({ chatId, connector, lastMessage: { preview } }) as unknown as ChatSummary;
-  it('находит чат с «канал выключен», иначе шага нет', () => {
-    expect(brokenChat([chat(1, 'btx24_telegram', 'Привет'), chat(2, 'wz_whatsapp', '=== SYSTEM WZ === Ошибка отправки сообщения: канал выключен')])?.chatId).toBe(2);
-    expect(brokenChat([chat(1, 'wz_whatsapp', 'Спасибо')])).toBeNull();
+  it('«канал выключен» от Wazzup — чат неработающий, причина для «Присоединиться к чату»', () => {
+    expect(deadReason(chat(2, 'wz_whatsapp', '=== SYSTEM WZ === Ошибка отправки сообщения: канал выключен'))).toBe('канал Wazzup выключен');
+    expect(deadReason(chat(1, 'wz_whatsapp', 'Спасибо'))).toBeNull();
+    expect(deadReason(undefined)).toBeNull();
   });
-  it('чат в неработающей линии (по проверке линии) — тоже «создать новый чат»', () => {
+  it('чат в неработающей линии (по проверке линии) — причина из проверки', () => {
     const dead = { ...chat(3, 'wz_telegram', 'Спасибо'), lineProblem: 'канал линии «Wazzup» не подключён' } as ChatSummary;
     expect(isDeadChat(dead)).toBe(true);
     expect(isDeadChat(chat(4, 'btx24_telegram', 'Привет'))).toBe(false);
-    expect(brokenChat([chat(4, 'btx24_telegram', 'Привет'), dead])?.chatId).toBe(3);
+    expect(deadReason(dead)).toBe('канал линии «Wazzup» не подключён');
+  });
+});
+
+describe('встройка сделки: шкала на брони сделки', () => {
+  const b = (dealId: number, start: string) => ({ bookingId: 1, dealId, deal: null, start, end: start, resources: [], resourceIds: [], when: 'future' as const });
+  const info = (over: Partial<ClientBookingsDto>) => ({ contactId: 1, contact: null, won: { count: 0, avgCheck: null, currency: null }, past: 0, upcoming: [], recent: [], openDeals: [], ...over }) as ClientBookingsDto;
+  it('текущая/будущая бронь сделки, иначе по сделке, иначе последняя прошедшая', () => {
+    expect(dealBookingStart(info({ upcoming: [b(5, '2026-11-01T10:00:00Z'), b(7, '2026-11-02T10:00:00Z')] }), 7)).toBe('2026-11-02T10:00:00Z');
+    expect(dealBookingStart(info({ openDeals: [{ id: 7, title: 'x', categoryId: null, booking: { start: '2026-11-03T10:00:00Z', end: '2026-11-03T12:00:00Z', resources: [] } }] }), 7)).toBe('2026-11-03T10:00:00Z');
+    expect(dealBookingStart(info({ recent: [b(7, '2026-10-01T10:00:00Z')] }), 7)).toBe('2026-10-01T10:00:00Z');
+    expect(dealBookingStart(info({ upcoming: [b(5, '2026-11-01T10:00:00Z')] }), 7)).toBeNull();
+    expect(dealBookingStart(null, 7)).toBeNull();
+  });
+});
+
+describe('встройка сделки: поиск клиента в мессенджерах', () => {
+  const t = (id: string, kind: 'whatsapp' | 'telegram', status: 'found' | 'not_found' | 'unavailable') => ({ messenger: { id, kind, phone: '7999' } as MessengerDto, status, to: status === 'found' ? 'x@c.us' : null, via: null, openlineChatId: null, note: null });
+  it('мессенджер — найден, если хотя бы в одном номере; номера найденного — для выбора', () => {
+    const rows = kindsOf([t('a', 'whatsapp', 'found'), t('b', 'whatsapp', 'found'), t('c', 'telegram', 'not_found')]);
+    expect(rows.map((r) => [r.kind, r.found.length, r.note])).toEqual([['whatsapp', 2, null], ['telegram', 0, 'Клиент не найден']]);
+    expect(kindsOf([t('d', 'telegram', 'unavailable')])[0].note).toBe('Проверка недоступна');
   });
 });
 

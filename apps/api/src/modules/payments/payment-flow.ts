@@ -24,6 +24,7 @@ import { BookingJournalService, SYSTEM } from '../bookings/booking-journal.servi
 import { dateRu, timeRu } from '../bookings/booking-create.service.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { MessageContextService } from '../bookings/message-context.service.js';
+import { appendServiceMessage } from '../openlines/service-chat.service.js';
 
 /** Сколько ждать ссылку от портала, прежде чем признать счёт неудачным. */
 export const LINK_WAIT_MS = 15 * 60_000;
@@ -332,6 +333,8 @@ export class PaymentFlow {
     const targets = await this.workingTargets(ctx, req.dealId, Number(deal?.CONTACT_ID) || null, noChat);
     if (!targets.length) {
       if (!ctx.newChat) {
+        // Клиент без мессенджеров (служебный чат сделки) — сообщение туда; клиенту его передаст менеджер.
+        if (await this.toServiceChat(ctx, req, text)) return true;
         warnings.push(...noChat);
         return false;
       }
@@ -418,6 +421,7 @@ export class PaymentFlow {
       }
       for (const f of st.files) {
         chatId ??= await this.boundChat(ctx, req.dealId);
+        if (!chatId && (await this.toServiceChat(ctx, req, `Файл для клиента: «${f.name}» (отправьте сами)`))) continue;
         if (!chatId) {
           warnings.push(`Файлы не отправлены: ${NO_WORKING_CHAT}`);
           return false;
@@ -445,6 +449,24 @@ export class PaymentFlow {
       }
     }
     return true;
+  }
+
+  private async hasServiceChat(ctx: FlowContext, dealId: number): Promise<boolean> {
+    try {
+      return !!(await this.prisma.serviceChat.findUnique({ where: { portalId_dealId: { portalId: ctx.portal.id, dealId } }, select: { id: true } }));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Служебный чат сделки (только в приложении): записать, если он у сделки есть. Сбой — как «чата нет». */
+  private async toServiceChat(ctx: FlowContext, req: SendTarget, text: string): Promise<boolean> {
+    try {
+      return await appendServiceMessage(this.prisma, ctx.portal.id, req.dealId, req.source === 'payment' ? 'payment' : 'automation', text);
+    } catch (e) {
+      this.logger.warn(`service chat append failed: ${msg(e)}`);
+      return false;
+    }
   }
 
   /**
@@ -509,7 +531,10 @@ export class PaymentFlow {
   /** Есть ли у сделки рабочий чат: null — есть; иначе текст «создайте работающий чат» (для окна оплаты). */
   async chatProblem(ctx: FlowContext, dealId: number): Promise<string | null> {
     const w: string[] = [];
-    return (await this.workingTargets(ctx, dealId, null, w)).length ? null : (w[0] ?? NO_WORKING_CHAT).replace(/ — сообщение не отправлено$/, '');
+    if ((await this.workingTargets(ctx, dealId, null, w)).length) return null;
+    // Служебный чат сделки: ссылка запишется туда — окну оплаты не нужно предлагать мессенджеры.
+    if (await this.hasServiceChat(ctx, dealId)) return null;
+    return (w[0] ?? NO_WORKING_CHAT).replace(/ — сообщение не отправлено$/, '');
   }
 
   /** Чат для файлов той же цепочки: сделка или её контакт, только с подтверждённой привязкой и рабочей линией. */

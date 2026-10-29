@@ -10,7 +10,7 @@ import { ChatDealCard } from './ChatDealCard.js';
 import { Avatar } from './Avatar.js';
 import { ChannelSwitch } from './ChannelSwitch.js';
 import { clipName, connectorLabel } from './format.js';
-import { Icon } from './icons.js';
+import { Icon, type IconName } from './icons.js';
 import { StepsEditor } from './StepsEditor.js';
 import { TemplatesManager } from './TemplatesManager.js';
 import { TemplatesPicker } from './TemplatesPicker.js';
@@ -77,7 +77,19 @@ export function ChatView({
   onStatus,
   onOpenChat,
   templatesRequest = 0,
+  dead = null,
+  onRevive,
+  menu,
 }: {
+  /** Почему канал чата не работает (встройка сделки, `lineProblem`); вместо поля ввода — «Присоединиться к чату». */
+  dead?: string | null;
+  /** «Присоединиться к чату» в неработающем канале: новый чат с клиентом через наш номер этого канала. */
+  onRevive?: () => void;
+  /**
+   * Встройка сделки: действия шапки — в меню «⋯» (вместе с «Обновить»), кнопки «Открыть диалог в
+   * Битрикс24» нет, «Не требует ответа» — маленьким серым тегом: больше места под клиента.
+   */
+  menu?: HeaderMenuItem[];
   /** Сменился (больше 0) — открыть окно «Шаблоны» (быстрое действие во встройке сделки). */
   templatesRequest?: number;
   chatId: number;
@@ -327,11 +339,11 @@ export function ChatView({
           </>
         }
         onBack={onBack}
-        onRefresh={onRefresh}
+        onRefresh={menu ? undefined : onRefresh}
         details={bookings}
       >
         {status && !status.sessionClosed && onStatus && (status.waitingReply || status.noReply) && (
-          <span className="cv-reply">
+          <span className={`cv-reply${menu ? ' compact' : ''}`}>
             {status.noReply ? (
               <>
                 <span className="cl-status noreply" title={status.noReply.byName ? `Отметил: ${status.noReply.byName}` : undefined}>
@@ -348,17 +360,21 @@ export function ChatView({
             )}
           </span>
         )}
-        <button
-          className="cl-btn cv-open"
-          onClick={() => openMessenger(target)}
-          title="Открыть диалог в Битрикс24"
-          aria-label="Открыть диалог в Битрикс24"
-        >
-          <Icon name="external" size={15} />
-        </button>
+        {menu ? (
+          <HeaderMenu items={[...(onRefresh ? [{ key: 'refresh', icon: 'refresh' as const, label: 'Обновить чат', onClick: onRefresh }] : []), ...menu]} />
+        ) : (
+          <button
+            className="cl-btn cv-open"
+            onClick={() => openMessenger(target)}
+            title="Открыть диалог в Битрикс24"
+            aria-label="Открыть диалог в Битрикс24"
+          >
+            <Icon name="external" size={15} />
+          </button>
+        )}
       </ChatHeader>
 
-      {(hasDisabledWazzupChannel(chat.connector, status?.lastMessage?.preview) || chat.messages.some(m => hasDisabledWazzupChannel(chat.connector, m.text))) && (
+      {!(dead && onRevive) && (hasDisabledWazzupChannel(chat.connector, status?.lastMessage?.preview) || chat.messages.some(m => hasDisabledWazzupChannel(chat.connector, m.text))) && (
         <ChannelRecovery key={chat.chatId} connector={chat.connector} channels={channels} phones={status?.phones ?? []} timezone={timezone} onOpen={onOpenChat} />
       )}
 
@@ -412,7 +428,16 @@ export function ChatView({
         </div>
       )}
 
-      {!chat.joined ? (
+      {dead && onRevive ? (
+        <div className="chat-join chat-revive">
+          <span className="muted chat-revive-text" title={dead}>
+            Канал необходимо подключить заново, нажмите <span aria-hidden="true">→</span>
+          </span>
+          <button className="primary" onClick={onRevive}>
+            Присоединиться к чату
+          </button>
+        </div>
+      ) : !chat.joined ? (
         <div className="chat-join">
           <span className="muted">Вы не участник этого диалога.</span>
           <button className="primary" disabled={busy} onClick={() => void join()}>
@@ -468,6 +493,45 @@ export function ChatView({
         />
       )}
     </main>
+  );
+}
+
+export type HeaderMenuItem = { key: string; icon: IconName; label: string; title?: string; onClick: () => void };
+
+/** «⋯» в шапке чата: редкие действия списком, чтобы шапка оставалась под имя и данные клиента. */
+function HeaderMenu({ items }: { items: HeaderMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [open]);
+  return (
+    <div className="cv-menu" ref={ref}>
+      <button type="button" className={`cl-btn${open ? ' active' : ''}`} aria-haspopup="menu" aria-expanded={open} aria-label="Ещё действия" title="Ещё действия" onClick={() => setOpen(!open)}>
+        <Icon name="more" size={20} />
+      </button>
+      {open && (
+        <ul className="cv-menu-list" role="menu">
+          {items.map((i) => (
+            <li key={i.key}>
+              <button type="button" role="menuitem" title={i.title} onClick={() => { setOpen(false); i.onClick(); }}>
+                <Icon name={i.icon} size={17} />
+                {i.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

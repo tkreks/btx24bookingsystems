@@ -1,3 +1,4 @@
+import type { ContactAlertListDto } from '@btx24/shared';
 import { BlockLoading } from './BlockLoading.js';
 import { useState } from 'react';
 import type { GroupDirectoryDto, DashboardGapsDto, BookingAlertListDto, CertificateListDto, NeedsCloseDto, ResourceStopDto } from '@btx24/shared';
@@ -70,12 +71,14 @@ export function NeedsCloseBlock({ tz }: { tz: string }) {
 /** «Уведомления о бронях»: сколько новых и последние — открыть страницу уведомлений. */
 export function AlertsBlock({ onOpen, period }: { onOpen?: () => void; period: Period }) {
   const { data, error } = useLoad<BookingAlertListDto>(`/booking-alerts?status=new&${periodQuery(period)}`);
-  const count = data?.counts.new ?? 0;
+  const { data: contacts } = useLoad<ContactAlertListDto>(`/contact-alerts?status=new&${periodQuery(period)}`);
+  const count = (data?.counts.new ?? 0) + (contacts?.counts.new ?? 0);
   return (
     <div className={`dash-tile${count ? ' warn' : ''}`}>
       <DashBadge name="alert" />
-      <span className="dash-tile-label">Уведомления о бронях</span>
+      <span className="dash-tile-label">Уведомления</span>
       <span className="dash-tile-value">{data ? count : error ? '—' : '…'}</span>
+      {!!contacts?.counts.new && <span className="dash-tile-hint">Контакты: {contacts.counts.new}</span>}
       {data?.items[0] && <span className="dash-tile-hint">последнее: {data.items[0].title ?? `бронь #${data.items[0].bookingId}`}</span>}
       {onOpen && (
         <button className="dash-tile-action" onClick={onOpen}>

@@ -6,6 +6,7 @@ import {
   type CalendarBooking,
   type CalendarDay,
   type CalendarDeal,
+  type CalendarRangeDto,
   type CalendarResource,
   type DealFieldConfig,
 } from '@btx24/shared';
@@ -16,6 +17,7 @@ import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { dealLinks, listBookings, listResources, type RawBooking } from '../bookings/bitrix-bookings.js';
 import { toDto as stopDto } from '../bookings/resource-stops.service.js';
 import { bookingFields, type DealFieldMeta } from './deal-fields.js';
+import { CrmMirrorReader } from '../crm-mirror/crm-mirror.reader.js';
 
 
 /** Что показывать: ресурсы группы, права и настройки направления. */
@@ -40,7 +42,83 @@ export class CalendarService {
   /** portalId → описание полей сделки (`crm.deal.fields`). Подписи и варианты меняются редко. */
 
   // Без БД (юнит-тесты дня) — без броней, пропавших в Битрикс24.
-  constructor(@Optional() private readonly prisma?: PrismaService) {}
+  constructor(
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly mirror?: CrmMirrorReader,
+  ) {}
+
+  /**
+   * Шкала за период — из базы приложения, без модуля бронирования Битрикс24: брони — журнал (сверка по
+   * событиям `onBooking*` и раз в 10 минут), ресурсы — их копия, сделки — копия CRM с проверкой прав
+   * сотрудника (нет в копии — `crm.deal.list` его токеном). Пропавшие в Битрикс24 — по уведомлению
+   * «брони нет» (как в дашборде), без точечной проверки каждой брони.
+   */
+  async range(user: B24UserContext, from: string, to: string, scope: DayScope = {}): Promise<CalendarRangeDto> {
+    const { resourceIds = null, withDetails = true, techWindowMinutes = 0 } = scope;
+    const prisma = this.prisma!;
+    const portalId = user.portal.id;
+    const timezone = user.portal.timezone;
+    const start = zonedDayRange(from, timezone).start;
+    const end = zonedDayRange(to, timezone).end;
+    const fetchFrom = new Date(start.getTime() - Math.max(0, techWindowMinutes) * 60_000);
+    const allowed = resourceIds ? new Set(resourceIds) : null;
+    const [resourceRows, records, settings] = await Promise.all([
+      prisma.resource.findMany({ where: { portalId, archivedAt: null, ...(allowed ? { resourceId: { in: [...allowed] } } : {}) }, select: { resourceId: true, name: true } }),
+      prisma.bookingRecord.findMany({ where: { portalId, status: 'active', startsAt: { lt: end }, endsAt: { gt: fetchFrom } }, orderBy: { startsAt: 'asc' }, take: RANGE_LIMIT }),
+      prisma.portalSettings.findUnique({ where: { portalId }, select: { bookingSyncAt: true, syncHorizonDays: true } }),
+    ]);
+    const resources = resourceRows.map((r) => ({ id: r.resourceId, name: r.name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    const mine = records.filter((r) => !allowed || (r.resourceIds as number[]).some((id) => allowed.has(Number(id))));
+    const gone = mine.length
+      ? await prisma.bookingAlert.findMany({
+          where: { portalId, bookingId: { in: mine.map((r) => r.bookingId) }, kind: 'discrepancy', problem: { contains: 'missing' } },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, bookingId: true, status: true },
+        })
+      : [];
+    const missing = new Map<number, string | null>();
+    for (const a of gone) if (!missing.has(a.bookingId)) missing.set(a.bookingId, a.status === 'resolved' ? null : a.id);
+    // Есть в Битрикс24 — обычная бронь (без `missing`), пропавшая — с решением сотрудника.
+    const live = mine.filter((r) => !missing.has(r.bookingId)).map((r): CalendarBooking => {
+      const { missing: _none, ...b } = this.fromRecord(r, null, null);
+      return b;
+    });
+    // Тех. окна — только по броням, которые есть в Битрикс24 (у пропавшей слот свободен).
+    const techWindows = techWindowsFor(live, techWindowMinutes, allowed ?? undefined).filter((t) => overlaps(t, start, end));
+    const shown = [...live, ...mine.filter((r) => missing.has(r.bookingId)).map((r) => this.fromRecord(r, missing.get(r.bookingId) ?? null, null))].filter((b) => overlaps(b, start, end));
+    let bookings = shown;
+    if (!withDetails) bookings = shown.map(occupancyOnly);
+    else {
+      const deals = await this.rangeDeals(user, [...new Set(shown.flatMap((b) => (b.dealId ? [b.dealId] : [])))]);
+      bookings = shown.map((b) => ({ ...b, deal: (b.dealId && deals.get(b.dealId)) || null }));
+    }
+    const horizon = settings?.syncHorizonDays ? new Date(Date.now() + settings.syncHorizonDays * 86_400_000).toISOString().slice(0, 10) : null;
+    return {
+      from,
+      to,
+      timezone,
+      resources,
+      bookings: bookings.sort(byStart),
+      techWindows,
+      stops: await this.stops(user, start, end, resources),
+      syncedAt: settings?.bookingSyncAt?.toISOString() ?? null,
+      horizon,
+    };
+  }
+
+  /** Сделки броней: копия CRM (права — токеном сотрудника, ≤ 5 минут), чего нет в копии — с портала. */
+  private async rangeDeals(user: B24UserContext, ids: number[]): Promise<Map<number, CalendarDeal>> {
+    const out = new Map<number, CalendarDeal>();
+    if (!ids.length) return out;
+    let missing = ids;
+    if (this.mirror && (await this.mirror.ready(user.portal.id, 'deal'))) {
+      const got = await this.mirror.dealsByIds(user, ids);
+      for (const d of got.rows) out.set(Number(d.ID), dealDto(d as Record<string, string | null>));
+      missing = got.missing;
+    }
+    if (missing.length) for (const [id, d] of await this.deals(user.client, missing)) out.set(id, d.dto);
+    return out;
+  }
 
   async day(user: B24UserContext, date: string, scope: DayScope = {}): Promise<CalendarDay> {
     const { resourceIds = null, withDetails = true, techWindowMinutes = 0, dealFields = [] } = scope;
@@ -219,23 +297,21 @@ export class CalendarService {
       filter: { '@ID': ids },
       select: [...new Set([...BASE_DEAL_SELECT, ...extraFields])],
     });
-    for (const d of rows) {
-      out.set(Number(d.ID), {
-        raw: d,
-        dto: {
-          id: Number(d.ID),
-          title: d.TITLE ?? '',
-          categoryId: d.CATEGORY_ID === null || d.CATEGORY_ID === undefined ? null : Number(d.CATEGORY_ID),
-          stageId: d.STAGE_ID ?? null,
-          opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined ? null : Number(d.OPPORTUNITY),
-          currency: d.CURRENCY_ID ?? null,
-        },
-      });
-    }
+    for (const d of rows) out.set(Number(d.ID), { raw: d, dto: dealDto(d) });
     return out;
   }
 }
 
+/** Шкала: брони периода — не больше (30 месяцев одной группы с запасом). */
+const RANGE_LIMIT = 20_000;
+const dealDto = (d: Record<string, string | null>): CalendarDeal => ({
+  id: Number(d.ID),
+  title: d.TITLE ?? '',
+  categoryId: d.CATEGORY_ID === null || d.CATEGORY_ID === undefined ? null : Number(d.CATEGORY_ID),
+  stageId: d.STAGE_ID ?? null,
+  opportunity: d.OPPORTUNITY === null || d.OPPORTUNITY === undefined || d.OPPORTUNITY === '' ? null : Number(d.OPPORTUNITY),
+  currency: d.CURRENCY_ID ?? null,
+});
 const toSec = (d: Date) => Math.floor(d.getTime() / 1000);
 const byStart = (a: CalendarBooking, b: CalendarBooking) => a.start.localeCompare(b.start) || a.id - b.id;
 /** Без права booking.details: видна только занятость ресурса. */

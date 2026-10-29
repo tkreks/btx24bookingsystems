@@ -18,8 +18,9 @@ function setup() {
       return { count: row ? 1 : 0 };
     },
   );
-  const prisma = { externalUser: { findMany, findFirst, updateMany } } as unknown as PrismaService;
-  return { service: new ExternalPasswordsService(prisma), rows, findMany, findFirst, updateMany };
+  const deleteMany = vi.fn(async () => ({ count: 1 }));
+  const prisma = { externalUser: { findMany, findFirst, updateMany }, externalSession: { deleteMany } } as unknown as PrismaService;
+  return { service: new ExternalPasswordsService(prisma), rows, findMany, findFirst, updateMany, deleteMany };
 }
 
 describe('ExternalPasswordsService', () => {
@@ -32,15 +33,17 @@ describe('ExternalPasswordsService', () => {
     );
   });
   it('stores only a salted hash and scopes the write to the authenticated portal', async () => {
-    const { service, rows, updateMany } = setup();
+    const { service, rows, updateMany, deleteMany } = setup();
     const password = 'test-password-12';
     await service.change('p1', 'u1', { password });
     expect(await verifyPassword(password, rows[0].passwordHash)).toBe(true);
     expect(rows[0].passwordHash).not.toContain(password);
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'u1', portalId: 'p1' },
-      data: { passwordHash: rows[0].passwordHash },
+      data: { passwordHash: rows[0].passwordHash, failedLogins: 0, lockedUntil: null },
     });
+    // Сессии со старым паролем завершаются.
+    expect(deleteMany).toHaveBeenCalledWith({ where: { portalId: 'p1', externalUserId: 'u1' } });
   });
   it('cannot change a user from another portal', async () => {
     const { service, rows, updateMany } = setup();

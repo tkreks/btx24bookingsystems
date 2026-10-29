@@ -21,10 +21,12 @@ import { OpenlineIndexService } from './openline-index.service.js';
 import { OpenlinesController } from './openlines.controller.js';
 import { TemplatesService } from './templates.service.js';
 import { HeadDashboardService } from './head-dashboard.service.js';
+import { ServiceChatController } from './service-chat.controller.js';
+import { ServiceChatService } from './service-chat.service.js';
 
 @Module({
   imports: [AccessModule, BookingsModule, Bitrix24Module, CrmMirrorModule],
-  controllers: [DashboardGapsController, OpenlinesController, CallsController, ChatChannelsAdminController],
-  providers: [CallExclusionsService, DealKanbanService, DashboardGapsService, ActivityService, ClientTimelineService, CallCardService, DashboardLayoutService, ChatFoldersService, ChatsService, ConversationsService, DashboardService, FilesService, HeadDashboardService, OpenlineIndexService, TemplatesService],
+  controllers: [DashboardGapsController, OpenlinesController, CallsController, ChatChannelsAdminController, ServiceChatController],
+  providers: [CallExclusionsService, DealKanbanService, DashboardGapsService, ActivityService, ClientTimelineService, CallCardService, DashboardLayoutService, ChatFoldersService, ChatsService, ConversationsService, DashboardService, FilesService, HeadDashboardService, OpenlineIndexService, ServiceChatService, TemplatesService],
 })
 export class OpenlinesModule {}

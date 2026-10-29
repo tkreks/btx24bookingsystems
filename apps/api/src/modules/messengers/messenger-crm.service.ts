@@ -1,10 +1,14 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { clientPhoneVariants, normalizeClientPhone, type MessengerClientContextDto } from '@btx24/shared';
+import { BadRequestException, ConflictException, Injectable, Optional } from '@nestjs/common';
+import { clientPhoneVariants, normalizeClientPhone, type ContactFieldMapDto, type MessengerClientContextDto } from '@btx24/shared';
 import type { Messenger, Portal } from '../../generated/prisma/client.js';
+import { ActionLogService } from '../audit/action-log.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { PortalService } from '../bitrix24/portals/portal.service.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
+
+import { contactFieldMap, mappedContactField } from '../bitrix24/contact-field-map.js';
+import { contactFieldOf, contactFieldValues, messengerIdentityOf } from '../bitrix24/messenger-contact-fields.js';
 
 type Contact = { ID: string; NAME?: string; LAST_NAME?: string; SECOND_NAME?: string };
 type Comm = { VALUE?: string };
@@ -12,20 +16,21 @@ type Comm = { VALUE?: string };
  * Где прежний провайдер (Wazzup) хранил Telegram-клиента: поле контакта с ID пользователя Telegram и
  * почта `<ID>@telegram.wazzup`. Telegram часто не показывает номер — по ним находим старого клиента.
  */
+export const APP_TELEGRAM_ID = 'UF_CRM_BTX24_TELEGRAM_ID';
 export const WZ_TELEGRAM_ID = 'UF_CRM_TELEGRAMID_WZ';
 export const WZ_TELEGRAM_LOGIN = 'UF_CRM_TELEGRAMUSERNAME_WZ';
 const wzTelegramEmail = (id: string) => `${id}@telegram.wazzup`;
 /** ID пользователя Telegram из ID чата (`<id>@lid`); у групп и других мессенджеров — null. */
 export const telegramIdOf = (kind: string, chatId: string): string | null => (kind === 'telegram' ? (/^(\d+)@lid$/.exec(chatId)?.[1] ?? null) : null);
 /** Кто клиент чата для поиска в CRM: номер, ID Telegram, уже известные контакты. */
-export type ChatIdentity = { telegramId?: string | null; contactIds?: number[] };
+export type ChatIdentity = { telegramId?: string | null; contactIds?: number[]; kind?: string; chatId?: string; contactFields?: ContactFieldMapDto };
 type Deal = { ID: string; TITLE: string; CONTACT_ID?: string; STAGE_SEMANTIC_ID?: string; OPPORTUNITY?: string; CURRENCY_ID?: string };
 const key = (m: Messenger, chatId: string) => ({ messengerId_chatId: { messengerId: m.id, chatId } });
 
 /** CRM остаётся источником истины. В фоне сохраняются только ID, интерфейс перечитывает CRM правами сотрудника. */
 @Injectable()
 export class MessengerCrmService {
-  constructor(private readonly prisma: PrismaService, private readonly portals: PortalService) {}
+  constructor(private readonly prisma: PrismaService, private readonly portals: PortalService, @Optional() private readonly actions?: ActionLogService) {}
 
   async match(client: Bitrix24RestClient, phone: string | null, activeOnly: boolean, who: ChatIdentity = {}): Promise<Pick<MessengerClientContextDto, 'contacts' | 'deals'>> {
     const values = phone ? clientPhoneVariants(phone) : [];
@@ -36,7 +41,15 @@ export class MessengerCrmService {
       for (const id of found?.CONTACT ?? []) contactSet.add(Number(id));
       for (const id of found?.COMPANY ?? []) companySet.add(Number(id));
     }
-    if (who.telegramId) for (const id of await this.byTelegram(client, who.telegramId)) contactSet.add(id);
+    if (who.telegramId) for (const id of await this.byTelegram(client, who.telegramId, who.contactFields?.telegram)) contactSet.add(id);
+    const ownField = who.kind ? contactFieldOf(who.kind) : null;
+    const ownId = who.kind && who.chatId ? messengerIdentityOf(who.kind, who.chatId) : null;
+    if (ownField && ownId && !who.telegramId) for (const id of await this.byField(client, mappedContactField(ownField.kind, who.contactFields ?? {})!, ownId)) contactSet.add(id);
+    if (who.kind === 'max' && ownId && !who.contactFields?.max) for (const id of await this.byField(client, 'UF_CRM_MAXID_WZ', ownId)) contactSet.add(id);
+    if (who.kind === 'whatsapp' && who.chatId?.endsWith('@lid')) {
+      const field = who.contactFields?.whatsappLid ?? 'UF_CRM_WHATSAPPLID_WZ';
+      for (const id of await this.byField(client, field, who.chatId.slice(0, -4))) contactSet.add(id);
+    }
     const contactIds = [...contactSet].filter(n => n > 0);
     const companyIds = [...companySet].filter(n => n > 0);
     if (!contactIds.length && !companyIds.length) return { contacts: [], deals: [] };
@@ -60,15 +73,31 @@ export class MessengerCrmService {
   }
 
   /** Контакты, которых прежний провайдер записал с этим ID Telegram (поле и почта). */
-  private async byTelegram(client: Bitrix24RestClient, telegramId: string): Promise<number[]> {
+  private async byTelegram(client: Bitrix24RestClient, telegramId: string, mappedField = APP_TELEGRAM_ID): Promise<number[]> {
     const out = new Set<number>();
     const byEmail = (await client.call<{ CONTACT?: number[] }>('crm.duplicate.findbycomm', { type: 'EMAIL', values: [wzTelegramEmail(telegramId)] })).result;
     for (const id of byEmail?.CONTACT ?? []) out.add(Number(id));
     // Фильтр по полю, которого нет на портале, Битрикс24 молча пропускает (пришли бы все контакты) — сверяем значение.
-    const byField = await client.call<Record<string, unknown>[]>('crm.contact.list', { filter: { [WZ_TELEGRAM_ID]: telegramId }, select: ['ID', WZ_TELEGRAM_ID] });
-    for (const c of byField.result ?? []) if (String(c[WZ_TELEGRAM_ID] ?? '') === telegramId) out.add(Number(c.ID));
+    for (const field of [mappedField, WZ_TELEGRAM_ID]) for (const id of await this.byField(client, field, telegramId)) out.add(id);
     return [...out].filter(n => n > 0);
   }
+
+  private async byField(client: Bitrix24RestClient, field: string, value: string): Promise<number[]> {
+    const out = new Set<number>();
+    for (let start = 0; ; ) {
+      const page = await client.call<Record<string, unknown>[]>('crm.contact.list', { filter: { [field]: value }, select: ['ID', field], start });
+      for (const c of page.result ?? []) if (contactFieldValues(c[field]).includes(value)) out.add(Number(c.ID));
+      // Не продолжаем сканирование портала, если отсутствующее поле проигнорировано.
+      if (page.next == null || !page.result.some(c => field in c)) break;
+      start = page.next;
+    }
+    return [...out].filter(n => Number.isSafeInteger(n) && n > 0);
+  }
+
+  /** Запись в контакты отложена владельцем 2026-10-28. Связь хранится локально в MessengerChat. */
+  async syncContactIdentity(_m: Messenger, _chatId: string, _contactId: number): Promise<void> {}
+
+  contactFields(portalId: string): Promise<ContactFieldMapDto> { return contactFieldMap(this.prisma, portalId); }
 
   /** Телефон и почта контакта (токеном приложения): по ним линия свяжет новый диалог с этим клиентом. */
   async comms(portal: Portal, contactId: number): Promise<{ phone: string | null; email: string | null }> {
@@ -91,8 +120,11 @@ export class MessengerCrmService {
 
   /** Связать чат мессенджера с клиентом (и сделкой) до первого сообщения. */
   async pin(m: Messenger, chatId: string, link: { dealId: number | null; contactId: number }, phone?: string | null) {
+    const before = await this.prisma.messengerChat.findUnique({ where: key(m, chatId) });
     const data = { crmContactId: link.contactId, ...(link.dealId ? { activeDealId: link.dealId } : {}) };
     await this.prisma.messengerChat.upsert({ where: key(m, chatId), create: { portalId: m.portalId, messengerId: m.id, chatId, phone: phone ?? null, ...data }, update: data });
+    if (before?.crmContactId !== link.contactId) await this.actions?.log(m.portalId, { kind: 'system', name: 'Приложение' }, { action: 'contact.messenger_linked', summary: `Контакт #${link.contactId}: связана переписка ${m.kind}`, entityType: 'contact', entityId: link.contactId, via: 'app', details: { messengerId: m.id, chatId, before: before?.crmContactId ?? null, after: link.contactId } });
+    await this.syncContactIdentity(m, chatId, link.contactId);
   }
 
   /** Маршрут нового входящего фиксируется один раз, последующая смена сделки не переписывает историю. */
@@ -100,7 +132,8 @@ export class MessengerCrmService {
     let chat = await this.prisma.messengerChat.findUnique({ where: key(m, chatId) });
     const phone = normalizeClientPhone(inputPhone ?? chat?.phone ?? (/^(\d+)@c\.us$/.exec(chatId)?.[1]));
     const telegramId = telegramIdOf(m.kind, chatId);
-    if ((!phone && !telegramId && !chat?.crmContactId) || chatId.endsWith('@g.us')) return { dealId: null, awaitingDeal: false };
+    const identity = messengerIdentityOf(m.kind, chatId);
+    if ((!phone && !identity && !chat?.crmContactId) || chatId.endsWith('@g.us')) return { dealId: null, awaitingDeal: false };
     if (!chat && phone) {
       // WA меняет адрес по номеру на LID: выбор сделки принадлежит клиенту, а не форме адреса.
       const alias = await this.prisma.messengerChat.findFirst({ where: { portalId: m.portalId, messengerId: m.id, phone }, orderBy: { lastMessageAt: 'desc' } });
@@ -111,7 +144,7 @@ export class MessengerCrmService {
       if (!portal) return { dealId: null, awaitingDeal: true };
       try {
         const prev = chat?.crmContactId ?? null;
-        const matched = await this.match(this.portals.clientFor(portal), phone, true, { telegramId, contactIds: prev ? [prev] : [] });
+        const matched = await this.match(this.portals.clientFor(portal), phone, true, { telegramId, kind: m.kind, chatId, contactFields: await this.contactFields(m.portalId), contactIds: prev ? [prev] : [] });
         const ids = matched.deals.map(d => d.id);
         const activeDealId = chat?.activeDealId && ids.includes(chat.activeDealId) ? chat.activeDealId : ids.length === 1 ? ids[0] : null;
         const contacts = matched.contacts.map(c => c.id);
@@ -124,6 +157,7 @@ export class MessengerCrmService {
       } catch { return { dealId: null, awaitingDeal: true }; }
     }
     if (!chat) return { dealId: null, awaitingDeal: false };
+    if (chat.crmContactId) await this.syncContactIdentity(m, chatId, chat.crmContactId);
     const ids = (chat.crmMatch as { dealIds?: number[] } | null)?.dealIds ?? [];
     return { dealId: chat.activeDealId, awaitingDeal: ids.length > 1 && !chat.activeDealId };
   }
@@ -133,9 +167,10 @@ export class MessengerCrmService {
     const phone = normalizeClientPhone(chat?.phone ?? (/^(\d+)@c\.us$/.exec(chatId)?.[1]));
     const pending = await this.prisma.messengerMessage.count({ where: { portalId: user.portal.id, messengerId: m.id, chatId, awaitingDeal: true } });
     const telegramId = telegramIdOf(m.kind, chatId);
+    const identity = messengerIdentityOf(m.kind, chatId);
     const contactIds = chat?.crmContactId ? [chat.crmContactId] : [];
-    if (!phone && !telegramId && !contactIds.length) return { phone: null, contacts: [], deals: [], activeDealId: null, needsChoice: false, pending, note: 'Номер клиента пока неизвестен' };
-    const found = await this.match(user.client, phone, false, { telegramId, contactIds });
+    if (!phone && !identity && !contactIds.length) return { phone: null, contacts: [], deals: [], activeDealId: null, needsChoice: false, pending, note: 'Номер клиента пока неизвестен' };
+    const found = await this.match(user.client, phone, false, { telegramId, kind: m.kind, chatId, contactFields: await this.contactFields(user.portal.id), contactIds });
     const activeDealId = found.deals.some(d => d.id === chat?.activeDealId && d.active) ? chat!.activeDealId : null;
     return { phone, ...found, activeDealId, needsChoice: found.deals.some(d => d.active) && !activeDealId, pending, note: null };
   }

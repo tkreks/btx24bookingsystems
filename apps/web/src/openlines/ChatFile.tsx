@@ -27,7 +27,10 @@ const kindOf = (f: ChatFileDto) =>
  * во фрейме не открываются. Картинки грузятся, когда видны; видео и аудио — по нажатию.
  */
 export function ChatFile({ chatId, f }: { chatId: number; f: ChatFileDto }) {
-  const kind = kindOf(f);
+  // Описание файла портал не отдал (сотрудник не в диалоге) — вид узнаём по скачанному файлу.
+  const unknown = f.type === 'unknown';
+  const [detected, setDetected] = useState<ReturnType<typeof kindOf> | null>(null);
+  const kind = unknown ? (detected ?? 'file') : kindOf(f);
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
   const box = useRef<HTMLDivElement | null>(null);
@@ -39,6 +42,7 @@ export function ChatFile({ chatId, f }: { chatId: number; f: ChatFileDto }) {
       const blob = await apiBlob(`/openlines/chats/${chatId}/files/${f.id}`);
       const type = MIME.find(([re]) => re.test(f.name))?.[1];
       const u = URL.createObjectURL(type && blob.type !== type ? new Blob([blob], { type }) : blob);
+      if (unknown) setDetected(/^image\//.test(blob.type) ? 'image' : /^video\//.test(blob.type) ? 'video' : /^audio\//.test(blob.type) ? 'audio' : 'file');
       setUrl(u);
       setState('idle');
       return u;
@@ -46,7 +50,7 @@ export function ChatFile({ chatId, f }: { chatId: number; f: ChatFileDto }) {
       setState('error');
       return null;
     }
-  }, [chatId, f.id, f.name, url]);
+  }, [chatId, f.id, f.name, url, unknown]);
 
   // Картинка — когда попала в область видимости.
   useEffect(() => {
@@ -63,6 +67,11 @@ export function ChatFile({ chatId, f }: { chatId: number; f: ChatFileDto }) {
   useEffect(() => () => void (url && URL.revokeObjectURL(url)), [url]);
 
   const save = async () => {
+    // Неизвестное вложение: первое нажатие — показать (картинка/видео/аудио), не скачивать.
+    if (unknown && !url) {
+      await load();
+      return;
+    }
     const u = await load();
     if (!u) return;
     const a = document.createElement('a');
@@ -87,7 +96,8 @@ export function ChatFile({ chatId, f }: { chatId: number; f: ChatFileDto }) {
         </button>
       )}
       <button type="button" className="link msg-file-name" onClick={() => void save()}>
-        {kind === 'file' && <Icon name="clip" size={14} />} {f.name} <span className="muted">{fileSize(f.size)}</span>
+        {kind === 'file' && <Icon name="clip" size={14} />} {unknown && !url ? (state === 'loading' ? 'Загрузка вложения…' : state === 'error' ? 'Не удалось загрузить вложение — ещё раз' : 'Вложение — показать') : f.name}{' '}
+        {f.size > 0 && <span className="muted">{fileSize(f.size)}</span>}
       </button>
     </div>
   );

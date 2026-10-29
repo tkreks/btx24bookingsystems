@@ -151,6 +151,29 @@ describe('PaymentFlow', () => {
     expect(result.warnings).toEqual([expect.stringContaining('Новый чат с клиентом не создан (номер не подключён)')]);
   });
 
+  it('рабочего чата нет, у сделки служебный чат → ссылка записана туда, в Битрикс24 ничего не уходит', async () => {
+    const t = setup({ link: 'https://pay.example/x', chats: [], contactChats: [] });
+    const created: unknown[] = [];
+    Object.assign(t.prisma, {
+      serviceChat: { findUnique: vi.fn(async () => ({ id: 's1' })) },
+      serviceChatMessage: { create: vi.fn(async ({ data }: { data: unknown }) => (created.push(data), data)) },
+    });
+    const result = await t.flow.awaitLink(t.ctx, t.req());
+    expect(created).toEqual([expect.objectContaining({ portalId: 'p1', dealId: 678, source: 'payment', text: expect.stringContaining('https://pay.example/x') })]);
+    expect(t.calls.some(([m]) => m === 'imopenlines.crm.message.add' || m === 'im.message.add')).toBe(false);
+    expect(result.messageSentAt).not.toBeNull();
+    expect(await t.flow.chatProblem(t.ctx, 678)).toBeNull();
+  });
+
+  it('рабочего чата и служебного чата нет → прежнее предупреждение', async () => {
+    const t = setup({ link: 'https://pay.example/x', chats: [], contactChats: [] });
+    Object.assign(t.prisma, { serviceChat: { findUnique: vi.fn(async () => null) }, serviceChatMessage: { create: vi.fn() } });
+    const result = await t.flow.awaitLink(t.ctx, t.req());
+    expect(result.messageSentAt).toBeNull();
+    expect(result.warnings).toEqual([expect.stringContaining('Нет рабочего чата')]);
+    expect(await t.flow.chatProblem(t.ctx, 678)).toContain('Нет рабочего чата');
+  });
+
   it('paid invoice → paid, success stage, booking history', async () => {
     const t = setup({ stage: 'DT31_2:P', booking: true });
     const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() + 60_000) }));

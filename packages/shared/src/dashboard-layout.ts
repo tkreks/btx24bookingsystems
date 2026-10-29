@@ -87,7 +87,7 @@ export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = 
   myActivity: { title: 'Журнал моих действий', hint: 'только ваши звонки, сообщения и действия за выбранный период', group: 'Списки', width: 'half' },
   actionLog: { title: 'Журнал действий', hint: 'действия сотрудников и системы за выбранный период', group: 'Контроль', width: 'full', adminOnly: true },
   needsClose: { title: 'Сделки к закрытию', hint: 'бронь прошла, а сделка в Битрикс24 ещё в работе', group: 'Контроль', width: 'half' },
-  alerts: { title: 'Уведомления о бронях', hint: 'новые уведомления: расхождения с Битрикс24, найденные брони', group: 'Контроль', width: 'quarter' },
+  alerts: { title: 'Уведомления', hint: 'расхождения броней, изменения и удаления контактов', group: 'Контроль', width: 'quarter' },
   certificates: { title: 'Сертификаты', hint: 'новые, срок прошёл — погасить', group: 'Контроль', width: 'quarter' },
   stops: { title: 'Стопы ресурсов', hint: 'ресурсы, закрытые для бронирования', group: 'Контроль', width: 'half' },
   kpiGrid: { title: 'Показатели (таблица)', hint: 'до 6 чисел на выбор: сделки, оплаты, брони, звонки; по числу — канбан сделок', group: 'Показатели', width: 'half' },

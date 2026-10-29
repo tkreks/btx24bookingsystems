@@ -149,17 +149,33 @@ export function toMessageDto(m: ImMessage, users: ImUser[], files: ImFile[]): Ch
     ...(phone ? { viaPhone: true } : {}),
     ...(kind === 'employee' && !phone ? { delivery: connectorMidOf(m) ? ('delivered' as const) : ('sent' as const) } : {}),
     text: plainText(phone ? phone.text : m.text),
-    files: files
-      .filter((f) => ids.has(Number(f.id)))
-      .map((f) => ({
-        id: Number(f.id),
+    files: [...ids].map((id) => {
+      const f = files.find((x) => Number(x.id) === id);
+      // Сотруднику не из диалога портал не отдаёт описание файла — вложение всё равно показываем
+      // (`UNKNOWN_FILE`): скачивание `/files/:fileId` проверяет доступ к диалогу.
+      if (!f) return { id, name: 'Вложение', size: 0, type: UNKNOWN_FILE, previewUrl: null, url: null };
+      return {
+        id,
         name: f.name ?? `Файл ${f.id}`,
         size: Number(f.size ?? 0),
         type: f.type ?? 'file',
         previewUrl: f.urlPreview || null,
         url: f.urlDownload || f.urlShow || null,
-      })),
+      };
+    }),
   };
+}
+
+/** Тип вложения без описания (портал не отдал файл сотруднику, который не в диалоге). */
+export const UNKNOWN_FILE = 'unknown';
+
+/**
+ * Не затирать сохранённое описание файлов «пустым»: страницу мог прочитать сотрудник не из диалога.
+ * Вложение без описания берётся из прежней версии сообщения, если там оно было.
+ */
+export function keepKnownFiles(next: ChatMessageDto, prev: ChatMessageDto | null | undefined): ChatMessageDto {
+  if (!prev?.files?.length || !next.files.some((f) => f.type === UNKNOWN_FILE)) return next;
+  return { ...next, files: next.files.map((f) => (f.type === UNKNOWN_FILE ? (prev.files.find((p) => p.id === f.id && p.type !== UNKNOWN_FILE) ?? f) : f)) };
 }
 
 /** ID сообщения в мессенджере из параметров сообщения линии (`CONNECTOR_MID`) — связь с перепиской приложения. */

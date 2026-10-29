@@ -1,19 +1,23 @@
+import { mappedContactField } from '../bitrix24/contact-field-map.js';
+import { contactFieldOf, contactFieldTarget } from '../bitrix24/messenger-contact-fields.js';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { chatNotWorkingMessage, lineProblem } from '../openlines/line-health.js';
-import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerLogin, normalizeMessengerPhone, type MessengerDealTargetsDto, type MessengerDealTargetVia, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
+import { chatNotWorkingMessage, lineOf, lineProblem } from '../openlines/line-health.js';
+import { MESSENGER_MAX_FILE_BYTES, messengerLabel, normalizeMessengerLogin, normalizeMessengerPhone, type MessengerBindChatsDto, type MessengerBindResultDto, type MessengerChatTargetsDto, type MessengerDealTargetsDto, type MessengerDealTargetVia, type MessengerContactSearchDto, type MessengerChatDto, type MessengerLinkDto, type MessengerMessageDto, type MessengerSendResultDto } from '@btx24/shared';
 import type { Messenger, MessengerMessage } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { MessengerConnectorService } from './messenger-connector.service.js';
-import { MessengerCrmService, WZ_TELEGRAM_ID, WZ_TELEGRAM_LOGIN } from './messenger-crm.service.js';
+import { APP_TELEGRAM_ID, MessengerCrmService, WZ_TELEGRAM_ID, WZ_TELEGRAM_LOGIN } from './messenger-crm.service.js';
 import { MessengerInboxService } from './messenger-inbox.service.js';
 import { MessengerServiceClient } from './messenger-service.client.js';
 import { toDto } from './messengers.service.js';
-import { groupReactions } from '../openlines/chat-parsing.js';
+import { crmLinksOf, groupReactions } from '../openlines/chat-parsing.js';
 
 const PAGE = 50;
+/** «Привязать чат»: чатов номера за раз. */
+const BIND_PAGE = 10;
 export const groupIdsOf = (m: Messenger): string[] => (Array.isArray(m.groupIds) ? (m.groupIds as unknown[]).filter((x): x is string => typeof x === 'string') : []);
 
 /**
@@ -247,12 +251,37 @@ export class MessengerChatsService {
     if (!deal?.ID) throw new NotFoundException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена` });
     const contactId = Number(deal.CONTACT_ID) || 0;
     if (!contactId) return { dealId, contact: null, targets: [] };
+    return { dealId, ...(await this.contactTargets(user, contactId)) };
+  }
+
+  /**
+   * Неработающий чат открытой линии (канал Wazzup не подключён): через какой наш номер продолжить.
+   * Номер — по сопоставлению линии с нашим каналом (`ChatLineChannel`, ADR 0017: линия ↔ один аккаунт
+   * мессенджера); не сопоставлена — все номера сотрудника. Клиент — контакт чата, иначе контакт его сделки.
+   */
+  async chatTargets(user: B24UserContext, b24ChatId: number): Promise<MessengerChatTargetsDto> {
+    const dialog = (await user.client.call<{ id?: number; entity_id?: string; entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: b24ChatId })).result;
+    if (!dialog?.id) throw new ForbiddenException({ code: 'NO_CHAT_ACCESS', message: 'Нет доступа к диалогу' });
+    const crm = crmLinksOf(dialog.entity_data_2);
+    const line = lineOf(dialog.entity_id)?.line ?? null;
+    const channel = line ? ((await this.prisma.chatLineChannel.findUnique({ where: { portalId_lineId: { portalId: user.portal.id, lineId: line } } }))?.channel ?? null) : null;
+    const [kind, phone] = channel && !channel.startsWith('line:') ? channel.split(':') : [null, null];
+    let contactId = crm.contactId ?? 0;
+    if (!contactId && crm.dealId) contactId = Number((await user.client.call<{ CONTACT_ID?: string | null }>('crm.deal.get', { id: crm.dealId })).result?.CONTACT_ID) || 0;
+    const base = { chatId: b24ChatId, dealId: crm.dealId ?? null, channel: kind ? channel : null };
+    if (!contactId) return { ...base, contact: null, targets: [] };
+    return { ...base, ...(await this.contactTargets(user, contactId, kind ? (m) => m.kind === kind && m.phone === phone : undefined)) };
+  }
+
+  /** Номера со своей линией, с которых сотрудник может писать, и адрес клиента-контакта в каждом. */
+  private async contactTargets(user: B24UserContext, contactId: number, only?: (m: Messenger) => boolean): Promise<Pick<MessengerDealTargetsDto, 'contact' | 'targets'>> {
     const c = (await user.client.call<Record<string, unknown> & { NAME?: string | null; LAST_NAME?: string | null; PHONE?: { VALUE?: string }[] }>('crm.contact.get', { id: contactId })).result;
     const name = [c?.NAME, c?.LAST_NAME].filter(Boolean).join(' ').trim() || `Контакт #${contactId}`;
     const phones = [...new Set((c?.PHONE ?? []).map((p) => normalizeMessengerPhone(p.VALUE)).filter((p): p is string => !!p))];
-    const tgId = String(c?.[WZ_TELEGRAM_ID] ?? '').trim();
-    const tgLogin = c?.[WZ_TELEGRAM_LOGIN] ? normalizeMessengerLogin(c[WZ_TELEGRAM_LOGIN]) : null;
-    const rows = (await this.available(user)).filter((m) => m.lineMode === 'own' && m.lineId);
+    const contactMap = this.crm ? await this.crm.contactFields(user.portal.id) : {};
+    const tgId = String(c?.[mappedContactField('telegram', contactMap) ?? APP_TELEGRAM_ID] || c?.[WZ_TELEGRAM_ID] || '').trim();
+    const tgLogin = c?.[contactMap.telegramLogin ?? WZ_TELEGRAM_LOGIN] ? normalizeMessengerLogin(c[contactMap.telegramLogin ?? WZ_TELEGRAM_LOGIN]) : null;
+    const rows = (await this.available(user)).filter((m) => m.lineMode === 'own' && m.lineId && (!only || only(m)));
     const can = await this.sendable(user, rows);
     const targets = await Promise.all(rows.filter((m) => can.has(m.id)).map(async (m): Promise<MessengerDealTargetsDto['targets'][number]> => {
       const messenger = toDto(m, null);
@@ -261,6 +290,13 @@ export class MessengerChatsService {
         let via: MessengerDealTargetVia | null = null;
         const linked = await this.prisma.messengerChat.findFirst({ where: { portalId: user.portal.id, messengerId: m.id, crmContactId: contactId, NOT: { chatId: { endsWith: '@g.us' } } }, orderBy: { lastMessageAt: 'desc' } });
         if (linked) [to, via] = [linked.chatId, 'chat'];
+        const ownField = contactFieldOf(m.kind);
+        const ownTarget = ownField ? contactFieldTarget(m.kind, c?.[mappedContactField(m.kind, contactMap) ?? ownField.code]) : null;
+        const lid = String(c?.[contactMap.whatsappLid ?? 'UF_CRM_WHATSAPPLID_WZ'] ?? '');
+        if (!to && m.kind === 'whatsapp' && /^\d{1,20}$/.test(lid)) [to, via] = [`${lid}@lid`, 'chat'];
+        const maxId = String(c?.[contactMap.max ?? 'UF_CRM_MAXID_WZ'] ?? '');
+        if (!to && m.kind === 'max' && /^\d{1,20}$/.test(maxId)) [to, via] = [`${maxId}@lid`, 'chat'];
+        if (!to && ownTarget) [to, via] = [ownTarget, m.kind === 'telegram' ? 'telegram' : 'chat'];
         if (!to && m.kind === 'telegram' && /^\d+$/.test(tgId)) [to, via] = [`${tgId}@lid`, 'telegram'];
         if (!to && m.kind === 'telegram' && tgLogin) {
           const f = await this.service.contactByLogin(m.id, tgLogin);
@@ -277,12 +313,95 @@ export class MessengerChatsService {
         if (lineChat) {
           try { if ((await user.client.call<{ id?: number }>('imopenlines.dialog.get', { CHAT_ID: lineChat })).result?.id) openlineChatId = lineChat; } catch { /* Права линии проверяет портал. */ }
         }
-        return { messenger, status: 'found', to, via, openlineChatId, note: via === 'telegram' ? 'ID Telegram из карточки клиента (записал прежний провайдер)' : null };
+        return { messenger, status: 'found', to, via, openlineChatId, note: via === 'telegram' ? 'ID Telegram из карточки клиента' : null };
       } catch {
         return { messenger, status: 'unavailable', to: null, via: null, openlineChatId: null, note: 'Не удалось проверить: проверьте подключение номера' };
       }
     }));
-    return { dealId, contact: { id: contactId, name }, targets };
+    return { contact: { id: contactId, name }, targets };
+  }
+
+  /**
+   * «Привязать чат» (встройка сделки): последние чаты номера по 10 или поиск по всем его чатам (имя,
+   * номер, ID). Личные чаты — группы мессенджера к клиенту не привязываются. Привязка — действие
+   * отправителя: нужно право писать с номера; чаты своей линии — только доступные сотруднику в Битрикс24.
+   */
+  async bindChats(user: B24UserContext, id: string, q: string | undefined, offset: number): Promise<MessengerBindChatsDto> {
+    const { m, admin } = await this.forUser(user, id, true);
+    const text = String(q ?? '').trim().slice(0, 100);
+    const digits = text.replace(/\D/g, '');
+    const where = {
+      messengerId: m.id,
+      NOT: { chatId: { endsWith: '@g.us' } },
+      ...(text ? { OR: [{ name: { contains: text } }, { chatId: { contains: text } }, ...(digits.length >= 3 ? [{ phone: { contains: digits } }] : [])] } : {}),
+    };
+    const rows = await this.prisma.messengerChat.findMany({ where, orderBy: { lastMessageAt: 'desc' }, skip: Math.max(0, offset), take: BIND_PAGE + 1 });
+    const page = rows.slice(0, BIND_PAGE);
+    const allowed = admin || m.lineMode !== 'own'
+      ? page
+      : (await Promise.all(page.map(async (row) => {
+          try { await this.forUser(user, id, true, row.chatId); return row; } catch { return null; }
+        }))).filter((row): row is (typeof page)[number] => row !== null);
+    return {
+      items: allowed.map((c) => ({ chatId: c.chatId, phone: c.phone, name: c.name, lastMessageAt: c.lastMessageAt?.toISOString() ?? null, lastText: c.lastText, unread: c.unread, contactId: c.crmContactId })),
+      hasMore: rows.length > BIND_PAGE,
+      nextOffset: Math.max(0, offset) + page.length,
+    };
+  }
+
+  /**
+   * Привязать чат мессенджера к клиенту сделки (контакт сделки). Чат уже связан с другим клиентом (в
+   * приложении или его диалог в линии — с другим контактом) — не привязываем: диалог линии к другому
+   * контакту REST не перепривязать, менеджеру — объединить контакты. У клиента есть другие сделки в
+   * работе — привязываем и подсказываем объединить сделки. Клиенту ничего не отправляется.
+   */
+  async bindChat(user: B24UserContext, m: Messenger, chatId: string, dealId: number): Promise<MessengerBindResultDto> {
+    if (!this.crm) throw new ConflictException({ code: 'CRM_UNAVAILABLE', message: 'Связь с CRM недоступна' });
+    if (chatId.endsWith('@g.us')) throw new BadRequestException({ code: 'GROUP_CHAT', message: 'Группу мессенджера нельзя привязать к клиенту' });
+    const link = await this.crm.linkForDeal(user, dealId);
+    const row = await this.prisma.messengerChat.findUnique({ where: { messengerId_chatId: { messengerId: m.id, chatId } } });
+    if (!row) throw new NotFoundException({ code: 'CHAT_NOT_FOUND', message: 'Чат мессенджера не найден' });
+    const others = new Set<number>();
+    if (row.crmContactId && row.crmContactId !== link.contactId) others.add(row.crmContactId);
+    const lineChat = await this.lineChatOf(m, chatId);
+    if (lineChat) {
+      try {
+        const d = (await user.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: lineChat })).result;
+        const bound = crmLinksOf(d?.entity_data_2).contactId;
+        if (bound && bound !== link.contactId) others.add(bound);
+      } catch { /* Нет доступа к диалогу — судим по связи в приложении. */ }
+    }
+    if (others.size) {
+      const ids = [link.contactId, ...others];
+      const contacts = await this.contactNames(user, ids);
+      const deals = await this.openDeals(user, [...others], null);
+      return {
+        linked: false,
+        message: `Чат уже связан с другим клиентом (${[...others].map((x) => contacts.find((c) => c.id === x)?.name ?? `#${x}`).join(', ')}). Объедините контакты${deals.length ? ' и сделки' : ''} в Битрикс24 — тогда чат будет у клиента этой сделки`,
+        merge: { contacts, deals },
+      };
+    }
+    await this.crm.pin(m, chatId, link, row.phone);
+    const deals = await this.openDeals(user, [link.contactId], dealId);
+    return {
+      linked: true,
+      message: deals.length ? `Чат привязан к клиенту. У клиента есть другие сделки в работе (${deals.length}) — при необходимости объедините сделки` : 'Чат привязан к клиенту сделки',
+      merge: deals.length ? { contacts: [], deals } : null,
+    };
+  }
+
+  private async contactNames(user: B24UserContext, ids: number[]): Promise<{ id: number; name: string }[]> {
+    const rows = (await user.client.call<{ ID: string; NAME?: string | null; LAST_NAME?: string | null }[]>('crm.contact.list', { filter: { '@ID': ids }, select: ['ID', 'NAME', 'LAST_NAME'] }).catch(() => ({ result: [] }))).result ?? [];
+    return ids.map((id) => {
+      const r = rows.find((x) => Number(x.ID) === id);
+      return { id, name: (r && [r.NAME, r.LAST_NAME].filter(Boolean).join(' ').trim()) || `Контакт #${id}` };
+    });
+  }
+
+  /** Сделки в работе контактов (кроме `except`) — правами сотрудника. */
+  private async openDeals(user: B24UserContext, contactIds: number[], except: number | null): Promise<{ id: number; title: string }[]> {
+    const rows = (await user.client.call<{ ID: string; TITLE?: string }[]>('crm.deal.list', { filter: { '@CONTACT_ID': contactIds, STAGE_SEMANTIC_ID: 'P' }, select: ['ID', 'TITLE'], order: { ID: 'DESC' } }).catch(() => ({ result: [] }))).result ?? [];
+    return rows.filter((d) => Number(d.ID) !== except).slice(0, 10).map((d) => ({ id: Number(d.ID), title: d.TITLE || `Сделка #${d.ID}` }));
   }
 
   /** Вложение сообщения: из хранилища сервиса (история — скачивается сейчас и запоминается). */

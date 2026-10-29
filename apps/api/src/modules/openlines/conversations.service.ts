@@ -4,7 +4,7 @@ import type { Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { followMergedContacts } from './merged-contacts.js';
 import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
-import { connectorMidOf, connectorOf, crmLinksOf, deliveryFromAck, groupReactions, phoneEchoIds, toMessageDto, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
+import { connectorMidOf, connectorOf, crmLinksOf, deliveryFromAck, groupReactions, keepKnownFiles, phoneEchoIds, toMessageDto, UNKNOWN_FILE, type ImFile, type ImMessage, type ImUser } from './chat-parsing.js';
 import { autoChannel, conversationKey, entityParts, lineChannel, ownKey } from './conversation-keys.js';
 
 /** Сообщений на страницу ленты (как прежняя история чата). */
@@ -222,9 +222,14 @@ export class ConversationsService {
     const users = page.users ?? [];
     const now = new Date();
     if (raw.length) {
+      const dtos = raw.map((m) => toMessageDto(m, users, page.files ?? []));
+      const blind = dtos.filter((d) => d.files.some((f) => f.type === UNKNOWN_FILE)).map((d) => d.id);
+      const prev = blind.length
+        ? new Map((await this.prisma.openlineMessage.findMany({ where: { portalId, messageId: { in: blind } }, select: { messageId: true, dto: true } })).map((r) => [r.messageId, r.dto as unknown as ChatMessageDto]))
+        : new Map<number, ChatMessageDto>();
       await this.prisma.$transaction(
-        raw.map((m) => {
-          const dto = toMessageDto(m, users, page.files ?? []);
+        raw.map((m, i) => {
+          const dto = keepKnownFiles(dtos[i], prev.get(dtos[i].id));
           const data = { chatId, date: new Date(m.date), authorKind: dto.author.kind, mid: connectorMidOf(m)?.slice(0, 190) ?? null, dto: dto as unknown as Prisma.InputJsonValue, syncedAt: now };
           return this.prisma.openlineMessage.upsert({ where: { portalId_messageId: { portalId, messageId: Number(m.id) } }, create: { portalId, messageId: Number(m.id), ...data }, update: data });
         }),

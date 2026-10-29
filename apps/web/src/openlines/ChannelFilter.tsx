@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MessengerDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
-import { Channel } from './Channel.js';
+import { Channel, ChannelStack } from './Channel.js';
 import { connectorLabel } from './format.js';
 
 /** +7 499 346-72-72; не российский — как есть, с «+». */
@@ -42,7 +42,7 @@ export function ChannelFilter({ channels, value, onChange }: { channels: string[
   };
   const row = (code: string) => (
     <>
-      {code ? <Channel connector={code} /> : <span className="cf-all">Все каналы</span>}
+      {code ? <Channel connector={code} /> : <ChannelStack connectors={channels} />}
       {code && phones(code) && <span className="cf-phone">{phones(code)}</span>}
     </>
   );

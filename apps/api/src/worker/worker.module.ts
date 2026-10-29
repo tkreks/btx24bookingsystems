@@ -1,3 +1,5 @@
+import { ContactAlertsService } from '../modules/contacts/contact-alerts.service.js';
+import { ContactSyncJob } from './contact-sync.job.js';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from '../config/env.js';
@@ -56,6 +58,8 @@ import { CrmMirrorJob } from './crm-mirror.job.js';
     EventSyncJob,
     CrmMirrorService,
     CrmMirrorJob,
+    ContactSyncJob,
+    ContactAlertsService,
   ],
 })
 export class WorkerModule {}

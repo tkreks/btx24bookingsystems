@@ -4,7 +4,7 @@ import { MESSENGER_MAX_FILE_BYTES } from '@btx24/shared';
 import { MessengerCrmService } from './messenger-crm.service.js';
 import { MediaLinks } from './media-links.js';
 import type { Response } from 'express';
-import type { CreateMessengerDto, MessengerChatDto, MessengerDealTargetsDto, MessengerDto, MessengerLinkDto, MessengerMessageDto, MessengerSendDto, MessengerSendResultDto, MessengerVncTicketDto } from '@btx24/shared';
+import type { CreateMessengerDto, MessengerBindChatsDto, MessengerBindResultDto, MessengerChatDto, MessengerChatTargetsDto, MessengerDealTargetsDto, MessengerDto, MessengerLinkDto, MessengerMessageDto, MessengerSendDto, MessengerSendResultDto, MessengerVncTicketDto } from '@btx24/shared';
 import { MessengerChatsService } from './messenger-chats.service.js';
 import { MessengerInboxService } from './messenger-inbox.service.js';
 import { MessengerServiceClient, type WireEvent } from './messenger-service.client.js';
@@ -218,9 +218,34 @@ export class MessengerUserController {
   }
 
 
+  /** Неработающий чат открытой линии: через какой наш номер продолжить переписку (ничего не шлёт). */
+  @Get('chat-targets/:chatId')
+  chatTargets(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<MessengerChatTargetsDto> {
+    return this.chatsService.chatTargets(user, chatId);
+  }
+
   @Get()
   async list(@B24User() user: B24UserContext): Promise<MessengerDto[]> {
     return (await this.chatsService.available(user)).map((m) => toDto(m, null));
+  }
+
+  /** «Привязать чат»: последние чаты номера по 10 (`offset`) или поиск `q` по всем. */
+  @Get(':id/bind-chats')
+  bindChats(@B24User() user: B24UserContext, @Param('id') id: string, @Query('q') q?: string, @Query('offset') offset?: string): Promise<MessengerBindChatsDto> {
+    const n = Number(offset ?? 0);
+    return this.chatsService.bindChats(user, id, q, Number.isSafeInteger(n) && n >= 0 ? Math.min(n, 10_000) : 0);
+  }
+
+  /** Привязать чат мессенджера к клиенту сделки. */
+  @Post(':id/chats/:chatId/bind')
+  @HttpCode(200)
+  async bind(@B24User() user: B24UserContext, @Param('id') id: string, @Param('chatId') chatId: string, @Body() body: { dealId?: unknown }): Promise<MessengerBindResultDto> {
+    const dealId = Number(body?.dealId);
+    if (!Number.isSafeInteger(dealId) || dealId < 1) throw new BadRequestException('Укажите сделку');
+    const { m } = await this.chatsService.forUser(user, id, true, chatId);
+    const r = await this.chatsService.bindChat(user, m, chatId, dealId);
+    if (r.linked) invalidate(user.portal.memberId, ['chats']);
+    return r;
   }
 
   @Get(':id/chats/:chatId/context')

@@ -192,3 +192,12 @@ describe('Bitrix24RestClient.callV3 (REST 3.0)', () => {
     await expect(client.callV3('tasks.task.add', {})).rejects.toBeInstanceOf(Bitrix24Error);
   });
 });
+
+it('запрещает изменения контактов при любом режиме и внутри batch до сети', async () => {
+  const { client, calls } = setup([]);
+  for (const method of ['crm.contact.add', 'crm.contact.update', 'crm.contact.delete']) await expect(client.call(method, { id: 140 })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.call('crm.item.update', { entityTypeId: 3, id: 140 })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.batch({ update: { method: 'crm.contact.update', params: { id: 140 } } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.call('batch', { cmd: { update: 'crm.item.update?entityTypeId=3&id=140' } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  expect(calls).toHaveLength(0);
+});

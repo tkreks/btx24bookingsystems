@@ -51,3 +51,10 @@ describe('классификация всех источников журнал�
     expect(classifyActionLog({ action: 'group.update', details: null }).category).toBe('settings');
   });
 });
+
+it('контактные удаления и отклонения заметны в CRM-журнале, поля относятся к настройкам', () => {
+  expect(classifyActionLog({ action:'contact.deleted_in_bitrix' })).toEqual({category:'crm',severity:'high'});
+  expect(classifyActionLog({ action:'contact.changed_in_bitrix',details:{deviations:[{field:'NAME'}]} })).toEqual({category:'crm',severity:'warning'});
+  expect(classifyActionLog({ action:'contact.missing_in_bitrix' })).toEqual({category:'crm',severity:'warning'});
+  expect(classifyActionLog({ action:'fields.mappings.updated' })).toEqual({category:'settings',severity:'info'});
+});

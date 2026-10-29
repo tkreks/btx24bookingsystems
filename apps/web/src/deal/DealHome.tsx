@@ -8,8 +8,9 @@ import {
   type DealChatsDto,
   type MessageTemplateDto,
   type MyGroupDto,
+  type ServiceChatDto,
 } from '@btx24/shared';
-import { apiGet, apiPut } from '../api.js';
+import { apiGet, apiPost, apiPut } from '../api.js';
 import { openCrm } from '../b24.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
 import { AttentionMessage } from '../dashboard/AttentionMessage.js';
@@ -17,7 +18,10 @@ import { ChatRowMenu } from '../dashboard/ChatRowMenu.js';
 import { ClientInvoicesBlock } from './ClientInvoicesBlock.js';
 import { LoadProgress } from '../dashboard/LoadProgress.js';
 import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
+import { BindChatDialog } from '../messengers/BindChatDialog.js';
 import { DealNewChatDialog } from '../messengers/DealNewChatDialog.js';
+import { DealChatStart } from './DealChatStart.js';
+import { ServiceChatView } from './ServiceChatView.js';
 import { hasDisabledWazzupChannel } from '../openlines/channel-error.js';
 import { ChatView } from '../openlines/ChatView.js';
 import { HideChatDialog } from '../openlines/DashboardPage.js';
@@ -28,9 +32,16 @@ export function isDeadChat(c: ChatSummary): boolean {
   return !!c.lineProblem || hasDisabledWazzupChannel(c.connector, c.lastMessage?.preview);
 }
 
-/** Чат клиента сделки в неработающем канале. */
-export function brokenChat(items: ChatSummary[]): ChatSummary | null {
-  return items.find(isDeadChat) ?? null;
+/** Почему в чат нельзя писать (для «Присоединиться к чату»); null — рабочий. */
+export function deadReason(c: ChatSummary | undefined): string | null {
+  return c && isDeadChat(c) ? (c.lineProblem ?? 'канал Wazzup выключен') : null;
+}
+
+/** Бронь этой сделки для шкалы: текущая/будущая, иначе последняя прошедшая. */
+export function dealBookingStart(info: ClientBookingsDto | null, dealId: number): string | null {
+  if (!info) return null;
+  const own = (list: ClientBookingsDto['upcoming'] | undefined) => (list ?? []).filter((b) => b.dealId === dealId);
+  return own(info.upcoming)[0]?.start ?? info.openDeals.find((d) => d.id === dealId)?.booking?.start ?? own(info.recent)[0]?.start ?? null;
 }
 
 /** Чат клиента — строкой «Последних сообщений» дашборда. */
@@ -110,14 +121,29 @@ export function DealHome({
   const [flagError, setFlagError] = useState('');
   const [paying, setPaying] = useState(false);
   const [invoicesOf, setInvoicesOf] = useState<number | null>(null);
-  /** «Создать новый чат» вместо чата в неработающем канале: мессенджер прежнего чата — первым. */
-  const [newChat, setNewChat] = useState<{ kind: string | null } | null>(null);
+  /** Новый чат: `chatId` — «Присоединиться к чату» в неработающем канале (наш номер этого канала), без него — любой мессенджер. */
+  const [newChat, setNewChat] = useState<{ kind: string | null; chatId?: number } | null>(null);
+  const [binding, setBinding] = useState(false);
+  /** Служебный чат сделки (клиент без мессенджеров); undefined — ещё грузится. */
+  const [service, setService] = useState<ServiceChatDto | null | undefined>(undefined);
+  /** Что показано вместо списка: служебный чат или поиск клиента в мессенджерах. */
+  const [pane, setPane] = useState<'service' | 'start' | null>(null);
   const [paymentRev, setPaymentRev] = useState(0);
   useEffect(() => {
     let active = true;
     void apiGet<DealChatsDto>(`/openlines/deal-chats/${dealId}`).then(
       (d) => active && (setData(d), setError('')),
       (e) => active && setError(e instanceof Error ? e.message : 'Чаты клиента недоступны'),
+    );
+    return () => {
+      active = false;
+    };
+  }, [dealId, rev]);
+  useEffect(() => {
+    let active = true;
+    void apiGet<ServiceChatDto>(`/deals/${dealId}/service-chat`).then(
+      (d) => active && setService(d.chat ? d : null),
+      () => active && setService(null),
     );
     return () => {
       active = false;
@@ -135,16 +161,31 @@ export function DealHome({
   }, []);
 
   const items = data?.items ?? [];
-  // Чат один и рабочий — сразу он, «назад» — к списку. Неработающий — список с «Создать новый чат».
-  const single = items.length === 1 && !isDeadChat(items[0]);
-  const shownId = openId ?? (single && !listed ? items[0].chatId : null);
+  // Чат один — сразу он (неработающий — с «Присоединиться к чату»), «назад» — к списку. Чатов нет —
+  // служебный чат сделки, если он есть, иначе поиск клиента в мессенджерах.
+  const single = items.length === 1;
+  const shownId = pane ? null : (openId ?? (single && !listed ? items[0].chatId : null));
+  const auto = !!data && !items.length && service !== undefined && !listed ? (service ? 'service' : 'start') : null;
+  const shownPane = shownId ? null : (pane ?? auto);
+  const toList = () => {
+    setOpenId(null);
+    setPane(null);
+    setListed(true);
+  };
+  const openChat = (id: number) => {
+    setPane(null);
+    setOpenId(id);
+  };
+  const createService = async () => {
+    const d = await apiPost<ServiceChatDto>(`/deals/${dealId}/service-chat`);
+    setService(d);
+    setPane('service');
+  };
   const refresh = () => {
     setReload((n) => n + 1);
     setRev((n) => n + 1);
   };
   const shown = items.find((c) => c.chatId === shownId);
-  const broken = brokenChat(items);
-  const hasWorking = items.some((c) => !isDeadChat(c));
   const categoryId = dealInfo?.openDeals.find((d) => d.id === dealId)?.categoryId;
   const timelineGroups = dealGroups(groups, categoryId);
 
@@ -157,7 +198,7 @@ export function DealHome({
       (e) => setFlagError(e instanceof Error ? e.message : 'Не удалось поставить «!»'),
     );
   const sendTemplate = () => {
-    if (!shownId) setOpenId(items[0]?.chatId ?? null);
+    if (!shownId) openChat(items.find((c) => !isDeadChat(c))?.chatId ?? items[0]?.chatId);
     setTemplatesRequest((n) => n + 1);
   };
   const run = (a: Action['key']) => (a === 'pay' ? setPaying(true) : a === 'book' ? onBooking() : sendTemplate());
@@ -167,7 +208,30 @@ export function DealHome({
   return (
     <div className="deal-ws">
       <section className="day-panel dash-block deal-ws-chat">
-        {shownId ? (
+        {shownPane === 'service' ? (
+          <ServiceChatView dealId={dealId} timezone={timezone} onBack={toList} onFind={() => setPane('start')} onBind={() => setBinding(true)} />
+        ) : shownPane === 'start' ? (
+          <div className="dash-attention deal-ws-chats">
+            <p className="dash-attention-title muted">
+              {(items.length > 0 || service) && (
+                <button type="button" className="cl-btn chat-back" aria-label="К списку чатов" title="К чатам" onClick={toList}>
+                  <Icon name="back" />
+                </button>
+              )}
+              Чат с клиентом
+            </p>
+            <DealChatStart
+              dealId={dealId}
+              hasServiceChat={!!service}
+              onOpenChat={(id) => {
+                setRev((n) => n + 1);
+                openChat(id);
+              }}
+              onServiceChat={createService}
+              onBind={() => setBinding(true)}
+            />
+          </div>
+        ) : shownId ? (
           <ChatView
             key={`${shownId}:${reload}`}
             chatId={shownId}
@@ -175,15 +239,18 @@ export function DealHome({
             templates={templates}
             onTemplates={setTemplates}
             templatesRequest={templatesRequest}
-            onBack={() => {
-              setOpenId(null);
-              setListed(true);
-            }}
+            onBack={toList}
+            dead={deadReason(shown)}
+            onRevive={() => setNewChat({ kind: shown ? messageChannel(shown.connector) : null, chatId: shownId })}
+            menu={[
+              { key: 'search', icon: 'search', label: 'Другой мессенджер', title: 'Поиск в другом мессенджере', onClick: () => setNewChat({ kind: null }) },
+              { key: 'bind', icon: 'link', label: 'Привязать чат', title: 'Привязать к клиенту сделки чат из мессенджера', onClick: () => setBinding(true) },
+            ]}
             onRefresh={refresh}
             onChanged={() => setRev((n) => n + 1)}
             status={shown}
             onStatus={(r) => setData((d) => (d ? { ...d, items: d.items.map((c) => (c.chatId === r.chatId ? { ...c, waitingReply: r.waitingReply, noReply: r.noReply } : c)) } : d))}
-            onOpenChat={(id) => setOpenId(id)}
+            onOpenChat={openChat}
             onPayment={canPay ? (id) => setInvoicesOf(id) : undefined}
             paymentRevision={paymentRev}
           />
@@ -195,41 +262,40 @@ export function DealHome({
               <button type="button" className="cl-btn chat-refresh" aria-label="Обновить чаты" title="Обновить чаты" onClick={refresh}>
                 <Icon name="refresh" />
               </button>
+              <span className="deal-ws-chats-actions">
+                <button type="button" className="cl-btn" title="Найти клиента в мессенджерах и начать переписку" onClick={() => setPane('start')}>
+                  Новый чат
+                </button>
+                <button type="button" className="cl-btn" title="Привязать к клиенту сделки чат из мессенджера" onClick={() => setBinding(true)}>
+                  Привязать чат
+                </button>
+              </span>
             </p>
             {!data && !error && <p className="muted"><LoadProgress name="deal-chats" label="Загрузка чатов" /></p>}
             {error && <p className="notice error" role="alert">{error}</p>}
             {flagError && <p className="notice error" role="alert">{flagError}</p>}
-            {data && !items.length && <p className="muted">Чатов с клиентом сделки нет.</p>}
-            {broken && !hasWorking && (
-              <div className="deal-home-broken" role="alert">
-                <Icon name="alert" size={18} />
-                <span>
-                  <b>Нет рабочего чата с клиентом</b> — {broken.lineProblem ?? 'канал Wazzup выключен'}, сообщения не доходят. Создайте новый чат — он
-                  привяжется к клиенту этой сделки.
-                </span>
-                <button type="button" className="primary" onClick={() => setNewChat({ kind: messageChannel(broken.connector) })}>
-                  Создать новый чат
-                </button>
-              </div>
-            )}
+            {data && !items.length && !service && <p className="muted">Чатов с клиентом сделки нет.</p>}
             <ul className="attention-rows">
+              {service && (
+                <li className="service-chat-row">
+                  <button type="button" className="service-chat-open" onClick={() => setPane('service')}>
+                    <Icon name="settings" size={18} />
+                    <span>
+                      <b>Служебный чат</b>
+                      <span className="muted">
+                        {service.messages.length ? service.messages[service.messages.length - 1].text.slice(0, 120) : 'Только в приложении: ссылки на оплату и автоматика'}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              )}
               {items.map((s) => {
                 const c = chatRow(s);
                 const dead = isDeadChat(s);
                 return (
                   <li key={c.chatId} className={[c.flag ? 'flagged' : '', dead ? 'dead' : ''].filter(Boolean).join(' ') || undefined}>
-                    <AttentionMessage chat={c} timezone={timezone} onOpen={() => setOpenId(c.chatId)} />
+                    <AttentionMessage chat={c} timezone={timezone} onOpen={() => openChat(c.chatId)} />
                     <span className="attention-actions">
-                      {dead && (
-                        <button
-                          type="button"
-                          className="deal-new-chat-btn"
-                          title={`Чат не работает: ${s.lineProblem ?? 'канал Wazzup выключен'}. Новый чат привяжется к клиенту этой сделки`}
-                          onClick={() => setNewChat({ kind: messageChannel(s.connector) })}
-                        >
-                          Создать новый чат
-                        </button>
-                      )}
                       <button
                         className={`dash-icon-btn cl-flag${c.flag ? ' on' : ''}`}
                         aria-pressed={!!c.flag}
@@ -239,7 +305,7 @@ export function DealHome({
                       >
                         !
                       </button>
-                      <ChatRowMenu dealId={c.dealId} onDeal={() => c.dealId && openCrm('deal', c.dealId)} onChat={() => setOpenId(c.chatId)} onHide={() => setHiding(c)} />
+                      <ChatRowMenu dealId={c.dealId} onDeal={() => c.dealId && openCrm('deal', c.dealId)} onChat={() => openChat(c.chatId)} onHide={() => setHiding(c)} />
                     </span>
                   </li>
                 );
@@ -258,6 +324,7 @@ export function DealHome({
           timezone={timezone}
           groupTabs
           pending={timelinePending}
+          focus={dealBookingStart(dealInfo, dealId)}
           deal={{ dealId, contactId: dealInfo?.contactId ?? null, openDeals: dealInfo?.openDeals ?? [] }}
         />
       </div>
@@ -314,12 +381,21 @@ export function DealHome({
       {newChat && (
         <DealNewChatDialog
           dealId={dealId}
+          chatId={newChat.chatId}
           kind={newChat.kind}
           onClose={() => setNewChat(null)}
           onOpenChat={(id) => {
             setRev((n) => n + 1);
-            setOpenId(id);
+            openChat(id);
           }}
+        />
+      )}
+      {binding && (
+        <BindChatDialog
+          dealId={dealId}
+          timezone={timezone}
+          onBound={() => setRev((n) => n + 1)}
+          onClose={() => setBinding(false)}
         />
       )}
     </div>

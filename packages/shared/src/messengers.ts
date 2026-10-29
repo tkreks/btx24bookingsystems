@@ -215,6 +215,45 @@ export interface MessengerDealTargetsDto {
   }[];
 }
 
+/**
+ * `GET /api/messengers/chat-targets/:chatId` — неработающий чат (канал Wazzup не подключён): через какой
+ * наш номер продолжить переписку. Канал линии сопоставлен с номером (⚙ → «Мессенджеры» → «Каналы
+ * линий», ADR 0017) — `targets` только этого номера; не сопоставлен — все номера, с которых можно писать.
+ */
+export interface MessengerChatTargetsDto {
+  chatId: number;
+  /** Сделка чата (новый чат привяжется к её контакту); null — сделки нет. */
+  dealId: number | null;
+  contact: { id: number; name: string } | null;
+  /** Наш канал линии: `<вид>:<номер>`; null — линия ни с каким номером не сопоставлена. */
+  channel: string | null;
+  targets: MessengerDealTargetsDto['targets'];
+}
+
+/** Чат мессенджера в окне «Привязать чат»: с кем он уже связан. */
+export interface MessengerBindChatDto extends MessengerChatDto {
+  /** Контакт CRM, с которым чат уже связан (в приложении); null — ни с кем. */
+  contactId: number | null;
+}
+
+/** `GET /api/messengers/:id/bind-chats?q=&offset=` — последние чаты номера (по 10) или поиск по всем. */
+export interface MessengerBindChatsDto {
+  items: MessengerBindChatDto[];
+  hasMore: boolean;
+  /** `offset` следующей страницы (часть чатов может быть скрыта правами линии). */
+  nextOffset: number;
+}
+
+/**
+ * `POST /api/messengers/:id/chats/:chatId/bind {dealId}` — привязать чат мессенджера к клиенту сделки.
+ * Клиент чата — другой контакт (или у клиента есть другие открытые сделки) — `merge`: что объединить.
+ */
+export interface MessengerBindResultDto {
+  linked: boolean;
+  message: string;
+  merge: { contacts: { id: number; name: string }[]; deals: { id: number; title: string }[] } | null;
+}
+
 /** Файл для отправки в мессенджер — не больше (видео, документы). */
 export const MESSENGER_MAX_FILE_BYTES = 64 * 1024 * 1024;
 

@@ -82,6 +82,23 @@ function readOnlyCall(method: string, params: Record<string, unknown>): boolean 
   return !!cmd && typeof cmd === 'object' && Object.values(cmd).every((c) => typeof c === 'string' && isReadMethod(c.split('?')[0]!));
 }
 
+/** Контакты пока только читаем — явное решение владельца 2026-10-28, независимо от песочницы. */
+export function assertContactsReadOnly(method: string, params: Record<string, unknown>): void {
+  const m = method.toLowerCase();
+  if (/^crm\.contact\.(add|update|delete)$/.test(m) || (/^crm\.item\.(add|update|delete)$/.test(m) && Number(params.entityTypeId ?? params.ENTITY_TYPE_ID) === 3)) {
+    throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Редактирование контактов приложением пока не разрешено владельцем');
+  }
+  if (m === 'batch' && params.cmd && typeof params.cmd === 'object') {
+    for (const command of Object.values(params.cmd)) if (typeof command === 'string') {
+      const at = command.indexOf('?');
+      const name = at < 0 ? command : command.slice(0, at);
+      if (name.toLowerCase() === 'batch') throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Вложенные пакеты недоступны');
+      const query = new URLSearchParams(at < 0 ? '' : command.slice(at + 1));
+      assertContactsReadOnly(name, Object.fromEntries(query));
+    }
+  }
+}
+
 const goneError = (method: string) => new Bitrix24Error(CLIENT_GONE, 'Клиент не дождался ответа — запрос к Битрикс24 не отправлялся', 499, { method });
 const BATCH_MAX = 50;
 
@@ -269,6 +286,7 @@ export class Bitrix24RestClient {
 
   /** true — вызов разрешён только благодаря песочнице (после успеха его надо записать в журнал). */
   private async assertAllowed(method: string, params: Record<string, unknown>): Promise<boolean> {
+    assertContactsReadOnly(method, params);
     if (method === 'batch' || !this.opts.readOnly || isReadMethod(method)) return false; // команды пакета проверяет batch()
     if (this.opts.writePolicy && (await this.opts.writePolicy.allows(method, params))) return true;
     throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);

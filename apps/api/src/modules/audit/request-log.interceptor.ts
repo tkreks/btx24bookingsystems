@@ -7,6 +7,7 @@ type Req = { b24?: B24UserContext; method: string; route?: { path?: string }; pa
 
 /** Изменяющие запросы сотрудников → журнал действий. `:param` в подписи заменяется значением. */
 const LABELS: Record<string, string> = {
+  'PUT /api/contact-alerts/:id': 'Изменил статус предупреждения по контакту',
   'POST /api/settings-access': 'Ввёл временный пароль к настройкам',
   'POST /api/admin/settings-codes': 'Создал временный пароль к настройкам',
   'DELETE /api/admin/settings-codes/:id': 'Отозвал временный пароль к настройкам',
@@ -56,6 +57,9 @@ const LABELS: Record<string, string> = {
  * шаблонов ничего не меняют.
  */
 const SKIP = new Set([
+  'PUT /api/contact-alerts/:id',
+  'PUT /api/admin/fields',
+  'POST /api/admin/fields/:entity/:key/create',
   'PUT /api/openlines/chats/:chatId/flag',
   'POST /api/dashboard/calls/:activityId/exclude',
   'DELETE /api/dashboard/calls/:activityId/exclude',

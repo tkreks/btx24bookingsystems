@@ -20,8 +20,8 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})/;
 
 /**
  * Значение поля сделки строкой для показа: списки — по названиям вариантов, «да/нет», деньги
- * («1500|RUB» → «1 500 RUB»), даты — в часовом поясе портала. Пустое и составное (файлы,
- * адреса) — null: такое поле не показываем.
+ * («1500|RUB» → «1 500 RUB»), даты — в часовом поясе портала. Пустые значения — null; составные (файлы, адреса)
+ * показываем текстом, если отдельный формат ещё не поддержан.
  */
 export function formatDealValue(raw: unknown, meta: DealFieldMeta | undefined, timezone: string): string | null {
   const values = (Array.isArray(raw) ? raw : [raw]).filter((v) => v !== null && v !== undefined && v !== '');
@@ -30,7 +30,16 @@ export function formatDealValue(raw: unknown, meta: DealFieldMeta | undefined, t
 }
 
 function formatOne(v: unknown, meta: DealFieldMeta | undefined, timezone: string): string | null {
-  if (typeof v === 'object') return null;
+  if (typeof v === 'object') {
+    if (!v) return null;
+    const row = v as Record<string, unknown>;
+    // Файлы, адреса и привязки могут приходить объектами: не теряем поле целиком.
+    for (const key of ['VALUE', 'TITLE', 'NAME', 'TEXT', 'ADDRESS', 'name', 'title']) {
+      const label = row[key];
+      if (typeof label === 'string' && label.trim()) return formatOne(label, { type: 'string' }, timezone);
+    }
+    return JSON.stringify(v);
+  }
   const s = String(v);
   switch (meta?.type) {
     case 'enumeration':

@@ -1,3 +1,5 @@
+import { ContactAlertRow } from './ContactAlertsPanel.js';
+import { bookingSeverity, bulkAcceptable, mergeTimeline, SEVERITY_LABELS } from './notifications.js';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ALERT_STATUS_LABELS,
@@ -12,8 +14,9 @@ import {
   type BookingStateDto,
   type BookingVersionDto,
   type BookingVersionsDto,
+  type ContactAlertListDto,
 } from '@btx24/shared';
-import { apiGet, apiPost, apiPut } from '../api.js';
+import { ApiRequestError, apiGet, apiPost, apiPut } from '../api.js';
 import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtTime } from '../format.js';
 import { dayKey } from '../openlines/chat-list.js';
@@ -59,26 +62,38 @@ export function BookingAlertsPage({
   onBack: () => void;
 }) {
   const [filter, setFilter] = useState<AlertStatus | ''>(focusId ? '' : 'new');
-  const [data, setData] = useState<{ filter: AlertStatus | ''; list: BookingAlertListDto } | null>(null);
+  const [data, setData] = useState<{ filter: AlertStatus | ''; list: BookingAlertListDto; contacts: ContactAlertListDto | null } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [bulk, setBulk] = useState('');
 
+  // Брони и контакты — одной лентой; уведомления контактов только администраторам (403 — без них).
+  const fetchAll = useCallback(async (status: AlertStatus | '') => {
+    const q = status ? `?status=${status}` : '';
+    const [list, contacts] = await Promise.all([
+      apiGet<BookingAlertListDto>(`/booking-alerts${q}`),
+      apiGet<ContactAlertListDto>(`/contact-alerts${q}`).catch((e) => {
+        if (e instanceof ApiRequestError && e.status === 403) return null;
+        throw e;
+      }),
+    ]);
+    return { filter: status, list, contacts };
+  }, []);
   const load = useCallback(async () => {
     try {
-      const list = await apiGet<BookingAlertListDto>(`/booking-alerts${filter ? `?status=${filter}` : ''}`);
-      setData({ filter, list });
+      setData(await fetchAll(filter));
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить уведомления');
     }
-  }, [filter]);
+  }, [fetchAll, filter]);
 
   useEffect(() => {
     let active = true;
-    apiGet<BookingAlertListDto>(`/booking-alerts${filter ? `?status=${filter}` : ''}`).then(
-      (list) => {
+    fetchAll(filter).then(
+      (d) => {
         if (!active) return;
-        setData({ filter, list });
+        setData(d);
         setError('');
       },
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось загрузить уведомления'),
@@ -86,7 +101,7 @@ export function BookingAlertsPage({
     return () => {
       active = false;
     };
-  }, [filter]);
+  }, [fetchAll, filter]);
 
   const act = async (id: string, run: () => Promise<unknown>) => {
     setBusy(id);
@@ -101,9 +116,58 @@ export function BookingAlertsPage({
     }
   };
 
-  const current = data?.filter === filter ? data.list : null;
-  const names = (ids: number[]) => ids.map((id) => current?.resources[id] ?? `Ресурс ${id}`).join(', ') || '—';
-  const total = current ? ALERT_STATUSES.reduce((n, s) => n + current.counts[s], 0) : 0;
+  const current = data?.filter === filter ? data : null;
+  const names = (ids: number[]) => ids.map((id) => current?.list.resources[id] ?? `Ресурс ${id}`).join(', ') || '—';
+  const count = (s: AlertStatus) => (current ? current.list.counts[s] + (current.contacts?.counts[s] ?? 0) : 0);
+  const total = ALERT_STATUSES.reduce((n, s) => n + count(s), 0);
+  const items = current ? mergeTimeline(current.list.items, current.contacts?.items ?? []) : [];
+  const moreContacts = async () => {
+    if (!current?.contacts?.nextCursor) return;
+    setBusy('more');
+    try {
+      const next = await apiGet<ContactAlertListDto>(`/contact-alerts?${filter ? `status=${filter}&` : ''}before=${encodeURIComponent(current.contacts.nextCursor)}`);
+      setData((d) => (d && d.contacts ? { ...d, contacts: { ...next, items: [...d.contacts.items, ...next.items.filter((i) => !d.contacts!.items.some((p) => p.id === i.id))] } } : d));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось загрузить ещё');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // «Принять все изменения»: контакты — «принято», брони — изменения и новые (как в Битрикс24).
+  // Удаления и неснятые брони (красные) не трогаем — их проверяют по одной.
+  const openContacts = (current?.contacts?.items ?? []).filter((a) => a.status === 'new' || a.status === 'viewed');
+  const openBookings = canEdit ? (current?.list.items ?? []).filter(bulkAcceptable) : [];
+  const skipped = (current?.list.items ?? []).filter((a) => (a.status === 'new' || a.status === 'viewed') && !bulkAcceptable(a)).length;
+  const acceptAll = async () => {
+    const parts = [openBookings.length && `брони: ${openBookings.length}`, openContacts.length && `контакты: ${openContacts.length}`].filter(Boolean).join(', ');
+    if (!confirm(`Принять все изменения (${parts})? Данные приложения станут как в Битрикс24.${skipped ? ` Удаления броней (${skipped}) нужно проверить отдельно.` : ''}`)) return;
+    setBusy('bulk');
+    setError('');
+    let done = 0;
+    const failed: string[] = [];
+    try {
+      if (openContacts.length) {
+        const r = await apiPost<{ updated: number }>('/contact-alerts/bulk', { ids: openContacts.map((a) => a.id), status: 'resolved' });
+        done += r.updated;
+      }
+      for (const a of openBookings) {
+        setBulk(`Принимаем… ${done + 1}`);
+        try {
+          await apiPost(`/booking-alerts/${a.id}/resolve`, { resolution: 'accept_bitrix' });
+          done++;
+        } catch (e) {
+          failed.push(`бронь #${a.bookingId}: ${e instanceof Error ? e.message : 'ошибка'}`);
+        }
+      }
+      setBulk(`Принято: ${done}${failed.length ? `. Не удалось: ${failed.join('; ')}` : ''}`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось принять изменения');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="page alerts-page">
@@ -112,54 +176,80 @@ export function BookingAlertsPage({
           <button aria-label="Назад" onClick={onBack}>
             ‹
           </button>
-          <h1>Уведомления о бронях</h1>
+          <h1>Уведомления</h1>
         </div>
         <button onClick={() => void load()}>Обновить</button>
       </header>
 
-      <div className="segmented period-presets" role="group" aria-label="Статус">
-        <button className={filter === '' ? 'active' : ''} onClick={() => setFilter('')}>
-          Все{current ? ` · ${total}` : ''}
-        </button>
-        {ALERT_STATUSES.map((s) => (
-          <button key={s} className={filter === s ? 'active' : ''} onClick={() => setFilter(s)}>
-            {ALERT_STATUS_LABELS[s]}
-            {current ? ` · ${current.counts[s]}` : ''}
+      <div className="nt-toolbar">
+        <div className="segmented period-presets" role="group" aria-label="Статус">
+          <button className={filter === '' ? 'active' : ''} onClick={() => setFilter('')}>
+            Все{current ? ` · ${total}` : ''}
           </button>
-        ))}
+          {ALERT_STATUSES.map((s) => (
+            <button key={s} className={filter === s ? 'active' : ''} onClick={() => setFilter(s)}>
+              {ALERT_STATUS_LABELS[s]}
+              {current ? ` · ${count(s)}` : ''}
+            </button>
+          ))}
+        </div>
+        {(openContacts.length > 0 || openBookings.length > 0) && (
+          <button type="button" className="primary nt-accept-all" disabled={!!busy} onClick={() => void acceptAll()}>
+            Принять все изменения · {openContacts.length + openBookings.length}
+          </button>
+        )}
       </div>
+      <p className="nt-legend muted">
+        <span className="nt-dot sev-info" /> не критично <span className="nt-dot sev-warning" /> обратите внимание <span className="nt-dot sev-critical" /> проверить!
+      </p>
 
-      {current && !current.chatConfigured && (
+      {current && !current.list.chatConfigured && (
         <p className="notice">
           Чат уведомлений ещё не создан — уведомления видны только здесь. Создать: ⚙ → «Приложение» → «Сверка с
           Битрикс24».
         </p>
       )}
+      {bulk && <p className="notice" role="status">{bulk}</p>}
       {error && (
         <div className="notice error" role="alert">
           {error}
         </div>
       )}
       {!current && !error && <p className="muted">Загрузка…</p>}
-      {current && !current.items.length && <p className="muted">Уведомлений нет.</p>}
+      {current && !items.length && <p className="muted">Уведомлений нет.</p>}
 
-      <ul className="alert-list">
-        {current?.items.map((a) => (
-          <AlertCard
-            key={a.id}
-            a={a}
-            focused={a.id === focusId}
-            busy={busy === a.id}
-            timezone={timezone}
-            names={names}
-            canEdit={canEdit}
-            canCancel={canCancel}
-            canCreate={canCreate}
-            onStatus={(status) => void act(a.id, () => apiPut(`/booking-alerts/${a.id}`, { status }))}
-            onResolve={(resolution, versionId) => void act(a.id, () => apiPost(`/booking-alerts/${a.id}/resolve`, { resolution, ...(versionId ? { versionId } : {}) }))}
-          />
-        ))}
+      <ul className="nt-list">
+        {items.map((it) =>
+          it.kind === 'contact' ? (
+            <ContactAlertRow
+              key={`c${it.a.id}`}
+              a={it.a}
+              timezone={timezone}
+              busy={!!busy}
+              onStatus={(status) => void act(it.a.id, () => apiPut(`/contact-alerts/${it.a.id}`, { status }))}
+            />
+          ) : (
+            <AlertCard
+              key={`b${it.a.id}`}
+              a={it.a}
+              focused={it.a.id === focusId}
+              busy={busy === it.a.id || busy === 'bulk'}
+              timezone={timezone}
+              names={names}
+              canEdit={canEdit}
+              canCancel={canCancel}
+              canCreate={canCreate}
+              onStatus={(status) => void act(it.a.id, () => apiPut(`/booking-alerts/${it.a.id}`, { status }))}
+              onResolve={(resolution, versionId) => void act(it.a.id, () => apiPost(`/booking-alerts/${it.a.id}/resolve`, { resolution, ...(versionId ? { versionId } : {}) }))}
+            />
+          ),
+        )}
       </ul>
+      {current?.contacts?.nextCursor && (
+        <button type="button" className="dash-more" disabled={!!busy} onClick={() => void moreContacts()}>
+          Показать ещё
+        </button>
+      )}
     </div>
   );
 }
@@ -214,18 +304,21 @@ function AlertCard({
     toggle('rollback');
   };
 
+  const sev = bookingSeverity(a);
   return (
-    <li className={`alert-card type-${type}${focused ? ' focused' : ''}${open ? '' : ' done'}`}>
-      <div className="alert-top">
-        <span className="alert-when">{fmtDateTime(a.createdAt, timezone)}</span>
-        <span className={`pill alert-type ${type}`}>{ALERT_TYPE_LABELS[type]}</span>
-        <span className={`pill alert-state ${a.status}`}>{ALERT_STATUS_LABELS[a.status]}</span>
-      </div>
-      <div className="alert-name">
-        <strong>{a.title || `Бронь #${a.bookingId}`}</strong> <span className="muted">бронь #{a.bookingId}</span>
+    <li className={`nt-row nt-booking sev-${sev} alert-card type-${type}${focused ? ' focused' : ''}${open ? '' : ' done'}`}>
+      <span className="nt-dot" title={SEVERITY_LABELS[sev]} aria-label={SEVERITY_LABELS[sev]} />
+      <div className="nt-body">
+      <div className="nt-line">
+        <b className="nt-title">{ALERT_TYPE_LABELS[type]}</b>
+        <span className="nt-subject">{a.title || `Бронь #${a.bookingId}`}</span>
+        <span className="nt-meta muted">
+          {fmtDateTime(a.createdAt, timezone)} · бронь #{a.bookingId}
+        </span>
+        <span className={`nt-status ${a.status}`}>{ALERT_STATUS_LABELS[a.status]}</span>
       </div>
       {state && (
-        <div className="alert-booking">
+        <div className="nt-booking-state">
           {range(state, timezone)} · {names(state.resourceIds)}
           {state.dealId ? ` · сделка #${state.dealId}` : ''}
         </div>
@@ -292,6 +385,7 @@ function AlertCard({
         )}
       </div>
       {!a.delivered && a.sendError && <p className="muted">В чат не отправлено: {a.sendError}</p>}
+      </div>
     </li>
   );
 }

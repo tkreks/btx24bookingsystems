@@ -1,3 +1,4 @@
+import { CrmAccessService } from '../crm-mirror/crm-access.service.js';
 import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import type { ActionLogDto } from '@btx24/shared';
 import { z } from 'zod';
@@ -24,6 +25,7 @@ export class ActionLogController {
   constructor(
     private readonly log: ActionLogService,
     private readonly access: AccessService,
+    private readonly crmAccess: CrmAccessService,
   ) {}
 
   /** Сотрудник открыл приложение: откуда (сделка, меню). Без доступа — тоже пишется (попытка). */
@@ -57,6 +59,6 @@ export class ActionLogController {
   @Get('admin/action-log')
   @UseGuards(AppAdminGuard)
   list(@B24User() user: B24UserContext, @Query() query: Record<string, unknown>): Promise<ActionLogDto> {
-    return this.log.list(user.portal.id, user.portal.timezone, query);
+    return this.log.list(user.portal.id, user.portal.timezone, query, ids => this.crmAccess.visible(user, 3, ids));
   }
 }

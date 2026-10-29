@@ -92,10 +92,10 @@ describe('SandboxWritePolicy', () => {
     await expect(policy.allows('timeman.pause', { USER_ID: 9 })).resolves.toBe(false);
   });
 
-  it('allows editing only the contact of the sandbox deal, never deleting it', async () => {
+  it('contact edits are disabled, including the previous sandbox', async () => {
     const { policy } = setup();
-    await expect(policy.allows('crm.contact.update', { id: 140, fields: { EMAIL: [] } })).resolves.toBe(true);
-    await expect(policy.allows('crm.item.update', { entityTypeId: 3, id: 140 })).resolves.toBe(true);
+    await expect(policy.allows('crm.contact.update', { id: 140, fields: { EMAIL: [] } })).resolves.toBe(false);
+    await expect(policy.allows('crm.item.update', { entityTypeId: 3, id: 140 })).resolves.toBe(false);
     await expect(policy.allows('crm.contact.update', { id: 141 })).resolves.toBe(false);
     await expect(policy.allows('crm.contact.delete', { id: 140 })).resolves.toBe(false);
   });
@@ -224,5 +224,16 @@ describe('Bitrix24RestClient with a sandbox policy', () => {
     await expect(c.call('crm.deal.update', { id: 1 })).rejects.toMatchObject({ code: 'READ_ONLY_MODE' });
     await expect(c.batch({ a: { method: 'crm.deal.update', params: { id: 678 } } })).rejects.toMatchObject({ code: 'READ_ONLY_MODE' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('контакты пока только читаем', () => {
+  it('запрещает обновление контактов даже внутри старой песочницы и по сопоставленному полю', async () => {
+    const { policy } = setup();
+    for (const id of [140, 777]) {
+      expect(await policy.allows('crm.contact.update', { id, fields: { UF_CRM_BTX24_TELEGRAM_ID: '123' } })).toBe(false);
+      expect(await policy.allows('crm.item.update', { entityTypeId: 3, id, fields: {} })).toBe(false);
+    }
   });
 });

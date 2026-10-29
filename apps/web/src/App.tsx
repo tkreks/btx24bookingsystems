@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AppEnterDto, SessionInfo } from '@btx24/shared';
+import type { AppEnterDto, SessionInfo, ViewerSessionDto } from '@btx24/shared';
 import { apiGet, apiPost, ApiRequestError } from './api.js';
 import { fitFrame, initB24, placementContext, setPortalDomain, setStandalone, type PlacementContext } from './b24.js';
 import { LoginPage } from './LoginPage.js';
@@ -8,11 +8,13 @@ import { CallLayer } from './calls/CallLayer.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 import { SessionOverlay } from './SessionOverlay.js';
 import { startSessionWatch } from './session-guard.js';
+import { ViewerApp } from './viewer/ViewerApp.js';
 
 type Boot =
   | { state: 'loading' }
   | { state: 'login'; error: string }
   | { state: 'error'; message: string }
+  | { state: 'viewer'; session: ViewerSessionDto }
   | { state: 'ready'; session: SessionInfo; placement: PlacementContext };
 
 export function App() {
@@ -34,7 +36,11 @@ export function App() {
         void apiPost('/activity/enter', { placement: placement.placement, dealId: placement.dealId } satisfies AppEnterDto).catch(() => undefined);
         startSessionWatch();
       } catch (e) {
-        if (!inFrame && e instanceof ApiRequestError && e.status === 401) return setBoot({ state: 'login', error: loginError() });
+        if (!inFrame && e instanceof ApiRequestError && e.status === 401) {
+          // Не сотрудник — может быть, внешний пользователь, вошедший по логину и паролю.
+          const viewer = await apiGet<ViewerSessionDto>('/external/session').catch(() => null);
+          return setBoot(viewer ? { state: 'viewer', session: viewer } : { state: 'login', error: loginError() });
+        }
         setBoot({ state: 'error', message: e instanceof ApiRequestError ? e.message : 'Не удалось подключиться к серверу приложения' });
       }
     })();
@@ -42,6 +48,7 @@ export function App() {
 
   if (boot.state === 'loading') return <div className="screen-center muted">Загрузка…</div>;
   if (boot.state === 'login') return <LoginPage error={boot.error} />;
+  if (boot.state === 'viewer') return <ViewerApp session={boot.session} />;
   if (boot.state === 'error') return <div className="screen-center"><div className="card error">{boot.message}</div></div>;
   if (!boot.session.appAccess)
     return (

@@ -4,7 +4,7 @@ import { apiGet, apiPut } from '../api.js';
 import { fitFrame } from '../b24.js';
 import { PlacementSettings } from '../calendar/AdminPanel.js';
 import { BookingSyncSettings } from '../bookings/BookingSyncSettings.js';
-import { DealFieldMapSettings } from '../bookings/DealFieldMapSettings.js';
+import { FieldsSection } from './FieldsSection.js';
 import { AppSettingsForm } from './AppSettingsForm.js';
 import { ResourceNames } from './ResourceNames.js';
 import { SettingsCodes } from './SettingsCodes.js';
@@ -13,7 +13,7 @@ import { ExternalPasswords } from './ExternalPasswords.js';
 import { GroupForm } from './GroupForm.js';
 import { MessengersSection } from './MessengersSection.js';
 
-type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements' | 'messengers';
+type Tab = 'groups' | 'resources' | 'app' | 'passwords' | 'placements' | 'messengers' | 'fields';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'groups', label: 'Группы' },
   { key: 'resources', label: 'Ресурсы' },
@@ -21,6 +21,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'passwords', label: 'Прямая ссылка' },
   { key: 'placements', label: 'Встройки' },
   { key: 'messengers', label: 'Мессенджеры' },
+  { key: 'fields', label: 'Поля' },
 ];
 /** Настройки — отдельная страница (решение владельца 2026-10-24), а не окно поверх дашборда. */
 export function SettingsPanel({
@@ -257,7 +258,7 @@ export function SettingsPanel({
           />
         )}
         {tab === 'app' && <BookingSyncSettings timezone={timezone} />}
-        {tab === 'app' && <DealFieldMapSettings />}
+        {tab === 'fields' && <FieldsSection users={directory?.users ?? []} onDirty={markDirty} onBusy={markBusy} onChanged={onChanged} readOnly={!!temporary} />}
         {tab === 'app' && !temporary && <SettingsCodes timezone={timezone} />}
         {tab === 'passwords' && (
           <fieldset className="password-settings" disabled={busy}>

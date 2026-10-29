@@ -1,3 +1,4 @@
+import { ContactsModule } from './modules/contacts/contacts.module.js';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from './config/env.js';
@@ -10,6 +11,8 @@ import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { CertificatesModule } from './modules/certificates/certificates.module.js';
+import { ExternalUsersModule } from './modules/external-users/external-users.module.js';
+import { FieldsModule } from './modules/fields/fields.module.js';
 import { GroupsModule } from './modules/groups/groups.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { MessengersModule } from './modules/messengers/messengers.module.js';
@@ -29,6 +32,9 @@ import { WorkdayModule } from './modules/workday/workday.module.js';
     PaymentsModule,
     CalendarModule,
     CertificatesModule,
+    ContactsModule,
+    ExternalUsersModule,
+    FieldsModule,
     GroupsModule,
     HealthModule,
     MessengersModule,

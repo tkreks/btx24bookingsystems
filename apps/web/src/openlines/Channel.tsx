@@ -24,3 +24,20 @@ export function Channel({ connector }: { connector: string }) {
     </span>
   );
 }
+
+/** «Все каналы»: значки каналов, наложенные друг на друга (одинаковые названия — один значок). */
+export function ChannelStack({ connectors, label = 'Все каналы' }: { connectors: string[]; label?: string }) {
+  const labels = [...new Set(connectors.map(connectorLabel))].slice(0, 5);
+  return (
+    <span className="cl-channel cl-channel-stack" title={labels.join(', ')}>
+      <span className="cl-channel-dots" aria-hidden="true">
+        {labels.map((l, i) => (
+          <span key={l} className="cl-channel-dot" style={{ background: CHANNEL_COLORS[l] ?? '#7e95bd', zIndex: labels.length - i }}>
+            {l === 'ВКонтакте' ? 'vk' : l[0]}
+          </span>
+        ))}
+      </span>
+      <span className="cl-channel-label">{label}</span>
+    </span>
+  );
+}

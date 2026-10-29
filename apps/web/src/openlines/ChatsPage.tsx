@@ -347,8 +347,8 @@ export function ChatsPage({
               </p>
             </div>
             {canSend && (
-              <button className="cl-add" title="Новый диалог: найти клиента по номеру телефона или логину Telegram" onClick={() => setAdding(true)}>
-                + Добавить
+              <button className="cl-add" aria-label="Новый диалог" title="Новый диалог: найти клиента по номеру телефона или логину Telegram" onClick={() => setAdding(true)}>
+                +
               </button>
             )}
             <button className="cl-btn" aria-label="Обновить" title="Обновить" onClick={() => void refresh()}>

@@ -4,7 +4,7 @@ import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 const M = { id:'m1', portalId:'p1' } as Messenger;
 function setup(deals = [11,12], closed = new Set<number>()) {
  const chat={portalId:'p1',messengerId:'m1',chatId:'x@lid',phone:'79259734763',activeDealId:null as number|null,crmMatchedAt:null as Date|null,crmMatch:null as unknown};
- const db={portal:{findFirst:vi.fn(async()=>({id:'p1',status:'ACTIVE'}))},messengerChat:{findFirst:vi.fn(async()=>chat),findUnique:vi.fn(async()=>chat),upsert:vi.fn(async({update}:{update:object})=>Object.assign(chat,update)),updateMany:vi.fn(async({data}:{data:object})=>{Object.assign(chat,data);return {count:1};})},messengerMessage:{count:vi.fn(async()=>2),updateMany:vi.fn(async()=>({count:2}))},$transaction:vi.fn(async(fn:(tx:unknown)=>Promise<void>)=>fn(db))};
+ const db={portalSettings:{findUnique:vi.fn(async()=>null)},portal:{findFirst:vi.fn(async()=>({id:'p1',status:'ACTIVE'}))},messengerChat:{findFirst:vi.fn(async()=>chat),findUnique:vi.fn(async()=>chat),upsert:vi.fn(async({update}:{update:object})=>Object.assign(chat,update)),updateMany:vi.fn(async({data}:{data:object})=>{Object.assign(chat,data);return {count:1};})},messengerMessage:{count:vi.fn(async()=>2),updateMany:vi.fn(async()=>({count:2}))},$transaction:vi.fn(async(fn:(tx:unknown)=>Promise<void>)=>fn(db))};
  const client={call:vi.fn(async(method:string,p:Record<string,unknown>)=>{
   if(method==='crm.duplicate.findbycomm')return {result:{CONTACT:[7]}};
   if(method==='crm.contact.list')return {result:[{ID:'7',NAME:'Клиент'}]};

@@ -11,6 +11,7 @@ import {
   type AttentionChatDto,
   type ChatFlagDto,
   type BookingAlertListDto,
+  type ContactAlertListDto,
   type CallKind,
   type CallScope,
   type DashboardBookingRow,
@@ -108,7 +109,8 @@ export function DashboardPage({
   const [range, setRange] = useState(() => presetRange('today', todayIn(tz)));
   // Части дашборда грузятся отдельно: основа — сразу, звонки и новые сделки — когда посчитаются.
   const alertsQuery = useDashboardQuery<BookingAlertListDto>(bookingAlerts ? '/booking-alerts?status=new' : null);
-  const alertCount = alertsQuery.data?.counts.new;
+  const contactAlertsQuery = useDashboardQuery<ContactAlertListDto>(session.canManageApp ? '/contact-alerts?status=new' : null);
+  const alertCount = (alertsQuery.data?.counts.new ?? 0) + (contactAlertsQuery.data?.counts.new ?? 0);
   const [attentionShown, setAttentionShown] = useState(ATTENTION_STEP);
   const [hidden, setHidden] = useState<Set<number>>(() => new Set());
   const [hiding, setHiding] = useState<AttentionChatDto | null>(null);
@@ -436,7 +438,7 @@ export function DashboardPage({
           {periodPicker}
           <ThemeToggle />
           {bookingAlerts && (
-            <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} aria-label="Уведомления" title="Уведомления о бронях">
+            <button className={`settings-button${alertCount ? ' has-badge' : ''}`} onClick={onAlerts} aria-label="Уведомления" title="Уведомления: брони и контакты">
               <Icon name="bell" size={20} />
               {!!alertCount && <span className="badge">{alertCount}</span>}
             </button>

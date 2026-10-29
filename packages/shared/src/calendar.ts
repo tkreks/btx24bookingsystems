@@ -64,6 +64,38 @@ export interface CalendarDay {
   stops?: ResourceStopDto[];
 }
 
+/** Шкала броней: период — не больше стольких месяцев (решение владельца 2026-10-29). */
+export const TIMELINE_MAX_MONTHS = 30;
+
+/**
+ * `GET /api/calendar/range?groupId=&from=YYYY-MM-DD&to=YYYY-MM-DD` — брони ресурсов группы за период из
+ * журнала приложения (сверка с Битрикс24 по событиям и раз в 10 минут), без запросов к модулю
+ * бронирования: шкала дашборда и встройки. Дни `from`…`to` включительно, не больше `TIMELINE_MAX_MONTHS`.
+ */
+export interface CalendarRangeDto {
+  from: string;
+  to: string;
+  timezone: string;
+  resources: CalendarResource[];
+  bookings: CalendarBooking[];
+  techWindows: CalendarTechWindow[];
+  stops: ResourceStopDto[];
+  /** Последняя сверка журнала с Битрикс24 (ISO); null — ещё не было. */
+  syncedAt: string | null;
+  /** До какого дня (YYYY-MM-DD) журнал сверяется с Битрикс24; позже брони из Битрикс24 могут быть не видны. */
+  horizon: string | null;
+}
+
+/** Дата через `months` месяцев (31-е в коротком месяце — его последний день). */
+export function addMonths(date: string, months: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const total = y * 12 + (m - 1) + months;
+  const ny = Math.floor(total / 12);
+  const nm = total % 12;
+  const last = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  return `${String(ny).padStart(4, '0')}-${String(nm + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+
 /**
  * Стоп ресурса (решение владельца 2026-10-23): ресурс недоступен для бронирования с дня `from` по день
  * `to` включительно; ставится, только если броней в этот период нет.

@@ -43,6 +43,7 @@ model Portal {
   appUsers             AppUser[]
   settings             PortalSettings?
   externalUsers        ExternalUser[]
+  externalSessions     ExternalSession[]
   sandboxBookings      SandboxBooking[]
   appCreatedEntities   AppCreatedEntity[]
   paymentRequests      PaymentRequest[]
@@ -57,6 +58,7 @@ model Portal {
   resources            Resource[]
   bookingAlerts        BookingAlert[]
   actionLogs           ActionLog[]
+  contactAlerts        ContactAlert[]
   webSessions          WebSession[]
   systemMessages       SystemMessage[]
   autoMessages         AutoMessageLog[]
@@ -81,6 +83,8 @@ model Portal {
   workdayEvents        WorkdayEvent[]
   callExclusions       CallExclusion[]
   chatLineChannels     ChatLineChannel[]
+  serviceChats         ServiceChat[]
+  serviceChatMessages  ServiceChatMessage[]
   openlineMessages     OpenlineMessage[]
 }
 
@@ -238,6 +242,10 @@ model PortalSettings {
   bookingSyncError      String?   @db.VarChar(500)
   /// Системные поля сделки портала: роль → код поля (`DealFieldMapDto` в @btx24/shared).
   dealFieldMap          Json?
+  /// Поля идентификаторов мессенджеров контакта: kind → код UF_CRM_.
+  contactFieldMap       Json?
+  /// Учётные записи автоматизаций; это не доказывает, какая программа выполнила изменение.
+  contactSystemUserIds  Json?
   /// Разрешение владельца создавать в Битрикс24 новые брони и сделки при B24_READ_ONLY (2026-10-22).
   createInBitrix        Boolean   @default(false)
   createGrantedByUserId Int?
@@ -268,9 +276,30 @@ model ExternalUser {
   disabledAt    DateTime?           @db.DateTime(3)
   createdAt     DateTime            @default(now()) @db.DateTime(3)
   updatedAt     DateTime            @updatedAt @db.DateTime(3)
+  /// Неудачные входы подряд; после 5 — пауза (`lockedUntil`), удачный вход обнуляет.
+  failedLogins  Int                 @default(0)
+  lockedUntil   DateTime?           @db.DateTime(3)
+  lastLoginAt   DateTime?           @db.DateTime(3)
   groups        ExternalUserGroup[]
+  sessions      ExternalSession[]
 
   @@unique([portalId, login])
+}
+
+/// Сессия входа по логину и паролю (внешний пользователь): в cookie — случайный секрет, здесь — его хеш.
+/// Смена пароля или отключение пользователя удаляет его сессии.
+model ExternalSession {
+  id             String       @id @default(cuid())
+  portalId       String
+  portal         Portal       @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  externalUserId String
+  externalUser   ExternalUser @relation(fields: [externalUserId], references: [id], onDelete: Cascade)
+  tokenHash      String       @unique @db.VarChar(64)
+  createdAt      DateTime     @default(now()) @db.DateTime(3)
+  lastSeenAt     DateTime     @default(now()) @db.DateTime(3)
+  expiresAt      DateTime     @db.DateTime(3)
+
+  @@index([portalId, externalUserId])
 }
 
 model ExternalUserGroup {
@@ -1335,4 +1364,55 @@ model CallExclusion {
   createdAt  DateTime @default(now()) @db.DateTime(3)
 
   @@unique([portalId, activityId])
+}
+
+/// Предупреждения о наблюдаемых изменениях/удалении контакта и долговечная доставка в чат.
+model ContactAlert {
+  id                String   @id @default(cuid())
+  portalId          String
+  portal            Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  contactId         Int
+  kind              String   @db.VarChar(32)
+  changes           Json
+  actor             Json
+  fingerprint       String   @db.VarChar(64)
+  status            String   @default("new") @db.VarChar(16)
+  statusByUserId    Int?
+  statusAt          DateTime? @db.DateTime(3)
+  createdAt         DateTime @default(now()) @db.DateTime(3)
+  messageId         Int?
+  sendError         String? @db.VarChar(500)
+  @@unique([portalId, fingerprint])
+  @@index([portalId, status, createdAt])
+  @@index([portalId, contactId, createdAt])
+}
+
+/// Служебный чат сделки: клиент без мессенджеров (менеджер выбрал «Без мессенджера» во встройке сделки).
+/// Только в приложении — в Битрикс24 не отправляется; сюда пишет автоматика (ссылки на оплату,
+/// подтверждения), когда рабочего чата с клиентом нет, и заметки сотрудников. Одна строка на сделку.
+model ServiceChat {
+  id              String   @id @default(cuid())
+  portalId        String
+  portal          Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dealId          Int
+  createdByUserId Int
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([portalId, dealId])
+}
+
+/// Сообщение служебного чата. `source`: `manager` — заметка сотрудника, `payment` — оплата (ссылка,
+/// подтверждение), `automation` — прочие автосообщения. Не редактируется и не удаляется.
+model ServiceChatMessage {
+  id         String   @id @default(cuid())
+  portalId   String
+  portal     Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  dealId     Int
+  source     String   @db.VarChar(16)
+  text       String   @db.Text
+  authorId   Int?
+  authorName String?  @db.VarChar(255)
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+
+  @@index([portalId, dealId, createdAt])
 }

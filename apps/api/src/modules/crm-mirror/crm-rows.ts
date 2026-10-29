@@ -30,7 +30,7 @@ export const CALL_FILTER = { TYPE_ID: 2, PROVIDER_ID: 'VOXIMPLANT_CALL' } as con
 /** Лид, контакт, компания: метод списка и поля названия. Сделка — отдельно (CrmDeal). */
 export const ENTITY_SPECS = {
   1: { method: 'crm.lead.list', select: ['ID', 'TITLE', 'DATE_MODIFY'] },
-  3: { method: 'crm.contact.list', select: ['ID', 'NAME', 'LAST_NAME', 'PHOTO', 'DATE_MODIFY'] },
+  3: { method: 'crm.contact.list', select: ['*', 'UF_*', 'PHONE', 'EMAIL', 'WEB', 'IM'] },
   4: { method: 'crm.company.list', select: ['ID', 'TITLE', 'DATE_MODIFY'] },
 } as const;
 export type EntityTypeId = keyof typeof ENTITY_SPECS;

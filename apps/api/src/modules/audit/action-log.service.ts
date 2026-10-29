@@ -70,7 +70,7 @@ export class ActionLogService {
    * Журнал для администраторов: период (дни в поясе портала), сотрудник, объект («сделка 678»),
    * текст; новые сверху, по 100, дальше — курсором `before` (ID записи).
    */
-  async list(portalId: string, timezone: string, q: Record<string, unknown>): Promise<ActionLogDto> {
+  async list(portalId: string, timezone: string, q: Record<string, unknown>, visibleContacts?: (ids: number[]) => Promise<Set<number>>): Promise<ActionLogDto> {
     const limit = q.limit === undefined ? PAGE : Number(q.limit);
     if (!Number.isInteger(limit) || limit < 1 || limit > PAGE)
       throw new BadRequestException({ code: 'INVALID_LIMIT', message: 'limit: целое число от 1 до 100' });
@@ -106,14 +106,17 @@ export class ActionLogService {
     };
     // Старые записи неизменяемы. Фильтруем классификацию ДО пагинации, читая индексированные
     // страницы портала/периода, пока не найдём limit+1 совпадений или конец журнала.
-    const classified = category !== null || severity !== null;
+    const classified = category !== null || severity !== null || !!visibleContacts;
     const take = classified ? 200 : limit + 1;
     const matches: ActionLogEntryDto[] = [];
     let pageCursor: { id: string; at: Date } | null = null;
     for (;;) {
       const pageWhere: Prisma.ActionLogWhereInput = pageCursor ? { AND: [where, { OR: [{ at: { lt: pageCursor.at } }, { at: pageCursor.at, id: { lt: pageCursor.id } }] }] } : where;
       const rows = await this.prisma.actionLog.findMany({ where: pageWhere, orderBy: [{ at: 'desc' }, { id: 'desc' }], take });
+      const contactIds = rows.filter(r => r.entityType === 'contact').map(r => Number(r.entityId)).filter(id => Number.isSafeInteger(id) && id > 0);
+      const allowedContacts = contactIds.length && visibleContacts ? await visibleContacts(contactIds) : new Set<number>();
       for (const r of rows) {
+        if (r.entityType === 'contact' && !allowedContacts.has(Number(r.entityId))) continue;
         const classification = classifyActionLog(r);
         if (category !== null && classification.category !== category || severity !== null && classification.severity !== severity) continue;
         matches.push({ id: r.id, at: r.at.toISOString(), actorKind: r.actorKind, userId: r.userId,

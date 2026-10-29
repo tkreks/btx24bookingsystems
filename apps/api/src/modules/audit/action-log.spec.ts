@@ -154,3 +154,16 @@ describe('категории и критичность историческог�
     await expect(new ActionLogService({} as PrismaService).list('p1','Europe/Moscow',q)).rejects.toThrow();
   });
 });
+
+it('история контакта показывает данные только после проверки CRM-видимости сотрудника', async () => {
+  const base = { at: new Date(), actorKind: 'bitrix', actorName: 'Битрикс24', userId: null, action: 'contact.changed_in_bitrix', summary: 'Контакт обновлён', details: { changes: [{ field: 'PHONE', after: 'private' }] }, via: 'bitrix_sync' };
+  const rows = [{ ...base, id: 'a', entityType: 'contact', entityId: '7' }, { ...base, id: 'b', entityType: 'contact', entityId: '8' }];
+  const findMany = vi.fn(async () => rows);
+  const svc = new ActionLogService({ actionLog: { findMany } } as unknown as PrismaService);
+  const visible = vi.fn(async () => new Set([8]));
+  const result = await svc.list('p1', 'UTC', {}, visible);
+  expect(visible).toHaveBeenCalledWith([7, 8]);
+  expect(result.items.map(r => r.entityId)).toEqual(['8']);
+  const noContext = await svc.list('p1', 'UTC', {});
+  expect(noContext.items).toEqual([]);
+});

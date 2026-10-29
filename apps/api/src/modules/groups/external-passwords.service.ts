@@ -28,8 +28,10 @@ export class ExternalPasswordsService {
     const user = await this.prisma.externalUser.findFirst({ where: { id, portalId }, select: { id: true } });
     if (!user) throw new NotFoundException({ code: 'EXTERNAL_USER_NOT_FOUND', message: 'Пользователь не найден' });
     const passwordHash = await hashPassword(parsed.data.password);
-    const result = await this.prisma.externalUser.updateMany({ where: { id, portalId }, data: { passwordHash } });
+    const result = await this.prisma.externalUser.updateMany({ where: { id, portalId }, data: { passwordHash, failedLogins: 0, lockedUntil: null } });
     if (!result.count)
       throw new NotFoundException({ code: 'EXTERNAL_USER_NOT_FOUND', message: 'Пользователь не найден' });
+    // Новый пароль (пауза после неудач снята выше) — входы со старым паролем завершаются.
+    await this.prisma.externalSession.deleteMany({ where: { portalId, externalUserId: id } });
   }
 }

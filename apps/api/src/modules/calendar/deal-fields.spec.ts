@@ -27,7 +27,12 @@ describe('formatDealValue', () => {
   ])('%s', (_name, raw, meta, expected) => {
     expect(formatDealValue(raw, meta as never, tz)).toBe(expected);
   });
-  it.each([null, '', [], [''], { id: 1 }])('treats %o as empty', (raw) => {
+  it.each([null, '', [], ['']])('treats %o as empty', (raw) => {
     expect(formatDealValue(raw, { type: 'string' }, tz)).toBeNull();
   });
+});
+
+it('сложные типы показываются текстом, названия файлов и привязок читаемы', () => {
+  expect(formatDealValue({ ID: 7, NAME: 'Договор.pdf' }, { type: 'file' }, 'UTC')).toBe('Договор.pdf');
+  expect(formatDealValue({ id: 1 }, { type: 'unknown' }, 'UTC')).toBe('{"id":1}');
 });

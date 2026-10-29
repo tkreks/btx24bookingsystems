@@ -9505,3 +9505,497 @@ html { scrollbar-gutter: stable; }
 .load-progress-text b { color: var(--text); font-weight: 600; }
 .load-progress-track { display: block; height: 4px; overflow: hidden; border-radius: 999px; background: var(--line); }
 .load-progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .25s linear; }
+
+.fields-section { padding: 16px; }
+.system-fields-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.system-field-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); gap: 12px; padding: 12px; background: var(--surface, #fff); }
+.system-field-bitrix { min-width: 0; overflow-wrap: anywhere; }
+.system-field-select { grid-column: 1 / -1; display: grid; gap: 6px; }
+.system-field-select select { width: 100%; min-width: 0; }
+.field-enum-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.field-enum-preview span { border: 1px solid var(--line); border-radius: 8px; padding: 2px 7px; font-size: 12px; }
+@media (max-width: 600px) { .system-field-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* Поля: компактные строки и поиск вместо раскрытых многострочных форм. */
+.compact-fields .fields-heading { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.compact-fields h3 { margin:0; }
+.compact-fields .fields-heading p { margin:6px 0 12px; font-size:13px; }
+.fields-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:8px 0; }
+.fields-switch { display:flex; gap:4px; flex-wrap:wrap; }
+.fields-switch .active { background:var(--primary); color:#fff; }
+.fields-tools input { flex:1; min-width:200px; }
+.fields-count { font-size:12px; margin:10px 0; }
+.fields-group { margin:10px 0; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+.fields-group > summary { display:flex; gap:8px; cursor:pointer; padding:9px 12px; font-weight:600; }
+.fields-group > summary span { font-size:12px; color:var(--muted); font-weight:400; }
+.compact-field-row { display:grid; grid-template-columns:minmax(170px,.8fr) minmax(220px,1.4fr) minmax(95px,.4fr); gap:12px; align-items:center; padding:9px 12px; border-top:1px solid var(--line); font-size:13px; }
+.compact-field-row strong { font-size:13px; font-weight:600; }
+.compact-field-row small { display:block; font-size:11px; color:var(--muted); overflow-wrap:anywhere; margin-top:2px; }
+.compact-field-row > * { min-width:0; }
+.field-state { display:flex; flex-direction:column; align-items:flex-start; gap:5px; }
+.field-state-badge { display:inline-flex; border-radius:6px; padding:3px 7px; font-size:11px; background:var(--surface-2); color:var(--muted); white-space:nowrap; }
+.field-state-badge.linked { color:var(--ok); background:color-mix(in srgb,var(--ok) 9%,var(--surface)); }
+.fields-savebar { display:flex; flex-wrap:wrap; gap:8px; position:sticky; bottom:0; z-index:4; padding:12px 0; background:var(--surface); border-top:1px solid var(--line); }
+.search-select { position:relative; min-width:0; }
+.search-select-input { display:flex; position:relative; }
+.search-select-input input { width:100%; padding-right:28px; font-size:13px; border-radius:7px; }
+.search-select-clear { position:absolute; right:3px; top:3px; bottom:3px; border:0; padding:0 7px; background:transparent; color:var(--muted); }
+.search-select-menu { position:absolute; top:calc(100% + 4px); left:0; right:0; min-width:240px; max-height:330px; overflow:auto; z-index:20; background:var(--surface); border:1px solid var(--line); border-radius:9px; box-shadow:0 10px 30px rgba(0,0,0,.13); padding:4px; }
+.search-select-menu > button { width:100%; text-align:left; border:0; background:transparent; border-radius:6px; display:block; padding:8px; white-space:normal; }
+.search-select-menu > button:hover,.search-select-menu > button.focused { background:var(--surface-2); }
+.search-select-menu small { display:block; font-size:10px; color:var(--muted); overflow-wrap:anywhere; }
+.search-select-menu .incompatible { opacity:.45; cursor:not-allowed; }
+.search-select-empty { padding:8px; color:var(--muted); font-size:11px; }
+.fields-automation { border-top:1px solid var(--line); margin-top:14px; padding-top:10px; font-size:13px; }
+.fields-automation > summary { cursor:pointer; }
+.system-user-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.system-user-tags > span { background:var(--surface-2); border-radius:7px; padding:3px 7px; }
+.system-user-tags button { border:0; background:transparent; padding:0 0 0 6px; }
+.contact-alerts-section { border:1px solid var(--line); border-radius:12px; padding:12px; margin:12px 0; background:var(--surface); }
+.contact-alert-row { border-top:1px solid var(--line); padding:10px 0; }
+.contact-alert-row > header { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; }
+.contact-alert-row .contact-changes { display:grid; gap:4px; margin:8px 0; font-size:13px; overflow-wrap:anywhere; }
+.contact-alert-row .contact-alert-actions { display:flex; gap:5px; flex-wrap:wrap; }
+@media(max-width:650px) { .compact-field-row { grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:8px; padding:8px; } .compact-field-row .field-state { grid-column:1/-1; flex-direction:row; align-items:center; } .search-select-menu { min-width:0; left:auto; width:min(320px,85vw); right:0; } .fields-heading { flex-wrap:wrap; } .fields-tools input { width:100%; min-width:0; flex-basis:100%; } .catalog-fields .compact-field-row { grid-template-columns:minmax(0,1.3fr) minmax(0,.5fr) minmax(0,1fr); } }
+
+.compact-fields .fields-tools input,.compact-fields .fields-tools select,.compact-fields .search-select-input input { border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:8px; padding:8px 10px; min-height:34px; font:inherit; font-size:13px; box-sizing:border-box; }
+.compact-fields .search-select-input input { padding-right:28px; }
+.compact-fields .fields-tools input:focus,.compact-fields .search-select-input input:focus { outline:2px solid color-mix(in srgb,var(--primary) 25%,transparent); border-color:var(--primary); }
+@media(max-width:650px) { .compact-fields .fields-tools input,.compact-fields .fields-tools select,.compact-fields .search-select-input input { font-size:16px; } }
+
+/* Встройка сделки: бронь этой сделки на шкале — заметнее остальных. */
+.tl-piece.busy.this-deal { outline: 2px solid #f59e0b; outline-offset: -1px; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35); z-index: 2; font-weight: 600; }
+
+/* Встройка сделки: неработающий чат — «Присоединиться к чату» через наш номер. */
+.chat-revive { background: var(--warn-bg); }
+.chat-revive > .muted { flex: 1 1 260px; color: var(--warn-text); }
+
+/* Встройка сделки: кнопки над списком чатов, поиск клиента в мессенджерах. */
+.deal-ws-chats-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
+.deal-ws-chats-actions .cl-btn, .service-chat-actions .cl-btn, .cl-btn.cv-action { width: auto; padding: 0 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.deal-chat-start { display: flex; flex-direction: column; gap: 10px; }
+.deal-chat-searching { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.deal-chat-step { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; }
+.deal-chat-start-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.deal-chat-no-messenger { color: var(--muted); }
+
+/* Служебный чат сделки: только в приложении. */
+.service-chat-row { list-style: none; }
+.service-chat-open { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
+.service-chat-open > span { display: flex; flex-direction: column; min-width: 0; }
+.service-chat-open .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.service-chat-badge { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--neutral-bg); color: var(--muted); flex: none; }
+.service-chat .cv-title { display: flex; flex-direction: column; min-width: 0; }
+.service-chat-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.service-chat-msg { max-width: 80%; margin: 6px 0; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.service-chat-msg.payment { background: var(--ok-bg); }
+.service-chat-msg.automation { background: var(--info-bg); }
+.service-chat-meta { display: block; font-size: 11px; margin-bottom: 2px; }
+.service-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.service-chat .cv-composer-row textarea { flex: 1; min-height: 44px; resize: vertical; }
+
+/* «Привязать чат»: список чатов номера с поиском. */
+.bind-chat-list { display: flex; flex-direction: column; gap: 8px; }
+.bind-chat-list input[type="search"] { width: 100%; }
+.bind-chat-preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; font-size: 12px; }
+.bind-result { padding: 10px 12px; border-radius: 12px; }
+.bind-result.ok { background: var(--ok-bg); color: var(--ok-text); }
+.bind-result.merge { background: var(--warn-bg); color: var(--warn-text); }
+
+/* Встройка сделки: старт переписки, служебный чат, «Привязать чат» (2026-10-29). */
+.deal-ws-chats-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+.deal-chat-start { display: flex; flex-direction: column; gap: 8px; }
+.deal-chat-searching { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--muted, #667085); }
+.deal-chat-step { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-weight: 600; }
+.deal-chat-start-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.deal-chat-no-messenger { border: 1px dashed #98a2b3; background: transparent; }
+.chat-revive { flex-wrap: wrap; gap: 8px 12px; background: #fffaeb; border-top: 1px solid #fedf89; }
+.chat-revive > .muted { flex: 1 1 260px; }
+.service-chat-row { list-style: none; }
+.service-chat-open { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px dashed #98a2b3; border-radius: 12px; background: transparent; text-align: left; cursor: pointer; }
+.service-chat-open > span { display: flex; flex-direction: column; min-width: 0; }
+.service-chat-open .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.service-chat-badge { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: #f2f4f7; flex: none; }
+.service-chat .cv-title { display: flex; flex-direction: column; min-width: 0; }
+.service-chat-actions { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.service-chat-msg { align-self: flex-start; max-width: 85%; margin: 4px 0; padding: 8px 10px; border-radius: 12px; background: #f2f4f7; }
+.service-chat-msg.manager { align-self: flex-end; background: #e0f2fe; }
+.service-chat-msg.payment { background: #ecfdf3; }
+.service-chat-meta { display: block; font-size: 11px; margin-bottom: 2px; }
+.service-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.service-chat textarea { flex: 1; min-width: 0; resize: vertical; }
+.bind-chat-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.bind-chat-list input[type='search'] { width: 100%; }
+.bind-chat-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.bind-result { margin-top: 12px; padding: 10px 12px; border-radius: 12px; }
+.bind-result.ok { background: #ecfdf3; border: 1px solid #abefc6; }
+.bind-result.merge { background: #fffaeb; border: 1px solid #fedf89; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .service-chat-msg, :root:not([data-theme="light"]) .service-chat-badge { background: rgba(255, 255, 255, 0.08); } }
+:root[data-theme="dark"] .service-chat-msg, :root[data-theme="dark"] .service-chat-badge { background: rgba(255, 255, 255, 0.08); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .service-chat-msg.manager { background: rgba(56, 189, 248, 0.18); } }
+:root[data-theme="dark"] .service-chat-msg.manager { background: rgba(56, 189, 248, 0.18); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .service-chat-msg.payment, :root:not([data-theme="light"]) .bind-result.ok { background: rgba(34, 197, 94, 0.15); } }
+:root[data-theme="dark"] .service-chat-msg.payment, :root[data-theme="dark"] .bind-result.ok { background: rgba(34, 197, 94, 0.15); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chat-revive, :root:not([data-theme="light"]) .bind-result.merge { background: rgba(245, 158, 11, 0.14); } }
+:root[data-theme="dark"] .chat-revive, :root[data-theme="dark"] .bind-result.merge { background: rgba(245, 158, 11, 0.14); }
+.timeline-period-cell.this-deal { outline: 2px solid #f59e0b; outline-offset: -2px; font-weight: 700; }
+.timeline-horizon { color: #b54708; }
+
+/* Чаты: выбор канала выше на ~10%, «Все каналы» — наложенные значки (2026-10-29). */
+.cf-current { padding: 8px 10px; min-height: 37px; }
+.cl-channel-dots { display: inline-flex; align-items: center; }
+.cl-channel-dots .cl-channel-dot { box-shadow: 0 0 0 2px var(--surface); }
+.cl-channel-dots .cl-channel-dot + .cl-channel-dot { margin-left: -7px; }
+.cl-add { width: 42px; padding: 0; font-size: 24px; line-height: 1; }
+
+/* Шапка чата во встройке сделки: «⋯», компактный «Не требует ответа», «подключить заново →» (2026-10-29). */
+.cv-menu { position: relative; }
+.cv-menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; min-width: 210px; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 14px 30px rgba(28, 51, 95, 0.16); }
+.cv-menu-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; text-align: left; font-size: 13px; color: var(--text); cursor: pointer; }
+.cv-menu-list button:hover { background: var(--hover); }
+.cv-menu-list .icon { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.cv-reply.compact .cl-btn { height: auto; padding: 3px 7px; border: 0; border-radius: 20px; background: #eef1f6; color: #475467; font-size: 10px; font-weight: 700; line-height: 1.2; }
+.cv-reply.compact .cl-status { padding: 3px 7px; font-size: 10px; }
+.chat-revive-text { font-weight: 600; color: #b54708; }
+.chat-revive-text span { font-size: 16px; }
+
+/* Карточка брони со шкалы (2026-10-29): ресурс со временем, сделка с суммой, клиент с фото, поля. */
+.tb { max-width: 600px; display: flex; flex-direction: column; gap: 14px; }
+.tb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tb-head h2 { margin: 0; font-size: 18px; }
+.tb-date { display: block; margin-top: 2px; font-size: 13px; text-transform: capitalize; }
+.tb-close { width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--hover); font-size: 20px; line-height: 1; cursor: pointer; }
+.tb-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.tb-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.tb-resource { border-left: 4px solid #ee3f4d; }
+.tb-deal { border-left: 4px solid #3269f6; }
+.tb-deal.empty { border-left-color: #98a2b3; }
+.tb-label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.tb-title { font-size: 15px; font-weight: 700; text-align: left; overflow-wrap: anywhere; }
+.tb-time { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.tb-arrow { color: var(--muted); }
+.tb-amount { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tb-sub { font-size: 12px; }
+.tb-client { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--hover); }
+.tb-client-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.tb-client-name { font-weight: 700; text-align: left; }
+.tb-client-text .muted { font-size: 12px; }
+.tb-assigned { flex: none; font-size: 12px; }
+.tb-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin: 0; }
+.tb-field { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.tb-field dt { font-size: 11px; color: var(--muted); }
+.tb-field dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.tb-products { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 12px; }
+.tb-products li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; padding: 7px 10px; font-size: 13px; }
+.tb-products li + li { border-top: 1px solid var(--line); }
+.tb-desc { margin: 0; white-space: pre-wrap; }
+
+/* Уведомления: одна лента броней и контактов, критичность точкой (серый/оранжевый/красный). */
+.nt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.nt-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; margin: 0 0 10px; }
+.nt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.nt-row { --sev: #9ca3af; display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--sev); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.nt-row.alert-card, .nt-row.alert-card[class*="type-"] { display: flex; gap: 10px; margin: 0; padding: 8px 10px; border-radius: 10px; border-left: 3px solid var(--sev); box-shadow: none; }
+.nt-row.alert-card.focused { box-shadow: 0 0 0 2px var(--sev); }
+.nt-row.done { opacity: .62; }
+.nt-row.focused { box-shadow: 0 0 0 2px var(--sev); }
+.sev-info { --sev: #9ca3af; }
+.sev-warning { --sev: #f79009; }
+.sev-critical { --sev: #dc2626; }
+.nt-dot { flex: none; display: inline-block; width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: var(--sev); }
+.nt-legend .nt-dot { margin: 0 0 0 6px; }
+.nt-body { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.nt-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.nt-title { font-weight: 600; }
+.nt-subject { font-weight: 500; overflow-wrap: anywhere; }
+.nt-meta { font-size: 12px; }
+.nt-status { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.nt-status.new { background: color-mix(in srgb, var(--sev) 16%, transparent); color: var(--text, inherit); }
+.nt-booking-state { color: var(--muted); font-size: 12px; }
+.nt-changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; overflow-wrap: anywhere; }
+.nt-changes li { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+.nt-field { color: var(--muted); min-width: 110px; }
+.nt-before { text-decoration: line-through; color: var(--muted); }
+.nt-arrow { color: var(--muted); }
+.nt-note { margin: 0; font-size: 12px; }
+.nt-actions { flex: none; display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 45%; }
+.nt-actions button, .nt-row.alert-card button { padding: 4px 9px; font-size: 12px; }
+@media (max-width: 640px) {
+  .nt-row { flex-wrap: wrap; }
+  .nt-actions { max-width: none; width: 100%; justify-content: flex-start; padding-left: 19px; }
+  .nt-accept-all { width: 100%; }
+}
+:root[data-theme="dark"] .sev-info { --sev: #6b7280; }
+:root[data-theme="dark"] .sev-warning { --sev: #fb923c; }
+:root[data-theme="dark"] .sev-critical { --sev: #f87171; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .sev-info { --sev: #6b7280; }
+  :root:not([data-theme="light"]) .sev-warning { --sev: #fb923c; }
+  :root:not([data-theme="light"]) .sev-critical { --sev: #f87171; }
+}
+
+/* Вход: Битрикс24 или логин и пароль. */
+.login-card form { display: grid; gap: 12px; }
+.login-tabs { display: flex; }
+.login-tabs button { flex: 1; }
+.login-password label { display: grid; gap: 4px; }
+.login-password input { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; font-size: 16px; }
+.login-more summary { cursor: pointer; font-size: 13px; }
+.login-more .login-domain { margin-top: 8px; }
+
+/* Экран «Бронирования» внешнего пользователя (viewer): телефон в первую очередь. */
+.vw-app { --vw-green: #15803d; --vw-red: #dc2626; --vw-orange: #ea580c; --vw-gray: #9ca3af; min-height: 100vh; background: var(--bg); color: var(--text); padding-bottom: calc(24px + var(--safe-b)); }
+.vw-top { position: sticky; top: 0; z-index: 5; display: grid; gap: 10px; padding: 12px 16px 10px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.vw-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vw-top h1 { margin: 0; font-size: 22px; }
+.vw-top-actions { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.vw-top-actions select { max-width: 46vw; min-height: 40px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
+.vw-logout { min-height: 40px; }
+.vw-date { display: flex; align-items: center; gap: 6px; }
+.vw-arrow { width: 44px; height: 44px; padding: 0; font-size: 24px; line-height: 1; border-radius: 12px; flex: none; }
+.vw-date-label { flex: 1; min-width: 0; display: grid; justify-items: center; gap: 0; padding: 4px 6px; background: none; border: 0; color: var(--text); }
+.vw-date-label b { font-size: 17px; white-space: nowrap; }
+.vw-date-label .muted { font-size: 12px; }
+.vw-cal-btn { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font-size: 20px; flex: none; cursor: pointer; }
+.vw-cal-btn input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.vw-today { min-height: 44px; flex: none; }
+.vw-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 12px; background: var(--neutral-bg); }
+.vw-modes button { min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-weight: 600; }
+.vw-modes button.active { background: var(--surface); color: var(--primary); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
+.vw-main { padding: 12px 16px; display: grid; gap: 12px; max-width: 1200px; margin: 0 auto; }
+.vw-empty { padding: 32px 12px; text-align: center; color: var(--muted); background: var(--surface); border-radius: 14px; }
+.vw-empty.small { padding: 8px 0; background: none; text-align: left; }
+.vw-error { display: grid; gap: 8px; justify-items: start; padding: 16px; border-radius: 14px; background: var(--surface); }
+.vw-skeleton { display: grid; gap: 12px; }
+.vw-skeleton i { display: block; height: 150px; border-radius: 14px; background: linear-gradient(90deg, var(--surface) 25%, var(--neutral-bg) 50%, var(--surface) 75%); background-size: 200% 100%; animation: vw-shimmer 1.2s infinite linear; }
+@keyframes vw-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .vw-skeleton i { animation: none; } }
+
+.vw-list, .vw-avail { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.vw-card { background: var(--surface); border-radius: 14px; box-shadow: 0 1px 3px rgba(15, 23, 42, .08); overflow: hidden; }
+.vw-card-main { display: grid; gap: 6px; width: 100%; padding: 14px 16px 6px; border: 0; border-radius: 0; background: none; color: var(--text); text-align: left; font: inherit; }
+.vw-title { font-size: 17px; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.vw-when { color: var(--muted); }
+.vw-when b { color: var(--text); }
+.vw-resource { font-weight: 600; color: var(--info-text); }
+.vw-guests { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.vw-program, .vw-program b { color: var(--vw-orange); }
+.vw-money { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.vw-paid { color: var(--vw-green); }
+.vw-debt { color: var(--vw-red); font-weight: 600; }
+.vw-over { color: var(--vw-orange); }
+.vw-pay { font-weight: 600; }
+.vw-pay-paid .vw-pay, .vw-pay.vw-pay-paid { color: var(--vw-green); }
+.vw-pay.vw-pay-partial { color: var(--vw-orange); }
+.vw-pay.vw-pay-unpaid { color: var(--vw-red); }
+.vw-pay.vw-pay-overpaid { color: var(--vw-orange); }
+.vw-important-line { color: var(--vw-red); overflow-wrap: anywhere; }
+.vw-more { justify-self: start; color: var(--primary); font-weight: 600; background: none; border: 0; padding: 4px 0; }
+.vw-card .vw-more { min-height: 32px; }
+.vw-avail .vw-card > .vw-more { margin: 0 16px 12px; }
+
+.vw-details { display: grid; gap: 8px; padding: 0 16px 14px; }
+.vw-card .vw-details { padding-top: 4px; }
+.vw-d-head { display: grid; gap: 2px; padding: 4px 0 10px; }
+.vw-d-head h2 { margin: 0; font-size: 20px; overflow-wrap: anywhere; padding-right: 36px; }
+.vw-d-head p { margin: 0; color: var(--muted); }
+.vw-d-head b { color: var(--text); }
+/* Разделы полного просмотра — отдельными плашками. */
+.vw-sec { display: grid; gap: 4px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.vw-d-head { padding-left: 2px; }
+.vw-sec h3 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+.vw-sec p { margin: 0; }
+.vw-row { display: flex; justify-content: space-between; gap: 12px; }
+.vw-row > span { color: var(--muted); }
+.vw-row > b { text-align: right; overflow-wrap: anywhere; }
+.vw-row.vw-paid b { color: var(--vw-green); }
+.vw-row.vw-debt b { color: var(--vw-red); }
+.vw-row.vw-program b { color: var(--vw-orange); }
+.vw-row.vw-pay-paid b { color: var(--vw-green); }
+.vw-row.vw-pay-partial b, .vw-row.vw-pay-overpaid b { color: var(--vw-orange); }
+.vw-row.vw-pay-unpaid b { color: var(--vw-red); }
+.vw-important { color: var(--vw-red); }
+.vw-important h3 { color: var(--vw-red); }
+.vw-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.vw-products { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vw-products li { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; }
+.vw-p-name { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.vw-p-calc { color: var(--muted); font-size: 13px; }
+.vw-p-sum { text-align: right; }
+.vw-p-total { font-size: 13px; color: var(--muted); }
+.vw-p-total b { color: var(--text); }
+
+.vw-sheet-back { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .45); display: flex; align-items: flex-end; justify-content: center; }
+.vw-sheet { position: relative; width: 100%; max-height: 90vh; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); color: var(--text); border-radius: 18px 18px 0 0; padding: 8px 0 calc(16px + var(--safe-b)); box-shadow: 0 -8px 30px rgba(15, 23, 42, .2); }
+.vw-sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 8px; }
+.vw-sheet-close { position: absolute; top: 8px; right: 10px; width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 22px; line-height: 1; }
+@media (min-width: 721px) {
+  .vw-sheet-back { align-items: center; padding: 24px; }
+  .vw-sheet { max-width: 640px; border-radius: 16px; padding: 16px 0; }
+  .vw-sheet-grip { display: none; }
+  .vw-details { padding: 0 24px 16px; }
+  .vw-card-main { grid-template-columns: 1fr 1fr; column-gap: 24px; }
+  .vw-card-main > .vw-card-head, .vw-card-main > .vw-meta-line, .vw-card-main > .vw-comment-line { grid-column: 1 / -1; }
+  .vw-modes { max-width: 420px; }
+  .vw-top { padding: 14px 24px 10px; }
+  .vw-main { padding: 16px 24px; }
+}
+
+.vw-cal { overflow-x: auto; background: var(--surface); border-radius: 14px; box-shadow: 0 1px 3px rgba(15, 23, 42, .08); -webkit-overflow-scrolling: touch; }
+.vw-cal-grid { display: grid; grid-template-columns: 52px repeat(var(--cols), minmax(150px, 1fr)); min-width: calc(52px + var(--cols) * 150px); }
+.vw-cal-corner, .vw-cal-head { position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--line); }
+.vw-cal-corner { left: 0; z-index: 4; }
+.vw-cal-head { padding: 10px 8px; font-weight: 700; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 1px solid var(--line); }
+.vw-cal-times { position: sticky; left: 0; z-index: 2; background: var(--surface); }
+.vw-cal-times span { position: absolute; right: 6px; transform: translateY(-50%); font-size: 11px; color: var(--muted); }
+.vw-cal-times span:first-child { transform: none; }
+.vw-cal-col { position: relative; border-left: 1px solid var(--line); }
+.vw-cal-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+.vw-cal-now { position: absolute; left: 0; right: 0; border-top: 2px solid var(--vw-red); z-index: 2; }
+.vw-cal-tech { position: absolute; left: 4px; right: 4px; border-radius: 6px; background: repeating-linear-gradient(45deg, rgba(234, 88, 12, .14) 0 6px, rgba(234, 88, 12, .06) 6px 12px); overflow: hidden; }
+.vw-cal-tech span { font-size: 10px; color: var(--vw-orange); padding: 2px 4px; }
+.vw-block { position: absolute; left: 4px; right: 4px; z-index: 1; display: flex; flex-direction: column; gap: 1px; align-items: stretch; padding: 4px 6px; border: 0; border-left: 4px solid var(--primary); border-radius: 8px; background: var(--info-bg); color: var(--text); text-align: left; font-size: 12px; line-height: 1.3; overflow: hidden; }
+.vw-block > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vw-block.vw-pay-paid { border-left-color: var(--vw-green); }
+.vw-block.vw-pay-partial, .vw-block.vw-pay-overpaid { border-left-color: var(--vw-orange); }
+.vw-block.vw-pay-unpaid { border-left-color: var(--vw-red); }
+.vw-block-title { font-weight: 700; }
+.vw-block-time { font-weight: 600; }
+.vw-block.s-sm { flex-direction: row; flex-wrap: wrap; column-gap: 6px; }
+.vw-flag { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: var(--vw-red); vertical-align: middle; }
+
+.vw-need { display: flex; flex-wrap: wrap; gap: 6px; }
+.vw-need button { min-height: 38px; border-radius: 999px; padding: 6px 14px; }
+.vw-need button.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.vw-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--muted); }
+.vw-legend .vw-dot:not(:first-child) { margin-left: 8px; }
+.vw-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; }
+.vw-dot.free { background: var(--vw-green); }
+.vw-dot.busy { background: var(--vw-red); }
+.vw-dot.tech { background: var(--vw-orange); }
+.vw-avail .vw-card { display: grid; gap: 8px; padding-top: 14px; }
+.vw-avail .vw-card > *:not(.vw-details) { margin-left: 16px; margin-right: 16px; }
+.vw-avail .vw-card > p { margin-top: 0; margin-bottom: 0; }
+.vw-avail-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.vw-avail-head > div { display: grid; gap: 2px; }
+.vw-avail-head .muted { font-size: 13px; }
+.vw-avail-status { align-self: start; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.vw-avail-status.free { background: var(--ok-bg); color: var(--ok-text); }
+.vw-avail-status.busy { background: #fee4e2; color: #b42318; }
+.vw-bar-wrap { display: grid; gap: 2px; }
+.vw-bar { position: relative; height: 26px; border-radius: 8px; overflow: hidden; background: var(--neutral-bg); }
+.vw-piece { position: absolute; top: 0; bottom: 0; border: 0; padding: 0; border-radius: 0; }
+.vw-piece.free { background: var(--vw-green); opacity: .8; }
+.vw-piece.free.unfit { background: repeating-linear-gradient(45deg, rgba(21, 128, 61, .35) 0 5px, rgba(21, 128, 61, .12) 5px 10px); opacity: 1; }
+.vw-piece.busy { background: var(--vw-red); cursor: pointer; border-left: 1px solid var(--surface); }
+.vw-piece.tech { background: var(--vw-orange); }
+.vw-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.vw-avail-sum { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.vw-fit { color: var(--vw-green); font-weight: 600; }
+.vw-free { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vw-free li.unfit { color: var(--muted); }
+.vw-free .vw-dot { border-radius: 50%; }
+.vw-busy { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.vw-busy li { display: grid; gap: 2px; }
+.vw-busy .link { justify-self: start; padding: 4px 0; }
+@media (min-width: 721px) { .vw-avail { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); align-items: start; } }
+
+:root[data-theme="dark"] .vw-app { --vw-green: #4ade80; --vw-red: #f87171; --vw-orange: #fb923c; }
+:root[data-theme="dark"] .vw-avail-status.busy { background: rgba(248, 113, 113, .16); color: #fca5a5; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .vw-app { --vw-green: #4ade80; --vw-red: #f87171; --vw-orange: #fb923c; }
+  :root:not([data-theme="light"]) .vw-avail-status.busy { background: rgba(248, 113, 113, .16); color: #fca5a5; }
+}
+.vw-last-pay b { color: var(--vw-green); }
+.vw-card-products { padding: 0 16px 6px; }
+.vw-card-products .vw-sec { padding: 8px 12px; }
+
+.vw-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.vw-house { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--info-bg); color: var(--info-text); }
+.vw-card-headtext { display: grid; gap: 2px; min-width: 0; }
+.vw-client { display: flex; align-items: center; gap: 6px; }
+.vw-initial { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: #fff; font-size: 8px; font-weight: 700; line-height: 1; }
+.vw-ic { display: inline-flex; align-items: center; gap: 6px; }
+.vw-ic svg { flex: none; color: var(--muted); }
+.vw-ic.vw-program svg { color: var(--vw-orange); }
+/* Статус брони по времени: тег рядом с названием и цвет карточки. */
+.vw-card { border-left: 4px solid var(--st, var(--primary)); }
+.vw-card.st-upcoming { --st: #2563eb; --st-bg: #dbeafe; --st-text: #1d4ed8; }
+.vw-card.st-now { --st: #16a34a; --st-bg: #dcfce7; --st-text: #15803d; background: color-mix(in srgb, #16a34a 5%, var(--surface)); }
+.vw-card.st-done { --st: #9ca3af; --st-bg: #f2f4f7; --st-text: #6b7280; }
+.vw-card.st-done .vw-title { color: var(--muted); }
+.vw-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vw-title-row .vw-title { display: block; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vw-status { flex: none; display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.5; white-space: nowrap; background: var(--st-bg, var(--neutral-bg)); color: var(--st-text, var(--muted)); }
+.vw-status.st-upcoming { --st-bg: #dbeafe; --st-text: #1d4ed8; }
+.vw-status.st-now { --st-bg: #dcfce7; --st-text: #15803d; }
+.vw-status.st-done { --st-bg: #f2f4f7; --st-text: #6b7280; }
+.vw-time-tag { display: inline-block; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--neutral-bg); color: var(--text); font-weight: 700; white-space: nowrap; }
+.vw-card-more { display: block; margin: 0 16px 12px auto; padding: 4px 0; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 600; text-decoration: underline dashed; text-underline-offset: 4px; cursor: pointer; }
+.vw-pays { border-collapse: collapse; font-size: 14px; }
+.vw-pays td { padding: 1px 10px 1px 0; white-space: nowrap; }
+.vw-pays td:first-child { color: var(--muted); }
+.vw-plus { color: var(--vw-green); font-weight: 600; }
+.vw-pays-wrap { display: grid; gap: 2px; margin-top: 4px; }
+.vw-comment-line { display: flex; align-items: flex-start; gap: 6px; }
+.vw-comment-line > svg { flex: none; margin-top: 6px; color: var(--muted); }
+.vw-comment-box { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.vw-sec h3 { display: flex; align-items: center; gap: 6px; }
+.vw-sec h3 svg { width: 16px; height: 16px; }
+.vw-d-head { display: flex; gap: 10px; align-items: flex-start; }
+.vw-d-head > div { display: grid; gap: 4px; min-width: 0; }
+.vw-d-head .vw-status { margin-left: 6px; vertical-align: 1px; }
+:root[data-theme="dark"] .vw-card.st-upcoming, :root[data-theme="dark"] .vw-status.st-upcoming { --st-bg: rgba(37, 99, 235, .22); --st-text: #93c5fd; }
+:root[data-theme="dark"] .vw-card.st-now, :root[data-theme="dark"] .vw-status.st-now { --st-bg: rgba(22, 163, 74, .22); --st-text: #86efac; }
+:root[data-theme="dark"] .vw-card.st-done, :root[data-theme="dark"] .vw-status.st-done { --st-bg: rgba(255, 255, 255, .08); --st-text: #9ca3af; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .vw-card.st-upcoming, :root:not([data-theme="light"]) .vw-status.st-upcoming { --st-bg: rgba(37, 99, 235, .22); --st-text: #93c5fd; }
+  :root:not([data-theme="light"]) .vw-card.st-now, :root:not([data-theme="light"]) .vw-status.st-now { --st-bg: rgba(22, 163, 74, .22); --st-text: #86efac; }
+  :root:not([data-theme="light"]) .vw-card.st-done, :root:not([data-theme="light"]) .vw-status.st-done { --st-bg: rgba(255, 255, 255, .08); --st-text: #9ca3af; }
+}
+.vw-title-row .vw-status { margin-left: auto; }
+.vw-meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
+.vw-meta-line > * + *::before { content: '·'; margin: 0 6px; color: var(--muted); font-weight: 400; }
+.vw-meta-line .vw-resource svg { color: var(--info-text); }
+.vw-duration { color: var(--muted); }
+/* «Важно»: красная рамка, полупрозрачная заливка, чёрный жирный текст, заметный «!». */
+.vw-important-box, .vw-sec.vw-important { border: 1.5px solid #dc2626; background: rgba(220, 38, 38, .1); color: #111827; font-weight: 700; }
+.vw-important-box { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vw-bang { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #dc2626; color: #fff; font-size: 15px; font-weight: 900; line-height: 1; }
+.vw-sec.vw-important h3 { color: #b91c1c; }
+:root[data-theme="dark"] .vw-important-box, :root[data-theme="dark"] .vw-sec.vw-important { color: #fff; background: rgba(220, 38, 38, .22); }
+:root[data-theme="dark"] .vw-sec.vw-important h3 { color: #fca5a5; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .vw-important-box, :root:not([data-theme="light"]) .vw-sec.vw-important { color: #fff; background: rgba(220, 38, 38, .22); }
+  :root:not([data-theme="light"]) .vw-sec.vw-important h3 { color: #fca5a5; }
+}
+/* Строки карточки списка равномерно по ширине: статус и время — справа, длительность — посередине. */
+.vw-card-head .vw-card-headtext { flex: 1 1 auto; }
+.vw-card-headtext .vw-when { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vw-meta-line { justify-content: space-between; gap: 2px 10px; }
+.vw-meta-line > * + *::before { content: none; }
+.vw-meta-line .vw-client { justify-content: flex-end; }
+/* «Важно» — как комментарий: иконка снаружи, рамка и полупрозрачная заливка красные. */
+.vw-important-line2 > svg { color: #dc2626; }
+.vw-important-line2 .vw-comment-box { border-color: #dc2626; background: rgba(220, 38, 38, .1); }
+:root[data-theme="dark"] .vw-important-line2 .vw-comment-box { background: rgba(220, 38, 38, .2); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .vw-important-line2 .vw-comment-box { background: rgba(220, 38, 38, .2); } }
+/* Шапка экрана viewer: группа слева, «Выйти» справа; строка даты не шире экрана. */
+.vw-app { overflow-x: clip; }
+.vw-top-row { min-width: 0; }
+.vw-group { flex: 1 1 auto; min-width: 0; max-width: 360px; min-height: 40px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-weight: 600; text-overflow: ellipsis; }
+.vw-group-name { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vw-logout { flex: none; }
+.vw-date { gap: 4px; min-width: 0; }
+.vw-date .vw-arrow, .vw-date .vw-cal-btn { width: 40px; height: 40px; }
+.vw-cal-btn { color: var(--primary); }
+.vw-date-label { min-width: 0; overflow: hidden; }
+.vw-date-label b { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 16px; }
+.vw-today { flex: none; min-height: 40px; padding: 6px 10px; font-size: 14px; }
+@media (max-width: 380px) { .vw-date-label b { font-size: 14px; } .vw-today { padding: 6px 8px; } }
+.vw-time-tag { display: inline-flex; align-items: center; gap: 4px; }
+.vw-time-tag svg { flex: none; color: var(--muted); }
+.vw-pays td.vw-num { text-align: right; }
+.vw-pays td:last-child { padding-right: 0; }
+.vw-pays-total td { border-top: 1px solid var(--line); padding-top: 3px; font-weight: 700; }
+.vw-pays-total td:first-child { color: var(--text); }

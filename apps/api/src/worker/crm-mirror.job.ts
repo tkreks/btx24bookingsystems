@@ -50,7 +50,7 @@ export class CrmMirrorJob implements OnModuleInit, OnApplicationShutdown {
     this.running = true;
     try {
       const events = await this.prisma.bitrix24Event.findMany({
-        where: { event: { in: [...CRM_MIRROR_EVENTS] }, receivedAt: { gt: this.eventsAfter } },
+        where: { event: { in: CRM_MIRROR_EVENTS.filter(e => !e.startsWith('ONCRMCONTACT')) }, receivedAt: { gt: this.eventsAfter } },
         select: { id: true, portalId: true, event: true, payload: true, receivedAt: true },
         orderBy: { receivedAt: 'asc' },
         take: 1000,

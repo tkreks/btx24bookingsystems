@@ -1,3 +1,5 @@
+import { SYSTEM_FIELDS } from '@btx24/shared';
+import { MESSENGER_CONTACT_FIELDS } from '../messenger-contact-fields.js';
 import { zonedTimeToUtc } from '@btx24/shared';
 import type { Portal } from '../../../generated/prisma/client.js';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
@@ -76,12 +78,17 @@ export class SandboxWritePolicy implements WritePolicy {
         // Смарт-счёт сделки (ссылку на оплату к нему ставит портал).
         return Number(params.entityTypeId) === 31 && /^\d+$/.test(String(fields.parentId2 ?? '')) && this.createAllowed();
       case 'crm.item.update':
-        if (Number(params.entityTypeId) === 3) return this.related('contactIds', params.id);
+        if (Number(params.entityTypeId) === 3) return false;
         if (Number(params.entityTypeId) === 31) return (await this.related('invoiceIds', params.id)) || this.created('invoice', params.id);
         return Number(params.entityTypeId) === 2 && (this.deal(params.id) || (await this.created('deal', params.id)) || this.dealFieldsAllowed(params.id));
       // Правка контакта сделки песочницы (решение владельца): например, очистка e-mail «wazzup».
+      case 'crm.deal.userfield.add':
+      case 'crm.contact.userfield.add':
+        // Собственное поле связи мессенджера (запрос владельца 2026-10-28).
+        if (SYSTEM_FIELDS.some(f => f.entity === (lc(method).includes('.deal.') ? 'deal' : 'contact') && fields.FIELD_NAME === f.defaultCode?.slice('UF_CRM_'.length) && fields.USER_TYPE_ID === f.types[0] && fields.MULTIPLE === (f.multiple ? 'Y' : 'N') && fields.MANDATORY === 'N' && fields.XML_ID === `btx24.${f.entity}.${f.key}`)) return true;
+        return MESSENGER_CONTACT_FIELDS.some(f => fields.FIELD_NAME === f.code.slice('UF_CRM_'.length) && fields.USER_TYPE_ID === 'string' && fields.MULTIPLE === f.multiple && fields.MANDATORY === 'N' && fields.XML_ID === f.xmlId);
       case 'crm.contact.update':
-        return this.related('contactIds', params.id);
+        return false; // Владелец отложил редактирование контактов (2026-10-28).
       // Аннулирование ссылки на оплату = удаление неоплаченной оплаты счёта тестовой сделки.
       case 'crm.item.payment.delete':
       case 'crm.item.payment.update':

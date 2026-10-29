@@ -1,3 +1,4 @@
+import { contactActor, contactBusinessChanges, contactFingerprint } from './contact-changes.js';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -19,7 +20,7 @@ import {
   type EntityTypeId,
 } from './crm-rows.js';
 
-export type MirrorKind = 'deal' | 'call' | 'entity' | 'employee';
+export type MirrorKind = 'deal' | 'call' | 'entity' | 'employee' | 'contact' | 'contact_changes' | 'contact_presence';
 /** Звонки в копии — за столько дней назад (период дашборда — до 92 дней, плюс запас на перезвоны). */
 export const CALL_HISTORY_DAYS = 120;
 /** Страниц по 50 за один проход первичной загрузки (остальное — в следующий проход). */
@@ -58,7 +59,8 @@ export class CrmMirrorService {
   /** Поля сделки в копии: базовые + все поля сопоставления (и найденные по названию). */
   async dealFields(portal: Portal, client: Bitrix24RestClient): Promise<string[]> {
     const [map, outcome] = await Promise.all([this.fieldMap.resolved(portal.id, client), this.fieldMap.outcome(portal.id, client)]);
-    return dealSelect([...Object.values(map), outcome.dealType, outcome.paidAmount, outcome.bookingEnd]);
+    // COMMENTS — комментарий брони на экране внешнего просмотра (ADR 0021).
+    return dealSelect([...Object.values(map), outcome.dealType, outcome.paidAmount, outcome.bookingEnd, 'COMMENTS']);
   }
 
   // ---------- Сделки ----------
@@ -200,6 +202,10 @@ export class CrmMirrorService {
   // ---------- Лиды, контакты, компании ----------
 
   async saveEntities(portal: Portal, typeId: number, rows: CrmRow[]): Promise<void> {
+    if (typeId === 3) {
+      for (const row of rows) await this.saveContact(portal, row, 'baseline');
+      return;
+    }
     const now = new Date();
     const items = rows.map((r) => ({ r, c: entityColumns(typeId, r, portal.domain) })).filter((x) => x.c.entityId > 0);
     for (const part of chunks(items))
@@ -212,6 +218,98 @@ export class CrmMirrorService {
           }),
         ),
       );
+  }
+
+  /** Полная карточка контакта и её наблюдаемые изменения — атомарно, без записей в Битрикс24. */
+  async saveContact(portal: Portal, row: CrmRow, observation: 'event' | 'poll' | 'baseline' = 'poll'): Promise<void> {
+    const id = num(row.ID);
+    if (!id) return;
+    await this.prisma.$transaction(async tx => {
+      const where = { portalId_entityTypeId_entityId: { portalId: portal.id, entityTypeId: 3, entityId: id } };
+      const before = await tx.crmEntity.findUnique({ where });
+      const old = before?.row && typeof before.row === 'object' && !Array.isArray(before.row) ? before.row as CrmRow : {};
+      // Частичный ответ CRM не должен стирать уже сохранённые поля.
+      const oldTime = Date.parse(String(old.DATE_MODIFY ?? ''));
+      const nextTime = Date.parse(String(row.DATE_MODIFY ?? ''));
+      if (before?.deletedAt && (!Number.isFinite(nextTime) || nextTime <= before.deletedAt.getTime())) return;
+      if (Number.isFinite(oldTime) && Number.isFinite(nextTime) && nextTime < oldTime) return;
+      const next = { ...old, ...row };
+      const changes = Object.keys(next).filter(key => stableJson(old[key]) !== stableJson(next[key])).map(field => ({ field, before: old[field] ?? null, after: next[field] ?? null }));
+      await tx.crmEntity.upsert({ where, create: { portalId: portal.id, entityTypeId: 3, ...entityColumns(3, next, portal.domain), row: json(next), syncedAt: new Date() }, update: { ...entityColumns(3, next, portal.domain), row: json(next), deletedAt: null, syncedAt: new Date() } });
+      const actor = await contactActor(tx, portal.id, row);
+      const actorName = actor.accountId ? `${actor.accountType === 'system_user' ? 'Системная учётная запись' : 'Битрикс24, последний редактор'}: ${actor.accountName ?? '#' + actor.accountId}` : 'Битрикс24, автор неизвестен';
+      const versionChanged = Number.isFinite(oldTime) && Number.isFinite(nextTime) && nextTime > oldTime;
+      const deviations = before && !before.deletedAt && observation !== 'baseline' && (observation === 'event' || versionChanged) ? contactBusinessChanges(changes, old) : [];
+      if (changes.length || before?.deletedAt) await tx.actionLog.create({ data: {
+        portalId: portal.id, actorKind: 'bitrix', actorName: actorName.slice(0, 255), userId: actor.accountId, action: before ? 'contact.changed_in_bitrix' : 'contact.imported',
+        entityType: 'contact', entityId: String(id), summary: before ? `Контакт #${id}: изменения из Битрикс24` : `Контакт #${id}: сохранён из Битрикс24`, via: 'bitrix_sync',
+        details: { changes, deviations, actor, modifiedById: num(row.MODIFY_BY_ID), modifiedAt: typeof row.DATE_MODIFY === 'string' ? row.DATE_MODIFY : null, restored: !!before?.deletedAt } as unknown as Prisma.InputJsonValue,
+      } });
+      if (deviations.length) await tx.contactAlert.createMany({ data: [{ portalId: portal.id, contactId: id, kind: 'change', changes: deviations as unknown as Prisma.InputJsonValue, actor: actor as unknown as Prisma.InputJsonValue, fingerprint: contactFingerprint(id, 'change', deviations, row.DATE_MODIFY ?? null) }], skipDuplicates: true });
+    }, { isolationLevel: 'Serializable' });
+  }
+
+  async refreshContact(portal: Portal, client: Bitrix24RestClient, id: number, deleted = false, eventAt?: Date): Promise<void> {
+    if (deleted) {
+      await this.prisma.$transaction(async tx => {
+        const where = { portalId_entityTypeId_entityId: { portalId: portal.id, entityTypeId: 3, entityId: id } };
+        const before = await tx.crmEntity.findUnique({ where });
+        if (before?.deletedAt) return;
+        if (before) await tx.crmEntity.update({ where, data: { deletedAt: new Date() } });
+        else await tx.crmEntity.create({ data: { portalId: portal.id, entityTypeId: 3, entityId: id, title: `Контакт #${id}`, row: {}, deletedAt: new Date(), syncedAt: new Date() } });
+        const actor = await contactActor(tx, portal.id, {}, true);
+        await tx.actionLog.create({ data: { portalId: portal.id, actorKind: 'bitrix', actorName: 'Битрикс24, автор удаления неизвестен', action: 'contact.deleted_in_bitrix', entityType: 'contact', entityId: String(id), summary: `Контакт #${id}: удалён в Битрикс24`, via: 'bitrix_sync', details: { before: before?.row ?? null, actor: actor as unknown as Prisma.InputJsonValue } } });
+        await tx.contactAlert.createMany({ data: [{ portalId: portal.id, contactId: id, kind: 'deleted', changes: [], actor: actor as unknown as Prisma.InputJsonValue, fingerprint: contactFingerprint(id, 'deleted', [], before?.row ?? null) }], skipDuplicates: true });
+      }, { isolationLevel: 'Serializable' });
+      return;
+    }
+    if (eventAt) {
+      const known = await this.prisma.crmEntity.findUnique({ where: { portalId_entityTypeId_entityId: { portalId: portal.id, entityTypeId: 3, entityId: id } }, select: { deletedAt: true } });
+      if (known?.deletedAt && known.deletedAt >= eventAt) return;
+    }
+    const row = (await client.call<CrmRow>('crm.contact.get', { id })).result;
+    if (!row?.ID) throw new Error('CRM contact unavailable');
+    await this.saveContact(portal, row, 'event');
+  }
+
+  /** Начальная копия и периодические изменения — курсор ID сохраняется между проходами. */
+  async syncContacts(portal: Portal, client: Bitrix24RestClient, initial: boolean, now = new Date()): Promise<void> {
+    const kind = initial ? 'contact' : 'contact_changes';
+    const state = await this.state(portal.id, kind);
+    if (initial && state.backfillDoneAt) return;
+    const since = state.since ?? new Date(now.getTime() - OVERLAP_MS);
+    const until = state.backfillDoneAt ?? now;
+    let cursor = state.backfillCursor;
+    for (let page = 0; page < 2; page++) {
+      const rows = (await client.call<CrmRow[]>('crm.contact.list', { order: { ID: 'ASC' }, filter: { '>ID': cursor, ...(!initial ? { '>=DATE_MODIFY': since.toISOString(), '<=DATE_MODIFY': until.toISOString() } : {}) }, select: ['*', 'UF_*', 'PHONE', 'EMAIL', 'WEB', 'IM'], start: -1 })).result;
+      if (!Array.isArray(rows)) throw new Error('Invalid CRM contact list');
+      for (const row of rows) await this.saveContact(portal, row, initial ? 'baseline' : 'poll');
+      if (rows.length < PAGE) {
+        await this.setState(portal.id, kind, initial ? { backfillCursor: cursor, backfillDoneAt: now, since } : { backfillCursor: 0, backfillDoneAt: null, since: new Date(until.getTime() - OVERLAP_MS) });
+        return;
+      }
+      cursor = Math.max(cursor, ...rows.map(r => num(r.ID) ?? 0));
+      await this.setState(portal.id, kind, { backfillCursor: cursor, since, ...(!initial ? { backfillDoneAt: until } : {}) });
+    }
+  }
+
+  /** Сверяем наличие известных контактов: отсутствие в списке ещё не доказывает удаление. */
+  async reconcileContacts(portal: Portal, client: Bitrix24RestClient): Promise<void> {
+    const state = await this.state(portal.id, 'contact_presence');
+    const known = await this.prisma.crmEntity.findMany({ where: { portalId: portal.id, entityTypeId: 3, deletedAt: null, entityId: { gt: state.backfillCursor } }, orderBy: { entityId: 'asc' }, take: 50, select: { entityId: true, row: true } });
+    if (!known.length) { await this.setState(portal.id, 'contact_presence', { backfillCursor: 0, since: new Date() }); return; }
+    const rows = (await client.call<CrmRow[]>('crm.contact.list', { filter: { '@ID': known.map(c => c.entityId) }, select: ['ID'] })).result;
+    if (!Array.isArray(rows)) throw new Error('Invalid CRM contact presence response');
+    const visible = new Set(rows.map(r => num(r.ID)));
+    for (const contact of known.filter(c => !visible.has(c.entityId))) await this.prisma.$transaction(async tx => {
+      const fingerprint = contactFingerprint(contact.entityId, 'missing', [], contact.row);
+      const prior = await tx.contactAlert.findUnique({ where: { portalId_fingerprint: { portalId: portal.id, fingerprint } } });
+      if (prior) return;
+      const actor = await contactActor(tx, portal.id, {}, true);
+      await tx.contactAlert.create({ data: { portalId: portal.id, contactId: contact.entityId, kind: 'missing', changes: [], actor: actor as unknown as Prisma.InputJsonValue, fingerprint } });
+      await tx.actionLog.create({ data: { portalId: portal.id, actorKind: 'bitrix', actorName: 'Битрикс24', action: 'contact.missing_in_bitrix', entityType: 'contact', entityId: String(contact.entityId), summary: `Контакт #${contact.entityId}: не возвращён Битрикс24, требуется проверка доступности/удаления`, via: 'bitrix_sync', details: { deletionConfirmed: false, valuesPreserved: true } } });
+    }, { isolationLevel: 'Serializable' });
+    await this.setState(portal.id, 'contact_presence', { backfillCursor: known[known.length - 1].entityId, since: new Date() });
   }
 
   /** Загрузить в копию те из `ids`, которых в ней ещё нет. */
@@ -251,6 +349,7 @@ export class CrmMirrorService {
           await this.afterCalls(portal, client, await this.saveCalls(portal.id, rows));
         } else {
           for (const t of ENTITY_TYPES) {
+            if (t === 3) continue; // Контакты синхронизирует отдельная устойчивая очередь.
             const spec = ENTITY_SPECS[t];
             const rows = await client.listAll<CrmRow>(spec.method, { order: { DATE_MODIFY: 'ASC' }, filter: { '>=DATE_MODIFY': since }, select: [...spec.select] }, { max: 2000 });
             await this.saveEntities(portal, t, rows);
@@ -292,4 +391,11 @@ export class CrmMirrorService {
     await this.state(portal.id, 'employee');
     await this.setState(portal.id, 'employee', { since: now, backfillDoneAt: now });
   }
+}
+
+/** Стабильное сравнение JSON без зависимости от порядка ключей ответа CRM. */
+export function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
 }

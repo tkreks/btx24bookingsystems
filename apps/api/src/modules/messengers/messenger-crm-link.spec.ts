@@ -10,6 +10,7 @@ describe('клиент CRM для Telegram без номера', () => {
   function crmSetup(chat: Record<string, unknown> | null, contacts: Record<string, unknown>[] = []) {
     const row = chat ? { portalId: 'p1', messengerId: 'm1', chatId: '345781378@lid', phone: null, activeDealId: null, crmContactId: null, crmMatchedAt: null, crmMatch: null, ...chat } : null;
     const db = {
+      portalSettings: { findUnique: vi.fn(async () => null) },
       portal: { findFirst: vi.fn(async () => ({ id: 'p1', status: 'ACTIVE' })) },
       messengerChat: {
         findUnique: vi.fn(async () => row),
@@ -81,6 +82,7 @@ describe('новый диалог линии — к найденному кли�
       return { result: { SUCCESS: true, DATA: { RESULT: [{ SUCCESS: true, session: { CHAT_ID: '900' } }] } } };
     });
     const db = {
+      portalSettings: { findUnique: vi.fn(async () => null) },
       portal: { findFirst: vi.fn(async () => ({ id: 'p1', status: 'ACTIVE' })) },
       messenger: { findFirst: vi.fn(async () => null) },
       messengerMessage: { findFirst: vi.fn(async () => null), update: vi.fn() },

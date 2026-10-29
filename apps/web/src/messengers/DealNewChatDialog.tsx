@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { messageChannel, messengerLabel, type MessengerDealTargetsDto } from '@btx24/shared';
+import { messageChannel, messengerLabel, type MessengerChatTargetsDto, type MessengerDealTargetsDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
 import { fmtLinePhone } from '../openlines/ChannelFilter.js';
 import { FirstMessageDialog, type SearchResult } from './by-kind.js';
@@ -18,23 +18,37 @@ const VIA: Record<NonNullable<Target['via']>, string> = {
  * Новый чат с клиентом сделки вместо чата в неработающей линии (встройка сделки). Клиент — контакт
  * сделки: сервер связывает с ним диалог до первого сообщения, поэтому линия не создаст нового клиента,
  * даже если мессенджер не показывает номер. Сначала — мессенджер прежнего чата (`kind`).
+ * `chatId` — «Присоединиться к чату» в неработающем чате: только наш номер, сопоставленный с линией
+ * этого чата (линия ↔ один аккаунт мессенджера); клиент найден в одном номере — сразу к сообщению.
  */
-export function DealNewChatDialog({ dealId, kind, onOpenChat, onClose }: { dealId: number; kind: string | null; onOpenChat: (chatId: number) => void; onClose: () => void }) {
+export function DealNewChatDialog({ dealId, chatId, kind, onOpenChat, onClose }: { dealId: number; chatId?: number; kind: string | null; onOpenChat: (chatId: number) => void; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [data, setData] = useState<MessengerDealTargetsDto | null>(null);
+  const [data, setData] = useState<MessengerDealTargetsDto | MessengerChatTargetsDto | null>(null);
   const [error, setError] = useState('');
   const [writing, setWriting] = useState<Target | null>(null);
   useEffect(() => ref.current?.showModal(), []);
   useEffect(() => {
     let active = true;
-    void apiGet<MessengerDealTargetsDto>(`/messengers/deal-targets/${dealId}`).then(
-      (d) => active && setData(d),
+    void apiGet<MessengerDealTargetsDto | MessengerChatTargetsDto>(chatId ? `/messengers/chat-targets/${chatId}` : `/messengers/deal-targets/${dealId}`).then(
+      (d) => {
+        if (!active) return;
+        setData(d);
+        // Продолжение неработающего чата: клиент найден ровно в одном нашем номере — без лишнего шага.
+        const found = d.targets.filter((t) => t.status === 'found');
+        if (chatId && found.length === 1 && d.targets.length === 1) {
+          if (found[0].openlineChatId) {
+            onClose();
+            onOpenChat(found[0].openlineChatId);
+          } else setWriting(found[0]);
+        }
+      },
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось проверить мессенджеры'),
     );
     return () => {
       active = false;
     };
-  }, [dealId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealId, chatId]);
 
   const open = (chatId: number) => {
     onClose();
@@ -49,7 +63,7 @@ export function DealNewChatDialog({ dealId, kind, onOpenChat, onClose }: { dealI
   return (
     <dialog ref={ref} className="new-dialog deal-new-chat" aria-label="Новый чат с клиентом" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => e.stopPropagation()}>
       <header className="new-dialog-head">
-        <h3>Новый чат с клиентом</h3>
+        <h3>{chatId ? 'Продолжить переписку через наш номер' : 'Новый чат с клиентом'}</h3>
         <button type="button" className="new-dialog-close" aria-label="Закрыть" onClick={onClose}>×</button>
       </header>
       {!data && !error && <p className="muted">Ищем клиента в мессенджерах…</p>}
@@ -60,7 +74,16 @@ export function DealNewChatDialog({ dealId, kind, onOpenChat, onClose }: { dealI
           Клиент: <b>{data.contact.name}</b>. Новый чат привяжется к этому клиенту — нового контакта и сделки не будет.
         </p>
       )}
-      {data?.contact && !targets.length && <p className="muted">Нет подключённых мессенджеров со своей линией, с которых вам можно писать.</p>}
+      {data && 'channel' in data && data.channel && (
+        <p className="muted">Канал этого чата закреплён за номером {fmtLinePhone(data.channel.split(':')[1] ?? '')} — новый чат начнётся с него.</p>
+      )}
+      {data?.contact && !targets.length && (
+        <p className="muted">
+          {data && 'channel' in data && data.channel
+            ? 'Номер этого канала не подключён к своей линии приложения или вам нельзя с него писать.'
+            : 'Нет подключённых мессенджеров со своей линией, с которых вам можно писать.'}
+        </p>
+      )}
       {!!targets.length && (
         <ul className="new-dialog-checks">
           {targets.map((t) => (
