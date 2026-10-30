@@ -5,6 +5,10 @@ ARG NODE_IMAGE=node:24-slim
 ARG NGINX_IMAGE=nginx:1.29-alpine
 
 FROM ${NODE_IMAGE} AS build
+# OpenSSL — чтобы `npm ci` поставил движок миграций Prisma под OpenSSL 3, как в слое api; без него
+# ставится 1.1.x, и api при каждом старте качает нужный из интернета (зависание 2026-10-30).
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 # Chromium для мессенджеров ставится в образ messenger из пакетов ОС — puppeteer свой не качает.
 ENV PUPPETEER_SKIP_DOWNLOAD=1

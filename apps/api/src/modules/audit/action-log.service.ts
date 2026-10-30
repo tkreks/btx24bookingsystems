@@ -3,6 +3,7 @@ import { isIsoDate, zonedDayRange, classifyActionLog, ACTION_LOG_CATEGORIES, ACT
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
+import { CHAIN_ACTION } from '../openlines/chain-send-guard.js';
 
 /** Кто сделал: сотрудник, автоматизация приложения или сам Битрикс24 (как в истории брони). */
 export type ActionActor = { kind: 'user'; userId: number; name: string } | { kind: 'system'; name: string } | { kind: 'bitrix'; name: string };
@@ -94,6 +95,8 @@ export class ActionLogService {
     const cursor = before ? await this.prisma.actionLog.findFirst({ where: { id: before, portalId }, select: { at: true, id: true } }) : null;
     const where: Prisma.ActionLogWhereInput = {
       portalId,
+      // Служебные строки защиты от повтора цепочки: сами сообщения журнал уже показывает.
+      action: { not: CHAIN_ACTION },
       ...(from || to
         ? { at: { ...(from ? { gte: zonedDayRange(from, timezone).start } : {}), ...(to ? { lt: zonedDayRange(to, timezone).end } : {}) } }
         : {}),

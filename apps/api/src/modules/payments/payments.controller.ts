@@ -26,9 +26,11 @@ export class PaymentsController {
     @Query('kind') kind?: string,
     @Query('groupId') groupId?: string,
     @Query('bookingId') bookingId?: string,
+    @Query('templateId') templateId?: string,
   ): Promise<PaymentPreviewDto> {
     if (!PAYMENT_REQUEST_KINDS.includes(kind as PaymentRequestKind)) throw new BadRequestException({ code: 'INVALID_QUERY', message: 'kind: custom | prepayment | surcharge' });
-    return this.payments.preview(user, int(dealId, 'dealId'), kind as PaymentRequestKind, groupId || undefined, bookingId ? int(bookingId, 'bookingId') : undefined);
+    if (templateId && !/^[a-z0-9]{1,40}$/i.test(templateId)) throw new BadRequestException({ code: 'INVALID_QUERY', message: 'templateId: ID шаблона' });
+    return this.payments.preview(user, int(dealId, 'dealId'), kind as PaymentRequestKind, groupId || undefined, bookingId ? int(bookingId, 'bookingId') : undefined, templateId || undefined);
   }
 
   /** Сделки клиента в работе для счёта (новые сверху) — выбор в окне счетов. */

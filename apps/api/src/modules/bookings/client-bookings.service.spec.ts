@@ -61,6 +61,17 @@ describe('ClientBookingsService', () => {
 });
 
 describe('ClientBookingsService recent', () => {
+  it('chat: contact and deal of the dialog, full past list on request', async () => {
+    const call = vi.fn(async () => ({ result: { entity_data_2: 'LEAD|0|COMPANY|0|CONTACT|140|DEAL|700' } }));
+    const service = new ClientBookingsService({} as PrismaService, {} as DealFieldMapService);
+    const forContact = vi.spyOn(service, 'forContact').mockResolvedValue({} as Awaited<ReturnType<ClientBookingsService['forContact']>>);
+    const user = { portal: { id: 'p1' }, client: { call } } as unknown as B24UserContext;
+    await service.forChat(user, 5);
+    expect(forContact).toHaveBeenLastCalledWith(user, 140, [700], expect.any(Date), false);
+    await service.forChat(user, 5, true);
+    expect(forContact).toHaveBeenLastCalledWith(user, 140, [700], expect.any(Date), true);
+  });
+
   it('keeps past bookings of the requested deal beyond the last five', async () => {
     const many = Array.from({ length: 7 }, (_, i) => ({ id: i + 1, resourceIds: [10], datePeriod: { from: { timestamp: Date.parse(`2026-0${i + 1}-01T10:00:00Z`) / 1000 }, to: { timestamp: Date.parse(`2026-0${i + 1}-01T12:00:00Z`) / 1000 } } }));
     const call = vi.fn(async (method: string) => (method === 'crm.contact.get' ? { result: {} } : { result: { booking: many } }));

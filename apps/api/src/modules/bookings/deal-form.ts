@@ -29,6 +29,7 @@ export const APP_FILLED_ROLES: readonly DealFieldRole[] = [
   'surchargeInvoiceId',
   'surchargeLink',
   'paidAmount',
+  'bookingsList',
 ];
 
 const KINDS: Record<string, DealFormFieldKind> = {

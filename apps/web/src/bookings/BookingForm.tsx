@@ -762,6 +762,7 @@ export function BookingForm({
       }}
     >
       <span className="bk-dot" aria-hidden="true" />
+      <DealToneTag tone={toneOf(d)} />
       <span className="wz-deal-main">
         <b>{d.title}</b>
         <span className="wz-deal-sub">
@@ -849,6 +850,7 @@ export function BookingForm({
                 onClick={() => chooseDeal(d)}
               >
                 <span className="bk-dot" aria-hidden="true" />
+                <DealToneTag tone={d.tone ?? 'empty'} />
                 <span className="wz-deal-main">
                   <b>{d.title}</b>
                   <span className="wz-deal-sub">{[d.contact?.name, d.opportunity ? fmtMoney(d.opportunity, d.currency) : null, `#${d.id}`].filter(Boolean).join(' · ')}</span>
@@ -1643,6 +1645,10 @@ const DEAL_TONE_TITLES: Record<DealBookingTone, string> = {
   filled: 'Брони нет, но в сделке остались заполнены поля брони',
   empty: 'Пустая сделка — подходит для новой брони',
 };
+/** Ярлык цвета сделки над верхней границей карточки справа (решение владельца 2026-10-30). */
+const DEAL_TONE_TAGS: Record<DealBookingTone, string> = { booked: 'Есть бронь', filled: 'Заполнены поля', empty: 'Пустая сделка' };
+/** Текст ярлыка входит в доступное имя кнопки-карточки — скринридер читает его вместе с названием. */
+const DealToneTag = ({ tone }: { tone: DealBookingTone }) => <span className="wz-deal-tag">{DEAL_TONE_TAGS[tone]}</span>;
 
 /**
  * В сделке уже заполнены поля формы — что с ними делать: оставить (по умолчанию) или очистить.

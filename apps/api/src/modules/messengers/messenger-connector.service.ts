@@ -422,12 +422,16 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
       if (event === 'ONIMCONNECTORMESSAGEADD') {
         // Повтор события: уже отправлено — только подтверждаем доставку. Первое сообщение из приложения
         // (`firstContact`) линия может прислать эхом — узнаём его по чату и тексту, второй раз не шлём.
+        // Проверка и отправка — под замком на сообщение линии: дубль события, пришедший одновременно
+        // (или повтор `retry`), ждёт первого и затем видит уже отправленное.
         const text = bbToMessenger(item.message?.text ?? '', m.kind);
-        const done =
-          (b24MessageId ? await this.prisma.messengerMessage.findFirst({ where: { messengerId: m.id, b24MessageId } }) : null) ??
-          (await this.echoOfFirstContact(m, chatId, Number(item.im?.chat_id) || null, text, b24MessageId, !!item.message?.files?.length));
-        const files = item.message?.files ?? [];
-        const ids = done && (!files.length || done.source !== 'bitrix') ? [done.externalId] : await this.sendFromLine(portal, m, chatId, text, item);
+        const ids = await this.once(`${m.id}:${b24MessageId ?? `${chatId}:${item.message?.id ?? ''}`}`, async () => {
+          const done =
+            (b24MessageId ? await this.prisma.messengerMessage.findFirst({ where: { messengerId: m.id, b24MessageId } }) : null) ??
+            (await this.echoOfFirstContact(m, chatId, Number(item.im?.chat_id) || null, text, b24MessageId, !!item.message?.files?.length));
+          const files = item.message?.files ?? [];
+          return done && (!files.length || done.source !== 'bitrix') ? [done.externalId] : await this.sendFromLine(client, m, chatId, text, item);
+        });
         await this.delivered(client, m, item, ids);
       } else {
         const ids = ([] as string[]).concat(item.message?.id ?? []).filter(Boolean);
@@ -445,6 +449,24 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     }
   }
 
+  /**
+   * Одна отправка сообщения оператора за раз (ключ — мессенджер + сообщение линии): следующий вызов с
+   * тем же ключом начинается после завершения предыдущего (успеха или ошибки) и заново проверяет базу.
+   * Замок в памяти процесса: события коннектора принимает и повторяет только `api` (один экземпляр).
+   */
+  private readonly sending = new Map<string, Promise<unknown>>();
+  private async once<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.sending.get(key);
+    const run = (prev ? prev.then(fn, fn) : fn()) as Promise<T>;
+    const tail = run.then(() => undefined, () => undefined);
+    this.sending.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.sending.get(key) === tail) this.sending.delete(key);
+    }
+  }
+
   private async echoOfFirstContact(m: Messenger, chatId: string, b24ChatId: number | null, text: string, b24MessageId: number | null, hasFiles = false): Promise<MessengerMessage | null> {
     if (!b24ChatId) return null;
     const recent = await this.prisma.messengerMessage.findMany({
@@ -459,14 +481,13 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
   }
 
   /** Сообщение оператора → клиенту: текст и вложения (каждое — отдельным сообщением, подпись — у первого). */
-  private async sendFromLine(portal: Portal, m: Messenger, chatId: string, text: string, item: ConnectorItem): Promise<string[]> {
+  private async sendFromLine(client: Bitrix24RestClient, m: Messenger, chatId: string, text: string, item: ConnectorItem): Promise<string[]> {
     const files = item.message?.files ?? [];
     const sent = files.length && item.im?.message_id ? await this.prisma.messengerMessage.findMany({ where: { messengerId: m.id, chatId: chatId.split('::deal:')[0], b24MessageId: Number(item.im.message_id), source: 'bitrix' }, orderBy: [{ sentAt: 'asc' }, { id: 'asc' }] }) : [];
     const out: string[] = sent.map(row => row.externalId);
     let caption = sent.length ? '' : text;
     for (const f of files.slice(sent.length)) {
-      const file = await this.operatorFile(portal, f);
-      if (!file) throw new Error('Не удалось скачать вложение оператора');
+      const file = await this.operatorFile(client, f);
       out.push((await this.saveFromLine(m, await this.service.send(m.id, chatId.split('::deal:')[0], caption, undefined, file), item)).externalId);
       caption = '';
     }
@@ -474,34 +495,15 @@ export class MessengerConnectorService implements OnModuleInit, OnApplicationShu
     return out;
   }
 
-  /** Скачать файл оператора — только с адреса самого портала (ссылки из события), не больше 64 МБ. */
-  private async operatorFile(portal: Portal, f: OperatorFile): Promise<{ mime: string; name: string; data: Buffer } | null> {
-    let url = new URL(String(f.link ?? f.downloadLink ?? f.urlDownload ?? f.url));
-    let res: Response | undefined;
-    for (let redirects = 0; redirects < 4; redirects++) {
-      if (url.protocol !== 'https:' || url.hostname !== portal.domain || (url.port && url.port !== '443') || url.username || url.password) throw new Error('Файл доступен только с HTTPS-адреса портала');
-      res = await fetch(url, { signal: AbortSignal.timeout(60_000), redirect: 'manual' });
-      if (![301,302,303,307,308].includes(res.status)) break;
-      const next = res.headers.get('location'); await res.body?.cancel();
-      if (!next) throw new Error('Нет адреса перенаправления файла');
-      url = new URL(next, url); res = undefined;
-    }
-    if (!res?.ok) throw new Error(`Файл не скачан: HTTP ${res?.status ?? 'redirect'}`);
-    if (Number(res.headers.get('content-length')) > MAX_OPERATOR_FILE) { await res.body?.cancel(); throw new Error('Файл больше 64 МБ'); }
-    const chunks: Uint8Array[] = []; let size = 0;
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('Файл без содержимого');
-    try {
-      while (true) {
-        const { done, value } = await reader.read(); if (done) break;
-        size += value.byteLength;
-        if (size > MAX_OPERATOR_FILE) { await reader.cancel(); throw new Error('Файл больше 64 МБ'); }
-        chunks.push(value);
-      }
-    } finally { reader.releaseLock(); }
-    const data = Buffer.concat(chunks, size);
-
-    return { mime: res.headers.get('content-type')?.split(';')[0] ?? f.type ?? 'application/octet-stream', name: f.name ?? 'file', data };
+  /**
+   * Скачать файл оператора клиентом портала (`download`): только с HTTPS-адреса самого портала, каждое
+   * перенаправление проверяется тем же правилом, не больше 64 МБ (поток прерывается).
+   */
+  private async operatorFile(client: Bitrix24RestClient, f: OperatorFile): Promise<{ mime: string; name: string; data: Buffer }> {
+    const link = f.link ?? f.downloadLink ?? f.urlDownload ?? f.url;
+    if (!link) throw new Error('Нет ссылки на вложение оператора');
+    const { data, contentType } = await client.download(String(link), MAX_OPERATOR_FILE, { redirects: 'portal' });
+    return { mime: contentType?.split(';')[0] || f.type || 'application/octet-stream', name: f.name ?? 'file', data };
   }
 
   private async saveFromLine(m: Messenger, w: Awaited<ReturnType<MessengerServiceClient['send']>>, item: ConnectorItem): Promise<MessengerMessage> {

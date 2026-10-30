@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySendResult, pendingOutgoing, type Outgoing } from './ChatView.js';
+import { applySendResult, pendingOutgoing, retryGroup, type Outgoing } from './ChatView.js';
 
 const item = (key: string, text: string, fileIds: string[] = []): Outgoing => ({ key, text, files: [], date: '', status: 'sending', ids: [], step: { text, fileIds } });
 
@@ -22,5 +22,15 @@ describe('исходящие сообщения чата', () => {
     const failed = { ...item('b', 'y'), status: 'error' as const };
     expect(pendingOutgoing([sent, failed], [{ id: 10 }]).map((o) => o.key)).toEqual(['a', 'b']);
     expect(pendingOutgoing([sent, failed], [{ id: 10 }, { id: 11 }]).map((o) => o.key)).toEqual(['b']);
+  });
+
+  it('«Повторить» без ответа сервера — вся пачка с прежним ключом; после ответа — только этот шаг', () => {
+    const lost = (key: string) => ({ ...item(key, key), status: 'error' as const, sendKey: 'k1' });
+    const a = lost('a');
+    const b = lost('b');
+    const other = { ...item('c', 'c'), status: 'error' as const, sendKey: 'k2' };
+    const answered = { ...item('d', 'd'), status: 'error' as const };
+    expect(retryGroup([a, other, b, answered], b).map((o) => o.key)).toEqual(['a', 'b']);
+    expect(retryGroup([a, other, b, answered], answered).map((o) => o.key)).toEqual(['d']);
   });
 });

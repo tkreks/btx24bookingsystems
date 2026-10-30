@@ -6,9 +6,8 @@ import { AccessService, type GroupAccess } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { dealLinks, getBooking } from './bitrix-bookings.js';
-import { dealDateFields } from './booking-create.service.js';
 import { BookingJournalService, stateOf, type BookingState } from './booking-journal.service.js';
-import { DealFieldMapService } from './deal-field-map.service.js';
+import { DealBookingFieldsService, userFieldsContext } from './deal-booking-fields.service.js';
 
 /** Код пересечения броней в Битрикс24. */
 const OVERLAP = '1018';
@@ -17,11 +16,13 @@ const VERSIONS_MAX = 20;
 /**
  * Решения по брони приложения, которая разошлась с Битрикс24 (до решения она видна в календаре):
  * - `recreate` — пропала в Битрикс24: создать там заново по данным журнала или по выбранной версии;
- *   у брони новый ID — он переписывается в журнал, счета приложения и поле «ID бронирования» сделки;
+ *   у брони новый ID — он переписывается в журнал и счета приложения;
  * - `rollback` — изменили в Битрикс24: вернуть бронь к выбранной версии из истории (время, ресурсы,
- *   сделка), даты в сделке — тоже;
+ *   сделка);
  * - `removeInApp` — согласиться с удалением: бронь отменяется в журнале (статус и история остаются).
  * Права — в группе ресурса брони (ресурс состоит ровно в одной группе); токен сотрудника.
+ * После решения поля броней сделки (номер/даты ближайшей брони, «Брони сделки») пересчитываются по
+ * журналу — `DealBookingFieldsService.refresh`, сбой записи — предупреждение.
  */
 @Injectable()
 export class BookingRestoreService {
@@ -29,7 +30,7 @@ export class BookingRestoreService {
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
     private readonly journal: BookingJournalService,
-    private readonly fieldMap: DealFieldMapService,
+    private readonly dealBookings: DealBookingFieldsService,
   ) {}
 
   /** Версии данных брони для «Откатить» и «Истории изменений» (по прежнему ID — тоже). */
@@ -79,8 +80,6 @@ export class BookingRestoreService {
         await user.client
           .call('booking.v1.booking.client.set', { bookingId: newId, clients: [{ id: contactId, type: { module: 'crm', code: 'CONTACT' } }] })
           .catch(() => warnings.push('Клиент не привязан к брони в Битрикс24'));
-      const map = await this.fieldMap.get(user.portal.id);
-      await this.dealFields(user, state.dealId, { ...(map.bookingId ? { [map.bookingId]: String(newId) } : {}), ...dealDateFields(map, new Date(state.startsAt), new Date(state.endsAt), tz) }, warnings);
     }
 
     const actor = { kind: 'user' as const, userId: user.userId, name: user.userName };
@@ -89,6 +88,7 @@ export class BookingRestoreService {
     if (versionId) await this.journal.recordChanged(recreated, state, actor, 'rolled_back', 'app');
     // Счета приложения по брони — на новый ID (оплата и снятие за неоплату находят бронь по нему).
     await this.prisma.paymentRequest.updateMany({ where: { portalId: user.portal.id, bookingId }, data: { bookingId: newId } });
+    warnings.push(...(await this.refreshDeals(user, [record.dealId, state.dealId])));
     return { previousBookingId: bookingId, bookingId: newId, warnings };
   }
 
@@ -119,21 +119,20 @@ export class BookingRestoreService {
         });
       else await user.client.call('booking.v1.booking.externalData.unset', { bookingId });
     }
-    if (state.dealId) {
-      const map = await this.fieldMap.get(user.portal.id);
-      await this.dealFields(user, state.dealId, dealDateFields(map, new Date(state.startsAt), new Date(state.endsAt), tz), warnings);
-    }
     await this.journal.recordChanged(record, state, { kind: 'user', userId: user.userId, name: user.userName }, 'rolled_back', 'app');
+    // Прежняя сделка (бронь могла уйти из неё) и сделка версии.
+    warnings.push(...(await this.refreshDeals(user, [record.dealId, state.dealId])));
     return warnings;
   }
 
   /** Согласиться с удалением в Битрикс24: отменить бронь в приложении. */
-  async removeInApp(user: B24UserContext, bookingId: number): Promise<void> {
-    await this.missingRecord(user, bookingId, 'booking.cancel');
+  async removeInApp(user: B24UserContext, bookingId: number): Promise<string[]> {
+    const record = await this.missingRecord(user, bookingId, 'booking.cancel');
     await this.journal.recordCancelled(user.portal.id, bookingId, {
       reason: 'removed_in_bitrix',
       actor: { kind: 'user', userId: user.userId, name: user.userName },
     });
+    return this.refreshDeals(user, [record.dealId]);
   }
 
   /** Активная запись журнала, которой нет в Битрикс24, и право в группе её ресурса. */
@@ -163,15 +162,12 @@ export class BookingRestoreService {
     return state;
   }
 
-  private async dealFields(user: B24UserContext, dealId: number, fields: Record<string, string>, warnings: string[]): Promise<void> {
-    if (!Object.keys(fields).length) return;
-    try {
-      await user.client.call('crm.deal.update', { id: dealId, fields });
-    } catch (err) {
-      if (!(err instanceof Bitrix24Error) || err.code !== 'READ_ONLY_MODE') throw err;
-      warnings.push(`Поля брони в сделке #${dealId} не обновлены: изменять существующие сделки не разрешено`);
-    }
+  private async refreshDeals(user: B24UserContext, dealIds: (number | null)[]): Promise<string[]> {
+    const warnings: string[] = [];
+    for (const id of new Set(dealIds)) if (id) warnings.push(...(await this.dealBookings.refresh(userFieldsContext(user), id)));
+    return warnings;
   }
+
 }
 
 function period(s: BookingState, timezone: string) {

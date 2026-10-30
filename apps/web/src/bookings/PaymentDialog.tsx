@@ -18,6 +18,7 @@ import { Countdown } from './Countdown.js';
 import { MinimizeButton } from '../Minimize.js';
 import { CustomPaymentForm } from './CustomPaymentForm.js';
 import { PaymentSendVia, type PaymentVia } from './PaymentSendVia.js';
+import { PaymentWindow } from './PaymentWindow.js';
 
 const SOURCE: Record<PaymentPreviewDto['source'], string> = {
   fixed: 'фиксированная сумма группы',
@@ -33,20 +34,7 @@ const STATE_LABELS: Record<DealInvoiceDto['state'], string> = {
   failed: 'не оплачен',
 };
 
-/**
- * Счёт и ссылка на оплату по сделке (ADR 0009): сумма и текст клиенту — до отправки; после —
- * статус (ссылка формируется → ждём оплату → оплачено / не оплачено в срок) и сама ссылка.
- */
-export function PaymentDialog({
-  dealId: initialDealId,
-  bookingId: initialBookingId,
-  initialAmount,
-  fixedDeal = false,
-  callPlacement = false,
-  timezone,
-  onClose,
-  onCreateBooking,
-}: {
+type PaymentDialogProps = {
   dealId: number;
   bookingId?: number | null;
   /** Сумма из мастера (бронирование сертификатом — «Сумма предоплаты»): вместо расчёта. */
@@ -58,7 +46,32 @@ export function PaymentDialog({
   onClose: () => void;
   /** «Создать бронь» по выбранной сделке (группа требует бронь перед оплатой). */
   onCreateBooking?: (dealId: number) => void;
-}) {
+  /** «Настройки сообщений» в окне оплаты (администратор приложения). */
+  onOpenSettings?: () => void;
+};
+
+/**
+ * Счёт и ссылка на оплату по сделке (ADR 0009). Окно — `PaymentWindow` (макет 2026-10-30); в карточке
+ * звонка — компактная версия ниже.
+ */
+export function PaymentDialog({ onOpenSettings, ...props }: PaymentDialogProps) {
+  return props.callPlacement ? <CallPaymentDialog {...props} /> : <PaymentWindow {...props} onOpenSettings={onOpenSettings} />;
+}
+
+/**
+ * Карточка звонка: сумма и текст клиенту — до отправки; после — статус (ссылка формируется → ждём
+ * оплату → оплачено / не оплачено в срок) и сама ссылка.
+ */
+function CallPaymentDialog({
+  dealId: initialDealId,
+  bookingId: initialBookingId,
+  initialAmount,
+  fixedDeal = false,
+  callPlacement = false,
+  timezone,
+  onClose,
+  onCreateBooking,
+}: Omit<PaymentDialogProps, 'onOpenSettings'>) {
   // Сделка — по умолчанию самая новая в работе (если окно открыли не сразу после брони).
   const [dealId, setDealId] = useState(initialDealId);
   const [dealOptions, setDealOptions] = useState<PaymentDealOptionsDto | null>(null);

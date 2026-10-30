@@ -8,6 +8,7 @@ function setup(portalId = 'p1') {
     storedFile: { create: vi.fn(async ({ data }: { data: { name: string; mime: string; size: number } }) => ({ id: 'saved', name: data.name, mime: data.mime, size: data.size })), findMany: vi.fn(async () => []), deleteMany: vi.fn() },
     messageTemplate: { findMany: vi.fn(async () => []) },
     workGroup: { findMany: vi.fn(async () => []) },
+    paymentRequest: { findMany: vi.fn(async () => [] as { messageFileIds: unknown }[]) },
   };
   const client = { call: vi.fn(async () => ({ result: { ID: '99', TYPE: 'file', NAME: 'Правила.pdf', SIZE: '3', DOWNLOAD_URL: 'https://portal/rest/download.json?auth=secret' } })), download: vi.fn(async () => ({ data: Buffer.from('pdf'), contentType: 'application/pdf' })), listAll: vi.fn(async () => [{ ID: '99', TYPE: 'file', NAME: 'Правила.pdf', SIZE: '3' }]) };
   const user = { portal: { id: portalId }, userId: 7, client } as unknown as B24UserContext;
@@ -74,6 +75,13 @@ describe('Вложения из Диска', () => {
     const t = setup();
     t.prisma.workGroup.findMany.mockResolvedValue([{ options: { bookingTypes: [{ confirmation: [{ files: [{ storedFileId: 'kept', name: 'Прайс' }] }] }] } }] as never);
     await t.svc.dropUnused(t.user, ['kept', 'orphan']);
+    expect(t.prisma.storedFile.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['orphan'] }, portalId: 'p1', ownerUserId: 7 } });
+  });
+  it('вложения окна оплаты не удаляются, пока заявка ждёт ссылку или оплату', async () => {
+    const t = setup();
+    t.prisma.paymentRequest.findMany.mockResolvedValue([{ messageFileIds: ['pay1'] }, { messageFileIds: null }]);
+    await t.svc.dropUnused(t.user, ['pay1', 'orphan']);
+    expect(t.prisma.paymentRequest.findMany).toHaveBeenCalledWith({ where: { portalId: 'p1', status: { in: ['link_pending', 'sent'] } }, select: { messageFileIds: true } });
     expect(t.prisma.storedFile.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['orphan'] }, portalId: 'p1', ownerUserId: 7 } });
   });
 });

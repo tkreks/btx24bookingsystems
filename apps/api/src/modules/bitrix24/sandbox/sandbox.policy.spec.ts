@@ -236,4 +236,18 @@ describe('контакты пока только читаем', () => {
       expect(await policy.allows('crm.item.update', { entityTypeId: 3, id, fields: {} })).toBe(false);
     }
   });
+
+  it('contact merge: crm.contact.update and crm.entity.mergeBatch only within the merge scope', async () => {
+    const { policy } = setup();
+    const scope = { kind: 'contact-merge' as const, ids: [10, 20] };
+    await expect(policy.allows('crm.contact.update', { id: 10, fields: { NAME: 'x' } })).resolves.toBe(false);
+    await expect(policy.allows('crm.contact.update', { id: 10, fields: { NAME: 'x' } }, scope)).resolves.toBe(true);
+    await expect(policy.allows('crm.contact.update', { id: 30, fields: { NAME: 'x' } }, scope)).resolves.toBe(false);
+    await expect(policy.allows('crm.contact.delete', { id: 10 }, scope)).resolves.toBe(false);
+    await expect(policy.allows('crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [10, 20] } })).resolves.toBe(false);
+    await expect(policy.allows('crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [10, 20] } }, scope)).resolves.toBe(true);
+    await expect(policy.allows('crm.entity.mergeBatch', { params: { entityTypeId: 2, entityIds: [10, 20] } }, scope)).resolves.toBe(false);
+    await expect(policy.allows('crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [20, 10] } }, scope)).resolves.toBe(false);
+    await expect(policy.allows('crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [10, 20, 30] } }, scope)).resolves.toBe(false);
+  });
 });

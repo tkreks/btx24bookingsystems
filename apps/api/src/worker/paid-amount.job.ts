@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PortalService } from '../modules/bitrix24/portals/portal.service.js';
-import { PaidAmountService } from '../modules/payments/paid-amount.service.js';
+import { crmItems, PaidAmountService } from '../modules/payments/paid-amount.service.js';
 
 /**
  * «Сумма внесённых оплат» — раз в 5 минут: сделки, у которых менялись счета (в т.ч. выставленные
@@ -46,7 +46,7 @@ export class PaidAmountJob implements OnModuleInit, OnApplicationShutdown {
         const client = this.portals.clientFor(portal);
         try {
           const [invoices, requests] = await Promise.all([
-            client.listAll<{ parentId2?: number | null }>('crm.item.list', { entityTypeId: 31, filter: { '>=updatedTime': since.toISOString() }, select: ['id', 'parentId2'] }, { max: 1000 }),
+            client.listAll<{ parentId2?: number | null }>('crm.item.list', { entityTypeId: 31, filter: { '>=updatedTime': since.toISOString() }, select: ['id', 'parentId2'] }, { max: 1000, pick: crmItems<{ parentId2?: number | null }> }),
             this.prisma.paymentRequest.findMany({ where: { portalId: portal.id, updatedAt: { gte: since } }, select: { dealId: true } }),
           ]);
           const deals = [...new Set([...invoices.map((i) => Number(i.parentId2) || 0), ...requests.map((r) => r.dealId)].filter((x) => x > 0))].slice(0, MAX_DEALS);

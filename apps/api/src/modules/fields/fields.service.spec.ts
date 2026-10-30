@@ -66,3 +66,16 @@ it('прежнее сопоставление сохраняется при из
   await service.save(t.user, { deal: { bookingStart: 'UF_CRM_READ' }, contact: { telegram: 'UF_CRM_TG' } });
   expect(t.write).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ dealFieldMap: { bookingStart: 'UF_CRM_READ' } }) }));
 });
+
+it('«Брони сделки» создаётся по кнопке множественным строковым полем и сопоставляется; существующее одиночное — не подходит', async () => {
+  const t = setup();
+  const save = vi.fn(async () => ({}));
+  const service = new FieldsService({ portalSettings: { findUnique: t.read, upsert: t.write } } as never, { get: async () => ({}), resolved: async () => ({}), save } as never);
+  await service.create(t.user, 'deal', 'bookingsList');
+  const add = t.call.mock.calls.find(([m]) => m === 'crm.deal.userfield.add') as unknown as [string, { fields: Record<string, unknown> }];
+  expect(add[1].fields).toMatchObject({ FIELD_NAME: 'BTX24_BOOKINGS_LIST', USER_TYPE_ID: 'string', MULTIPLE: 'Y', MANDATORY: 'N', XML_ID: 'btx24.deal.bookingsList', LABEL: 'Брони сделки' });
+  expect(save).toHaveBeenCalledWith('p1', 9, { bookingsList: 'UF_CRM_BTX24_BOOKINGS_LIST' });
+
+  t.call.mockImplementation(async (method: string): Promise<{ result: Record<string, CrmFieldMeta> }> => ({ result: method === 'crm.deal.fields' ? { UF_CRM_LIST: { type: 'string', formLabel: 'Брони сделки', isMultiple: false } } : {} }));
+  await expect(service.create(t.user, 'deal', 'bookingsList')).rejects.toMatchObject({ status: 400 });
+});

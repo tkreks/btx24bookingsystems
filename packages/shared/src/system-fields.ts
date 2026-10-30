@@ -1,4 +1,4 @@
-import { DEAL_FIELD_ROLES, type DealFieldRole, type DealFieldMapDto } from './bookings.js';
+import { DEAL_FIELD_ROLES, MULTIPLE_DEAL_FIELD_ROLES, type DealFieldRole, type DealFieldMapDto } from './bookings.js';
 import type { DealFieldInfo } from './group-admin.js';
 
 export type ContactFieldMapDto = Partial<Record<'telegram' | 'whatsapp' | 'max' | 'whatsappLid' | 'telegramLogin' | 'maxLogin', string>>;
@@ -22,7 +22,7 @@ const typesForRole = (role: DealFieldRole): string[] => {
   return ['string'];
 };
 export const SYSTEM_FIELDS: SystemFieldDefinition[] = [
-  ...(Object.keys(DEAL_FIELD_ROLES) as DealFieldRole[]).map(key => ({ key, entity: 'deal' as const, label: DEAL_FIELD_ROLES[key], group: key.startsWith('visit') ? 'Визит' : /prepayment|surcharge|paidAmount/.test(key) ? 'Оплаты' : 'Бронирование', defaultCode: `UF_CRM_BTX24_${key.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`, types: typesForRole(key), multiple: false })),
+  ...(Object.keys(DEAL_FIELD_ROLES) as DealFieldRole[]).map(key => ({ key, entity: 'deal' as const, label: DEAL_FIELD_ROLES[key], group: key.startsWith('visit') ? 'Визит' : /prepayment|surcharge|paidAmount/.test(key) ? 'Оплаты' : 'Бронирование', defaultCode: `UF_CRM_BTX24_${key.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`, types: typesForRole(key), multiple: MULTIPLE_DEAL_FIELD_ROLES.includes(key) })),
   ...(['telegram', 'whatsapp', 'max'] as const).map(key => ({ key, entity: 'contact' as const, group: 'Контакт и мессенджеры', label: key === 'whatsapp' ? 'Адреса WhatsApp' : `${{ telegram: 'Telegram', whatsapp: 'WhatsApp', max: 'MAX' }[key]} ID`, types: ['string'], multiple: key === 'whatsapp', defaultCode: `UF_CRM_BTX24_${key.toUpperCase()}_ID` })),
 ];
 SYSTEM_FIELDS.push(

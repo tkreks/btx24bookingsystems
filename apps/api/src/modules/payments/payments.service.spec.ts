@@ -39,13 +39,21 @@ function setup(
     bookingGroup?: string;
     bookingResources?: number[];
     template?: { id: string; name: string; steps: { text: string; fileIds: string[] }[] };
+    /** Файлы портала p1 (StoredFile). */
+    files?: { id: string; name: string; mime: string; size: number; ownerUserId: number }[];
+    /** crm.contact.get падает (нет доступа к контакту). */
+    contactDenied?: boolean;
   } = {},
 ) {
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
     if (method === 'crm.deal.get')
-      return { result: { ID: '678', CATEGORY_ID: o.category ?? '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P', UF_TYPE: o.dealType ?? '72' } };
+      return { result: { ID: '678', TITLE: 'Баня на субботу', CURRENCY_ID: 'RUB', CATEGORY_ID: o.category ?? '0', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_PRE: '', STAGE_SEMANTIC_ID: 'P', UF_TYPE: o.dealType ?? '72' } };
+    if (method === 'crm.contact.get') {
+      if (o.contactDenied) throw new Error('ACCESS_DENIED');
+      return { result: { ID: '140', NAME: 'Анна', LAST_NAME: 'Петрова' } };
+    }
     if (method === 'crm.item.add') return { result: { item: { id: 6001 } } };
     if (method === 'crm.item.get') return { result: { item: { id: 6001, ufCrmLink: o.link ?? '' } } };
     if (method === 'imopenlines.crm.chat.get') return { result: [{ CHAT_ID: '3301' }] };
@@ -82,8 +90,17 @@ function setup(
     },
     resource: { findMany: vi.fn(async () => [{ resourceId: 2, name: 'Баня 2' }]) },
     appCreatedEntity: { findUnique: vi.fn(async () => ({})), upsert: vi.fn() },
-    messageTemplate: { findFirst: vi.fn(async ({ where }: { where: { id: string } }) => (o.template?.id === where.id ? o.template : null)) },
-    storedFile: { findMany: vi.fn(async () => [{ id: 'f1', name: 'прайс.pdf', data: Buffer.from('x') }]) },
+    messageTemplate: {
+      findFirst: vi.fn(async ({ where }: { where: { id: string; portalId: string } }) => (o.template?.id === where.id && where.portalId === 'p1' ? o.template : null)),
+      findMany: vi.fn(async () => (o.template ? [o.template] : [])),
+    },
+    storedFile: {
+      findMany: vi.fn(async ({ where }: { where: { portalId: string; id: { in: string[] } } }) =>
+        (o.files ?? [{ id: 'f1', name: 'прайс.pdf', mime: 'application/pdf', size: 1, ownerUserId: 1 }])
+          .filter((f) => where.portalId === 'p1' && where.id.in.includes(f.id))
+          .map((f) => ({ ...f, data: Buffer.from('x') })),
+      ),
+    },
   } as unknown as PrismaService;
   const group = { group: { id: 'g1', name: 'Бани', dealCategoryId: 0, options, resourceIds: [2, 14] }, permissions: o.permissions ?? ['payment.send'] };
   const access = { resolve: vi.fn(async () => ({ groups: [group, ...(o.groups ?? [])] })) } as unknown as AccessService;
@@ -304,5 +321,82 @@ describe('PaymentsService', () => {
     } finally {
       delete (options.payments as Record<string, unknown>)[`${kind}TemplateId`];
     }
+  });
+  describe('окно оплаты: свой текст и вложения', () => {
+    const template = { id: 'tp1', name: 'Предоплата бани', steps: [{ text: 'Оплатите {prepayment} ₽: {link} до {deadline}', fileIds: [] }, { text: 'Правила', fileIds: ['f1'] }] };
+
+    it('preview: текст шаблона без 📎, {link} и {deadline} остаются; файлы, сделка, контакт', async () => {
+      const t = setup({ template });
+      const p = await t.svc.preview(t.user, 678, 'prepayment', undefined, undefined, 'tp1');
+      expect(p.templateId).toBe('tp1');
+      expect(p.messageText).toBe('Оплатите 45 000 ₽: {link} до {deadline}\n\nПравила');
+      expect(p.messageText).not.toContain('📎');
+      expect(p.message).toContain('📎 файл из шаблона');
+      expect(p.messageFiles).toEqual([{ id: 'f1', name: 'прайс.pdf', mime: 'application/pdf', size: 1 }]);
+      expect(p.deal).toEqual({ title: 'Баня на субботу', amount: 90000, currency: 'RUB' });
+      expect(p.contact).toEqual({ id: 140, name: 'Анна Петрова' });
+    });
+
+    it('preview: шаблон группы — его id; без шаблона — стандартный текст и null', async () => {
+      const t = setup({ template });
+      (options.payments as Record<string, unknown>).prepaymentTemplateId = 'tp1';
+      try {
+        expect((await t.svc.preview(t.user, 678, 'prepayment')).templateId).toBe('tp1');
+      } finally {
+        delete (options.payments as Record<string, unknown>).prepaymentTemplateId;
+      }
+      const d = await setup().svc.preview(t.user, 678, 'prepayment');
+      expect(d).toMatchObject({ templateId: null, messageFiles: [] });
+      expect(d.messageText).toContain('{link}');
+    });
+
+    it('preview: шаблон другого портала или не найден → 400 TEMPLATE_NOT_FOUND; для произвольной игнорируется', async () => {
+      const t = setup({ template });
+      const other = { ...t.user, portal: { ...t.user.portal, id: 'p2' } } as B24UserContext;
+      await expect(t.svc.preview(other, 678, 'prepayment', undefined, undefined, 'tp1')).rejects.toMatchObject({ status: 400, response: { code: 'TEMPLATE_NOT_FOUND' } });
+      await expect(t.svc.preview(t.user, 678, 'surcharge', undefined, undefined, 'nope')).rejects.toMatchObject({ status: 400, response: { code: 'TEMPLATE_NOT_FOUND' } });
+      const c = await t.svc.preview(t.user, 678, 'custom', undefined, undefined, 'nope');
+      expect(c).toMatchObject({ templateId: null, messageText: 'Просим Вам произвести оплату {{СсылкаНаОплату}}', messageFiles: [], contact: { id: 140 } });
+    });
+
+    it('preview: нет доступа к контакту → contact null', async () => {
+      const t = setup({ contactDenied: true });
+      expect((await t.svc.preview(t.user, 678, 'prepayment')).contact).toBeNull();
+    });
+
+    it('create: свой текст и файлы сохраняются в заявке; файлы без текста, чужой файл → 400', async () => {
+      const files = [
+        { id: 'mine1', name: 'схема.png', mime: 'image/png', size: 2, ownerUserId: 242 },
+        { id: 'f1', name: 'прайс.pdf', mime: 'application/pdf', size: 1, ownerUserId: 1 },
+        { id: 'alien', name: 'чужой.pdf', mime: 'application/pdf', size: 1, ownerUserId: 5 },
+      ];
+      const t = setup({ template, files });
+      await t.svc.create(t.user, body({ message: 'Оплатите: {link}', fileIds: ['mine1', 'f1'] }));
+      expect(t.prisma.paymentRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ message: 'Оплатите: {link}', messageFileIds: ['mine1', 'f1'] }) });
+      await expect(t.svc.create(t.user, body({ idempotencyKey: 'pay-2', fileIds: ['mine1'] }))).rejects.toMatchObject({ status: 400 });
+      await expect(t.svc.create(t.user, body({ idempotencyKey: 'pay-3xxxxxx', fileIds: ['mine1'] }))).rejects.toMatchObject({ status: 400, response: { code: 'INVALID_PAYMENT' } });
+      await expect(t.svc.create(t.user, body({ idempotencyKey: 'pay-4xxxxxx', message: 'x', fileIds: ['mine1', 'mine1'] }))).rejects.toMatchObject({ status: 400 });
+      await expect(t.svc.create(t.user, body({ idempotencyKey: 'pay-5xxxxxx', message: 'x', fileIds: ['alien'] }))).rejects.toMatchObject({ status: 400, response: { code: 'FILE_NOT_FOUND' } });
+      await expect(t.svc.create(t.user, body({ idempotencyKey: 'pay-6xxxxxx', message: 'x', fileIds: ['gone'] }))).rejects.toMatchObject({ status: 400, response: { code: 'FILE_NOT_FOUND' } });
+      expect(t.calls.filter((c) => c[0] === 'crm.item.add')).toHaveLength(1);
+    });
+
+    it.each(['prepayment', 'surcharge'] as const)('%s: свой текст — одно сообщение, ссылка не задваивается при {link}, файлы уходят', async (kind) => {
+      const files = [{ id: 'mine1', name: 'схема.png', mime: 'image/png', size: 2, ownerUserId: 242 }];
+      const t = setup({ link: 'https://pay.example/x', files });
+      await t.svc.create(t.user, body({ kind, amount: 25000, message: 'Анна, оплатите {prepayment} ₽: {link}', fileIds: ['mine1'] }));
+      const sent = t.calls.filter((c) => c[0] === 'imopenlines.crm.message.add').map((c) => c[1].MESSAGE);
+      expect(sent).toEqual(['Анна, оплатите 25 000 ₽: https://pay.example/x']);
+      expect(t.calls.filter((c) => c[0] === 'im.v2.File.upload').map((c) => (c[1].fields as { name: string }).name)).toEqual(['схема.png']);
+    });
+
+    it('свой текст без переменной ссылки — ссылка последней строкой; {{СсылкаНаОплату}} — на её месте', async () => {
+      const t = setup({ link: 'https://pay.example/x' });
+      await t.svc.create(t.user, body({ message: 'Ждём оплату' }));
+      const u = setup({ link: 'https://pay.example/x' });
+      await u.svc.create(u.user, body({ kind: 'custom', amount: 100, purpose: 'Сертификат' }));
+      expect(t.calls.filter((c) => c[0] === 'imopenlines.crm.message.add').map((c) => c[1].MESSAGE)).toEqual(['Ждём оплату\nhttps://pay.example/x']);
+      expect(u.calls.filter((c) => c[0] === 'imopenlines.crm.message.add').map((c) => c[1].MESSAGE)).toEqual(['Просим Вам произвести оплату https://pay.example/x']);
+    });
   });
 });

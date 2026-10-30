@@ -850,6 +850,8 @@ model PaymentRequest {
   timeoutMinutes  Int?
   /// Свой текст клиенту, `{{СсылкаНаОплату}}` — ссылка; null — шаблон оплаты группы.
   message         String?              @db.Text
+  /// Вложения к своему тексту (`StoredFile.id[]`, окно оплаты); null — без файлов / шаблон группы.
+  messageFileIds  Json?
   createdAt       DateTime             @default(now()) @db.DateTime(3)
   updatedAt       DateTime             @updatedAt @db.DateTime(3)
 

@@ -1,4 +1,4 @@
-import { Bitrix24RestClient, type AccessProvider } from './rest-client.js';
+import { Bitrix24RestClient, ContactMergeGrant, type AccessProvider } from './rest-client.js';
 import { Bitrix24Error } from './errors.js';
 import { RateLimiter } from './rate-limiter.js';
 import { requestContext } from '../../../common/cache-invalidation.js';
@@ -145,6 +145,30 @@ describe('Bitrix24RestClient.download', () => {
     await expect(ok.client.download('http://portal.example/x')).rejects.toMatchObject({ code: 'INVALID_DOWNLOAD_URL' });
     await expect(make('0123456789').client.download('https://portal.example/x', 5)).rejects.toMatchObject({ code: 'FILE_TOO_LARGE' });
   });
+
+  it("redirects: 'portal' — перенаправления только внутри портала, не больше трёх", async () => {
+    const seq = (...rs: Response[]) => {
+      const fetchMock = vi.fn();
+      for (const r of rs) fetchMock.mockResolvedValueOnce(r);
+      const client = new Bitrix24RestClient({ clientEndpoint: 'https://portal.example/rest/', access: { getAccessToken: async () => 't', refresh: async () => 't' }, limiter: new RateLimiter(1000, 1000), limiterKey: 'm1', fetch: fetchMock as unknown as typeof fetch });
+      return { client, fetchMock };
+    };
+    const redirect = (location: string) => new Response(null, { status: 302, headers: { location } });
+    const ok = seq(redirect('/upload/a.pdf'), new Response('pdf', { headers: { 'content-type': 'application/pdf' } }));
+    expect(await ok.client.download('https://portal.example/x', 10, { redirects: 'portal' })).toEqual({ data: Buffer.from('pdf'), contentType: 'application/pdf' });
+    expect(ok.fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
+    expect(String(ok.fetchMock.mock.calls[1][0])).toBe('https://portal.example/upload/a.pdf');
+    for (const bad of ['https://cdn.example/a', 'http://portal.example/a', 'https://portal.example:8443/a', 'https://u:p@portal.example/a', 'http://169.254.169.254/']) {
+      const r = seq(redirect(bad), new Response('x'));
+      await expect(r.client.download('https://portal.example/x', 10, { redirects: 'portal' })).rejects.toMatchObject({ code: 'INVALID_DOWNLOAD_URL' });
+      expect(r.fetchMock).toHaveBeenCalledTimes(1);
+    }
+    const loop = seq(redirect('/1'), redirect('/2'), redirect('/3'), redirect('/4'), new Response('x'));
+    await expect(loop.client.download('https://portal.example/x', 10, { redirects: 'portal' })).rejects.toMatchObject({ code: 'DOWNLOAD_FAILED' });
+    expect(loop.fetchMock).toHaveBeenCalledTimes(4);
+    const big = seq(new Response('0123456789'));
+    await expect(big.client.download('https://portal.example/x', 5, { redirects: 'portal' })).rejects.toMatchObject({ code: 'FILE_TOO_LARGE' });
+  });
 });
 
 describe('Bitrix24RestClient — окончательный сбой запроса сообщается наружу (журнал действий)', () => {
@@ -200,4 +224,27 @@ it('запрещает изменения контактов при любом �
   await expect(client.batch({ update: { method: 'crm.contact.update', params: { id: 140 } } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
   await expect(client.call('batch', { cmd: { update: 'crm.item.update?entityTypeId=3&id=140' } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
   expect(calls).toHaveLength(0);
+});
+
+it('объединение контактов: mergeBatch и правка контакта — только через ContactMergeGrant и только в его рамках', async () => {
+  const { client, calls } = setup([{ body: { result: true } }, { body: { result: { STATUS: 'SUCCESS', ENTITY_IDS: [20] } } }]);
+  await expect(client.call('crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [10, 20] } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.call('crm.entity.mergeBatch', { params: { entityTypeId: 2, entityIds: [10, 20] } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.batch({ m: { method: 'crm.entity.mergeBatch', params: { params: { entityTypeId: 3, entityIds: [10, 20] } } } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  // Поддельный объект вместо разрешения не проходит.
+  await expect(client.callContactMerge({ ids: [10, 20], check() {}, scope: { kind: 'contact-merge', ids: [10, 20] } } as never, 'crm.contact.update', { id: 10, fields: { NAME: 'x' } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  const grant = new ContactMergeGrant(10, [20, 10]);
+  expect(grant.ids).toEqual([10, 20]);
+  await expect(client.callContactMerge(grant, 'crm.contact.update', { id: 30, fields: { NAME: 'x' } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.callContactMerge(grant, 'crm.contact.update', { id: 20, fields: { PHONE: [] } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.callContactMerge(grant, 'crm.contact.delete', { id: 20 })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  await expect(client.callContactMerge(grant, 'crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [20, 10] } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  expect(calls).toHaveLength(0);
+  await client.callContactMerge(grant, 'crm.contact.update', { id: 20, fields: { NAME: 'x' } });
+  await client.callContactMerge(grant, 'crm.entity.mergeBatch', { params: { entityTypeId: 3, entityIds: [10, 20] } });
+  expect(calls).toHaveLength(2);
+  // Разрешение одноразовое: после mergeBatch — ни правки, ни повтора.
+  await expect(client.callContactMerge(grant, 'crm.contact.update', { id: 10, fields: { NAME: 'y' } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });
+  expect(() => new ContactMergeGrant(10, [10])).toThrow();
+  expect(() => new ContactMergeGrant(10, [20, 30])).toThrow();
 });

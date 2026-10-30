@@ -2,14 +2,14 @@ import { freshPoll } from '../fresh-poll.js';
 import { useCallback, useEffect, useState } from 'react';
 import type { ClientBookingDto, ClientBookingsDto } from '@btx24/shared';
 import { apiGet } from '../api.js';
-import { openCrm } from '../b24.js';
 import { fmtDateTime, fmtTime } from '../format.js';
-import { dayKey } from '../openlines/chat-list.js';
 import { Icon } from '../openlines/icons.js';
+import { ClientBookingCard, PastBookingsDialog } from './ClientBookingCard.js';
 
 /**
  * Клиент в шапке чата — тегами: сделки (успешные) · средний чек · брони (по клику — список) ·
  * ближайшая бронь; зелёный «+» — новая бронь (шаг выбора сделки). Имя клиента — в шапке, здесь не повторяем.
+ * Раскрытый список — только текущие/будущие карточками; прошедшие — ссылкой «Прошедшие брони (N)» в окне.
  */
 export function ClientBookings({
   chatId,
@@ -30,6 +30,12 @@ export function ClientBookings({
   const [data, setData] = useState<ClientBookingsDto | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  // Окно открыто для этого чата (сменили чат — закрыто само).
+  const [pastFor, setPastFor] = useState<number | null>(null);
+  const pastOpen = pastFor === chatId;
+  // Полный список прошедших — лениво, при открытии окна (`?history=1`); `recent` — пока он грузится.
+  const [past, setPast] = useState<{ chatId: number; items: ClientBookingDto[] | null; error: string } | null>(null);
+  const closePast = useCallback(() => setPastFor(null), []);
 
   const load = useCallback(
     () =>
@@ -56,6 +62,18 @@ export function ClientBookings({
     return () => { active = false; stop(); };
   }, [chatId, revision]);
 
+  useEffect(() => {
+    if (!pastOpen) return;
+    let active = true;
+    apiGet<ClientBookingsDto>(`/openlines/chats/${chatId}/bookings?history=1`).then(
+      (d) => active && setPast({ chatId, items: d.history ?? d.recent, error: '' }),
+      (e) => active && setPast((p) => ({ chatId, items: p?.chatId === chatId ? p.items : null, error: e instanceof Error ? e.message : 'Прошедшие брони недоступны' })),
+    );
+    return () => {
+      active = false;
+    };
+  }, [pastOpen, chatId, revision]);
+
   const next = data?.upcoming[0];
   const money = (v: number, cur: string | null) =>
     `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(v)} ${!cur || cur === 'RUB' ? '₽' : cur}`;
@@ -81,12 +99,12 @@ export function ClientBookings({
             <button
               className="cb-tag"
               aria-expanded={open}
-              title="Прошедшие брони — показать список"
-              aria-label={`Броней: ${data.past}`}
+              title="Брони клиента: текущие и будущие — списком, прошедшие — в отдельном окне"
+              aria-label={`Броней: ${data.past + data.upcoming.length}`}
               onClick={() => setOpen(!open)}
             >
               <Icon name="calendar" size={14} />
-              Броней <b>{data.past}</b>
+              Броней <b>{data.past + data.upcoming.length}</b>
             </button>
             {next && (
               <button
@@ -111,48 +129,39 @@ export function ClientBookings({
       {open && data && (
         <div className="cb-list">
           {!data.contactId && <p className="muted">К чату не привязан контакт CRM — брони ищутся только по сделке чата.</p>}
-          {data.upcoming.length > 0 && <h4>Текущие и будущие</h4>}
           {data.upcoming.map((b, i) => (
-            <Row key={`u${i}`} b={b} tz={timezone} onOpenDay={onOpenDay} />
+            <ClientBookingCard key={`${b.bookingId ?? `d${b.dealId}`}:${i}`} b={b} tz={timezone} onOpenDay={onOpenDay} />
           ))}
-          {data.recent.length > 0 && <h4>Прошедшие (последние {data.recent.length} из {data.past})</h4>}
-          {data.recent.map((b, i) => (
-            <Row key={`p${i}`} b={b} tz={timezone} onOpenDay={onOpenDay} />
-          ))}
-          {!data.upcoming.length && !data.recent.length && <p className="muted">Броней не найдено.</p>}
-          <button className="link" onClick={() => void load()}>
-            Обновить
-          </button>
+          {!data.upcoming.length && <p className="muted cb-empty">Текущих и будущих броней нет.</p>}
+          <div className="cb-list-foot">
+            {data.past > 0 && (
+              <button type="button" className="link cb-past-link" onClick={() => setPastFor(chatId)}>
+                Прошедшие брони ({data.past})
+              </button>
+            )}
+            <button type="button" className="link" onClick={() => void load()}>
+              Обновить
+            </button>
+          </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function Row({ b, tz, onOpenDay }: { b: ClientBookingDto; tz: string; onOpenDay?: (date: string) => void }) {
-  const range =
-    dayKey(b.start, tz) === dayKey(b.end, tz) ? `${fmtDateTime(b.start, tz)}–${fmtTime(b.end, tz)}` : `${fmtDateTime(b.start, tz)} – ${fmtDateTime(b.end, tz)}`;
-  return (
-    <div className={`cb-row ${b.when}`}>
-      <div>
-        <b>{range}</b> {b.when === 'now' && <span className="pill waiting">идёт сейчас</span>}
-        <div className="muted">
-          {[b.resources.join(', '), b.bookingId ? '' : 'бронь удалена в Битрикс24, даты из сделки'].filter(Boolean).join(' · ')}
-          {b.deal && ` · ${b.deal.title}${b.deal.stageSemantic === 'S' ? ' (выиграна)' : b.deal.stageSemantic === 'F' ? ' (проиграна)' : ''}`}
-        </div>
-      </div>
-      <span className="row-actions">
-        {b.dealId && (
-          <button className="link" onClick={() => openCrm('deal', b.dealId!)}>
-            Сделка
-          </button>
-        )}
-        {onOpenDay && (
-          <button className="link" onClick={() => onOpenDay(dayKey(b.start, tz))}>
-            В календарь
-          </button>
-        )}
-      </span>
+      {pastOpen && data && (
+        <PastBookingsDialog
+          // Все прошедшие уже в `recent` (до 5) — показываем сразу, иначе ждём полный список.
+          items={past?.chatId === chatId && past.items ? past.items : data.recent.length >= data.past ? data.recent : null}
+          total={data.past}
+          error={past?.chatId === chatId ? past.error : ''}
+          tz={timezone}
+          onOpenDay={
+            onOpenDay &&
+            ((d) => {
+              setPastFor(null);
+              onOpenDay(d);
+            })
+          }
+          onClose={closePast}
+        />
+      )}
     </div>
   );
 }

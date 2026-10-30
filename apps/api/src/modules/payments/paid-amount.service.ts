@@ -6,6 +6,9 @@ import { DealFieldMapService, detectFieldMap } from '../bookings/deal-field-map.
 type Invoice = { id: number; opportunity?: number | string | null; stageId?: string | null; currencyId?: string | null };
 type Payment = { paid?: string; sum?: number | string };
 
+/** `crm.item.list` отдаёт `{ items: [...] }`, а не массив — без этого `listAll` возвращает пустой список. */
+export const crmItems = <T>(result: unknown): T[] => (result as { items?: T[] } | null)?.items ?? [];
+
 /** Стадия счёта «оплачен» (`DT31_<воронка>:P`) — как `invoicePaid` в payment-flow (без цикла импортов). */
 const paidStage = (stageId: unknown) => String(stageId ?? '').endsWith(':P');
 
@@ -28,7 +31,7 @@ export class PaidAmountService {
 
   /** Сумма внесённых оплат по счетам сделки. */
   async paidSum(client: Bitrix24RestClient, dealId: number): Promise<number> {
-    const invoices = await client.listAll<Invoice>('crm.item.list', { entityTypeId: 31, filter: { parentId2: dealId }, select: ['id', 'opportunity', 'stageId', 'currencyId'] });
+    const invoices = await client.listAll<Invoice>('crm.item.list', { entityTypeId: 31, filter: { parentId2: dealId }, select: ['id', 'opportunity', 'stageId', 'currencyId'] }, { pick: crmItems<Invoice> });
     let total = 0;
     for (const inv of invoices) {
       const res = await client.call<Payment[]>('crm.item.payment.list', { entityTypeId: 31, entityId: inv.id });

@@ -3,6 +3,8 @@ import {
   PAYMENT_REQUEST_KINDS,
   PAYMENT_MAX_TIMEOUT_HOURS,
   DEFAULT_PAYMENT_LINK_MESSAGE,
+  PAYMENT_MAX_FILES,
+  type PaymentFileDto,
   type PaymentRequestKind,
   moneyValue,
   paymentAmount,
@@ -25,7 +27,7 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { isCertificatePurchase } from '../bookings/deal-outcome.js';
 import { MessengerChatsService } from '../messengers/messenger-chats.service.js';
-import { msg, PaymentFlow, type FlowContext } from './payment-flow.js';
+import { msg, PaymentFlow, type FlowContext, type PaymentMessageStep } from './payment-flow.js';
 
 const createSchema = z
   .object({
@@ -39,10 +41,17 @@ const createSchema = z
     purpose: z.string().trim().min(1).max(200).optional(),
     timeoutHours: z.number().int().min(1).max(PAYMENT_MAX_TIMEOUT_HOURS).nullable().optional(),
     message: z.string().trim().min(1).max(4000).optional(),
+    // Вложения к своему тексту (окно оплаты): StoredFile этого портала, только вместе с `message`.
+    fileIds: z
+      .array(z.string().regex(/^[a-z0-9]{1,40}$/i, 'Неверный ID файла'))
+      .max(PAYMENT_MAX_FILES, `Не больше ${PAYMENT_MAX_FILES} файлов`)
+      .refine((a) => new Set(a).size === a.length, 'Файлы повторяются')
+      .optional(),
     // Рабочего чата нет — сотрудник выбрал, куда отправить ссылку: новый чат с клиентом сделки.
     via: z.object({ messengerId: z.string().min(1).max(40), to: z.string().min(3).max(100) }).strict().optional(),
   })
-  .strict();
+  .strict()
+  .refine((b) => !b.fileIds?.length || b.message !== undefined, { message: 'Вложения передаются только вместе с текстом сообщения' });
 
 /** Сколько ждать ссылку прямо в запросе сотрудника; дальше доводит worker. */
 const INLINE_LINK_WAIT_MS = 20_000;
@@ -65,7 +74,14 @@ export class PaymentsService {
   /** Пауза между проверками ссылки (в тестах подменяется). */
   sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-  async preview(user: B24UserContext, dealId: number, kind: PaymentRequestKind, groupId?: string, bookingId?: number): Promise<PaymentPreviewDto> {
+  async preview(
+    user: B24UserContext,
+    dealId: number,
+    kind: PaymentRequestKind,
+    groupId?: string,
+    bookingId?: number,
+    templateId?: string,
+  ): Promise<PaymentPreviewDto> {
     // Произвольная: сумму, основание и срок задаёт сотрудник; брони не требует, шаблон — свой текст.
     const custom = kind === 'custom';
     const deal = await this.flow.deal(user, dealId);
@@ -102,13 +118,27 @@ export class PaymentsService {
     if (bookingMissing) problems.push(BOOKING_REQUIRED_MESSAGE);
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
     const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
-    const tpl = custom ? { name: null, steps: [{ text: DEFAULT_PAYMENT_LINK_MESSAGE, files: [] }] } : await this.flow.paymentTemplate(user.portal.id, kind, opts);
+    // Шаблон, выбранный в окне (`?templateId`), — только системный шаблон оплаты этого портала.
+    let tpl: { id: string | null; name: string | null; steps: PaymentMessageStep[] };
+    if (custom) tpl = { id: null, name: null, steps: [{ text: DEFAULT_PAYMENT_LINK_MESSAGE, files: [] }] };
+    else if (templateId) {
+      const chosen = await this.flow.systemPaymentTemplate(user.portal.id, templateId);
+      if (!chosen) throw new BadRequestException({ code: 'TEMPLATE_NOT_FOUND', message: 'Шаблон сообщения об оплате не найден' });
+      tpl = chosen;
+    } else tpl = await this.flow.paymentTemplate(user.portal.id, kind, opts);
     const [mc, chatProblem] = await Promise.all([this.flow.messages(ctx, dealId), this.flow.chatProblem(ctx, dealId).catch(() => null)]);
     const vars = { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' };
     const message = tpl.steps
       .map((st) => [renderMessage(st.text, { ...mc, vars }), ...st.files.map(() => '📎 файл из шаблона')].filter((x) => x.trim()).join('\n'))
       .filter(Boolean)
       .join('\n\n');
+    // Для правки в окне: только тексты шагов (`{link}`, `{deadline}` остаются), файлы — отдельным списком.
+    const messageText = tpl.steps
+      .map((st) => renderMessage(st.text, { ...mc, vars }).trim())
+      .filter(Boolean)
+      .join('\n\n');
+    const messageFiles = await this.templateFiles(user.portal.id, tpl.steps);
+    const contactId = Number(deal.CONTACT_ID) || 0;
     return {
       dealId,
       kind,
@@ -120,6 +150,11 @@ export class PaymentsService {
       source: a.source,
       timeoutMinutes: minutes,
       message,
+      templateId: tpl.id,
+      messageText,
+      messageFiles,
+      deal: { title: String(deal.TITLE ?? '') || `Сделка #${dealId}`, amount: dealAmount(deal.OPPORTUNITY), currency: String(deal.CURRENCY_ID ?? '') || 'RUB' },
+      contact: contactId ? await this.contact(user, contactId, mc.contact) : null,
       problems,
       requireBooking,
       bookings,
@@ -128,6 +163,49 @@ export class PaymentsService {
       pastBooking,
       chatProblem,
     };
+  }
+
+  /** Файлы шагов шаблона (без содержимого), в порядке шаблона; пропавшие — пропускаем. */
+  private async templateFiles(portalId: string, steps: PaymentMessageStep[]): Promise<PaymentFileDto[]> {
+    const ids = [...new Set(steps.flatMap((st) => st.files.map((f) => f.fileId)))];
+    if (!ids.length) return [];
+    const rows = await this.prisma.storedFile.findMany({ where: { portalId, id: { in: ids } }, select: { id: true, name: true, mime: true, size: true } });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ids.flatMap((id) => {
+      const r = byId.get(id);
+      return r ? [{ id: r.id, name: r.name, mime: r.mime, size: r.size }] : [];
+    });
+  }
+
+  /**
+   * Контакт сделки: имя — из данных шаблонов (их уже прочитали токеном сотрудника), иначе
+   * `crm.contact.get` его токеном; нет доступа или ошибка — null.
+   */
+  private async contact(user: B24UserContext, id: number, known: Record<string, string>): Promise<{ id: number; name: string } | null> {
+    const fullName = (c: Record<string, unknown>) => [c.NAME, c.SECOND_NAME, c.LAST_NAME].map((x) => String(x ?? '').trim()).filter(Boolean).join(' ');
+    const name = fullName(known);
+    if (name) return { id, name };
+    try {
+      const c = (await user.client.call<Record<string, unknown>>('crm.contact.get', { id })).result;
+      if (!c || typeof c !== 'object') return null;
+      return { id, name: fullName(c) || String(c.TITLE ?? '').trim() || `Контакт #${id}` };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Свои файлы сотрудника и файлы системных шаблонов оплаты портала; иначе 400 FILE_NOT_FOUND. */
+  private async assertMessageFiles(user: B24UserContext, ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    const rows = await this.prisma.storedFile.findMany({ where: { portalId: user.portal.id, id: { in: ids } }, select: { id: true, ownerUserId: true } });
+    const foreign = rows.filter((r) => r.ownerUserId !== user.userId);
+    let allowed = new Set<string>();
+    if (foreign.length) {
+      const tpls = await this.prisma.messageTemplate.findMany({ where: { portalId: user.portal.id, purpose: 'payment', shared: true }, select: { steps: true } });
+      allowed = new Set(tpls.flatMap((t) => (Array.isArray(t.steps) ? (t.steps as { fileIds?: string[] }[]) : []).flatMap((st) => st.fileIds ?? [])));
+    }
+    if (rows.length !== ids.length || foreign.some((r) => !allowed.has(r.id)))
+      throw new BadRequestException({ code: 'FILE_NOT_FOUND', message: 'Вложение не найдено или недоступно' });
   }
 
   private async lastPastBooking(user: B24UserContext, dealId: number): Promise<PaymentBookingOption | null> {
@@ -184,6 +262,7 @@ export class PaymentsService {
 
     const prev = await this.prisma.paymentRequest.findUnique({ where: { portalId_idempotencyKey: { portalId: user.portal.id, idempotencyKey: b.idempotencyKey } } });
     if (prev) return toDto(prev);
+    await this.assertMessageFiles(user, b.fileIds ?? []);
 
     const p = await this.preview(user, b.dealId, b.kind, b.groupId, b.bookingId ?? undefined);
     const amount = b.amount ?? p.amount;
@@ -222,6 +301,7 @@ export class PaymentsService {
         purpose: b.purpose ?? null,
         timeoutMinutes: b.timeoutHours ? b.timeoutHours * 60 : null,
         message: b.message ?? null,
+        ...(b.fileIds?.length ? { messageFileIds: b.fileIds } : {}),
       },
     });
     const ctx: FlowContext = {
@@ -422,6 +502,13 @@ export class PaymentsService {
     return { group: own ?? can.find((g) => (g.group.options as GroupOptionsDto | null)?.payments.invoice) ?? can[0] ?? null, options };
   }
 }
+
+/** Сумма сделки (OPPORTUNITY) числом; пусто или не число — null. */
+const dealAmount = (v: unknown): number | null => {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 /** Воронка стадии сделки: `C14:NEW` → 14, стадии общей воронки без префикса → 0. */
 export const stageCategory = (stageId: string) => Number(/^C(\d+):/.exec(stageId)?.[1] ?? 0);

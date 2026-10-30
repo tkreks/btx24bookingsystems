@@ -40,6 +40,11 @@ export interface Outgoing {
   /** ID сообщений Битрикс24 (текст и каждый файл — отдельным сообщением). */
   ids: number[];
   step: ReturnType<typeof toSteps>[number];
+  /**
+   * Ключ отправки (`idempotencyKey`), если ответа сервера не было (обрыв, таймаут, ошибка запроса):
+   * «Повторить» отправит ту же пачку с тем же ключом — сервер не задублирует уже ушедшее.
+   */
+  sendKey?: string;
 }
 
 /** Результат отправки цепочки → статусы её сообщений в «исходящих». */
@@ -53,6 +58,14 @@ export function applySendResult(items: Outgoing[], res: SendResultDto): Outgoing
     if (res.error && i === res.error.step) return { ...o, status: 'error', error: res.error.message, ids };
     return { ...o, status: 'error', error: 'Не отправлено: предыдущее сообщение цепочки не ушло', ids };
   });
+}
+
+/**
+ * Что отправить по «Повторить»: без ответа сервера (есть `sendKey`) — всю ту пачку с тем же ключом,
+ * иначе — только этот шаг (новой отправкой).
+ */
+export function retryGroup(items: Outgoing[], o: Outgoing): Outgoing[] {
+  return o.sendKey ? items.filter((x) => x.sendKey === o.sendKey && x.status === 'error') : [o];
 }
 
 /** Ушедшие сообщения, которые уже пришли в ленте, из «исходящих» убираем. */
@@ -257,18 +270,20 @@ export function ChatView({
   };
 
   /** Отправка по очереди (порядок у клиента важен); статусы — в «исходящих». */
-  const dispatch = (items: Outgoing[]) => {
+  /** `idempotencyKey` — один на нажатие; повтор после обрыва передаёт прежний (см. `Outgoing.sendKey`). */
+  const dispatch = (items: Outgoing[], idempotencyKey: string = crypto.randomUUID()) => {
     const keys = new Set(items.map((o) => o.key));
     const mark = (f: (list: Outgoing[]) => Outgoing[]) => setOutbox((prev) => [...prev.filter((o) => !keys.has(o.key)), ...f(prev.filter((o) => keys.has(o.key)))]);
     queue.current = queue.current.then(async () => {
       try {
-        const res = await apiPost<SendResultDto>(`/openlines/chats/${target}/send`, { steps: items.map((o) => o.step) });
-        mark((list) => applySendResult(list, res));
+        const res = await apiPost<SendResultDto>(`/openlines/chats/${target}/send`, { steps: items.map((o) => o.step), idempotencyKey });
+        // Ответ получен: шаги с ошибкой повторяются уже новой отправкой (новым ключом).
+        mark((list) => applySendResult(list, res).map((o) => ({ ...o, sendKey: undefined })));
         await load(true);
         onChanged();
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Не удалось отправить';
-        mark((list) => list.map((o) => ({ ...o, status: 'error', error: message })));
+        mark((list) => list.map((o) => ({ ...o, status: 'error', error: message, sendKey: idempotencyKey })));
       }
     });
   };
@@ -296,9 +311,11 @@ export function ChatView({
   };
 
   const retry = (o: Outgoing) => {
-    const again = { ...o, status: 'sending' as const, error: undefined, ids: [] };
-    setOutbox((prev) => prev.map((x) => (x.key === o.key ? again : x)));
-    dispatch([again]);
+    const group = retryGroup(outbox, o);
+    const again = group.map((x) => ({ ...x, status: 'sending' as const, error: undefined, ids: [] }));
+    const byKey = new Map(again.map((x) => [x.key, x]));
+    setOutbox((prev) => prev.map((x) => byKey.get(x.key) ?? x));
+    dispatch(again, o.sendKey);
   };
 
   if (!chat)

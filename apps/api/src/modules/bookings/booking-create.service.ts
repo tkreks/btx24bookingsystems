@@ -13,12 +13,11 @@ import {
   type CreateBookingDto,
   type BookingProductInput,
   type CreateBookingResultDto,
-  type DealFieldMapDto,
   type DealFormField,
   type GroupOptionsDto,
 } from '@btx24/shared';
 import { z } from 'zod';
-import type { Prisma } from '../../generated/prisma/client.js';
+import { Prisma, type BookingOperation } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -26,6 +25,7 @@ import { TRANSIENT_CODES } from '../bitrix24/portals/portal.service.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { BookingJournalService } from './booking-journal.service.js';
 import { ActionLogService } from '../audit/action-log.service.js';
+import { BOOKING_REFRESH_ROLES, DealBookingFieldsService, userFieldsContext } from './deal-booking-fields.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { dealUpdateFields } from './deal-form.js';
 import { DealFormService } from './deal-form.service.js';
@@ -81,7 +81,8 @@ type Step = { step: string; at: string; ok: boolean; detail?: unknown };
 /**
  * Создание брони — сага с журналом (`BookingOperation`) и компенсацией (ADR 0003, 0007):
  * 1) новая сделка (если нужна) → 2) бронь в Битрикс24 → 3) связь со сделкой и клиентом →
- * 4) системные поля сделки → 5) товары → 6) журнал броней. Сбой после шага 2 — бронь удаляется
+ * 4) поля сделки (гости, тип, комментарий, форма) → 5) товары → 6) журнал броней → 7) номер, даты
+ * ближайшей брони и «Брони сделки» — пересчётом по журналу (`DealBookingFieldsService`). Сбой после шага 2 — бронь удаляется
  * (слот освобождается), созданная сделка остаётся (удалять сделки приложению нельзя) — это в ошибке.
  * Все вызовы — токеном сотрудника: его права в CRM, режим «только чтение» и песочница действуют.
  */
@@ -97,6 +98,7 @@ export class BookingCreateService {
     private readonly dealForm: DealFormService,
     @Optional() private readonly actions?: ActionLogService,
     @Optional() private readonly stops?: ResourceStopsService,
+    @Optional() private readonly dealBookings?: DealBookingFieldsService,
   ) {}
 
   /** Контакт для привязки к выбранной сделке без клиента; null — привязывать не нужно. Нет клиента — 400. */
@@ -160,31 +162,20 @@ export class BookingCreateService {
     await this.stops?.assertOpen(user.portal.id, b.resourceIds, new Date(b.start), new Date(b.end), user.portal.timezone);
 
     // Идемпотентность: повтор заявки возвращает прежний результат.
-    const prev = await this.prisma.bookingOperation.findUnique({
-      where: { portalId_idempotencyKey: { portalId: user.portal.id, idempotencyKey: b.idempotencyKey } },
-    });
-    if (prev?.status === 'done' && prev.bookingId)
-      return { bookingId: prev.bookingId, dealId: prev.dealId, bookingType: null, warnings: ['Повтор заявки: бронь уже создана'] };
-    // Идёт прямо сейчас (не зависла дольше 2 минут) — второй раз не запускаем.
-    if (prev?.status === 'running' && prev.updatedAt.getTime() > Date.now() - STUCK_MS)
-      throw new ConflictException({ code: 'OPERATION_RUNNING', message: 'Бронь уже создаётся — дождитесь результата' });
+    const opKey = { portalId_idempotencyKey: { portalId: user.portal.id, idempotencyKey: b.idempotencyKey } };
+    const prev = await this.prisma.bookingOperation.findUnique({ where: opKey });
+    const settled = prev ? this.settledRepeat(prev, b) : null;
+    if (settled) return settled;
     // У клиентской брони всегда есть клиент (решение владельца 2026-10-26): контакт заявки или сделки;
     // у выбранной сделки контакта нет — привязываем к ней контакт заявки.
     const attachContact = b.kind === 'client' ? await this.requireClient(user, b) : null;
-    // Прошлая попытка сорвалась — повтор безопасен: созданная тогда новая сделка используется снова,
-    // а бронь, которую не удалось снять откатом, сначала снимаем.
-    const reuseDealId = prev && b.newDeal ? prev.dealId : null;
-    if (prev?.bookingId) {
+    // Захват заявки — атомарно: параллельные запросы с тем же ключом не выполнят шаги дважды.
+    // Первый запрос — create (второй получит P2002); повтор после сбоя/зависания — updateMany
+    // по прочитанному состоянию (status + updatedAt), продолжает только тот, кто его сменил.
+    let op: BookingOperation;
+    if (!prev) {
       try {
-        await user.client.call('booking.v1.booking.delete', { id: prev.bookingId });
-      } catch (err) {
-        if (!(err instanceof Bitrix24Error && String(err.code) === '1021'))
-          throw new ServiceUnavailableException({ code: 'BITRIX_UNAVAILABLE', message: `Бронь не создана: не удалось убрать бронь #${prev.bookingId} прошлой попытки — повторите через минуту` });
-      }
-    }
-    const op = prev
-      ? await this.prisma.bookingOperation.update({ where: { id: prev.id }, data: { status: 'running', error: null, bookingId: null, steps: [] } })
-      : await this.prisma.bookingOperation.create({
+        op = await this.prisma.bookingOperation.create({
           data: {
             portalId: user.portal.id,
             idempotencyKey: b.idempotencyKey,
@@ -194,6 +185,33 @@ export class BookingCreateService {
             request: b as unknown as Prisma.InputJsonValue,
           },
         });
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return this.lostRace(opKey, b);
+        throw err;
+      }
+    } else {
+      const { count } = await this.prisma.bookingOperation.updateMany({
+        where: { id: prev.id, status: prev.status, updatedAt: prev.updatedAt },
+        data: { status: 'running', error: null, steps: [], request: b as unknown as Prisma.InputJsonValue },
+      });
+      if (count !== 1) return this.lostRace(opKey, b);
+      op = prev;
+    }
+    // Прошлая попытка сорвалась — повтор безопасен: созданная тогда новая сделка используется снова,
+    // а бронь, которую не удалось снять откатом, сначала снимаем.
+    const reuseDealId = prev && b.newDeal ? prev.dealId : null;
+    if (prev?.bookingId) {
+      try {
+        await user.client.call('booking.v1.booking.delete', { id: prev.bookingId });
+      } catch (err) {
+        if (!(err instanceof Bitrix24Error && String(err.code) === '1021')) {
+          // Захват отпускаем: следующий повтор снова попробует снять эту бронь.
+          await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { status: 'failed', error: `Не удалось снять бронь #${prev.bookingId} прошлой попытки: ${msg(err)}`.slice(0, 1000) } });
+          throw new ServiceUnavailableException({ code: 'BITRIX_UNAVAILABLE', message: `Бронь не создана: не удалось убрать бронь #${prev.bookingId} прошлой попытки — повторите через минуту` });
+        }
+      }
+      await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { bookingId: null } });
+    }
     const steps: Step[] = [];
     const log = async (step: string, ok: boolean, detail?: unknown) => {
       steps.push({ step, at: new Date().toISOString(), ok, ...(detail === undefined ? {} : { detail }) });
@@ -299,8 +317,11 @@ export class BookingCreateService {
           if (code && value) kindFields[code] = value;
           else warnings.push(`«${DEAL_KIND_LABELS[b.dealKind]}»: поле «Тип сделки» не заполнено (нет поля или такого варианта)`);
         }
-        // Системные поля важнее полей формы: их значения приложение считает само.
-        const fields = { ...groupFields, ...kindFields, ...(await this.systemFields(user.portal.id, b, bookingId, tz, typeValue ?? '')) };
+        // Системные поля важнее полей формы: их значения приложение считает само. Номер и даты брони,
+        // даты визита и список броней пишет пересчёт после журнала (шаг 7) — здесь их не трогаем.
+        const managed = new Set(BOOKING_REFRESH_ROLES.map((r) => map[r]).filter(Boolean));
+        const formOnly = Object.fromEntries(Object.entries(groupFields).filter(([code]) => !managed.has(code)));
+        const fields = { ...formOnly, ...kindFields, ...(await this.systemFields(user.portal.id, b, typeValue ?? '')) };
         if (Object.keys(fields).length) {
           if (await this.dealWrite(() => user.client.call('crm.deal.update', { id: dealId, fields }), createdDeal, log, 'deal.update')) {
             await log('deal.update', true, { fields: Object.keys(fields) });
@@ -317,7 +338,7 @@ export class BookingCreateService {
                 details: { bookingId, changes },
               });
           } else warnings.push(`Поля сделки #${dealId} не заполнены: изменять существующие сделки не разрешено (⚙ → «Приложение» → «Запись в Битрикс24»)`);
-        } else warnings.push('Системные поля сделки не настроены (⚙ → «Приложение»)');
+        } else if (!managed.size) warnings.push('Системные поля сделки не настроены (⚙ → «Приложение»)');
       }
 
       // 5. Товары (полная замена строк сделки)
@@ -346,6 +367,9 @@ export class BookingCreateService {
         { kind: 'user', userId: user.userId, name: user.userName },
       );
       await this.prisma.bookingOperation.update({ where: { id: op.id }, data: { status: 'done', bookingId, dealId } });
+      // 7. Номер и даты ближайшей брони, даты визита, «Брони сделки» — по всем действующим броням
+      // сделки. Бронь уже создана: сбой записи — предупреждение, не откат.
+      if (dealId && b.kind === 'client' && this.dealBookings) warnings.push(...(await this.dealBookings.refresh(userFieldsContext(user), dealId)));
       return { bookingId, dealId, bookingType: type?.rule.title ?? null, warnings };
     } catch (err) {
       // Компенсация: снять бронь — слот свободен; созданную сделку не удаляем (сообщаем).
@@ -375,6 +399,36 @@ export class BookingCreateService {
         });
       throw err;
     }
+  }
+
+  /**
+   * Повтор заявки, которая уже завершена или выполняется: готово — прежний результат; идёт (не
+   * зависла дольше 2 минут) — 409. Ключ тот же, а параметры другие — 409 IDEMPOTENCY_KEY_REUSED
+   * (иначе вернули бы бронь не по этой заявке). null — заявку можно (пере)запускать: её ещё нет,
+   * она сорвалась (повтор с исправленными параметрами разрешён — форма держит один ключ) или зависла.
+   */
+  private settledRepeat(prev: BookingOperation, b: CreateBookingDto): CreateBookingResultDto | null {
+    const done = prev.status === 'done' && !!prev.bookingId;
+    const running = prev.status === 'running' && prev.updatedAt.getTime() > Date.now() - STUCK_MS;
+    if (!done && !running) return null;
+    if (canonicalJson(prev.request) !== canonicalJson(b))
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: done
+          ? `По этой заявке уже создана бронь #${prev.bookingId} с другими параметрами — откройте форму заново`
+          : 'По этой заявке уже создаётся бронь с другими параметрами — дождитесь результата',
+      });
+    if (done) return { bookingId: prev.bookingId!, dealId: prev.dealId, bookingType: null, warnings: ['Повтор заявки: бронь уже создана'] };
+    throw new ConflictException({ code: 'OPERATION_RUNNING', message: 'Бронь уже создаётся — дождитесь результата' });
+  }
+
+  /** Параллельный запрос с тем же ключом захватил заявку раньше — ведём себя как повтор. */
+  private async lostRace(opKey: { portalId_idempotencyKey: { portalId: string; idempotencyKey: string } }, b: CreateBookingDto): Promise<CreateBookingResultDto> {
+    const now = await this.prisma.bookingOperation.findUnique({ where: opKey });
+    const settled = now ? this.settledRepeat(now, b) : null;
+    if (settled) return settled;
+    // Успела завершиться неудачей между запросами — повтор клиента запустит её заново.
+    throw new ConflictException({ code: 'OPERATION_RUNNING', message: 'Бронь уже создаётся параллельным запросом — повторите через несколько секунд' });
   }
 
   /**
@@ -410,15 +464,16 @@ export class BookingCreateService {
     return rows.map((r) => r.NAME ?? '').filter(Boolean);
   }
 
-  /** Поля сделки по настройке портала: ID брони, даты брони и визита, гости, тип, комментарий. */
-  private async systemFields(portalId: string, b: CreateBookingDto, bookingId: number, tz: string, typeValue: string) {
+  /**
+   * Поля сделки этой брони по настройке портала: гости, тип, комментарий. Номер и даты брони и визита
+   * относятся к ближайшей брони сделки — их пишет `DealBookingFieldsService.refresh`.
+   */
+  private async systemFields(portalId: string, b: CreateBookingDto, typeValue: string) {
     const m = await this.fieldMap.get(portalId);
     const f: Record<string, unknown> = {};
     const put = (code: string | undefined, v: unknown) => {
       if (code && v !== undefined && v !== null && v !== '') f[code] = v;
     };
-    put(m.bookingId, String(bookingId));
-    Object.assign(f, dealDateFields(m, new Date(b.start), new Date(b.end), tz));
     put(m.guests, b.guests);
     put(m.bookingType, typeValue);
     put(m.managerComment, b.comment);
@@ -428,41 +483,18 @@ export class BookingCreateService {
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Даты брони и визита в системных полях сделки (те, что настроены на портале). */
-export function dealDateFields(m: DealFieldMapDto, s: Date, e: Date, tz: string): Record<string, string> {
-  const f: Record<string, string> = {};
-  const put = (code: string | undefined, v: string) => {
-    if (code) f[code] = v;
-  };
-  put(m.bookingStart, zonedIso(s, tz));
-  put(m.bookingEnd, zonedIso(e, tz));
-  put(m.visitDateStart, dateRu(s, tz));
-  put(m.visitTimeStart, timeRu(s, tz));
-  put(m.visitDateEnd, dateRu(e, tz));
-  put(m.visitTimeEnd, timeRu(e, tz));
-  return f;
+/** JSON с отсортированными ключами — сравнение параметров заявки независимо от порядка полей. */
+export function canonicalJson(v: unknown): string {
+  const norm = (x: unknown): unknown =>
+    Array.isArray(x)
+      ? x.map(norm)
+      : x && typeof x === 'object'
+        ? Object.fromEntries(Object.keys(x).sort().filter((k) => (x as Record<string, unknown>)[k] !== undefined).map((k) => [k, norm((x as Record<string, unknown>)[k])]))
+        : x;
+  return JSON.stringify(norm(v));
 }
 
-export function dateRu(d: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone, day: '2-digit', month: '2-digit', year: 'numeric' }).format(d);
-}
-export function timeRu(d: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone, hour: '2-digit', minute: '2-digit' }).format(d);
-}
-/** «2026-10-23T14:00:00+03:00» — время в поясе портала со смещением (для полей «дата/время»). */
-export function zonedIso(d: Date, timeZone: string): string {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
-      .formatToParts(d)
-      .map((x) => [x.type, x.value]),
-  );
-  const local = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
-  const off = Math.round((local - d.getTime()) / 60000);
-  const sign = off >= 0 ? '+' : '-';
-  const hh = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0');
-  const mm = String(Math.abs(off) % 60).padStart(2, '0');
-  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${sign}${hh}:${mm}`;
-}
+export { dealDateFields, dateRu, timeRu, zonedIso } from './deal-dates.js';
 
 /**
  * Строка товара для `crm.deal.productrows.set`: итоговая цена за единицу и скидка — процентом

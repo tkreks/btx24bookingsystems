@@ -13,6 +13,7 @@ import { ClientBookingsService } from './client-bookings.service.js';
 import { DealPaymentsService } from './deal-payments.service.js';
 import { DealStatusService } from './deal-status.service.js';
 import { ResourceStopsService } from './resource-stops.service.js';
+import { DealBookingFieldsService } from './deal-booking-fields.service.js';
 import { DealFieldMapService } from './deal-field-map.service.js';
 import { DealFormService } from './deal-form.service.js';
 import { DealHubService } from './deal-hub.service.js';
@@ -33,6 +34,7 @@ import { MessageContextService } from './message-context.service.js';
     BookingDirectoryService,
     BookingInfoService,
     ClientBookingsService,
+    DealBookingFieldsService,
     DealFieldMapService,
     DealFormService,
     DealHubService,
@@ -41,6 +43,6 @@ import { MessageContextService } from './message-context.service.js';
     MessageContextService,
     ResourceStopsService,
   ],
-  exports: [ClientBookingsService, BookingJournalService, BookingAlertsService, BookingSyncService, DealFieldMapService, DealPaymentsService, DealStatusService, MessageContextService, ResourceStopsService],
+  exports: [ClientBookingsService, BookingJournalService, BookingAlertsService, BookingSyncService, DealBookingFieldsService, DealFieldMapService, DealPaymentsService, DealStatusService, MessageContextService, ResourceStopsService],
 })
 export class BookingsModule {}

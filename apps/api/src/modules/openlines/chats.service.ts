@@ -51,6 +51,7 @@ import { ACCESS_MAX_AGE_MS, ConversationsService } from './conversations.service
 import { ActivityService } from './activity.service.js';
 import { entityParts, ownKey, channelOfKey } from './conversation-keys.js';
 import { stepsSchema } from './templates.service.js';
+import { ChainSendGuard, chainFingerprint } from './chain-send-guard.js';
 
 /** Сессия открытой линии в CRM (`crm.activity.list`, PROVIDER_ID = IMOPENLINES_SESSION). */
 interface SessionActivity {
@@ -116,7 +117,13 @@ const listQuery = z
   .strict();
 /** `fresh=1` — сверить с Битрикс24 до ответа (после отправки и «Присоединиться»), иначе — из базы и сверка в фоне. */
 const historyQuery = z.object({ beforeId: z.coerce.number().int().positive().optional(), fresh: z.literal('1').optional() }).strict();
-const sendBody = z.object({ steps: stepsSchema }).strict();
+/**
+ * `idempotencyKey` — ключ отправки от клиента (один на нажатие, тот же при повторе): повтор с ним
+ * не шлёт цепочку ещё раз (`ChainSendGuard`). Без ключа (старая вкладка) — отправка без защиты.
+ */
+const sendBody = z.object({ steps: stepsSchema, idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).optional() }).strict();
+/** Ошибки `im.v2.File.download` токеном сотрудника, при которых ссылку берём токеном приложения (см. `file`). */
+const FILE_APP_FALLBACK_CODES = new Set(['FILE_ACCESS_ERROR', 'ACCESS_DENIED']);
 
 /**
  * Диалоги открытых линий **правами пользователя**. Список строится из сессий в CRM: REST не
@@ -136,7 +143,12 @@ export class ChatsService {
     private readonly messageContext?: MessageContextService,
     private readonly conversations?: ConversationsService,
     private readonly activity?: ActivityService,
-  ) {}
+  ) {
+    this.chainGuard = new ChainSendGuard(prisma);
+  }
+
+  /** Повторы отправки цепочки по ключу клиента. */
+  readonly chainGuard: ChainSendGuard;
 
   /** Лента для показа: фото авторов полными адресами, автор сообщений «с телефона» — по сменам. */
   private present(user: B24UserContext, messages: ChatMessageDto[]): { messages: ChatMessageDto[]; pending: boolean } {
@@ -192,21 +204,25 @@ export class ChatsService {
   /**
    * Файл сообщения чата (картинка, видео, документ) — через сервер приложения: прямые ссылки
    * портала во фрейме не открываются (нет входа в Битрикс24 у стороннего домена). Доступ к диалогу —
-   * правами сотрудника; ссылку на файл берём его токеном, а если он не участник чата (видит диалог
-   * по правам CRM), — токеном приложения.
+   * правами сотрудника (`imopenlines.dialog.get` его токеном; отказ — ошибка, дальше не идём). Ссылку
+   * на файл берём его токеном; токеном приложения — только в известном случае, ради которого фолбэк
+   * добавлен (f22d6f2): сотрудник видит диалог по правам CRM, но не участник чата, и `im.v2.File.download`
+   * отвечает отказом доступа к файлу/чату (`FILE_APP_FALLBACK_CODES`). Сеть, лимиты, авторизация,
+   * размер и ошибки скачивания по ссылке — пробрасываются.
    */
   async file(user: B24UserContext, chatId: number, fileId: number): Promise<{ data: Buffer; contentType: string | null }> {
     await user.client.call('imopenlines.dialog.get', { CHAT_ID: chatId });
     const params = { dialogId: `chat${chatId}`, fileId };
+    let url: string;
     try {
-      const r = await user.client.call<{ downloadUrl?: string }>('im.v2.File.download', params);
-      return await user.client.download(String(r.result?.downloadUrl ?? ''));
+      url = String((await user.client.call<{ downloadUrl?: string }>('im.v2.File.download', params)).result?.downloadUrl ?? '');
     } catch (err) {
-      if (!(err instanceof Bitrix24Error) || !this.portals || err.code === 'FILE_TOO_LARGE') throw err;
+      if (!(err instanceof Bitrix24Error) || !this.portals || !FILE_APP_FALLBACK_CODES.has(err.code)) throw err;
       const app = this.portals.clientFor(user.portal);
       const r = await app.call<{ downloadUrl?: string }>('im.v2.File.download', params);
       return app.download(String(r.result?.downloadUrl ?? ''));
     }
+    return user.client.download(url);
   }
 
   private async textsEnabled(portalId: string): Promise<boolean> {
@@ -1155,19 +1171,28 @@ export class ChatsService {
    * отдельным сообщением (`im.v2.File.upload`, поля `fields.name/content` — вложенный `FILE` портал
    * отвергает как FILE_EMPTY). Между сообщениями — пауза: иначе канал может доставить клиенту
    * второе раньше первого. На ошибке останавливаемся и сообщаем, сколько шагов ушло: повтор
-   * отправит только оставшиеся (интерфейс убирает отправленные).
+   * отправит только оставшиеся (интерфейс убирает отправленные). С `idempotencyKey` повтор того же
+   * запроса возвращает результат первого, не отправляя заново (`ChainSendGuard`).
    */
   async send(user: B24UserContext, chatId: number, body: unknown): Promise<SendResultDto> {
     const parsed = sendBody.safeParse(body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_CHAIN', message: 'Цепочка пуста или шаг без текста и вложений' });
     const steps: TemplateStepDto[] = parsed.data.steps;
+    const key = parsed.data.idempotencyKey;
+    if (!key) return this.sendChain(user, chatId, steps, async () => undefined);
+    return this.chainGuard.run(user, chatId, key, chainFingerprint(chatId, steps), (started) => this.sendChain(user, chatId, steps, started));
+  }
+
+  /** `started` — прямо перед первым сообщением клиенту (до него сбой повтор не блокирует). */
+  private async sendChain(user: B24UserContext, chatId: number, steps: TemplateStepDto[], started: () => Promise<void>): Promise<SendResultDto> {
     // Только через рабочую открытую линию (решение владельца 2026-10-26).
     const problem = await chatLineProblem(user.client, this.prisma, user.portal.id, chatId);
     if (problem) throw new ConflictException({ code: 'CHAT_NOT_WORKING', message: chatNotWorkingMessage(problem) });
     const files = await this.files.loadOwned(user, [...new Set(steps.flatMap((s) => s.fileIds))]);
     const dialogId = `chat${chatId}`;
     const messageIds: number[] = [];
+    await started();
     let first = true;
     const gap = async () => {
       if (!first && this.sendGapMs > 0) await this.sleep(this.sendGapMs);

@@ -9,6 +9,7 @@ import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { FROM_HOUR, TO_HOUR, isSystemMessage, shiftOwner, shiftSpan, summarize, type Shift } from './activity.js';
 import { photoUrl } from '../bitrix24/rest/photo-url.js';
 import { authorKind, phoneOutgoing, preview, withoutPhoneEchoes, type ImMessage, type ImUser } from './chat-parsing.js';
+import { CHAIN_ACTION } from './chain-send-guard.js';
 
 /** Чатов дня, переписку которых смотрим (последние 50 сообщений каждого). */
 const MAX_CHATS = 150;
@@ -224,6 +225,8 @@ export class ActivityService {
     for (const a of actions) {
       const own = events.get(a.userId ?? 0);
       if (!own) continue;
+      // Служебный журнал повтора цепочки (`ChainSendGuard`): отправку уже показывает строка запроса.
+      if (a.action === CHAIN_ACTION) continue;
       if (a.action === 'booking.created' && own.some((e) => e.id === `booking:${a.entityId}`)) continue;
       const detail = a.details && typeof a.details === 'object' && !Array.isArray(a.details) ? a.details as Record<string, unknown> : {};
       if (!onlyMine && detail.error) continue;

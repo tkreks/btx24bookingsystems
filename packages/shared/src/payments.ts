@@ -94,6 +94,19 @@ export interface PaymentPreviewDto {
   timeoutMinutes: number | null;
   /** Текст клиенту (ссылка — `{link}`, подставится после создания счёта). */
   message: string;
+  /** Шаблон сообщения: id системного шаблона оплаты (`?templateId` или шаблон группы); null — стандартный текст. */
+  templateId: string | null;
+  /**
+   * Текст для правки в окне: шаги шаблона одним текстом (через пустую строку), переменные сделки уже
+   * подставлены, `{link}` и `{deadline}` — остаются (известны только после выставления счёта).
+   */
+  messageText: string;
+  /** Файлы шаблона (все шаги) — вложения окна по умолчанию. */
+  messageFiles: PaymentFileDto[];
+  /** Сделка — для блока данных окна. */
+  deal: { title: string; amount: number | null; currency: string };
+  /** Контакт сделки; null — нет контакта. */
+  contact: { id: number; name: string } | null;
   /** Группа требует бронь перед оплатой (настройка «Требовать бронь перед оплатой»). */
   requireBooking: boolean;
   /** Действующие брони сделки (ещё не закончились), ближайшие сверху — к какой привязать счёт. */
@@ -139,7 +152,25 @@ export interface CreatePaymentDto {
   bookingId?: number | null;
   /** Рабочего чата нет — ссылку отправить новым чатом с клиентом сделки (`GET /messengers/deal-targets`). */
   via?: { messengerId: string; to: string };
+  /**
+   * Свой текст клиенту вместо шаблона группы (одним сообщением): `{link}` / `{{СсылкаНаОплату}}` — ссылка
+   * (нет ни того ни другого — ссылка последней строкой), `{deadline}` — срок оплаты.
+   */
+  message?: string;
+  /** Вложения к своему тексту (`StoredFile`, не больше `PAYMENT_MAX_FILES`); только вместе с `message`. */
+  fileIds?: string[];
 }
+
+/** Файл сообщения об оплате (`StoredFile`). */
+export interface PaymentFileDto {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
+/** Вложений в сообщении со ссылкой на оплату — не больше. */
+export const PAYMENT_MAX_FILES = 10;
 
 export interface PaymentRequestDto {
   id: string;

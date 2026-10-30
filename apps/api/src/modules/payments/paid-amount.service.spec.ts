@@ -6,11 +6,15 @@ import { PaidAmountService } from './paid-amount.service.js';
 function setup(o: { current?: string; map?: Record<string, string> } = {}) {
   const calls: [string, Record<string, unknown>][] = [];
   const client = {
-    listAll: vi.fn(async () => [
-      { id: 1, opportunity: 20000, stageId: 'DT31_2:N' }, // частично оплачен: 15000 из 20000
-      { id: 2, opportunity: 5000, stageId: 'DT31_2:P' }, // отмечен «оплачен» вручную, оплат нет
-      { id: 3, opportunity: 9000, stageId: 'DT31_2:D' }, // не оплачен
-    ]),
+    // Как настоящий клиент: `crm.item.list` отдаёт `{ items }`, массив достаёт `pick`.
+    listAll: vi.fn(async (_m: string, _p: unknown, opts: { pick?: (r: unknown) => unknown[] } = {}) => {
+      const result = { items: [
+        { id: 1, opportunity: 20000, stageId: 'DT31_2:N' }, // частично оплачен: 15000 из 20000
+        { id: 2, opportunity: 5000, stageId: 'DT31_2:P' }, // отмечен «оплачен» вручную, оплат нет
+        { id: 3, opportunity: 9000, stageId: 'DT31_2:D' }, // не оплачен
+      ] };
+      return opts.pick ? opts.pick(result) : Array.isArray(result) ? result : [];
+    }),
     call: vi.fn(async (method: string, params: Record<string, unknown>) => {
       calls.push([method, params]);
       if (method === 'crm.item.payment.list')
@@ -29,7 +33,7 @@ describe('PaidAmountService — «Сумма внесённых оплат» з�
   it('проведённые оплаты счетов + счёт, отмеченный оплаченным без оплат; не оплаченные — нет', async () => {
     const t = setup();
     expect(await t.svc.paidSum(t.client, 678)).toBe(20000);
-    expect(t.client.listAll).toHaveBeenCalledWith('crm.item.list', expect.objectContaining({ entityTypeId: 31, filter: { parentId2: 678 } }));
+    expect(t.client.listAll).toHaveBeenCalledWith('crm.item.list', expect.objectContaining({ entityTypeId: 31, filter: { parentId2: 678 } }), expect.objectContaining({ pick: expect.any(Function) }));
   });
 
   it('пишет в поле (найдено по названию) и в журнал, только если сумма изменилась', async () => {

@@ -246,11 +246,16 @@ export class BookingsController {
     return this.hub.newDeal(user, dealId);
   }
 
-  /** Брони клиента чата открытой линии. */
+  /** Брони клиента чата открытой линии; `?history=1` — с полным списком прошедших (`history`). */
   @Get('openlines/chats/:chatId/bookings')
-  async chatBookings(@B24User() user: B24UserContext, @Param('chatId', ParseIntPipe) chatId: number): Promise<ClientBookingsDto> {
+  async chatBookings(
+    @B24User() user: B24UserContext,
+    @Param('chatId', ParseIntPipe) chatId: number,
+    @Query('history') history?: string,
+  ): Promise<ClientBookingsDto> {
     await this.require(user, 'openlines.read');
-    return this.clientBookings(user, `chat:${chatId}`, () => this.clients.forChat(user, chatId));
+    const full = history === '1';
+    return this.clientBookings(user, `chat:${chatId}${full ? ':history' : ''}`, () => this.clients.forChat(user, chatId, full));
   }
 
   /** История брони (аудит): кто, что, как и когда. */

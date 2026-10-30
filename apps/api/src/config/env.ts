@@ -56,7 +56,7 @@ export const envSchema = z.object({
   B24_RATE_BURST: z.coerce.number().int().positive().default(30),
   /** Сервис мессенджеров (ADR 0014) — внутренний адрес в сети стенда. */
   MESSENGER_URL: z.string().url().default('http://messenger:3090'),
-  /** Общий секрет api ↔ messenger (заголовок x-messenger-token); пусто — защищает только сеть стенда. */
+  /** Общий секрет api ↔ messenger (заголовок x-messenger-token); пусто — api отклоняет события мессенджеров. */
   MESSENGER_TOKEN: optionalString(z.string().min(16)),
 });
 

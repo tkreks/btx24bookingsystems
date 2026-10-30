@@ -27,3 +27,11 @@ it('находит реальные собственные и старые по�
   expect(resolveContactFields(fields, {})).toEqual({ telegram: 'UF_CRM_BTX24_TELEGRAM_ID', max: 'UF_CRM_MAXID_WZ', whatsappLid: 'UF_CRM_WHATSAPPLID_WZ' });
   expect(resolveContactFields(fields, { telegram: 'UF_CRM_CUSTOM' }).telegram).toBe('UF_CRM_CUSTOM');
 });
+
+it('«Брони сделки» — множественное строковое поле приложения с собственным кодом', () => {
+  const list = SYSTEM_FIELDS.find(f => f.entity === 'deal' && f.key === 'bookingsList')!;
+  expect(list).toMatchObject({ label: 'Брони сделки', multiple: true, types: ['string'], defaultCode: 'UF_CRM_BTX24_BOOKINGS_LIST', group: 'Бронирование' });
+  expect(systemFieldCompatible(list, meta)).toBe(false);
+  expect(systemFieldCompatible(list, { ...meta, multiple: true })).toBe(true);
+  expect(SYSTEM_FIELDS.find(f => f.key === 'bookingId')!.multiple).toBe(false);
+});

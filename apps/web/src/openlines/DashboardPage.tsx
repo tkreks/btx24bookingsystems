@@ -29,6 +29,7 @@ import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
 import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
 import { MessengersBlock } from '../dashboard/MessengersBlock.js';
+import { ContactDuplicatesBlock } from '../dashboard/ContactDuplicatesBlock.js';
 import { KpiGridBlock } from '../dashboard/KpiGridBlock.js';
 import { LiveBookingsBlock } from '../dashboard/LiveBookingsBlock.js';
 import { ResourceTimelineBlock } from '../dashboard/ResourceTimelineBlock.js';
@@ -296,6 +297,9 @@ export function DashboardPage({
         return <StopsBlock period={range} />;
       case 'messengers':
         return <MessengersBlock />;
+      case 'contactDuplicates':
+        // Объединение необратимо — только постоянные администраторы (не по временному паролю).
+        return session.canManageApp && !session.settingsAccessUntil ? <ContactDuplicatesBlock tz={tz} /> : null;
       case 'upcomingBookings':
         return <LiveBookingsBlock kind="upcoming" timezone={tz} />;
       case 'currentBookings':

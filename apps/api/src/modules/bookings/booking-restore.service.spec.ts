@@ -3,7 +3,7 @@ import { BookingRestoreService } from './booking-restore.service.js';
 import type { AccessService } from '../access/access.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { BookingJournalService } from './booking-journal.service.js';
-import type { DealFieldMapService } from './deal-field-map.service.js';
+import type { DealBookingFieldsService } from './deal-booking-fields.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 
 const record = {
@@ -19,7 +19,7 @@ const record = {
   endsAt: new Date('2026-10-23T20:30:00Z'),
 };
 
-function setup(o: { exists?: boolean; overlap?: boolean; permissions?: string[]; status?: string } = {}) {
+function setup(o: { exists?: boolean; overlap?: boolean; permissions?: string[]; status?: string; refreshWarnings?: string[] } = {}) {
   const calls: [string, Record<string, unknown>][] = [];
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
@@ -48,16 +48,16 @@ function setup(o: { exists?: boolean; overlap?: boolean; permissions?: string[];
       groups: [{ group: { id: 'g1', resourceIds: [2, 14] }, permissions: o.permissions ?? ['booking.create', 'booking.cancel', 'booking.edit'] }],
     })),
   };
-  const fieldMap = { get: vi.fn(async () => ({ bookingId: 'UF_ID', bookingStart: 'UF_S' })) };
+  const dealBookings = { refresh: vi.fn(async () => (o.refreshWarnings ?? []) as string[]) };
   const svc = new BookingRestoreService(
     prisma as unknown as PrismaService,
     access as unknown as AccessService,
     journal as unknown as BookingJournalService,
-    fieldMap as unknown as DealFieldMapService,
+    dealBookings as unknown as DealBookingFieldsService,
   );
   const batch = vi.fn(async () => ({ result: { b5942: { externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '18784' }] } }, errors: {}, total: {}, next: {} }));
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call, batch } } as unknown as B24UserContext;
-  return { svc, user, calls, journal, prisma };
+  return { svc, user, calls, journal, prisma, dealBookings };
 }
 
 describe('BookingRestoreService', () => {
@@ -72,7 +72,11 @@ describe('BookingRestoreService', () => {
       externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: '18784' }],
     });
     expect(t.calls.find((c) => c[0] === 'booking.v1.booking.client.set')![1]).toMatchObject({ bookingId: 6001, clients: [{ id: 140 }] });
-    expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 18784, fields: { UF_ID: '6001', UF_S: '2026-10-23T19:30:00+03:00' } });
+    // Номер и даты в сделке — пересчётом по журналу после записи нового ID (сам сервис в сделку не пишет).
+    expect(t.calls.some((c) => c[0] === 'crm.deal.update')).toBe(false);
+    expect(t.dealBookings.refresh).toHaveBeenCalledTimes(1);
+    expect(t.dealBookings.refresh).toHaveBeenCalledWith({ portalId: 'p1', timezone: 'Europe/Moscow', client: t.user.client }, 18784);
+    expect(t.dealBookings.refresh.mock.invocationCallOrder[0]).toBeGreaterThan(t.journal.recordRecreated.mock.invocationCallOrder[0]);
     expect(t.journal.recordRecreated).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), 6001, { kind: 'user', userId: 7, name: 'Анна' });
     expect(t.prisma.paymentRequest.updateMany).toHaveBeenCalledWith({ where: { portalId: 'p1', bookingId: 5942 }, data: { bookingId: 6001 } });
   });
@@ -94,6 +98,8 @@ describe('BookingRestoreService', () => {
     await t.svc.removeInApp(t.user, 5942);
     expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 5942, { reason: 'removed_in_bitrix', actor: { kind: 'user', userId: 7, name: 'Анна' } });
     expect(t.calls.some((c) => c[0] === 'booking.v1.booking.delete')).toBe(false);
+    expect(t.dealBookings.refresh).toHaveBeenCalledWith(expect.objectContaining({ portalId: 'p1' }), 18784);
+    expect(t.dealBookings.refresh.mock.invocationCallOrder[0]).toBeGreaterThan(t.journal.recordCancelled.mock.invocationCallOrder[0]);
   });
 
   it('rollback: the booking in Bitrix24 returns to the chosen version, dates in the deal too', async () => {
@@ -106,8 +112,15 @@ describe('BookingRestoreService', () => {
     });
     // Сделка та же — связь не трогаем.
     expect(t.calls.some((c) => c[0].startsWith('booking.v1.booking.externalData'))).toBe(false);
-    expect(t.calls.find((c) => c[0] === 'crm.deal.update')![1]).toEqual({ id: 18784, fields: { UF_S: '2026-10-23T18:00:00+03:00' } });
     expect(t.journal.recordChanged).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ startsAt: '2026-10-23T15:00:00.000Z' }), expect.anything(), 'rolled_back', 'app');
+    // Сделка та же — один пересчёт, после записи версии в журнал.
+    expect(t.dealBookings.refresh).toHaveBeenCalledTimes(1);
+    expect(t.dealBookings.refresh.mock.invocationCallOrder[0]).toBeGreaterThan(t.journal.recordChanged.mock.invocationCallOrder[0]);
+  });
+
+  it('предупреждения пересчёта полей сделки возвращаются, а не роняют решение', async () => {
+    const t = setup({ exists: true, refreshWarnings: ['Поля броней в сделке #18784 не обновлены'] });
+    expect(await t.svc.rollback(t.user, 5942, 'h1')).toEqual(['Поля броней в сделке #18784 не обновлены']);
   });
 
   it('rollback of a booking deleted in Bitrix24 recreates it by the version', async () => {

@@ -3,7 +3,7 @@ import { MESSENGER_CONTACT_FIELDS } from '../messenger-contact-fields.js';
 import { zonedTimeToUtc } from '@btx24/shared';
 import type { Portal } from '../../../generated/prisma/client.js';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { WritePolicy } from '../rest/rest-client.js';
+import type { WritePolicy, WriteScope } from '../rest/rest-client.js';
 
 /** Песочница записи (решение владельца 2026-10-21): одна тестовая сделка и брони в заданном периоде. */
 export interface SandboxConfig {
@@ -65,9 +65,16 @@ export class SandboxWritePolicy implements WritePolicy {
     this.to = cfg.bookingsTo ? zonedTimeToUtc(cfg.bookingsTo, '00:00', portal.timezone).getTime() / 1000 : null;
   }
 
-  async allows(method: string, params: P): Promise<boolean> {
+  async allows(method: string, params: P, scope?: WriteScope): Promise<boolean> {
     const fields = (params.fields ?? {}) as P;
     switch (lc(method)) {
+      // Объединение дублей контактов (решение владельца 2026-10-30, ADR 0022): только в контексте
+      // ContactMergeGrant, который клиент уже проверил, — контакты группы и один mergeBatch по ним.
+      case 'crm.entity.mergebatch': {
+        const p = (params.params ?? {}) as P;
+        const ids = Array.isArray(p.entityIds) ? p.entityIds.map(Number) : [];
+        return scope?.kind === 'contact-merge' && Number(p.entityTypeId) === 3 && ids.length === scope.ids.length && ids.every((id, i) => id === scope.ids[i]);
+      }
       case 'crm.deal.add':
         return this.createAllowed();
       case 'crm.deal.update':
@@ -88,7 +95,8 @@ export class SandboxWritePolicy implements WritePolicy {
         if (SYSTEM_FIELDS.some(f => f.entity === (lc(method).includes('.deal.') ? 'deal' : 'contact') && fields.FIELD_NAME === f.defaultCode?.slice('UF_CRM_'.length) && fields.USER_TYPE_ID === f.types[0] && fields.MULTIPLE === (f.multiple ? 'Y' : 'N') && fields.MANDATORY === 'N' && fields.XML_ID === `btx24.${f.entity}.${f.key}`)) return true;
         return MESSENGER_CONTACT_FIELDS.some(f => fields.FIELD_NAME === f.code.slice('UF_CRM_'.length) && fields.USER_TYPE_ID === 'string' && fields.MULTIPLE === f.multiple && fields.MANDATORY === 'N' && fields.XML_ID === f.xmlId);
       case 'crm.contact.update':
-        return false; // Владелец отложил редактирование контактов (2026-10-28).
+        // Владелец отложил редактирование контактов (2026-10-28); исключение — выравнивание полей перед объединением.
+        return scope?.kind === 'contact-merge' && /^\d+$/.test(String(params.id ?? '')) && scope.ids.includes(Number(params.id));
       // Аннулирование ссылки на оплату = удаление неоплаченной оплаты счёта тестовой сделки.
       case 'crm.item.payment.delete':
       case 'crm.item.payment.update':

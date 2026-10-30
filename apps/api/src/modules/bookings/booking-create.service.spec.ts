@@ -1,6 +1,7 @@
 import { BookingCreateService, dateRu, productRow, timeRu, zonedIso } from './booking-create.service.js';
 import { detectFieldMap, type DealFieldMapService } from './deal-field-map.service.js';
 import type { BookingJournalService } from './booking-journal.service.js';
+import type { DealBookingFieldsService } from './deal-booking-fields.service.js';
 import type { DealFormService } from './deal-form.service.js';
 import type { DealFormField } from '@btx24/shared';
 import type { AccessService } from '../access/access.service.js';
@@ -8,6 +9,7 @@ import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import type { ActionLogService } from '../audit/action-log.service.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
+import { Prisma } from '../../generated/prisma/client.js';
 
 const group = {
   id: 'g1',
@@ -22,12 +24,19 @@ const group = {
 };
 const map = { bookingId: 'UF_ID', bookingStart: 'UF_START', bookingEnd: 'UF_END', visitDateStart: 'UF_VD', visitTimeStart: 'UF_VT', guests: 'UF_G', bookingType: 'UF_TYPE', managerComment: 'UF_C' };
 
-function setup(o: { dealContact?: string | null; failCompensation?: boolean; fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; dealProducts?: string[]; formFields?: DealFormField[] } = {}) {
+function setup(o: { dealContact?: string | null; failCompensation?: boolean; fail?: string; failCode?: string; can?: boolean; permissions?: string[]; prevOp?: Record<string, unknown>; afterRace?: Record<string, unknown> | null; createDup?: boolean; claimCount?: number; dealProducts?: string[]; formFields?: DealFormField[]; refreshWarnings?: string[] } = {}) {
   const ops: Record<string, unknown>[] = [];
   const prisma = {
     bookingOperation: {
-      findUnique: vi.fn(async () => o.prevOp ?? null),
+      // Первое чтение — состояние до захвата; повторное (после проигранной гонки) — состояние победителя.
+      findUnique: vi.fn().mockResolvedValueOnce(o.prevOp ?? null).mockResolvedValue(o.afterRace ?? null),
+      updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const count = o.claimCount ?? 1;
+        if (count) Object.assign(ops[0] ?? (ops[0] = { id: 'op1', ...o.prevOp }), data);
+        return { count };
+      }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (o.createDup) throw new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x' });
         const r = { id: 'op1', ...data };
         ops.push(r);
         return r;
@@ -57,8 +66,12 @@ function setup(o: { dealContact?: string | null; failCompensation?: boolean; fai
   const user = { portal: { id: 'p1', timezone: 'Europe/Moscow' }, userId: 7, userName: 'Анна', client: { call, listAll } } as unknown as B24UserContext;
   const dealForm = { createFields: vi.fn(async () => o.formFields ?? []) } as unknown as DealFormService;
   const actions = { user: vi.fn(async () => undefined) };
-  const svc = new BookingCreateService(prisma, access, journal as unknown as BookingJournalService, fieldMap, dealForm, actions as unknown as ActionLogService);
-  return { svc, user, calls, journal, ops, actions };
+  const dealBookings = { refresh: vi.fn(async () => o.refreshWarnings ?? []) };
+  const svc = new BookingCreateService(
+    prisma, access, journal as unknown as BookingJournalService, fieldMap, dealForm, actions as unknown as ActionLogService, undefined,
+    dealBookings as unknown as DealBookingFieldsService,
+  );
+  return { svc, user, calls, journal, ops, actions, prisma, dealBookings };
 }
 
 const body = (over: Record<string, unknown> = {}) => ({
@@ -92,11 +105,24 @@ describe('BookingCreateService', () => {
     expect(t.calls[0][1]).toMatchObject({ fields: { resourceIds: [10], datePeriod: { from: { timestamp: 1591009200, timezone: 'Europe/Moscow' } } } });
     expect(t.calls[3][1]).toEqual({
       id: 678,
-      fields: { UF_ID: '555', UF_START: '2020-06-01T14:00:00+03:00', UF_END: '2020-06-01T18:00:00+03:00', UF_VD: '01.06.2020', UF_VT: '14:00', UF_G: 4, UF_TYPE: '86', UF_C: 'Именинник' },
+      // Номер и даты брони/визита — не здесь, а пересчётом по журналу (шаг 7).
+      fields: { UF_G: 4, UF_TYPE: '86', UF_C: 'Именинник' },
     });
     expect(t.calls[4][1]).toEqual({ id: 678, rows: [{ PRODUCT_ID: 31, PRICE: 45000, QUANTITY: 1, DISCOUNT_TYPE_ID: 2, DISCOUNT_RATE: 0, DISCOUNT_SUM: 0 }] });
     expect(t.journal.recordCreated).toHaveBeenCalledWith('p1', expect.objectContaining({ bookingId: 555, dealId: 678, paymentMode: 'prepayment' }), { kind: 'user', userId: 7, name: 'Анна' });
     expect(t.ops[0]).toMatchObject({ status: 'done', bookingId: 555 });
+    // 7. Пересчёт полей броней сделки — после записи брони в журнал, токеном сотрудника.
+    expect(t.dealBookings.refresh).toHaveBeenCalledTimes(1);
+    expect(t.dealBookings.refresh).toHaveBeenCalledWith({ portalId: 'p1', timezone: 'Europe/Moscow', client: t.user.client }, 678);
+    expect(t.dealBookings.refresh.mock.invocationCallOrder[0]).toBeGreaterThan(t.journal.recordCreated.mock.invocationCallOrder[0]);
+  });
+
+  it('предупреждения пересчёта полей броней — в warnings, бронь создана; служебная бронь — без пересчёта', async () => {
+    const t = setup({ refreshWarnings: ['Поля броней в сделке #678 не обновлены'] });
+    expect((await t.svc.create(t.user, body())).warnings).toEqual(['Поля броней в сделке #678 не обновлены']);
+    const s = setup();
+    await s.svc.create(s.user, body({ kind: 'service', dealId: undefined, products: [] }));
+    expect(s.dealBookings.refresh).not.toHaveBeenCalled();
   });
 
   it('new deal is created in the group funnel first', async () => {
@@ -151,10 +177,10 @@ describe('BookingCreateService', () => {
   });
 
   it('повтор с тем же ключом: готово — прежний результат; идёт — 409; сорвалось — выполняется заново', async () => {
-    const done = setup({ prevOp: { status: 'done', bookingId: 555, dealId: 678 } });
+    const done = setup({ prevOp: { status: 'done', bookingId: 555, dealId: 678, request: body() } });
     expect(await done.svc.create(done.user, body())).toMatchObject({ bookingId: 555, warnings: [expect.stringContaining('Повтор')] });
     expect(done.calls).toEqual([]);
-    const running = setup({ prevOp: { status: 'running', updatedAt: new Date() } });
+    const running = setup({ prevOp: { status: 'running', updatedAt: new Date(), request: body() } });
     await expect(running.svc.create(running.user, body())).rejects.toMatchObject({ status: 409 });
     const failed = setup({ prevOp: { status: 'failed', error: 'x', updatedAt: new Date(), dealId: null } });
     expect(await failed.svc.create(failed.user, body())).toMatchObject({ bookingId: 555 });
@@ -166,6 +192,71 @@ describe('BookingCreateService', () => {
     expect(r.dealId).toBe(900);
     expect(t.calls[0]).toEqual(['booking.v1.booking.delete', { id: 554 }]);
     expect(t.calls.some(([m]) => m === 'crm.deal.add')).toBe(false);
+  });
+
+  describe('гонки идемпотентности', () => {
+    it('два первых запроса с одним ключом: проигравший create (P2002), победитель ещё идёт — 409 OPERATION_RUNNING без шагов', async () => {
+      const t = setup({ createDup: true, afterRace: { id: 'op1', status: 'running', updatedAt: new Date(), request: body() } });
+      await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ status: 409, response: { code: 'OPERATION_RUNNING' } });
+      expect(t.calls).toEqual([]);
+    });
+
+    it('два первых запроса: победитель уже создал бронь — проигравший возвращает его результат', async () => {
+      const t = setup({ createDup: true, afterRace: { id: 'op1', status: 'done', bookingId: 555, dealId: 678, updatedAt: new Date(), request: body() } });
+      expect(await t.svc.create(t.user, body())).toMatchObject({ bookingId: 555, dealId: 678, warnings: [expect.stringContaining('Повтор')] });
+      expect(t.calls).toEqual([]);
+    });
+
+    it('два повтора после сбоя: захват атомарный (status+updatedAt), проигравший не создаёт вторую сделку', async () => {
+      const updatedAt = new Date(0);
+      const prevOp = { id: 'op1', status: 'failed', updatedAt, dealId: null, bookingId: null };
+      const win = setup({ prevOp });
+      const nb = body({ dealId: undefined, newDeal: { title: 'Баня', contactId: 140 } });
+      await win.svc.create(win.user, nb);
+      expect(win.prisma.bookingOperation.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'op1', status: 'failed', updatedAt }, data: expect.objectContaining({ status: 'running' }) }),
+      );
+      expect(win.calls.filter(([m]) => m === 'crm.deal.add')).toHaveLength(1);
+      const lose = setup({ prevOp, claimCount: 0, afterRace: { id: 'op1', status: 'running', updatedAt: new Date(), request: nb } });
+      await expect(lose.svc.create(lose.user, nb)).rejects.toMatchObject({ status: 409, response: { code: 'OPERATION_RUNNING' } });
+      expect(lose.calls).toEqual([]);
+    });
+
+    it('проигравший захват, а победитель уже успел снова сорваться — 409 «повторите», шаги не выполняются', async () => {
+      const t = setup({ prevOp: { id: 'op1', status: 'failed', updatedAt: new Date(0) }, claimCount: 0, afterRace: { id: 'op1', status: 'failed', updatedAt: new Date() } });
+      await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ response: { code: 'OPERATION_RUNNING' } });
+      expect(t.calls).toEqual([]);
+    });
+
+    it('зависшая заявка: захват по прежнему updatedAt — второй «спасатель» не запускает шаги', async () => {
+      const t = setup({ prevOp: { id: 'op1', status: 'running', updatedAt: new Date(0), request: body() }, claimCount: 0, afterRace: { id: 'op1', status: 'running', updatedAt: new Date(), request: body() } });
+      await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ response: { code: 'OPERATION_RUNNING' } });
+      expect(t.prisma.bookingOperation.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ status: 'running', updatedAt: new Date(0) }) }));
+      expect(t.calls).toEqual([]);
+    });
+
+    it('тот же ключ, другие параметры: готово или идёт — 409 IDEMPOTENCY_KEY_REUSED; порядок полей не важен', async () => {
+      const done = setup({ prevOp: { status: 'done', bookingId: 555, dealId: 678, request: body() } });
+      await expect(done.svc.create(done.user, body({ guests: 5 }))).rejects.toMatchObject({ status: 409, response: { code: 'IDEMPOTENCY_KEY_REUSED' } });
+      const running = setup({ prevOp: { status: 'running', updatedAt: new Date(), request: body() } });
+      await expect(running.svc.create(running.user, body({ start: '2020-06-01T12:00:00.000Z' }))).rejects.toMatchObject({ response: { code: 'IDEMPOTENCY_KEY_REUSED' } });
+      const reordered = Object.fromEntries(Object.entries(body()).reverse());
+      const same = setup({ prevOp: { status: 'done', bookingId: 555, dealId: 678, request: reordered } });
+      expect(await same.svc.create(same.user, body())).toMatchObject({ bookingId: 555 });
+    });
+
+    it('после сбоя повтор с исправленными параметрами разрешён (форма держит один ключ), новые параметры сохраняются', async () => {
+      const t = setup({ prevOp: { id: 'op1', status: 'failed', updatedAt: new Date(0), request: body() } });
+      expect(await t.svc.create(t.user, body({ guests: 6 }))).toMatchObject({ bookingId: 555 });
+      expect(t.prisma.bookingOperation.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ request: expect.objectContaining({ guests: 6 }) }) }));
+    });
+
+    it('оставшуюся бронь прошлой попытки снять не удалось — 503, захват отпущен (failed), бронь сохранена в записи', async () => {
+      const t = setup({ prevOp: { id: 'op1', status: 'failed', updatedAt: new Date(0), dealId: null, bookingId: 554 }, failCompensation: true });
+      await expect(t.svc.create(t.user, body())).rejects.toMatchObject({ status: 503, response: { code: 'BITRIX_UNAVAILABLE' } });
+      expect(t.ops[0]).toMatchObject({ status: 'failed', bookingId: 554 });
+      expect(t.calls.map((c) => c[0])).toEqual(['booking.v1.booking.delete']);
+    });
   });
 
   it('портал не ответил (лимит) — 503 «повторите», бронь снята', async () => {
@@ -296,7 +387,15 @@ describe('BookingCreateService — поля сделки группы', () => {
     const { svc, user, calls } = setup({ formFields });
     await svc.create(user, body({ dealFields: { UF_KIND: '72', UF_SUM: '1500' }, bookingTypeId: 'hourly' }));
     const upd = calls.find(([m]) => m === 'crm.deal.update')![1] as { fields: Record<string, unknown> };
-    expect(upd.fields).toMatchObject({ UF_KIND: '72', UF_SUM: '1500|RUB', UF_ID: '555' });
+    expect(upd.fields).toMatchObject({ UF_KIND: '72', UF_SUM: '1500|RUB', UF_G: 4 });
+  });
+
+  it('поле формы с кодом номера/дат брони не пишется формой: его ведёт пересчёт', async () => {
+    const { svc, user, calls } = setup({ formFields: [...formFields, field({ code: 'UF_START', label: 'Начало', kind: 'string' })] });
+    await svc.create(user, body({ dealFields: { UF_KIND: '72', UF_SUM: '1500', UF_START: 'вручную' }, bookingTypeId: 'hourly' }));
+    const upd = calls.find(([m]) => m === 'crm.deal.update')![1] as { fields: Record<string, unknown> };
+    expect(upd.fields).not.toHaveProperty('UF_START');
+    expect(upd.fields).not.toHaveProperty('UF_ID');
   });
 
   it('обязательное поле пустое — 400 до записей в Битрикс24', async () => {

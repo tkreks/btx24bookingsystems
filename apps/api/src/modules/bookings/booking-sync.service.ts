@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { todayIn, zonedDayRange, type AlertProblem, type BookingStateDto } from '@btx24/shared';
 import type { BookingRecord, Portal } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -6,12 +6,15 @@ import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { diffState } from './alert-message.js';
 import { BookingAlertsService } from './booking-alerts.service.js';
 import { BookingJournalService, stateOf, SYSTEM } from './booking-journal.service.js';
+import { DealBookingFieldsService } from './deal-booking-fields.service.js';
 import { dealLinks, getBooking, listBookings, listResources, type RawBooking } from './bitrix-bookings.js';
 
 export interface SyncReport {
   resources: { total: number; archived: number };
   bookings: { seen: number; imported: number; changed: number; removed: number; alerts: number };
   baseline: boolean;
+  /** Поля броней сделок: пересчитано за проход и осталось в очереди на следующий. */
+  deals?: { refreshed: number; pending: number };
 }
 
 type Actual = BookingStateDto & { title: string | null };
@@ -21,6 +24,11 @@ const DAY_MS = 86_400_000;
  * 30 дней): известные — не удалили ли; неизвестные прошедшие — в журнал без уведомления.
  */
 export const SYNC_LOOKBACK_DAYS = 31;
+/**
+ * Сколько сделок за проход сверки получают пересчёт полей броней (по одной `crm.deal.get` и, если
+ * изменилось, `crm.deal.update`). Остальные — в очереди процесса worker на следующие проходы.
+ */
+export const DEAL_FIELDS_PER_PASS = 20;
 
 /**
  * Сверка с Битрикс24 (ADR 0007), токеном приложения, в worker:
@@ -31,6 +39,9 @@ export const SYNC_LOOKBACK_DAYS = 31;
  * - бронь приложения не совпала / пропала — уведомление о расхождении; запись не меняется,
  *   пока сотрудник не решит, как поступить;
  * - бронь из Битрикс24 изменили или удалили там — запись следует за Битрикс24 (с историей).
+ * Сделки, у которых бронь появилась/изменилась/отменена по Битрикс24, получают пересчёт полей броней
+ * (`DealBookingFieldsService`) — не больше `DEAL_FIELDS_PER_PASS` за проход; первый проход (baseline)
+ * поля не пересчитывает.
  */
 @Injectable()
 export class BookingSyncService {
@@ -38,7 +49,12 @@ export class BookingSyncService {
     private readonly prisma: PrismaService,
     private readonly journal: BookingJournalService,
     private readonly alerts: BookingAlertsService,
+    @Optional() private readonly dealBookings?: DealBookingFieldsService,
   ) {}
+
+  private readonly logger = new Logger(BookingSyncService.name);
+  /** Очередь сделок на пересчёт полей броней по порталам (в памяти worker; после рестарта — с новых событий). */
+  private readonly dealQueue = new Map<string, Set<number>>();
 
   async reconcile(portal: Portal, client: Bitrix24RestClient, now = new Date()): Promise<SyncReport> {
     const settings = await this.prisma.portalSettings.upsert({
@@ -63,6 +79,10 @@ export class BookingSyncService {
     });
     const byBooking = new Map(records.map((r) => [r.bookingId, r]));
     const report = { seen: actual.size, imported: 0, changed: 0, removed: 0, alerts: 0 };
+    const touched = new Set<number>();
+    const touch = (...ids: (number | null | undefined)[]) => {
+      for (const id of ids) if (id) touched.add(id);
+    };
 
     for (const [bookingId, a] of actual) {
       const r = byBooking.get(bookingId);
@@ -71,16 +91,23 @@ export class BookingSyncService {
         // для истории, но без уведомления и с «созданием» на дату брони — не как новая сегодня.
         if (Date.parse(a.endsAt) <= from.getTime()) {
           const { created } = await this.journal.recordImported(portal.id, { ...importInput(bookingId, a), createdAt: new Date(a.startsAt) });
-          if (created) report.imported++;
+          if (created) {
+            report.imported++;
+            touch(a.dealId);
+          }
           continue;
         }
         const { created } = await this.journal.recordImported(portal.id, importInput(bookingId, a));
-        if (created) report.imported++;
+        if (created) {
+          report.imported++;
+          touch(a.dealId);
+        }
         if (created && baseline && (await this.alerts.raise(portal.id, newBooking(bookingId, a)))) report.alerts++;
       } else {
         const res = await this.compare(r, a);
         report.changed += res.changed;
         report.alerts += res.alerts;
+        if (res.changed) touch(r.dealId, a.dealId);
       }
     }
 
@@ -90,9 +117,11 @@ export class BookingSyncService {
       const b = await getBooking(client, r.bookingId);
       if (b) {
         const links1 = await dealLinks(client, [r.bookingId]);
-        const res = await this.compare(r, toActual(b, links1.get(r.bookingId) ?? null));
+        const a = toActual(b, links1.get(r.bookingId) ?? null);
+        const res = await this.compare(r, a);
         report.changed += res.changed;
         report.alerts += res.alerts;
+        if (res.changed) touch(r.dealId, a.dealId);
       } else if (r.source === 'bitrix' && !r.dealId) {
         // Служебная бронь из Битрикс24 без сделки — решать нечего, просто в историю.
         if (await this.journal.recordCancelled(portal.id, r.bookingId, { reason: 'removed_in_bitrix', actor: SYSTEM.bitrix, via: 'reconcile' }))
@@ -105,7 +134,27 @@ export class BookingSyncService {
     if (!baseline)
       await this.prisma.portalSettings.update({ where: { portalId: portal.id }, data: { bookingSyncBaselineAt: now } });
     await this.alerts.deliverPending(portal, client);
-    return { resources, bookings: report, baseline: !baseline };
+    // Первый проход принимает всё как есть — без шквала записей в сделки.
+    const deals = baseline ? await this.refreshDeals(portal, client, touched, now) : undefined;
+    return { resources, bookings: report, baseline: !baseline, ...(deals ? { deals } : {}) };
+  }
+
+  /** Пересчёт полей броней затронутых сделок: последовательно, не больше `DEAL_FIELDS_PER_PASS` за проход. */
+  private async refreshDeals(portal: Portal, client: Bitrix24RestClient, touched: Set<number>, now: Date) {
+    if (!this.dealBookings) return undefined;
+    const queue = this.dealQueue.get(portal.id) ?? new Set<number>();
+    for (const id of touched) queue.add(id);
+    let refreshed = 0;
+    for (const dealId of [...queue].slice(0, DEAL_FIELDS_PER_PASS)) {
+      queue.delete(dealId);
+      // Токен приложения: фоновая задача; запись — по тем же правилам «только чтение»/песочницы.
+      const warnings = await this.dealBookings.refresh({ portalId: portal.id, timezone: portal.timezone, client }, dealId, now);
+      if (warnings.length) this.logger.warn(`portal ${portal.id}: ${warnings.join('; ')}`);
+      refreshed++;
+    }
+    if (queue.size) this.dealQueue.set(portal.id, queue);
+    else this.dealQueue.delete(portal.id);
+    return { refreshed, pending: queue.size };
   }
 
   /** Сверить известную бронь с Битрикс24. */

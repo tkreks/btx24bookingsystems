@@ -169,8 +169,8 @@ export class ClientBookingsService {
     };
   }
 
-  /** Брони клиента из чата открытой линии (контакт и сделка чата). */
-  async forChat(user: B24UserContext, chatId: number): Promise<ClientBookingsDto> {
+  /** Брони клиента из чата открытой линии (контакт и сделка чата); `includeHistory` — все прошедшие (окно «Прошедшие брони»). */
+  async forChat(user: B24UserContext, chatId: number, includeHistory = false): Promise<ClientBookingsDto> {
     const d = (await user.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId })).result;
     const parts = String(d?.entity_data_2 ?? '').split('|');
     const get = (t: string) => {
@@ -179,7 +179,7 @@ export class ClientBookingsService {
       return n > 0 ? n : null;
     };
     const dealId = get('DEAL');
-    return this.forContact(user, get('CONTACT'), dealId ? [dealId] : []);
+    return this.forContact(user, get('CONTACT'), dealId ? [dealId] : [], new Date(), includeHistory);
   }
 
   /** Брони сделки и её клиента (встройка в карточку сделки). */

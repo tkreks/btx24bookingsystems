@@ -5,9 +5,11 @@ import {
   DEFAULT_FAIL_MESSAGE,
   DEFAULT_SURCHARGE_MESSAGE,
   renderMessage,
+  hasPaymentLinkToken,
   withPaymentLink,
   PAYMENT_KIND_LABELS,
   DEFAULT_PAYMENT_LINK_MESSAGE,
+  PAYMENT_LINK_VAR,
   type ClientMessageStep,
   type MessageContext,
   type GroupOptionsDto,
@@ -39,6 +41,18 @@ const money = (v: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDig
 /** Стадия счёта «оплачен»: семантика успеха у смарт-счёта — суффикс `:P`. */
 export const invoicePaid = (stageId: unknown) => String(stageId ?? '').endsWith(':P');
 const invoiceFailed = (stageId: unknown) => String(stageId ?? '').endsWith(':D');
+
+/**
+ * Свой текст клиенту со ссылкой: `{{СсылкаНаОплату}}` — ссылкой; `{link}` (и другие формы ссылки
+ * шаблонизатора) подставит `renderMessage`; ни того ни другого — ссылка последней строкой. Иначе
+ * текст из шаблона оплаты (`{link}`) получил бы ссылку дважды.
+ */
+export function ownTextWithLink(text: string, link: string): string {
+  return hasPaymentLinkToken(text) ? text.trim().split(PAYMENT_LINK_VAR).join(link) : withPaymentLink(text, link);
+}
+
+/** ID файлов своего текста из заявки (`PaymentRequest.messageFileIds`). */
+export const requestFileIds = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /** Шаг сообщения об оплате до загрузки файлов: текст и ID файлов шаблона (`StoredFile`). */
 export interface PaymentMessageStep {
@@ -172,10 +186,13 @@ export class PaymentFlow {
       minutes: minutes ?? '',
       deadline: deadline ? `${timeRu(deadline, ctx.portal.timezone)} ${dateRu(deadline, ctx.portal.timezone)}` : '',
     };
-    // Свой текст из встройки сделки — одним сообщением, `{{СсылкаНаОплату}}` — ссылка.
+    // Свой текст (встройка сделки, окно оплаты) — одним сообщением с вложениями заявки; ссылка — без задвоения.
     const own = req.message ?? (req.kind === 'custom' ? DEFAULT_PAYMENT_LINK_MESSAGE : null);
     const tpl = own !== null || req.kind === 'custom'
-      ? { name: null, steps: [{ text: withPaymentLink(own ?? DEFAULT_PAYMENT_LINK_MESSAGE, req.link), files: [] }] }
+      ? {
+          name: null,
+          steps: [{ text: ownTextWithLink(own ?? DEFAULT_PAYMENT_LINK_MESSAGE, req.link), files: requestFileIds(req.messageFileIds).map((fileId) => ({ fileId, name: '' })) }],
+        }
       : await this.paymentTemplate(ctx.portal.id, req.kind, opts, warnings);
     const steps = await this.withFileData(
       ctx.portal.id,
@@ -557,19 +574,24 @@ export class PaymentFlow {
     kind: PaymentKind,
     opts: GroupOptionsDto | null,
     warnings: string[] = [],
-  ): Promise<{ name: string | null; steps: PaymentMessageStep[] }> {
+  ): Promise<{ id: string | null; name: string | null; steps: PaymentMessageStep[] }> {
     const p = opts?.payments;
     const id = kind === 'prepayment' ? p?.prepaymentTemplateId : p?.surchargeTemplateId;
     if (id) {
-      const row = await this.prisma.messageTemplate.findFirst({ where: { id, portalId, purpose: 'payment', shared: true } });
-      if (row) {
-        const steps = (row.steps as unknown as TemplateStepDto[]).map((st) => ({ text: st.text, files: st.fileIds.map((fileId) => ({ fileId, name: '' })) }));
-        return { name: row.name, steps };
-      }
+      const tpl = await this.systemPaymentTemplate(portalId, id);
+      if (tpl) return tpl;
       warnings.push('Шаблон сообщения об оплате не найден — отправлен стандартный текст');
     }
     const text = kind === 'prepayment' ? p?.clientMessage || DEFAULT_CLIENT_MESSAGE : p?.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE;
-    return { name: null, steps: [{ text, files: [] }] };
+    return { id: null, name: null, steps: [{ text, files: [] }] };
+  }
+
+  /** Системный шаблон оплаты портала (общий, назначение `payment`); чужой или пропавший — null. */
+  async systemPaymentTemplate(portalId: string, id: string): Promise<{ id: string; name: string; steps: PaymentMessageStep[] } | null> {
+    const row = await this.prisma.messageTemplate.findFirst({ where: { id, portalId, purpose: 'payment', shared: true } });
+    if (!row) return null;
+    const steps = (row.steps as unknown as TemplateStepDto[]).map((st) => ({ text: st.text, files: (st.fileIds ?? []).map((fileId) => ({ fileId, name: '' })) }));
+    return { id: row.id, name: row.name, steps };
   }
 
   /** Файлы шаблона оплаты (`StoredFile`) — содержимое для отправки; пропавший файл — предупреждение. */

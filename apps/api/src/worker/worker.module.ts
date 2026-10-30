@@ -23,6 +23,7 @@ import { PaidAmountJob } from './paid-amount.job.js';
 import { AutoMessageJob } from './auto-message.job.js';
 import { AutoMessagesService } from '../modules/payments/auto-messages.service.js';
 import { DealFieldMapService } from '../modules/bookings/deal-field-map.service.js';
+import { DealBookingFieldsService } from '../modules/bookings/deal-booking-fields.service.js';
 import { MessageContextService } from '../modules/bookings/message-context.service.js';
 import { DealPaymentsService } from '../modules/bookings/deal-payments.service.js';
 import { EventSyncJob } from './event-sync.job.js';
@@ -44,6 +45,7 @@ import { CrmMirrorJob } from './crm-mirror.job.js';
     BookingSyncService,
     BookingSyncJob,
     DealFieldMapService,
+    DealBookingFieldsService,
     MessageContextService,
     PaymentFlow,
     PaymentJob,

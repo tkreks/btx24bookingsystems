@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { CancelBookingResultDto } from '@btx24/shared';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -7,6 +7,10 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { dealLinks, getBooking } from './bitrix-bookings.js';
 import { BookingJournalService } from './booking-journal.service.js';
+import { DealBookingFieldsService, userFieldsContext } from './deal-booking-fields.service.js';
+
+/** Код Битрикс24 «Booking not found» (как в `getBooking`). */
+const BOOKING_NOT_FOUND = '1021';
 
 const cancelSchema = z.object({ groupId: z.string().min(1).max(40), comment: z.string().trim().max(500).optional() }).strict();
 
@@ -21,6 +25,7 @@ export class BookingCancelService {
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
     private readonly journal: BookingJournalService,
+    @Optional() private readonly dealBookings?: DealBookingFieldsService,
   ) {}
 
   async cancel(user: B24UserContext, bookingId: number, body: unknown): Promise<CancelBookingResultDto> {
@@ -39,7 +44,7 @@ export class BookingCancelService {
       const rec = await this.journal.find(user.portal.id, bookingId);
       if (!rec) throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Бронь не найдена' });
       if (rec.status === 'active') await this.journal.recordCancelled(user.portal.id, bookingId, cancel);
-      return { bookingId, warnings: ['Бронь уже была снята в Битрикс24'] };
+      return { bookingId, warnings: ['Бронь уже была снята в Битрикс24', ...(await this.refreshDeal(user, rec.dealId))] };
     }
     const resourceIds = (raw.resourceIds ?? []).map(Number);
     if (!resourceIds.some((id) => g.group.resourceIds.includes(id)))
@@ -48,7 +53,7 @@ export class BookingCancelService {
     // Бронь, созданную мимо приложения и ещё не попавшую в журнал, сначала записываем — чтобы
     // у отмены была история.
     const dealId = (await dealLinks(user.client, [bookingId])).get(bookingId) ?? null;
-    await this.journal.recordImported(user.portal.id, {
+    const imported = await this.journal.recordImported(user.portal.id, {
       bookingId,
       kind: dealId ? 'client' : 'service',
       dealId,
@@ -64,8 +69,11 @@ export class BookingCancelService {
     } catch (err) {
       if (err instanceof Bitrix24Error && err.code === 'READ_ONLY_MODE')
         throw new ForbiddenException({ code: 'BOOKING_READ_ONLY', message: 'Снимать эту бронь приложению пока не разрешено: можно только брони, созданные приложением' });
-      throw err;
+      // 1021 «Booking not found»: параллельная отмена успела удалить бронь между get и delete —
+      // цель достигнута, доводим отмену как обычно (запись журнала и ожидания оплаты — идемпотентны).
+      if (!(err instanceof Bitrix24Error && String(err.code) === BOOKING_NOT_FOUND)) throw err;
     }
+    // Отменяет только активную запись (updateMany по статусу): вторая отмена историю не задваивает.
     await this.journal.recordCancelled(user.portal.id, bookingId, cancel);
 
     // Ожидание оплаты по этой брони больше не нужно: иначе по сроку клиенту уйдёт «не оплачено».
@@ -78,6 +86,13 @@ export class BookingCancelService {
       for (const r of waiting)
         if (r.invoiceId) warnings.push(`Счёт #${r.invoiceId} остался — при необходимости переведите его в «Не оплачен»`);
     }
+    // Поля броней сделки: номер/даты ближайшей действующей брони и список — без снятой.
+    // Сделка по журналу могла отличаться от связи в Битрикс24 — пересчитываем обе.
+    for (const id of new Set([dealId, imported?.record?.dealId ?? null])) warnings.push(...(await this.refreshDeal(user, id)));
     return { bookingId, warnings };
+  }
+
+  private async refreshDeal(user: B24UserContext, dealId: number | null): Promise<string[]> {
+    return dealId && this.dealBookings ? this.dealBookings.refresh(userFieldsContext(user), dealId) : [];
   }
 }

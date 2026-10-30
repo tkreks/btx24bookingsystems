@@ -5,6 +5,7 @@ import type { OpenlineIndexService } from './openline-index.service.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
+import type { PortalService } from '../bitrix24/portals/portal.service.js';
 
 const act = (session: number, userCode: string, responsible = 7, completed: 'Y' | 'N' = 'N') => ({
   ID: String(session),
@@ -27,6 +28,8 @@ function setup(
     /** Общий кэш (несколько «сотрудников» на одной базе). */
     cache?: { chats: Map<number, Record<string, unknown>>; access: Map<string, Record<string, unknown>> };
     userId?: number;
+    /** Общий журнал действий (несколько «процессов» api на одной базе). */
+    actionLog?: Record<string, unknown>[];
   } = {},
 ) {
   const call = vi.fn(async (method: string, params?: Record<string, unknown>) => {
@@ -72,6 +75,7 @@ function setup(
     byChat: vi.fn(async () => new Map()),
   } as unknown as OpenlineIndexService;
   // Кэш списка чатов в памяти: сводки — по чату, доступы — по сотруднику и чату.
+  const actionLog: Record<string, unknown>[] = opts.actionLog ?? [];
   const chats = opts.cache?.chats ?? new Map<number, Record<string, unknown>>();
   const access = opts.cache?.access ?? new Map<string, Record<string, unknown>>();
   type W = { portalId_chatId?: { chatId: number }; portalId_userId_chatId?: { userId: number; chatId: number } };
@@ -104,10 +108,19 @@ function setup(
         if (access.has(k)) access.set(k, { ...access.get(k), ...data });
       }),
     },
+    // Журнал действий: только добавление; поиск — по порталу, сотруднику, действию и ключу в details.
+    actionLog: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => void actionLog.push({ ...data, at: new Date() })),
+      findMany: vi.fn(async ({ where }: { where: { portalId: string; userId: number; action: string; details: { equals: string } } }) =>
+        actionLog
+          .filter((r) => r.portalId === where.portalId && r.userId === where.userId && r.action === where.action && (r.details as { idempotencyKey?: string }).idempotencyKey === where.details.equals)
+          .reverse(),
+      ),
+    },
     $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   } as unknown as PrismaService;
   if (opts.userId) (user as { userId: number }).userId = opts.userId;
-  return { svc: new ChatsService(files, index, prisma), user, call, batch, listAll, files, index, cache: { chats, access } };
+  return { svc: new ChatsService(files, index, prisma), user, call, batch, listAll, files, index, prisma, actionLog, cache: { chats, access } };
 }
 
 const client = { id: 50, name: 'Клиент', connector: true };
@@ -285,6 +298,165 @@ describe('ChatsService.send', () => {
   ])('rejects an invalid chain %o', async (body) => {
     const { svc, user } = setup();
     await expect(svc.send(user, 1, body)).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('ChatsService.send idempotency', () => {
+  const body = (key?: string) => ({ steps: [{ text: 'a', fileIds: [] }, { text: 'bb', fileIds: ['f1'] }], ...(key ? { idempotencyKey: key } : {}) });
+  const sends = (call: ReturnType<typeof vi.fn>) => call.mock.calls.filter((c) => c[0] === 'im.message.add' || c[0] === 'im.v2.File.upload').length;
+
+  it('a concurrent double click with the same key sends the chain once and both get the same result', async () => {
+    const { svc, user, call } = setup();
+    svc.sleep = async () => {};
+    const [a, b] = await Promise.all([svc.send(user, 101, body('key-00000001')), svc.send(user, 101, body('key-00000001'))]);
+    expect(a).toEqual({ sent: 2, messageIds: [901, 902, 800], error: null });
+    expect(b).toEqual(a);
+    expect(sends(call)).toBe(3);
+  });
+
+  it('a retry after the first finished (e.g. timeout on the client) returns the stored result, even after an api restart', async () => {
+    const first = setup();
+    first.svc.sleep = async () => {};
+    const res = await first.svc.send(first.user, 101, body('key-00000002'));
+    expect(first.actionLog.map((r) => (r.details as { state: string }).state)).toEqual(['started', 'finished']);
+    expect(first.actionLog[0]).toMatchObject({ portalId: 'p1', userId: 7, action: 'chat.send_chain', entityType: 'chat', entityId: '101' });
+    // «Перезапуск»: новая память процесса, та же база.
+    const again = setup({ actionLog: first.actionLog });
+    expect(await again.svc.send(again.user, 101, body('key-00000002'))).toEqual(res);
+    expect(sends(again.call)).toBe(0);
+  });
+
+  it('a partial failure is replayed as is: the retry with the same key does not resend', async () => {
+    const { svc, user, call } = setup();
+    svc.sleep = async () => {};
+    call.mockImplementation(async (method: string) => {
+      if (method === 'im.v2.File.upload') throw new Bitrix24Error('READ_ONLY_MODE', 'blocked');
+      return { result: 1 };
+    });
+    const res = await svc.send(user, 101, body('key-00000003'));
+    expect(res).toMatchObject({ sent: 1, error: { step: 1 } });
+    expect(await svc.send(user, 101, body('key-00000003'))).toEqual(res);
+    expect(call.mock.calls.filter((c) => c[0] === 'im.message.add')).toHaveLength(2);
+  });
+
+  it('a started send without a result (api died mid-chain) is not resent: 409 CHAIN_SEND_UNKNOWN', async () => {
+    const first = setup();
+    first.svc.sleep = async () => {};
+    first.call.mockImplementation(async (method: string) => {
+      if (method === 'im.message.add') throw new TypeError('socket hang up');
+      return { result: 1 };
+    });
+    await expect(first.svc.send(first.user, 101, body('key-00000004'))).rejects.toThrow('socket hang up');
+    const again = setup({ actionLog: first.actionLog });
+    await expect(again.svc.send(again.user, 101, body('key-00000004'))).rejects.toMatchObject({ status: 409, response: { code: 'CHAIN_SEND_UNKNOWN' } });
+    // Та же «живая» память: запись удалена, ответ — из журнала.
+    await expect(first.svc.send(first.user, 101, body('key-00000004'))).rejects.toMatchObject({ status: 409 });
+    expect(sends(again.call)).toBe(0);
+  });
+
+  it('a failure before the first message (line not working) does not burn the key', async () => {
+    resetLineHealthCache();
+    const { svc, user, call, actionLog } = setup();
+    svc.sleep = async () => {};
+    let broken = true;
+    call.mockImplementation((async (method: string) => {
+      if (method === 'imopenlines.dialog.get') return { result: broken ? { entity_id: 'wz_telegram_x|8|77|5' } : {} };
+      if (method === 'imopenlines.config.list.get') return { result: [{ ID: '8', LINE_NAME: 'TG', ACTIVE: 'Y' }] };
+      if (method === 'imconnector.status') return { result: { CONFIGURED: false, STATUS: false, ERROR: false } };
+      return { result: 1 };
+    }) as never);
+    await expect(svc.send(user, 101, body('key-00000005'))).rejects.toMatchObject({ status: 409, response: { code: 'CHAT_NOT_WORKING' } });
+    expect(actionLog).toHaveLength(0);
+    resetLineHealthCache();
+    broken = false;
+    expect(await svc.send(user, 101, body('key-00000005'))).toMatchObject({ sent: 2, error: null });
+    resetLineHealthCache();
+  });
+
+  it('the same key with another chain or chat is rejected; keys are per portal and user', async () => {
+    const { svc, user, call } = setup();
+    svc.sleep = async () => {};
+    await svc.send(user, 101, body('key-00000006'));
+    await expect(svc.send(user, 102, body('key-00000006'))).rejects.toMatchObject({ status: 409, response: { code: 'IDEMPOTENCY_KEY_REUSED' } });
+    await expect(svc.send(user, 101, { steps: [{ text: 'other', fileIds: [] }], idempotencyKey: 'key-00000006' })).rejects.toMatchObject({ status: 409 });
+    const other = { ...user, userId: 8 } as B24UserContext;
+    await svc.send(other, 101, body('key-00000006'));
+    expect(sends(call)).toBe(6);
+  });
+
+  it('without a key (old tab) every request sends; a malformed key is rejected', async () => {
+    const { svc, user, call, actionLog } = setup();
+    svc.sleep = async () => {};
+    await svc.send(user, 101, body());
+    await svc.send(user, 101, body());
+    expect(sends(call)).toBe(6);
+    expect(actionLog).toHaveLength(0);
+    await expect(svc.send(user, 101, { ...body(), idempotencyKey: 'short' })).rejects.toMatchObject({ status: 400 });
+    await expect(svc.send(user, 101, { ...body(), idempotencyKey: 'bad key with spaces!' })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('ChatsService.file', () => {
+  function fileSetup(fail?: Error) {
+    const call = vi.fn(async (method: string) => {
+      if (method === 'imopenlines.dialog.get') return { result: { id: 101 } };
+      if (method === 'im.v2.File.download') {
+        if (fail) throw fail;
+        return { result: { downloadUrl: 'https://p.bitrix24.ru/user' } };
+      }
+      throw new Error(method);
+    });
+    const download = vi.fn(async (url: string) => ({ data: Buffer.from(url), contentType: 'image/jpeg' }));
+    const appCall = vi.fn(async () => ({ result: { downloadUrl: 'https://p.bitrix24.ru/app' } }));
+    const appDownload = vi.fn(async (url: string) => ({ data: Buffer.from(url), contentType: 'image/jpeg' }));
+    const portals = { clientFor: vi.fn(() => ({ call: appCall, download: appDownload })) } as unknown as PortalService;
+    const user = { portal: { id: 'p1' }, userId: 7, client: { call, download } } as unknown as B24UserContext;
+    const svc = new ChatsService({} as FilesService, {} as OpenlineIndexService, undefined, portals);
+    return { svc, user, call, download, appCall, portals };
+  }
+
+  it('downloads with the employee token when allowed', async () => {
+    const { svc, user, portals } = fileSetup();
+    expect((await svc.file(user, 101, 5)).data.toString()).toBe('https://p.bitrix24.ru/user');
+    expect(portals.clientFor).not.toHaveBeenCalled();
+  });
+
+  it.each(['FILE_ACCESS_ERROR', 'ACCESS_DENIED'])('falls back to the app token only for a file access refusal (%s) after the dialog check passed', async (code) => {
+    const { svc, user, call, appCall } = fileSetup(new Bitrix24Error(code, 'no access'));
+    expect((await svc.file(user, 101, 5)).data.toString()).toBe('https://p.bitrix24.ru/app');
+    expect(call.mock.calls[0]).toEqual(['imopenlines.dialog.get', { CHAT_ID: 101 }]);
+    expect(appCall).toHaveBeenCalledWith('im.v2.File.download', { dialogId: 'chat101', fileId: 5 });
+  });
+
+  it.each([
+    new Bitrix24Error('NETWORK_ERROR', 'down'),
+    new Bitrix24Error('QUERY_LIMIT_EXCEEDED', 'limit'),
+    new Bitrix24Error('invalid_token', 'auth', 401),
+    new Bitrix24Error('insufficient_scope', 'scope', 403),
+    new Bitrix24Error('FILE_TOO_LARGE', 'big'),
+    new Error('boom'),
+  ])('rethrows other errors without the app token: %s', async (err) => {
+    const { svc, user, portals } = fileSetup(err);
+    await expect(svc.file(user, 101, 5)).rejects.toBe(err);
+    expect(portals.clientFor).not.toHaveBeenCalled();
+  });
+
+  it('no dialog access with the employee token — no fallback at all', async () => {
+    const { svc, user, call, portals } = fileSetup();
+    const denied = new Bitrix24Error('ACCESS_DENIED', 'dialog', 403);
+    call.mockImplementationOnce(async () => {
+      throw denied;
+    });
+    await expect(svc.file(user, 101, 5)).rejects.toBe(denied);
+    expect(portals.clientFor).not.toHaveBeenCalled();
+  });
+
+  it('a failed download by the employee link is rethrown, not retried with the app token', async () => {
+    const { svc, user, download, portals } = fileSetup();
+    const failed = new Bitrix24Error('DOWNLOAD_FAILED', 'HTTP 500', 500);
+    download.mockRejectedValueOnce(failed);
+    await expect(svc.file(user, 101, 5)).rejects.toBe(failed);
+    expect(portals.clientFor).not.toHaveBeenCalled();
   });
 });
 

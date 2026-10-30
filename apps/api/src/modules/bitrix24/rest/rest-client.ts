@@ -16,7 +16,8 @@ export interface AccessProvider {
  * параметрами; `recorded` — после успешного вызова (журнал созданного).
  */
 export interface WritePolicy {
-  allows(method: string, params: Record<string, unknown>): Promise<boolean>;
+  /** `scope` — проверенный клиентом контекст операции (объединение дублей контактов), иначе нет. */
+  allows(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<boolean>;
   recorded(method: string, params: Record<string, unknown>, result: unknown): Promise<void>;
 }
 
@@ -82,9 +83,65 @@ function readOnlyCall(method: string, params: Record<string, unknown>): boolean 
   return !!cmd && typeof cmd === 'object' && Object.values(cmd).every((c) => typeof c === 'string' && isReadMethod(c.split('?')[0]!));
 }
 
+/**
+ * Объединение дублей контактов (решение владельца 2026-10-30, ADR 0022) — единственное исключение из
+ * запрета правки контактов. Разрешение выдаётся на конкретный набор контактов (основной — первый) и
+ * пропускает через `client.callContactMerge` только: `crm.contact.update` этих контактов без
+ * PHONE/EMAIL/IM/WEB и один `crm.entity.mergeBatch` (entityTypeId 3, ровно эти ID в этом порядке).
+ * Создаёт его только `contacts/contact-merge.service.ts` (после PermanentAdminGuard).
+ */
+export class ContactMergeGrant {
+  readonly ids: readonly number[];
+  private merged = false;
+
+  constructor(primaryId: number, ids: readonly number[]) {
+    const rest = ids.filter((id) => id !== primaryId);
+    const all = [primaryId, ...rest];
+    if (!all.every((id) => Number.isSafeInteger(id) && id > 0) || new Set(all).size !== all.length || rest.length < 1 || rest.length !== ids.length - 1 || all.length > 10)
+      throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Неверный набор контактов для объединения');
+    this.ids = Object.freeze(all);
+  }
+
+  get scope(): WriteScope {
+    return { kind: 'contact-merge', ids: this.ids };
+  }
+
+  /** Бросает CONTACT_WRITE_DISABLED, если вызов выходит за рамки объединения. */
+  check(method: string, params: Record<string, unknown>): void {
+    const deny = (why: string) => {
+      throw new Bitrix24Error('CONTACT_WRITE_DISABLED', `Объединение контактов: ${why}`);
+    };
+    if (this.merged) deny('разрешение уже использовано');
+    const m = method.toLowerCase();
+    if (m === 'crm.contact.update') {
+      if (!this.ids.includes(Number(params.id)) || !/^\d+$/.test(String(params.id ?? ''))) deny('контакт не из объединяемой группы');
+      const fields = params.fields;
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) deny('нет полей');
+      for (const key of Object.keys(fields as object)) if (CONTACT_MULTI_FIELDS.has(key.toUpperCase()) || !/^[A-Z0-9_]+$/.test(key)) deny(`поле ${key} не меняется`);
+      return;
+    }
+    if (m === 'crm.entity.mergebatch') {
+      const p = (params.params ?? {}) as Record<string, unknown>;
+      const ids = Array.isArray(p.entityIds) ? p.entityIds.map(Number) : [];
+      if (Number(p.entityTypeId) !== 3 || ids.length !== this.ids.length || ids.some((id, i) => id !== this.ids[i])) deny('другие контакты');
+      this.merged = true;
+      return;
+    }
+    deny(`метод ${method} недоступен`);
+  }
+}
+
+/** Контекст изменяющего вызова, проверенный клиентом (для WritePolicy). */
+export type WriteScope = { kind: 'contact-merge'; ids: readonly number[] };
+
+/** Множественные поля контакта: при объединении Битрикс24 их складывает сам, приложение их не пишет. */
+const CONTACT_MULTI_FIELDS = new Set(['PHONE', 'EMAIL', 'IM', 'WEB', 'LINK']);
+
 /** Контакты пока только читаем — явное решение владельца 2026-10-28, независимо от песочницы. */
 export function assertContactsReadOnly(method: string, params: Record<string, unknown>): void {
   const m = method.toLowerCase();
+  // Объединение удаляет записи CRM — только через ContactMergeGrant (callContactMerge).
+  if (m === 'crm.entity.mergebatch') throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Объединение записей CRM доступно только из окна объединения дублей контактов');
   if (/^crm\.contact\.(add|update|delete)$/.test(m) || (/^crm\.item\.(add|update|delete)$/.test(m) && Number(params.entityTypeId ?? params.ENTITY_TYPE_ID) === 3)) {
     throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Редактирование контактов приложением пока не разрешено владельцем');
   }
@@ -119,8 +176,23 @@ export class Bitrix24RestClient {
   }
 
   async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<RestResponse<T>> {
+    return this.run<T>(method, params);
+  }
+
+  /**
+   * Запись в рамках объединения дублей контактов (`ContactMergeGrant`): единственный путь, которым
+   * приложение меняет контакты. Разрешение проверяется до сети; при B24_READ_ONLY вызов дополнительно
+   * должна пропустить песочница (`WritePolicy` получает `scope`).
+   */
+  async callContactMerge<T = unknown>(grant: ContactMergeGrant, method: string, params: Record<string, unknown>): Promise<RestResponse<T>> {
+    if (!(grant instanceof ContactMergeGrant)) throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Нет разрешения на объединение контактов');
+    grant.check(method, params);
+    return this.run<T>(method, params, grant.scope);
+  }
+
+  private async run<T>(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<RestResponse<T>> {
     try {
-      return await this.callOnce<T>(method, params);
+      return await this.callOnce<T>(method, params, scope);
     } catch (err) {
       if (err instanceof Bitrix24Error && !isClientGone(err) && this.opts.onFailure)
         try {
@@ -132,9 +204,9 @@ export class Bitrix24RestClient {
     }
   }
 
-  private async callOnce<T>(method: string, params: Record<string, unknown>): Promise<RestResponse<T>> {
+  private async callOnce<T>(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<RestResponse<T>> {
     if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
-    const viaPolicy = await this.assertAllowed(method, params);
+    const viaPolicy = await this.assertAllowed(method, params, scope);
     // Чтение для ушедшего клиента не отправляем; запись — всегда до конца (журнал операций, компенсация).
     const cancelled = readOnlyCall(method, params) ? clientGone : undefined;
     let token = await this.opts.access.getAccessToken();
@@ -259,36 +331,76 @@ export class Bitrix24RestClient {
 
   /**
    * Скачать файл по одноразовой ссылке портала (`downloadUrl` из REST, токен уже в ссылке). Только
-   * хост самого портала — ссылку не подменить на чужой адрес; больше `maxBytes` — ошибка.
+   * хост самого портала — ссылку не подменить на чужой адрес; больше `maxBytes` — ошибка (поток
+   * прерывается, не дочитывая). `redirects: 'portal'` — перенаправления проходим сами (до 4) и каждое
+   * проверяем тем же правилом: уйти с портала (CDN, внутренняя сеть) нельзя. Без него — как раньше
+   * (`fetch` по умолчанию).
    */
-  async download(url: string, maxBytes = 50 * 1024 * 1024): Promise<{ data: Buffer; contentType: string | null }> {
-    let target: URL;
-    try {
-      target = new URL(url);
-    } catch {
-      throw new Bitrix24Error('INVALID_DOWNLOAD_URL', 'Download URL is malformed');
-    }
+  async download(url: string, maxBytes = 50 * 1024 * 1024, opts: { redirects?: 'follow' | 'portal' } = {}): Promise<{ data: Buffer; contentType: string | null }> {
     const portal = new URL(this.opts.clientEndpoint);
-    if (target.host !== portal.host || target.protocol !== portal.protocol)
-      throw new Bitrix24Error('INVALID_DOWNLOAD_URL', 'Download URL is not on the portal host');
-    let res: Response;
-    try {
-      res = await this.fetchImpl(target, { signal: AbortSignal.timeout(60_000) });
-    } catch (err) {
-      throw new Bitrix24Error('NETWORK_ERROR', `Download failed: ${(err as Error).message}`);
+    const onPortal = (raw: string, base?: URL): URL => {
+      let target: URL;
+      try {
+        target = new URL(raw, base);
+      } catch {
+        throw new Bitrix24Error('INVALID_DOWNLOAD_URL', 'Download URL is malformed');
+      }
+      if (target.host !== portal.host || target.protocol !== portal.protocol || target.username || target.password)
+        throw new Bitrix24Error('INVALID_DOWNLOAD_URL', 'Download URL is not on the portal host');
+      return target;
+    };
+    let target = onPortal(url);
+    const manual = opts.redirects === 'portal';
+    let res: Response | undefined;
+    for (let hop = 0; ; hop++) {
+      try {
+        res = await this.fetchImpl(target, { signal: AbortSignal.timeout(60_000), ...(manual ? { redirect: 'manual' as const } : {}) });
+      } catch (err) {
+        throw new Bitrix24Error('NETWORK_ERROR', `Download failed: ${(err as Error).message}`);
+      }
+      if (!manual || ![301, 302, 303, 307, 308].includes(res.status)) break;
+      const next = res.headers.get('location');
+      await res.body?.cancel();
+      if (!next) throw new Bitrix24Error('DOWNLOAD_FAILED', 'Redirect without location', res.status);
+      if (hop >= 3) throw new Bitrix24Error('DOWNLOAD_FAILED', 'Too many redirects', res.status);
+      target = onPortal(next, target);
     }
-    if (!res.ok) throw new Bitrix24Error('DOWNLOAD_FAILED', `Download failed: HTTP ${res.status}`, res.status);
-    if (Number(res.headers.get('content-length') ?? 0) > maxBytes) throw new Bitrix24Error('FILE_TOO_LARGE', 'File is too large');
-    const data = Buffer.from(await res.arrayBuffer());
-    if (data.length > maxBytes) throw new Bitrix24Error('FILE_TOO_LARGE', 'File is too large');
-    return { data, contentType: res.headers.get('content-type') };
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new Bitrix24Error('DOWNLOAD_FAILED', `Download failed: HTTP ${res.status}`, res.status);
+    }
+    if (Number(res.headers.get('content-length') ?? 0) > maxBytes) {
+      await res.body?.cancel();
+      throw new Bitrix24Error('FILE_TOO_LARGE', 'File is too large');
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = res.body?.getReader();
+    if (reader) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes) {
+            await reader.cancel();
+            throw new Bitrix24Error('FILE_TOO_LARGE', 'File is too large');
+          }
+          chunks.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    return { data: Buffer.concat(chunks, size), contentType: res.headers.get('content-type') };
   }
 
   /** true — вызов разрешён только благодаря песочнице (после успеха его надо записать в журнал). */
-  private async assertAllowed(method: string, params: Record<string, unknown>): Promise<boolean> {
-    assertContactsReadOnly(method, params);
+  private async assertAllowed(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<boolean> {
+    // scope приходит только из callContactMerge, где ContactMergeGrant уже проверил вызов.
+    if (!scope) assertContactsReadOnly(method, params);
     if (method === 'batch' || !this.opts.readOnly || isReadMethod(method)) return false; // команды пакета проверяет batch()
-    if (this.opts.writePolicy && (await this.opts.writePolicy.allows(method, params))) return true;
+    if (this.opts.writePolicy && (await this.opts.writePolicy.allows(method, params, scope))) return true;
     throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);
   }
 

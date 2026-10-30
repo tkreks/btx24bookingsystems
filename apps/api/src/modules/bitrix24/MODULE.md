@@ -81,6 +81,11 @@
   `ONAPPUNINSTALL` обрабатывается сразу (портал `UNINSTALLED`, токены стёрты), остальные остаются
   `PENDING` для worker.
 - `batch` > 50 команд делится на части, только если в нём нет ссылок `$result[...]`.
+- **Файлы портала — `client.download(url, maxBytes, opts?)`** (не `fetch` из доменных модулей): только
+  хост и протокол `clientEndpoint`, без логина/пароля в URL; размер ограничен и по `Content-Length`, и по
+  потоку (чтение прерывается). `{ redirects: 'portal' }` (2026-10-30, вложения операторов `imconnector`) —
+  перенаправления проходятся вручную (до 3), каждое снова проверяется на хост портала: CDN/внутренняя сеть
+  — `INVALID_DOWNLOAD_URL`. Без опции — `fetch` по умолчанию (см. `docs/agents/TECH_DEBT.md`).
 
 - **Пользовательские запросы** (`B24AuthGuard`): `Authorization: Bearer <AUTH_ID>` +
   `X-B24-Member-Id` из `BX24.getAuth()`. Токен проверяется `user.current` на endpoint
@@ -137,3 +142,15 @@ placement.info().options дополняются командой JS-интерф
 Создание схемы UF-поля сделки/контакта — только явным действием в «Поля»; sandbox разрешает
 только тип/кратность/код/XML_ID известных ролей shared/system-fields. Данные карточек не записываются.
 Сопоставленные поля контакта читаются из PortalSettings.contactFieldMap.
+
+### Объединение дублей контактов (решение владельца 2026-10-30, ADR 0022)
+Единственное исключение из запрета правки контактов. `assertContactsReadOnly` теперь также запрещает
+`crm.entity.mergeBatch` (любой тип — он удаляет записи CRM), в т.ч. внутри `batch`. Пропускает их только
+`client.callContactMerge(grant, method, params)` с `ContactMergeGrant(primaryId, ids)` (2–10 контактов,
+основной — первый): `crm.contact.update` контактов группы без PHONE/EMAIL/IM/WEB/LINK и один
+`crm.entity.mergeBatch` с `entityTypeId: 3` и ровно этими ID в этом порядке; после mergeBatch разрешение
+израсходовано. Проверка — до сети, поддельный объект (не `instanceof`) не проходит. При `B24_READ_ONLY=true`
+вызов дополнительно проверяет `SandboxWritePolicy.allows(method, params, scope)`: эти два метода — только
+со `scope.kind === 'contact-merge'` и в его рамках; без scope `crm.contact.update` по-прежнему `false`.
+Без `B24_READ_ONLY` политики нет — действует только проверка разрешения. Разрешение создаёт только
+`contacts/contact-merge.service.ts` за `PermanentAdminGuard`, токеном сотрудника (его права в CRM).

@@ -1,5 +1,11 @@
 import type { EventEmitter } from 'node:events';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Instance, READY_TIMEOUT_MS } from './instance.js';
+
+// Свой каталог на прогон: общий /tmp/wa-test мог остаться от другого пользователя без прав.
+const dataDir = mkdtempSync(join(tmpdir(), 'wa-test-'));
 
 /** Клиент whatsapp-web.js без браузера: события подаёт тест. */
 const clients = vi.hoisted(() => [] as (EventEmitter & { destroy: ReturnType<typeof vi.fn> })[]);
@@ -27,7 +33,7 @@ describe('WhatsApp: вход без «готов»', () => {
   afterEach(() => vi.useRealTimers());
 
   it('перезапускает клиент, если после входа «готов» не наступил', async () => {
-    const inst = new Instance(spec, { dataDir: '/tmp/wa-test', chromium: '', display: false }, () => undefined);
+    const inst = new Instance(spec, { dataDir, chromium: '', display: false }, () => undefined);
     await inst.start();
     clients[0].emit('authenticated');
     await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 10);
@@ -41,7 +47,7 @@ describe('WhatsApp: вход без «готов»', () => {
   });
 
   it('после нескольких перезапусков подряд — «не удалось», без бесконечного круга', async () => {
-    const inst = new Instance(spec, { dataDir: '/tmp/wa-test', chromium: '', display: false }, () => undefined);
+    const inst = new Instance(spec, { dataDir, chromium: '', display: false }, () => undefined);
     await inst.start();
     for (let i = 0; i < 4; i++) {
       await vi.waitFor(() => expect(clients).toHaveLength(i + 1));

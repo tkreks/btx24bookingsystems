@@ -166,7 +166,7 @@ export class FilesService {
   /** Удалить свои файлы из `ids`, если они не входят ни в один шаблон автора и ни в один общий. */
   async dropUnused(user: B24UserContext, ids: string[]): Promise<void> {
     if (!ids.length) return;
-    const used = new Set([...(await this.usedByTemplates(user)), ...(await this.sharedFileIds(user.portal.id))]);
+    const used = new Set([...(await this.usedByTemplates(user)), ...(await this.sharedFileIds(user.portal.id)), ...(await this.paymentFileIds(user.portal.id))]);
     const drop = ids.filter((id) => !used.has(id));
     if (drop.length)
       await this.prisma.storedFile.deleteMany({
@@ -188,6 +188,18 @@ export class FilesService {
       user,
       old.map((f) => f.id),
     );
+  }
+
+  /**
+   * Вложения своего текста в окне оплаты (`PaymentRequest.messageFileIds`): пока заявка ждёт ссылку или
+   * оплату, файлы не удаляем — сообщение может отправить worker позже.
+   */
+  private async paymentFileIds(portalId: string): Promise<string[]> {
+    const rows = await this.prisma.paymentRequest.findMany({
+      where: { portalId, status: { in: ['link_pending', 'sent'] } },
+      select: { messageFileIds: true },
+    });
+    return rows.flatMap((r) => (Array.isArray(r.messageFileIds) ? r.messageFileIds.filter((x): x is string => typeof x === 'string') : []));
   }
 
   private async usedByTemplates(user: B24UserContext): Promise<Set<string>> {

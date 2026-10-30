@@ -347,6 +347,14 @@ export function CalendarPage({
             setPayment(null);
             setBookingForm({ date });
           }}
+          onOpenSettings={
+            session.canManageApp
+              ? () => {
+                  setPayment(null);
+                  setScreen({ name: 'settings', back: 'dashboard' });
+                }
+              : undefined
+          }
         />
       )}
     </>

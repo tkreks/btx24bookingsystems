@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Headers, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { timingSafeEqual } from 'node:crypto';
 import { MESSENGER_MAX_FILE_BYTES } from '@btx24/shared';
 import { MessengerCrmService } from './messenger-crm.service.js';
 import { MediaLinks } from './media-links.js';
@@ -155,9 +156,18 @@ export class MessengersController {
   }
 }
 
+/** Сравнение токена за постоянное время; пустой ожидаемый токен не совпадает ни с чем. */
+export function sameMessengerToken(got: string | undefined, expected: string): boolean {
+  if (!expected || !got) return false;
+  const a = Buffer.from(got);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /**
- * События сервиса мессенджеров (переписка). Только внутренняя сеть стенда: nginx закрывает путь
- * снаружи; с `MESSENGER_TOKEN` — ещё и по токену.
+ * События сервиса мессенджеров (переписка). Снаружи путь закрывает nginx, но это не единственная
+ * защита: без `MESSENGER_TOKEN` хук отклоняет всё (иначе любой, кто дошёл до api, подделает
+ * входящие сообщения).
  */
 @Controller('messengers/hook')
 export class MessengerHookController {
@@ -169,7 +179,8 @@ export class MessengerHookController {
   @Post()
   @HttpCode(200)
   async hook(@Headers('x-messenger-token') token: string | undefined, @Body() body: { events?: WireEvent[] }): Promise<{ ok: true }> {
-    if (this.service.token && token !== this.service.token) throw new ForbiddenException({ code: 'BAD_TOKEN', message: 'Неверный токен' });
+    if (!this.service.token) throw new ForbiddenException({ code: 'NO_TOKEN', message: 'MESSENGER_TOKEN не задан — события мессенджеров не принимаются' });
+    if (!sameMessengerToken(token, this.service.token)) throw new ForbiddenException({ code: 'BAD_TOKEN', message: 'Неверный токен' });
     await this.inbox.apply(Array.isArray(body?.events) ? body.events.slice(0, 500) : []);
     return { ok: true };
   }

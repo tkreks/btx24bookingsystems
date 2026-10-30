@@ -46,6 +46,7 @@ export const DASHBOARD_BLOCK_TYPES = [
   'upcomingBookings',
   'currentBookings',
   'resourceTimelineNow',
+  'contactDuplicates',
 ] as const;
 export type DashboardBlockType = (typeof DASHBOARD_BLOCK_TYPES)[number];
 
@@ -95,6 +96,7 @@ export const DASHBOARD_BLOCKS: Record<DashboardBlockType, DashboardBlockMeta> = 
   upcomingBookings: { title: 'Ближайшие брони', hint: 'брони ваших групп на 14 дней: время, ресурс, клиент, сумма и оплата; по клику — подробности', group: 'Списки', width: 'half' },
   currentBookings: { title: 'Текущие брони', hint: 'брони, которые идут сейчас: ресурс, клиент, сумма и оплата; по клику — подробности', group: 'Списки', width: 'half' },
   resourceTimelineNow: { title: 'Брони (шкала, текущие)', hint: 'шкала сегодняшнего дня: только ресурсы с идущей сейчас бронью', group: 'Списки', width: 'full' },
+  contactDuplicates: { title: 'Дубли контактов', hint: 'один клиент в нескольких контактах: поиск по телефону, почте и имени, сравнение и объединение', group: 'Контроль', width: 'full', adminOnly: true },
   messengers: { title: 'Мессенджеры', hint: 'все номера ваших групп и их состояние; экран мессенджера и файлы для отправки', group: 'Контроль', width: 'quarter' },
 };
 

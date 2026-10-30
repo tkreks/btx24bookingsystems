@@ -1,4 +1,5 @@
-import { BookingSyncService } from './booking-sync.service.js';
+import { BookingSyncService, DEAL_FIELDS_PER_PASS } from './booking-sync.service.js';
+import type { DealBookingFieldsService } from './deal-booking-fields.service.js';
 import type { BookingAlertsService } from './booking-alerts.service.js';
 import type { BookingJournalService } from './booking-journal.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
@@ -27,7 +28,7 @@ const record = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function setup(o: { bookings: unknown[]; links?: Record<number, number>; records: unknown[]; baseline: boolean; get?: Record<number, unknown> }) {
+function setup(o: { bookings: unknown[]; links?: Record<number, number>; records: unknown[]; baseline: boolean; get?: Record<number, unknown>; refresh?: boolean }) {
   const prisma = {
     portalSettings: {
       upsert: vi.fn(async () => ({ syncHorizonDays: 30, bookingSyncBaselineAt: o.baseline ? now : null })),
@@ -63,8 +64,14 @@ function setup(o: { bookings: unknown[]; links?: Record<number, number>; records
       ),
     })),
   } as unknown as Bitrix24RestClient;
-  const svc = new BookingSyncService(prisma, journal as unknown as BookingJournalService, alerts as unknown as BookingAlertsService);
-  return { svc, prisma, journal, alerts, client };
+  const dealBookings = { refresh: vi.fn(async () => [] as string[]) };
+  const svc = new BookingSyncService(
+    prisma,
+    journal as unknown as BookingJournalService,
+    alerts as unknown as BookingAlertsService,
+    o.refresh ? (dealBookings as unknown as DealBookingFieldsService) : undefined,
+  );
+  return { svc, prisma, journal, alerts, client, dealBookings };
 }
 
 describe('BookingSyncService', () => {
@@ -171,5 +178,47 @@ describe('BookingSyncService — прошедшие брони (31 день на
     expect(t.journal.recordCancelled).toHaveBeenCalledWith('p1', 8, expect.objectContaining({ reason: 'removed_in_bitrix' }));
     expect(r.bookings.removed).toBe(1);
     expect((t.prisma.bookingRecord.findMany as ReturnType<typeof vi.fn>).mock.calls[0][0].where.OR[1].endsAt.gt).toEqual(new Date('2026-09-19T21:00:00Z'));
+  });
+});
+
+describe('BookingSyncService — поля броней сделок', () => {
+  const refreshed = (t: ReturnType<typeof setup>) => t.dealBookings.refresh.mock.calls.map((c) => (c as unknown[])[1]);
+
+  it('новая бронь вне приложения и изменение в Битрикс24 — пересчёт затронутых сделок (прежней и новой) токеном приложения', async () => {
+    const t = setup({
+      bookings: [booking(2, '2026-10-22T10:00:00Z', '2026-10-22T12:00:00Z', [10]), booking(4, '2026-10-23T11:00:00Z', '2026-10-23T13:00:00Z', [10])],
+      links: { 2: 700, 4: 701 },
+      records: [record({ bookingId: 4, source: 'bitrix', dealId: 678 })],
+      baseline: true,
+      refresh: true,
+    });
+    const r = await t.svc.reconcile(portal, t.client, now);
+    expect(refreshed(t).sort()).toEqual([678, 700, 701]);
+    expect(t.dealBookings.refresh).toHaveBeenCalledWith({ portalId: 'p1', timezone: 'Europe/Moscow', client: t.client }, 700, now);
+    expect(r.deals).toEqual({ refreshed: 3, pending: 0 });
+  });
+
+  it('без изменений и при расхождении брони приложения (решает сотрудник) — сделки не трогаются', async () => {
+    const t = setup({ bookings: [booking(3, '2026-10-23T12:00:00Z', '2026-10-23T13:00:00Z', [10])], links: { 3: 678 }, records: [record({ bookingId: 3 })], baseline: true, refresh: true });
+    await t.svc.reconcile(portal, t.client, now);
+    expect(t.dealBookings.refresh).not.toHaveBeenCalled();
+  });
+
+  it('первый проход (baseline) не пересчитывает сделки', async () => {
+    const t = setup({ bookings: [booking(1, '2026-10-22T10:00:00Z', '2026-10-22T12:00:00Z', [10])], links: { 1: 700 }, records: [], baseline: false, refresh: true });
+    const r = await t.svc.reconcile(portal, t.client, now);
+    expect(t.dealBookings.refresh).not.toHaveBeenCalled();
+    expect(r.deals).toBeUndefined();
+  });
+
+  it(`не больше ${DEAL_FIELDS_PER_PASS} сделок за проход, остальные — на следующий`, async () => {
+    const n = DEAL_FIELDS_PER_PASS + 5;
+    const bookings = Array.from({ length: n }, (_, i) => booking(100 + i, '2026-10-22T10:00:00Z', '2026-10-22T12:00:00Z', [10]));
+    const links = Object.fromEntries(bookings.map((b) => [b.id, 1000 + b.id]));
+    const t = setup({ bookings, links, records: [], baseline: true, refresh: true });
+    expect((await t.svc.reconcile(portal, t.client, now)).deals).toEqual({ refreshed: DEAL_FIELDS_PER_PASS, pending: 5 });
+    t.journal.recordImported.mockResolvedValue({ record: {}, created: false });
+    expect((await t.svc.reconcile(portal, t.client, now)).deals).toEqual({ refreshed: 5, pending: 0 });
+    expect(new Set(refreshed(t)).size).toBe(n);
   });
 });

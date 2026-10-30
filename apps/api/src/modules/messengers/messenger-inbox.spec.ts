@@ -3,6 +3,15 @@ import type { PrismaService } from '../../prisma/prisma.service.js';
 import { bbToMessenger, lineText, MessengerConnectorService, PHONE_MARK } from './messenger-connector.service.js';
 import { MessengerInboxService, phoneOfChat } from './messenger-inbox.service.js';
 import type { MessengerServiceClient, WireMessage } from './messenger-service.client.js';
+import { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
+import { RateLimiter } from '../bitrix24/rest/rate-limiter.js';
+
+/** Клиент портала https://portal.test: `call` подменён, `download` настоящий поверх `get` (fetch). */
+function portalClient(call: unknown, get: unknown) {
+  const c = new Bitrix24RestClient({ clientEndpoint: 'https://portal.test/rest/', access: { getAccessToken: async () => 't', refresh: async () => 't' }, limiter: new RateLimiter(1000, 1000), limiterKey: 'p1', fetch: get as typeof fetch });
+  (c as unknown as { call: unknown }).call = call;
+  return c;
+}
 
 /** База в памяти: сообщения и чаты мессенджера. */
 function fakeDb() {
@@ -121,8 +130,7 @@ describe('Своя открытая линия (коннектор)', () => {
     const db=fakeDb();vi.mocked(db.prisma.messengerMessage.findMany).mockImplementation((async () => db.msgs.filter(m=>m.source==='bitrix')) as never);
     const inbox=new MessengerInboxService(db.prisma);const call=vi.fn(async()=>({result:{SUCCESS:true}}));
     let attempt=0;const send=vi.fn(async (_id:string,to:string,text:string)=>{attempt++;if(attempt===2)throw new Error('disconnected');return {...wire('file'+attempt,text,true),chatId:to};});
-    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>({call})} as never,{send} as never,inbox,{} as never,{} as never);
-    vi.stubGlobal('fetch',vi.fn(async()=>new Response('file',{headers:{'content-type':'application/pdf'}})));
+    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>portalClient(call,vi.fn(async()=>new Response('file',{headers:{'content-type':'application/pdf'}})))} as never,{send} as never,inbox,{} as never,{} as never);
     const data={LINE:14,MESSAGES:[{im:{chat_id:8,message_id:900},message:{text:'Подпись',files:[{link:'https://portal.test/one',name:'1.pdf'},{link:'https://portal.test/two',name:'2.pdf'}]},chat:{id:'79991234567@c.us'}}]};
     try {
       await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',data)).rejects.toThrow('disconnected');
@@ -135,35 +143,41 @@ describe('Своя открытая линия (коннектор)', () => {
   it('файл оператора скачивается только с портала; подпись и байты уходят клиенту', async () => {
     const db=fakeDb();const inbox=new MessengerInboxService(db.prisma);const call=vi.fn(async()=>({result:{SUCCESS:true}}));
     const service={send:vi.fn(async (_id:string,to:string,text:string)=>({...wire('fileout',text,true),chatId:to}))} as unknown as MessengerServiceClient;
-    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>({call})} as never,service,inbox,{} as never,{} as never);
-    const get=vi.fn(async()=>new Response('bytes',{headers:{'content-type':'application/pdf'}}));vi.stubGlobal('fetch',get);
+    const get=vi.fn(async()=>new Response('bytes',{headers:{'content-type':'application/pdf'}}));const global=vi.fn();vi.stubGlobal('fetch',global);
+    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>portalClient(call,get)} as never,service,inbox,{} as never,{} as never);
     const data={LINE:14,MESSAGES:[{im:{chat_id:8,message_id:900},message:{text:'Документ',files:[{link:'https://portal.test/file',name:'Счёт.pdf'}]},chat:{id:'79991234567@c.us'}}]};
     try {
       await svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',data);
       expect(service.send).toHaveBeenCalledWith('m1','79991234567@c.us','Документ',undefined,{mime:'application/pdf',name:'Счёт.pdf',data:Buffer.from('bytes')});
-      expect(get).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(1);expect(global).not.toHaveBeenCalled();
     } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('перенаправление внутри портала проходится клиентом портала, каждое проверяется', async () => {
+    const db=fakeDb();const inbox=new MessengerInboxService(db.prisma);const call=vi.fn(async()=>({result:{SUCCESS:true}}));
+    const service={send:vi.fn(async (_id:string,to:string,text:string)=>({...wire('fileout',text,true),chatId:to}))} as unknown as MessengerServiceClient;
+    const get=vi.fn().mockResolvedValueOnce(new Response(null,{status:302,headers:{location:'/upload/file.pdf'}})).mockResolvedValueOnce(new Response('bytes',{headers:{'content-type':'application/pdf; charset=binary'}}));
+    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>portalClient(call,get)} as never,service,inbox,{} as never,{} as never);
+    await svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',{LINE:14,MESSAGES:[{im:{chat_id:8,message_id:901},message:{text:'',files:[{link:'https://portal.test/file',name:'a.pdf'}]},chat:{id:'79991234567@c.us'}}]});
+    expect(get).toHaveBeenCalledTimes(2);expect(String(get.mock.calls[1][0])).toBe('https://portal.test/upload/file.pdf');expect(get.mock.calls[0][1]).toMatchObject({redirect:'manual'});
+    expect(service.send).toHaveBeenCalledWith('m1','79991234567@c.us','',undefined,{mime:'application/pdf',name:'a.pdf',data:Buffer.from('bytes')});
   });
 
   it.each(['https://evil.test/file','http://portal.test/file','https://portal.test:444/file','https://user:pass@portal.test/file'])('чужая/небезопасная ссылка %s не доставляется', async link => {
-    const db=fakeDb();const send=vi.fn();const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>({call:vi.fn()})} as never,{send} as never,new MessengerInboxService(db.prisma),{} as never,{} as never);
-    const get=vi.fn();vi.stubGlobal('fetch',get);
-    try {
-      await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',{LINE:14,MESSAGES:[{message:{files:[{link}]},chat:{id:'x@c.us'}}]})).rejects.toThrow();
-      expect(get).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
-    } finally { vi.unstubAllGlobals(); }
+    const db=fakeDb();const send=vi.fn();const get=vi.fn();
+    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>portalClient(vi.fn(),get)} as never,{send} as never,new MessengerInboxService(db.prisma),{} as never,{} as never);
+    await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',{LINE:14,MESSAGES:[{message:{files:[{link}]},chat:{id:'x@c.us'}}]})).rejects.toMatchObject({code:'INVALID_DOWNLOAD_URL'});
+    expect(get).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
   });
 
   it('redirect за пределы портала и Content-Length >64 МБ прекращают загрузку', async () => {
-    const db=fakeDb();const send=vi.fn();const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>({call:vi.fn()})} as never,{send} as never,new MessengerInboxService(db.prisma),{} as never,{} as never);
+    const db=fakeDb();const send=vi.fn();
     const get=vi.fn().mockResolvedValueOnce(new Response(null,{status:302,headers:{location:'https://evil.test/file'}})).mockResolvedValueOnce(new Response('x',{headers:{'content-length':String(65*1024*1024)}}));
-    vi.stubGlobal('fetch',get);
+    const svc=new MessengerConnectorService(db.prisma,{clientFor:()=>portalClient(vi.fn(),get)} as never,{send} as never,new MessengerInboxService(db.prisma),{} as never,{} as never);
     const data={LINE:14,MESSAGES:[{message:{files:[{link:'https://portal.test/file'}]},chat:{id:'x@c.us'}}]};
-    try {
-      await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',data)).rejects.toThrow();
-      expect(get).toHaveBeenCalledTimes(1);
-      await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',data)).rejects.toThrow('64 МБ');expect(send).not.toHaveBeenCalled();
-    } finally { vi.unstubAllGlobals(); }
+    await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',data)).rejects.toMatchObject({code:'INVALID_DOWNLOAD_URL'});
+    expect(get).toHaveBeenCalledTimes(1);
+    await expect(svc.fromBitrix({id:'p1',domain:'portal.test'} as never,'ONIMCONNECTORMESSAGEADD',data)).rejects.toMatchObject({code:'FILE_TOO_LARGE'});expect(send).not.toHaveBeenCalled();
   });
 
   it('текст оператора: BBCode → разметка WhatsApp', () => {
@@ -186,6 +200,44 @@ describe('Своя открытая линия (коннектор)', () => {
     expect(db.msgs[0]).toMatchObject({ source: 'bitrix', b24MessageId: 86497, sentByUserId: 27 });
     expect(call).toHaveBeenCalledWith('imconnector.send.status.delivery', expect.objectContaining({ CONNECTOR: 'btx24_whatsapp', LINE: 14 }));
     expect(call.mock.calls.filter((c) => (c as unknown[])[0] === 'imconnector.send.status.delivery')).toHaveLength(2);
+  });
+
+  it('одно событие, доставленное дважды одновременно, уходит клиенту один раз; после сбоя отправки — повторяется', async () => {
+    const db = fakeDb();
+    const inbox = new MessengerInboxService(db.prisma);
+    const call = vi.fn(async () => ({ result: { SUCCESS: true } }));
+    let fail = true;
+    const send = vi.fn(async (_id: string, to: string, text: string) => {
+      await new Promise((r) => setTimeout(r, 5));
+      if (fail) { fail = false; throw new Error('disconnected'); }
+      return { ...wire('out-c', text, true), chatId: to };
+    });
+    const svc = new MessengerConnectorService(db.prisma, { clientFor: () => ({ call }) } as never, { send } as never, inbox, { appBaseUrl: 'https://app.test' } as never, { url: () => null } as never);
+    const data = { CONNECTOR: 'btx24_whatsapp', LINE: 14, MESSAGES: [{ im: { chat_id: 1807, message_id: 777 }, message: { user_id: 27, text: 'Привет' }, chat: { id: '79991234567@c.us' } }] };
+    // Первая доставка падает на отправке — запись не создаётся, вторая (параллельная) отправляет сама.
+    const [a, b] = await Promise.allSettled([
+      svc.fromBitrix({ id: 'p1' } as never, 'ONIMCONNECTORMESSAGEADD', data),
+      svc.fromBitrix({ id: 'p1' } as never, 'ONIMCONNECTORMESSAGEADD', data),
+    ]);
+    expect(a.status).toBe('rejected');
+    expect(b.status).toBe('fulfilled');
+    expect(send).toHaveBeenCalledTimes(2);
+    // Ещё две одновременные доставки — уже отправлено, клиенту больше не уходит.
+    await Promise.all([1, 2].map(() => svc.fromBitrix({ id: 'p1' } as never, 'ONIMCONNECTORMESSAGEADD', data)));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(db.msgs.filter((m) => m.b24MessageId === 777)).toHaveLength(1);
+  });
+
+  it('одновременные дубли без сбоя — одна отправка', async () => {
+    const db = fakeDb();
+    const inbox = new MessengerInboxService(db.prisma);
+    const call = vi.fn(async () => ({ result: { SUCCESS: true } }));
+    const send = vi.fn(async (_id: string, to: string, text: string) => { await new Promise((r) => setTimeout(r, 5)); return { ...wire('out-d', text, true), chatId: to }; });
+    const svc = new MessengerConnectorService(db.prisma, { clientFor: () => ({ call }) } as never, { send } as never, inbox, { appBaseUrl: 'https://app.test' } as never, { url: () => null } as never);
+    const data = { LINE: 14, MESSAGES: [{ im: { chat_id: 1807, message_id: 778 }, message: { text: 'Привет' }, chat: { id: '79991234567@c.us' } }] };
+    await Promise.all([1, 2, 3].map(() => svc.fromBitrix({ id: 'p1' } as never, 'ONIMCONNECTORMESSAGEADD', data)));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls.filter((c) => (c as unknown[])[0] === 'imconnector.send.status.delivery')).toHaveLength(3);
   });
 });
 

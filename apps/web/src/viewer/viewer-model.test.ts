@@ -23,7 +23,8 @@ describe('экран «Бронирования»: доступность', () =
     expect(a.pieces.map((p) => p.kind)).toEqual(['free', 'busy', 'free', 'busy', 'free']);
   });
   it('тех. окно — отдельный отрезок внутри свободного времени, свободным временем остаётся', () => {
-    const a = availability(day([booking(1, 13, 16)], [{ resourceId: 1, startsAt: msk(16), endsAt: msk(16, 30) }]), 1);
+    // «Сейчас» — вне дня брони: иначе в день из фикстуры (31.10.2026) freeNow зависит от часов машины.
+    const a = availability(day([booking(1, 13, 16)], [{ resourceId: 1, startsAt: msk(16), endsAt: msk(16, 30) }]), 1, Date.parse('2026-11-02T12:00:00Z'));
     expect(a.pieces.map((p) => p.kind)).toEqual(['free', 'busy', 'tech', 'free']);
     expect(a.freeMinutes).toBe(21 * 60);
     expect(a.freeNow).toBeNull();
