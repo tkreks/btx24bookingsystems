@@ -106,7 +106,7 @@ export function fakeBitrix(): FakeBitrix {
 export function makePortalService(opts: { config?: Partial<Bitrix24Config>; clientId?: string } = {}) {
   const db = fakePrisma();
   const b24 = fakeBitrix();
-  const config: Bitrix24Config = { appBaseUrl: 'https://app.example.ru', trustedOAuthHosts: ['oauth.bitrix.info'], readOnly: false, sandbox: null, ...opts.config };
+  const config: Bitrix24Config = { appBaseUrl: 'https://app.example.ru', trustedOAuthHosts: ['oauth.bitrix.info'], ...opts.config };
   const oauth = new OAuthClient(opts.clientId ?? 'app.client', 'secret', b24.fetch);
   const box = new SecretBox(KEY);
   const service = new PortalService(db.prisma, box, oauth, new RateLimiter(1000, 1000), config, b24.fetch);

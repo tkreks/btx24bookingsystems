@@ -50,7 +50,7 @@ export class GroupsAdminController {
   private async checkFiles(user: B24UserContext, body: unknown): Promise<void> {
     const parsed = groupSettingsSchema.safeParse(body);
     if (!parsed.success) return; // Понятная ошибка полной схемы — в GroupsService.
-    const ids = [...new Set((parsed.data.options?.bookingTypes ?? []).flatMap((r) => r.confirmation.flatMap((s) => s.files.flatMap((f) => 'storedFileId' in f ? [f.storedFileId] : []))))];
+    const ids = [...new Set((parsed.data.options?.bookingTypes ?? []).flatMap((r) => [...r.confirmation, ...(r.prepayment ?? [])].flatMap((s) => s.files.flatMap((f) => 'storedFileId' in f ? [f.storedFileId] : []))))];
     await this.files.assertOwned(user, ids);
   }
 
@@ -154,7 +154,7 @@ export class GroupsAdminController {
   async save(@B24User() user: B24UserContext, @Body() body: unknown): Promise<AppSettingsDto> {
     const before = await this.groups.settings(user.portal.id);
     const after = await this.groups.saveSettings(user.portal.id, user.userId, body);
-    const changes = diffFields({ ...before }, { ...after }, SETTINGS_LABELS, ['createGrantedAt']);
+    const changes = diffFields({ ...before }, { ...after }, SETTINGS_LABELS);
     await this.actions.user(user, {
       action: 'settings.update',
       summary: `Изменил настройки приложения${changes.length ? `: ${changes.map((c) => c.label).join(', ')}` : ' (без изменений)'}`,
@@ -192,8 +192,6 @@ const SETTINGS_LABELS: Record<string, string> = {
   dialogMetadataEnabled: 'сбор метаданных диалогов',
   dialogTextsEnabled: 'сбор текстов',
   removeWazzupEmail: 'удаление e-mail wazzup',
-  createInBitrix: 'создание в Битрикс24',
-  updateDealFields: 'изменение полей сделок',
   admins: 'администраторы',
   appUsers: 'доступ к приложению',
   heads: 'руководители',

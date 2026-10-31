@@ -72,16 +72,17 @@ export function InvoiceViewDialog({
   const req = data?.request ?? null;
   const status = data ? (req ? invoiceDisplayStatus(data.state, { status: req.status, messageSent: req.messageSent }) : data.status) : null;
   const canSend = !!data && !!req && status === 'issued' && (req.status === 'link_pending' || req.status === 'sent');
+  const canResend = !!data && !!req && req.status === 'sent' && req.messageSent && data.state === 'open';
   const left = data && status === 'waiting' ? linkTimeLeft(req?.deadline ?? null, now) : '';
   const fmt = (iso: string) =>
     new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
-  const send = async () => {
+  const send = async (resend = false) => {
     if (!req || busy) return;
     setBusy(true);
     setError('');
     try {
-      const r = await apiPost<PaymentRequestDto>(`/payments/requests/${req.id}/send`, {});
+      const r = await apiPost<PaymentRequestDto>(`/payments/requests/${req.id}/send`, resend ? { resend: true } : {});
       setSent(r);
       setData((d) => (d ? { ...d, request: r } : d));
       if (r.messageSent) onChanged?.();
@@ -282,8 +283,13 @@ export function InvoiceViewDialog({
               </button>
             )}
             {canSend && !covered && (
-              <button type="button" className="primary pw-send" disabled={busy} onClick={() => void send()}>
+              <button type="button" className="primary pw-send" disabled={busy} onClick={() => void send(false)}>
                 <Icon name="send" size={16} /> {busy ? 'Отправляем…' : 'Отправить счёт'}
+              </button>
+            )}
+            {canResend && !covered && (
+              <button type="button" className="primary pw-send" disabled={busy} onClick={() => void send(true)}>
+                <Icon name="send" size={16} /> {busy ? 'Отправляем…' : 'Отправить повторно'}
               </button>
             )}
             <button type="button" disabled={busy} onClick={onClose}>

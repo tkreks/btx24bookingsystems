@@ -70,6 +70,7 @@ function setup(
   let row: PaymentRequest | null = null;
   const prisma = {
     paymentRequest: {
+      updateMany: vi.fn(async () => ({ count: 1 })),
       findUnique: vi.fn(async () => (o.prev ? ({ id: 'old', amount: 1, warnings: [], createdAt: new Date(), status: 'sent', ...o.prev } as PaymentRequest) : null)),
       findFirst: vi.fn(async () => (o.active ? { id: 'a' } : null)),
       findMany: vi.fn(async () => [

@@ -3,13 +3,16 @@ import {
   DEFAULT_CLIENT_MESSAGE,
   DEFAULT_FAIL_MESSAGE,
   DEFAULT_SURCHARGE_MESSAGE,
+  defaultPrepaymentSteps,
   VARIABLE_MENU,
   type GroupDto,
+  type ClientMessageStep,
   type GroupOptionsDto,
   type MessageTemplateDto,
   type TemplateVariablesDto,
 } from '@btx24/shared';
 import { apiGet, apiPost, apiPut } from '../api.js';
+import { MessageStepsEditor } from '../settings/MessageStepsEditor.js';
 import { groupSettings } from '../settings/group-form.js';
 import { newStep } from './chain.js';
 import { TemplatesManager } from './TemplatesManager.js';
@@ -84,6 +87,8 @@ type Trigger = {
   enabled: boolean;
   /** Можно открыть в редакторе шаблонов: свой шаблон или новый, назначаемый группе. */
   edit?: { purpose: 'payment' | 'auto'; field?: 'prepaymentTemplateId' | 'surchargeTemplateId' };
+  /** Сообщение со ссылкой на предоплату типа брони (Бани): правится здесь же, хранится в типе брони. */
+  typeEdit?: { typeId: string; title: string; steps: ClientMessageStep[]; own: boolean };
 };
 
 /** Системные сообщения групп: какой шаблон и при каких условиях уходит клиенту без участия сотрудника. */
@@ -95,11 +100,20 @@ export function systemTriggers(groups: GroupDto[], templates: MessageTemplateDto
     const p = o?.payments;
     const pre = p?.prepaymentTemplateId ? (byId.get(p.prepaymentTemplateId) ?? null) : null;
     const sur = p?.surchargeTemplateId ? (byId.get(p.surchargeTemplateId) ?? null) : null;
+    // У групп с типами брони, где нет шаблона оплаты и своего текста, предоплата уходит текстом типа брони.
+    const typed = !p?.prepaymentTemplateId && !p?.clientMessage && (o?.bookingTypes?.length ?? 0) > 0;
+    const typeRows: Trigger[] = typed
+      ? (o?.bookingTypes ?? []).map((bt) => {
+          const steps = defaultPrepaymentSteps([bt], bt.title) ?? [];
+          return { key: `${g.id}:pre:${bt.id}`, group: g, title: `Ссылка на предоплату · ${bt.title}`, when: `Счёт на предоплату выставлен и портал выдал ссылку, тип брони «${bt.title}»`, template: null, text: steps.map((st) => st.text).filter(Boolean).join('\n\n'), files: steps.reduce((n, st) => n + st.files.length, 0), enabled: !!p?.invoice, typeEdit: { typeId: bt.id, title: bt.title, steps, own: !!bt.prepayment?.length } };
+        })
+      : [];
     const list: Trigger[] = [
       { key: `${g.id}:pre`, group: g, title: 'Ссылка на предоплату', when: `Счёт на предоплату выставлен и портал выдал ссылку${p?.timeoutMinutes ? ` · на оплату ${p.timeoutMinutes} мин` : ''}`, template: pre, text: pre ? '' : p?.clientMessage || DEFAULT_CLIENT_MESSAGE, files: files(pre), enabled: !!p?.invoice, edit: { purpose: 'payment', field: 'prepaymentTemplateId' } },
       { key: `${g.id}:sur`, group: g, title: 'Ссылка на доплату', when: 'Счёт на доплату выставлен и портал выдал ссылку', template: sur, text: sur ? '' : p?.surchargeMessage || DEFAULT_SURCHARGE_MESSAGE, files: files(sur), enabled: !!p?.invoice, edit: { purpose: 'payment', field: 'surchargeTemplateId' } },
-      { key: `${g.id}:fail`, group: g, title: 'Бронь снята — оплата не поступила', when: `Предоплата не поступила за ${p?.timeoutMinutes ?? 90} мин после отправки ссылки`, template: null, text: p?.failMessage ?? DEFAULT_FAIL_MESSAGE, files: 0, enabled: !!p?.invoice && (p?.failMessage ?? DEFAULT_FAIL_MESSAGE).trim() !== '' },
+      { key: `${g.id}:fail`, group: g, title: 'Бронь снята — оплата не поступила', when: 'Срок оплаты вышел (у каждого счёта свой: по умолчанию срок группы, менеджер может задать другой) — сообщение уходит перед снятием брони и аннулированием счёта; для предоплаты, доплаты и произвольной оплаты', template: null, text: p?.failMessage ?? DEFAULT_FAIL_MESSAGE, files: 0, enabled: !!p?.invoice && (p?.failMessage ?? DEFAULT_FAIL_MESSAGE).trim() !== '' },
     ];
+    if (typed) list.splice(0, 1, ...typeRows);
     for (const r of o?.autoMessages ?? []) {
       const t = byId.get(r.templateId) ?? null;
       list.push({ key: `${g.id}:auto:${r.id}`, group: g, title: r.name || 'Рассылка', when: `За ${r.hoursBefore} ч до начала брони, с ${r.windowFrom} до ${r.windowTo}`, template: t, text: t ? '' : 'Шаблон не выбран или удалён', files: files(t), enabled: r.enabled && !!t, edit: t ? { purpose: 'auto' } : undefined });
@@ -109,6 +123,60 @@ export function systemTriggers(groups: GroupDto[], templates: MessageTemplateDto
         list.push({ key: `${g.id}:conf:${bt.id}`, group: g, title: `Подтверждение · ${bt.title}`, when: `Предоплата поступила, тип брони «${bt.title}»${bt.keywords.length ? ` (товары: ${bt.keywords.join(', ')})` : ''}`, template: null, text: bt.confirmation.map((st) => st.text).filter(Boolean).join('\n\n'), files: bt.confirmation.reduce((n, st) => n + st.files.length, 0), enabled: !!p?.sendConfirmation });
     return list;
   });
+}
+
+/**
+ * Сообщение со ссылкой на предоплату для типа брони: начинаем с того, что сейчас уходит (стандартный текст и
+ * файлы Диска или своё сообщение типа), правим текст и файлы, сохраняем в тип брони группы.
+ */
+function TypePrepaymentEditor({ trigger, onClose, onSaved }: { trigger: Trigger; onClose: () => void; onSaved: () => Promise<void> }) {
+  const te = trigger.typeEdit!;
+  const [steps, setSteps] = useState<ClientMessageStep[]>(te.steps);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const save = async (next: ClientMessageStep[] | undefined) => {
+    setBusy(true);
+    setError('');
+    try {
+      const g = trigger.group;
+      const o = (g.options ?? {}) as GroupOptionsDto;
+      const bookingTypes = (o.bookingTypes ?? []).map((bt) => {
+        if (bt.id !== te.typeId) return bt;
+        const { prepayment: _old, ...rest } = bt;
+        return next ? { ...rest, prepayment: next } : rest;
+      });
+      await apiPut<GroupDto>(`/admin/groups/${encodeURIComponent(g.id)}`, { ...groupSettings(g), options: { ...o, bookingTypes } });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cleaned = steps.filter((st) => st.text.trim() || st.files.length);
+  return (
+    <section className="day-panel">
+      <p className="muted">
+        {trigger.title} · группа «{trigger.group.name}». В тексте <code>{'{link}'}</code> — ссылка на оплату, <code>{'{prepayment}'}</code> — сумма, <code>{'{client_name}'}</code> — имя клиента. Выбранный в группе шаблон оплаты главнее этого сообщения.
+      </p>
+      <MessageStepsEditor steps={steps} onChange={setSteps} label={trigger.title} empty="Сообщений нет — уйдёт стандартный текст." onUploadingChange={setUploading} />
+      {error && <p className="notice error" role="alert">{error}</p>}
+      <div className="form-actions">
+        <button type="button" className="primary" disabled={busy || uploading || !cleaned.length} onClick={() => void save(cleaned)}>
+          {busy ? 'Сохраняем…' : 'Сохранить'}
+        </button>
+        {te.own && (
+          <button type="button" disabled={busy} onClick={() => void save(undefined)}>
+            Вернуть стандартный текст
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={onClose}>
+          Отмена
+        </button>
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -128,6 +196,9 @@ function SystemTemplates({ admin, onSettings, templates, onTemplates }: { admin:
   if (error) return <p className="notice error" role="alert">{error}</p>;
   if (!groups) return <p className="muted">Загрузка…</p>;
 
+  if (editing?.typeEdit) {
+    return <TypePrepaymentEditor trigger={editing} onClose={() => setEditing(null)} onSaved={async () => { await load(); setEditing(null); }} />;
+  }
   if (editing?.edit) {
     const t = editing.template;
     const open = t
@@ -187,11 +258,15 @@ function SystemTemplates({ admin, onSettings, templates, onTemplates }: { admin:
               </span>
               <span className="system-when">{x.when}</span>
               <span className="system-source muted">
-                {x.template ? `Шаблон «${x.template.name}»` : x.edit?.field ? 'Стандартный текст' : 'Текст в настройках группы'}
+                {x.template ? `Шаблон «${x.template.name}»` : x.typeEdit ? (x.typeEdit.own ? 'Своё сообщение типа брони' : 'Стандартный текст типа брони') : x.edit?.field ? 'Стандартный текст' : 'Текст в настройках группы'}
                 {x.files > 0 && ` · 📎 ${x.files}`}
               </span>
             </div>
-            {x.edit ? (
+            {x.typeEdit ? (
+              <button type="button" onClick={() => setEditing(x)}>
+                Настроить
+              </button>
+            ) : x.edit ? (
               <button type="button" onClick={() => setEditing(x)}>
                 {x.template ? 'Изменить' : 'Создать шаблон'}
               </button>

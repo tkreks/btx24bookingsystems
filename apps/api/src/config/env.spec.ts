@@ -17,11 +17,6 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...base, ENCRYPTION_KEY: 'c2hvcnQ=' })).toThrow(/ENCRYPTION_KEY/);
   });
 
-  it('defaults to read-only Bitrix24 access', () => {
-    expect(validateEnv(base).B24_READ_ONLY).toBe(true);
-    expect(validateEnv({ ...base, B24_READ_ONLY: 'false' }).B24_READ_ONLY).toBe(false);
-  });
-
   it('parses the trusted OAuth host list', () => {
     expect(validateEnv({ ...base, B24_TRUSTED_OAUTH_HOSTS: 'oauth.bitrix.info, Box.Example.ru' }).B24_TRUSTED_OAUTH_HOSTS).toEqual([
       'oauth.bitrix.info',

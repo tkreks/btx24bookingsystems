@@ -5,6 +5,7 @@ import {
   DEFAULT_PAYMENT_LINK_MESSAGE,
   PAYMENT_MAX_FILES,
   invoiceDisplayStatus,
+  parseDiskFileId,
   type PaymentFileDto,
   type PaymentRequestKind,
   moneyValue,
@@ -89,8 +90,15 @@ export class PaymentsService {
     const custom = kind === 'custom';
     const deal = await this.flow.deal(user, dealId);
     if (!deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${dealId} не найдена или нет доступа` });
+    const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
+    // Независимые запросы к порталу — параллельно: окно оплаты открывалось по нескольку секунд.
+    const [bookings, mc, chatProblem, outcome] = await Promise.all([
+      this.dealBookings(user, dealId),
+      this.flow.messages(ctx, dealId),
+      this.flow.chatProblem(ctx, dealId).catch(() => null),
+      this.fieldMap.outcome(user.portal.id, user.client).catch(() => ({ certificateTypeId: null })),
+    ]);
     // Бронь сделки: к ней привязывается счёт (неоплата в срок снимает именно её), её группа — группа счёта.
-    const bookings = await this.dealBookings(user, dealId);
     const chosenBooking = bookings.find((x) => x.bookingId === bookingId)?.bookingId ?? bookings[0]?.bookingId ?? null;
     const { group: g, options: groupOptions } = await this.group(user, Number(deal.CATEGORY_ID ?? 0), groupId, chosenBooking ?? undefined);
     const problems: string[] = [];
@@ -99,7 +107,7 @@ export class PaymentsService {
     if (g && !opts?.payments.invoice) problems.push(`Счёт не настроен в группе «${g.group.name}» (⚙ → группа → «Оплаты»)`);
     const map = await this.fieldMap.get(user.portal.id);
     // Покупка сертификата: платят весь номинал (сумма сделки), брони у такой сделки не бывает.
-    const certificate = isCertificatePurchase(deal, await this.fieldMap.outcome(user.portal.id, user.client).catch(() => ({ certificateTypeId: null })));
+    const certificate = isCertificatePurchase(deal, outcome);
     const opportunity = Number(deal.OPPORTUNITY) || null;
     const a: { amount: number | null; source: PaymentAmountSource } = custom
       ? { amount: null, source: 'none' }
@@ -120,7 +128,6 @@ export class PaymentsService {
     const pastBooking = bookingMissing ? await this.lastPastBooking(user, dealId) : null;
     if (bookingMissing) problems.push(BOOKING_REQUIRED_MESSAGE);
     const minutes = kind === 'prepayment' ? (opts?.payments.timeoutMinutes ?? null) : null;
-    const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
     // Шаблон, выбранный в окне (`?templateId`), — только системный шаблон оплаты этого портала.
     let tpl: { id: string | null; name: string | null; steps: PaymentMessageStep[] };
     if (custom) tpl = { id: null, name: null, steps: [{ text: DEFAULT_PAYMENT_LINK_MESSAGE, files: [] }] };
@@ -129,7 +136,9 @@ export class PaymentsService {
       if (!chosen) throw new BadRequestException({ code: 'TEMPLATE_NOT_FOUND', message: 'Шаблон сообщения об оплате не найден' });
       tpl = chosen;
     } else tpl = await this.flow.paymentTemplate(user.portal.id, kind, opts);
-    const [mc, chatProblem] = await Promise.all([this.flow.messages(ctx, dealId), this.flow.chatProblem(ctx, dealId).catch(() => null)]);
+    // Предоплата без выбранного шаблона и своего текста группы: текст по типу брони (бронь / сертификат) и файлы Диска.
+    const typed = !templateId && !custom ? this.flow.defaultSteps(opts, kind, mc.variables.dealtype) : null;
+    if (typed) tpl = { id: null, name: null, steps: typed };
     const vars = { ...mc.vars, prepayment: a.amount !== null ? new Intl.NumberFormat('ru-RU').format(a.amount).replace(/[\u00a0\u202f]/g, ' ') : '', minutes: minutes ?? '' };
     const message = tpl.steps
       .map((st) => [renderMessage(st.text, { ...mc, vars }), ...st.files.map(() => '📎 файл из шаблона')].filter((x) => x.trim()).join('\n'))
@@ -170,11 +179,16 @@ export class PaymentsService {
 
   /** Файлы шагов шаблона (без содержимого), в порядке шаблона; пропавшие — пропускаем. */
   private async templateFiles(portalId: string, steps: PaymentMessageStep[]): Promise<PaymentFileDto[]> {
-    const ids = [...new Set(steps.flatMap((st) => st.files.map((f) => f.fileId)))];
-    if (!ids.length) return [];
-    const rows = await this.prisma.storedFile.findMany({ where: { portalId, id: { in: ids } }, select: { id: true, name: true, mime: true, size: true } });
+    const refs = new Map(steps.flatMap((st) => st.files).map((f) => [f.fileId, f.name] as const));
+    const stored = [...refs.keys()].filter((id) => parseDiskFileId(id) === null);
+    const rows = stored.length ? await this.prisma.storedFile.findMany({ where: { portalId, id: { in: stored } }, select: { id: true, name: true, mime: true, size: true } }) : [];
     const byId = new Map(rows.map((r) => [r.id, r]));
-    return ids.flatMap((id) => {
+    return [...refs.entries()].flatMap(([id, name]): PaymentFileDto[] => {
+      const disk = parseDiskFileId(id);
+      if (disk !== null) {
+        const label = name || `Файл Диска #${disk}`;
+        return [{ id, name: label, mime: /\.pdf$/i.test(label) ? 'application/pdf' : 'application/octet-stream', size: 0 }];
+      }
       const r = byId.get(id);
       return r ? [{ id: r.id, name: r.name, mime: r.mime, size: r.size }] : [];
     });
@@ -199,6 +213,8 @@ export class PaymentsService {
 
   /** Свои файлы сотрудника и файлы системных шаблонов оплаты портала; иначе 400 FILE_NOT_FOUND. */
   private async assertMessageFiles(user: B24UserContext, ids: string[]): Promise<void> {
+    // Файлы Диска (`disk:<ID>`) — файлы типа брони: Диск проверяет права сотрудника при скачивании.
+    ids = ids.filter((id) => parseDiskFileId(id) === null);
     if (!ids.length) return;
     const rows = await this.prisma.storedFile.findMany({ where: { portalId: user.portal.id, id: { in: ids } }, select: { id: true, ownerUserId: true } });
     const foreign = rows.filter((r) => r.ownerUserId !== user.userId);
@@ -312,8 +328,11 @@ export class PaymentsService {
       client: user.client,
       actor: { kind: 'user', userId: user.userId, name: user.userName },
       ...(via ? { newChat: async (text: string) => (await this.chats!.send(user, via.m, via.to, text, undefined, b.dealId)).openlineChatId ?? null } : {}),
+      ...this.messengerFallback(user, b.dealId),
     };
     const deal = await this.flow.deal(user, b.dealId);
+    // До счёта: платёжный сервис отклоняет оплату с почтой «wazzup» у клиента (настройка «Удалять e-mail…»).
+    await this.flow.cleanWazzupEmail(ctx, deal);
     try {
       const contactId = Number(deal?.CONTACT_ID) || 0;
       const res = await user.client.call<{ item?: { id?: number } }>('crm.item.add', {
@@ -336,6 +355,12 @@ export class PaymentsService {
       const invoiceId = Number(res.result?.item?.id);
       if (!(invoiceId > 0)) throw new Error('Портал не вернул ID счёта');
       req = await this.prisma.paymentRequest.update({ where: { id: req.id }, data: { invoiceId } });
+      // Счёт создало приложение: по журналу позже аннулируем его ссылку на оплату (вне песочницы журнал сам не пишется).
+      await this.prisma.appCreatedEntity.upsert({
+        where: { portalId_entityType_entityId: { portalId: user.portal.id, entityType: 'invoice', entityId: invoiceId } },
+        create: { portalId: user.portal.id, entityType: 'invoice', entityId: invoiceId },
+        update: {},
+      });
     } catch (e) {
       await this.prisma.paymentRequest.update({ where: { id: req.id }, data: { status: 'failed', error: msg(e), closedAt: new Date() } });
       throw e;
@@ -521,18 +546,51 @@ export class PaymentsService {
    * просмотра счёта. Право — `payment.send` в группе счёта. Срок оплаты пойдёт с момента отправки,
    * статус станет «Ждёт оплату» автоматически.
    */
-  async send(user: B24UserContext, requestId: string): Promise<PaymentRequestDto> {
+  async send(user: B24UserContext, requestId: string, resend = false): Promise<PaymentRequestDto> {
     let req = await this.prisma.paymentRequest.findFirst({ where: { portalId: user.portal.id, id: requestId } });
     if (!req) throw new BadRequestException({ code: 'REQUEST_NOT_FOUND', message: 'Счёт не найден' });
     const a = await this.access.resolve(user);
     if (!a.isAppAdmin && !a.groups.some((g) => g.group.id === req!.groupId && g.permissions.includes('payment.send')))
       throw new ForbiddenException({ code: 'NO_PAYMENT_SEND', message: 'Нет права «Отправка ссылок на оплату» в группе счёта' });
-    if (req.messageSentAt) throw new ConflictException({ code: 'ALREADY_SENT', message: 'Счёт уже отправлен клиенту' });
+    if (req.messageSentAt && !resend) throw new ConflictException({ code: 'ALREADY_SENT', message: 'Счёт уже отправлен клиенту' });
+    if (resend && !req.messageSentAt) throw new ConflictException({ code: 'NOT_SENT_YET', message: 'Счёт ещё не отправлялся — используйте «Отправить счёт»' });
     if (req.status !== 'link_pending' && req.status !== 'sent')
       throw new ConflictException({ code: 'NOT_SENDABLE', message: 'Счёт закрыт — отправить нельзя' });
-    const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
-    req = await this.flow.sendLink(ctx, req);
+    const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName }, ...this.messengerFallback(user, req.dealId) };
+    req = resend ? await this.flow.resendLink(ctx, req) : await this.flow.sendLink(ctx, req);
     return toDto(req);
+  }
+
+  /**
+   * Запасной путь отправки: Битрикс24 не принял сообщение в чат — пишем клиенту из мессенджера, где уже была
+   * переписка (чат с самым свежим диалогом линии), от имени сотрудника. Нет такого чата — не отправляем.
+   */
+  private messengerFallback(user: B24UserContext, dealId: number): Pick<FlowContext, 'fallbackSend' | 'fallbackSendFile'> {
+    const chats = this.chats;
+    if (!chats) return {};
+    let target: Promise<{ m: Awaited<ReturnType<MessengerChatsService['forUser']>>['m']; to: string } | null> | null = null;
+    const find = () =>
+      (target ??= (async () => {
+        const found = (await chats.dealTargets(user, dealId)).targets.filter((t) => t.status === 'found' && t.to);
+        const pick = found.find((t) => t.via === 'chat' && t.openlineChatId) ?? found.find((t) => t.via === 'chat') ?? null;
+        if (!pick?.to) return null;
+        return { m: (await chats.forUser(user, pick.messenger.id, true, pick.to)).m, to: pick.to };
+      })());
+    return {
+      fallbackSend: async (text) => {
+        const t = await find();
+        if (!t) return false;
+        await chats.send(user, t.m, t.to, text, undefined, dealId);
+        return true;
+      },
+      fallbackSendFile: async (file) => {
+        const t = await find();
+        if (!t) return false;
+        const mime = /\.pdf$/i.test(file.name) ? 'application/pdf' : /\.(jpe?g)$/i.test(file.name) ? 'image/jpeg' : /\.png$/i.test(file.name) ? 'image/png' : 'application/octet-stream';
+        await chats.sendFile(user, t.m, t.to, '', { mime, name: file.name, data: file.data });
+        return true;
+      },
+    };
   }
 
   /** Счета, ждущие оплату (ссылка у клиента, срок идёт), — блок дашборда: раньше истекающие сверху. */

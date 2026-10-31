@@ -11,16 +11,6 @@ export interface AccessProvider {
   refresh(expiredToken: string): Promise<string>;
 }
 
-/**
- * Исключения из режима только чтения (песочница). `allows` — разрешён ли изменяющий вызов с этими
- * параметрами; `recorded` — после успешного вызова (журнал созданного).
- */
-export interface WritePolicy {
-  /** `scope` — проверенный клиентом контекст операции (объединение дублей контактов), иначе нет. */
-  allows(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<boolean>;
-  recorded(method: string, params: Record<string, unknown>, result: unknown): Promise<void>;
-}
-
 export interface RestResponse<T = unknown> {
   result: T;
   total?: number;
@@ -51,10 +41,6 @@ export interface RestClientOptions {
   maxRateLimitRetries?: number;
   retryDelayMs?: number;
   timeoutMs?: number;
-  /** Отклонять изменяющие методы (B24_READ_ONLY). */
-  readOnly?: boolean;
-  /** Точечные исключения из readOnly (песочница записи). */
-  writePolicy?: WritePolicy;
   /** Запрос окончательно не удался (после повторов) — для журнала действий. */
   onFailure?: (f: RestFailure) => void;
 }
@@ -131,8 +117,36 @@ export class ContactMergeGrant {
   }
 }
 
-/** Контекст изменяющего вызова, проверенный клиентом (для WritePolicy). */
-export type WriteScope = { kind: 'contact-merge'; ids: readonly number[] };
+/**
+ * Очистка e-mail «wazzup» у контакта клиента (решение владельца: настройка «Удалять e-mail у контакта перед
+ * отправкой»): единственная правка контакта вне объединения дублей. Пропускает через
+ * `client.callContactEmailCleanup` только `crm.contact.update` этого контакта, где в `EMAIL` — удаление
+ * значений по их ID (`{ ID, VALUE: '' }`), больше ничего. Создаёт его только `payments/payment-flow.ts`.
+ */
+export class ContactEmailCleanupGrant {
+  constructor(readonly contactId: number) {
+    if (!Number.isSafeInteger(contactId) || contactId <= 0) throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Неверный контакт для очистки e-mail');
+  }
+
+  check(method: string, params: Record<string, unknown>): void {
+    const deny = (why: string) => {
+      throw new Bitrix24Error('CONTACT_WRITE_DISABLED', `Очистка e-mail: ${why}`);
+    };
+    if (method.toLowerCase() !== 'crm.contact.update') deny(`метод ${method} недоступен`);
+    if (Number(params.id) !== this.contactId || !/^\d+$/.test(String(params.id ?? ''))) deny('другой контакт');
+    const fields = params.fields as Record<string, unknown> | undefined;
+    const keys = fields && typeof fields === 'object' && !Array.isArray(fields) ? Object.keys(fields) : [];
+    const mail = fields?.EMAIL;
+    if (keys.length !== 1 || keys[0] !== 'EMAIL' || !Array.isArray(mail) || !mail.length) deny('меняется только EMAIL');
+    for (const item of mail as unknown[]) {
+      const i = item as { ID?: unknown; VALUE?: unknown };
+      if (!item || typeof item !== 'object' || !/^\d+$/.test(String(i.ID ?? '')) || i.VALUE !== '' || Object.keys(item).length !== 2) deny('только удаление значений по ID');
+    }
+  }
+}
+
+/** Контекст изменяющего вызова, проверенный клиентом. */
+export type WriteScope = { kind: 'contact-merge'; ids: readonly number[] } | { kind: 'contact-email-cleanup'; id: number };
 
 /** Множественные поля контакта: при объединении Битрикс24 их складывает сам, приложение их не пишет. */
 const CONTACT_MULTI_FIELDS = new Set(['PHONE', 'EMAIL', 'IM', 'WEB', 'LINK']);
@@ -181,13 +195,19 @@ export class Bitrix24RestClient {
 
   /**
    * Запись в рамках объединения дублей контактов (`ContactMergeGrant`): единственный путь, которым
-   * приложение меняет контакты. Разрешение проверяется до сети; при B24_READ_ONLY вызов дополнительно
-   * должна пропустить песочница (`WritePolicy` получает `scope`).
+   * приложение меняет контакты. Разрешение проверяется до сети.
    */
   async callContactMerge<T = unknown>(grant: ContactMergeGrant, method: string, params: Record<string, unknown>): Promise<RestResponse<T>> {
     if (!(grant instanceof ContactMergeGrant)) throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Нет разрешения на объединение контактов');
     grant.check(method, params);
     return this.run<T>(method, params, grant.scope);
+  }
+
+  /** Удаление e-mail «wazzup» у контакта (`ContactEmailCleanupGrant`) — вторая и последняя правка контактов. */
+  async callContactEmailCleanup<T = unknown>(grant: ContactEmailCleanupGrant, method: string, params: Record<string, unknown>): Promise<RestResponse<T>> {
+    if (!(grant instanceof ContactEmailCleanupGrant)) throw new Bitrix24Error('CONTACT_WRITE_DISABLED', 'Нет разрешения на очистку e-mail');
+    grant.check(method, params);
+    return this.run<T>(method, params, { kind: 'contact-email-cleanup', id: grant.contactId });
   }
 
   private async run<T>(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<RestResponse<T>> {
@@ -206,7 +226,7 @@ export class Bitrix24RestClient {
 
   private async callOnce<T>(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<RestResponse<T>> {
     if (!METHOD_RE.test(method)) throw new Bitrix24Error('INVALID_METHOD', `Invalid REST method name: ${method}`);
-    const viaPolicy = await this.assertAllowed(method, params, scope);
+    this.assertAllowed(method, params, scope);
     // Чтение для ушедшего клиента не отправляем; запись — всегда до конца (журнал операций, компенсация).
     const cancelled = readOnlyCall(method, params) ? clientGone : undefined;
     let token = await this.opts.access.getAccessToken();
@@ -217,7 +237,6 @@ export class Bitrix24RestClient {
       countRest(method, Date.now() - queued);
       const body = await this.post(method, { ...params, auth: token });
       if (!body.error) {
-        if (viaPolicy) await this.opts.writePolicy!.recorded(method, params, body.result);
         return { result: body.result as T, total: body.total, next: body.next };
       }
 
@@ -285,8 +304,6 @@ export class Bitrix24RestClient {
     if (entries.length > BATCH_MAX && entries.some(([, c]) => JSON.stringify(c.params ?? {}).includes('$result['))) {
       throw new Bitrix24Error('BATCH_TOO_LARGE', `Batch with $result references cannot exceed ${BATCH_MAX} commands`);
     }
-    // Запись внутри batch песочница не разрешает: ссылки $result между командами не проверить.
-    for (const [, c] of entries) this.assertReadable(c.method);
     const out: BatchResult = { result: {}, errors: {}, total: {}, next: {} };
     for (let i = 0; i < entries.length; i += BATCH_MAX) {
       const cmd: Record<string, string> = {};
@@ -395,19 +412,9 @@ export class Bitrix24RestClient {
     return { data: Buffer.concat(chunks, size), contentType: res.headers.get('content-type') };
   }
 
-  /** true — вызов разрешён только благодаря песочнице (после успеха его надо записать в журнал). */
-  private async assertAllowed(method: string, params: Record<string, unknown>, scope?: WriteScope): Promise<boolean> {
+  private assertAllowed(method: string, params: Record<string, unknown>, scope?: WriteScope): void {
     // scope приходит только из callContactMerge, где ContactMergeGrant уже проверил вызов.
     if (!scope) assertContactsReadOnly(method, params);
-    if (method === 'batch' || !this.opts.readOnly || isReadMethod(method)) return false; // команды пакета проверяет batch()
-    if (this.opts.writePolicy && (await this.opts.writePolicy.allows(method, params, scope))) return true;
-    throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);
-  }
-
-  private assertReadable(method: string): void {
-    if (this.opts.readOnly && !isReadMethod(method)) {
-      throw new Bitrix24Error('READ_ONLY_MODE', `${method} is blocked: Bitrix24 integration is in read-only mode (B24_READ_ONLY)`);
-    }
   }
 
   private async post(method: string, payload: Record<string, unknown>, suffix = '.json') {

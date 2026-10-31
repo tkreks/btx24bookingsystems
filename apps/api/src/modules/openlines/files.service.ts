@@ -122,7 +122,7 @@ export class FilesService {
   /** Копии вложений подтверждений сохраняются вместе с настройками групп. */
   private async groupFileIds(portalId: string): Promise<Set<string>> {
     const groups = await this.prisma.workGroup.findMany({ where: { portalId }, select: { options: true } });
-    return new Set(groups.flatMap((g) => ((g.options as GroupOptionsDto | null)?.bookingTypes ?? []).flatMap((r) => r.confirmation.flatMap((s) => s.files.flatMap((f) => 'storedFileId' in f ? [f.storedFileId] : [])))));
+    return new Set(groups.flatMap((g) => ((g.options as GroupOptionsDto | null)?.bookingTypes ?? []).flatMap((r) => [...r.confirmation, ...(r.prepayment ?? [])].flatMap((s) => s.files.flatMap((f) => 'storedFileId' in f ? [f.storedFileId] : [])))));
   }
 
   /** Свои файлы и файлы общих шаблонов портала (их отправляют все сотрудники). */

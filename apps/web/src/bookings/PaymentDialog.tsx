@@ -12,7 +12,8 @@ import {
   type PaymentPreviewDto,
   type PaymentRequestDto,
 } from '@btx24/shared';
-import { apiGet, apiPost } from '../api.js';
+import { ApiRequestError, apiGet, apiPost } from '../api.js';
+import { ActiveInvoiceLink } from './ActiveInvoiceLink.js';
 import { paymentFeedback } from './payment-feedback.js';
 import { Countdown } from './Countdown.js';
 import { MinimizeButton } from '../Minimize.js';
@@ -48,14 +49,16 @@ type PaymentDialogProps = {
   onCreateBooking?: (dealId: number) => void;
   /** «Настройки сообщений» в окне оплаты (администратор приложения). */
   onOpenSettings?: () => void;
+  /** Встройка сделки: «Отправить» закрывает окно и открывает чат (см. `PaymentWindow`). */
+  onSending?: () => void;
 };
 
 /**
  * Счёт и ссылка на оплату по сделке (ADR 0009). Окно — `PaymentWindow` (макет 2026-10-30); в карточке
  * звонка — компактная версия ниже.
  */
-export function PaymentDialog({ onOpenSettings, ...props }: PaymentDialogProps) {
-  return props.callPlacement ? <CallPaymentDialog {...props} /> : <PaymentWindow {...props} onOpenSettings={onOpenSettings} />;
+export function PaymentDialog({ onOpenSettings, onSending, ...props }: PaymentDialogProps) {
+  return props.callPlacement ? <CallPaymentDialog {...props} /> : <PaymentWindow {...props} onOpenSettings={onOpenSettings} onSending={onSending} />;
 }
 
 /**
@@ -71,7 +74,7 @@ function CallPaymentDialog({
   timezone,
   onClose,
   onCreateBooking,
-}: Omit<PaymentDialogProps, 'onOpenSettings'>) {
+}: Omit<PaymentDialogProps, 'onOpenSettings' | 'onSending'>) {
   // Сделка — по умолчанию самая новая в работе (если окно открыли не сразу после брони).
   const [dealId, setDealId] = useState(initialDealId);
   const [dealOptions, setDealOptions] = useState<PaymentDealOptionsDto | null>(null);
@@ -108,6 +111,7 @@ function CallPaymentDialog({
   const [tab, setTab] = useState<'work' | 'all'>('work');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [activeKind, setActiveKind] = useState<PaymentRequestKind | null>(null);
   const [copied, setCopied] = useState('');
   const [submitted, setSubmitted] = useState<PaymentRequestDto | null>(null);
   // Свой ключ на сделку и вид платежа: повторное нажатие не выставит второй счёт.
@@ -163,6 +167,7 @@ function CallPaymentDialog({
     if (busy || !preview || blocking.length || preview.bookingMissing || !(Number(amount) > 0)) return;
     setBusy(true);
     setError('');
+    setActiveKind(null);
     try {
       const result = await apiPost<PaymentRequestDto>('/payments', {
         idempotencyKey: keyFor(`${dealId}:${kind}:${bookingId ?? ''}`),
@@ -178,6 +183,7 @@ function CallPaymentDialog({
       setTab('work');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось выставить счёт');
+      if (e instanceof ApiRequestError && e.code === 'PAYMENT_ACTIVE') setActiveKind(kind);
     } finally {
       setBusy(false);
     }
@@ -234,7 +240,17 @@ function CallPaymentDialog({
             />
             {!preview && !error && <p className="muted" role="status">Рассчитываем сумму…</p>}
             {busy && <p className="muted" role="status">Создаём счёт и отправляем сообщение клиенту…</p>}
-            {error && <p className="notice error" role="alert">{error}</p>}
+            {error && (
+              <p className="notice error" role="alert">
+                {error}
+                {activeKind && (
+                  <>
+                    {' '}
+                    <ActiveInvoiceLink dealId={dealId} kind={activeKind} timezone={timezone} />
+                  </>
+                )}
+              </p>
+            )}
             {!!blocking.length && <p className="notice error" role="alert">{blocking.join('. ')}</p>}
             {submitted && !error && <div className="call-payment-result" role="status">
               <p className={submitted.error || (submitted.status === 'sent' && !submitted.messageSent) ? 'notice error' : 'notice'}>{paymentFeedback(submitted)}</p>

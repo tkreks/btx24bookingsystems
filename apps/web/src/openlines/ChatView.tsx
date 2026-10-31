@@ -93,7 +93,12 @@ export function ChatView({
   dead = null,
   onRevive,
   menu,
+  pending = [],
+  onPendingDrop,
 }: {
+  /** Сообщения об оплате, уходящие в фоне (встройка сделки): показываются в конце ленты со статусом. */
+  pending?: { id: string; text: string; files: string[]; date: string; status: 'sending' | 'sent' | 'error'; error?: string }[];
+  onPendingDrop?: (id: string) => void;
   /** Почему канал чата не работает (встройка сделки, `lineProblem`); вместо поля ввода — «Присоединиться к чату». */
   dead?: string | null;
   /** «Присоединиться к чату» в неработающем канале: новый чат с клиентом через наш номер этого канала. */
@@ -429,6 +434,15 @@ export function ChatView({
             </Fragment>
           );
         })}
+        {pending.map((p) => (
+          <OutgoingMessage
+            key={p.id}
+            o={{ key: p.id, text: p.text, files: p.files, date: p.date, status: p.status, error: p.error, ids: [], step: { text: p.text, fileIds: [] } }}
+            timezone={timezone}
+            onRetry={() => onPendingDrop?.(p.id)}
+            onDrop={() => onPendingDrop?.(p.id)}
+          />
+        ))}
         {outbox.map((o) => (
           <OutgoingMessage key={o.key} o={o} timezone={timezone} onRetry={() => retry(o)} onDrop={() => setOutbox((prev) => prev.filter((x) => x.key !== o.key))} />
         ))}

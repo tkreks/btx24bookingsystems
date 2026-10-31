@@ -13,6 +13,7 @@ import {
 import { apiGet, apiPost, apiPut } from '../api.js';
 import { openCrm } from '../b24.js';
 import { PaymentDialog } from '../bookings/PaymentDialog.js';
+import { dropPendingPayment, usePendingPayments } from '../bookings/pending-payment.js';
 import { AttentionMessage } from '../dashboard/AttentionMessage.js';
 import { ChatRowMenu } from '../dashboard/ChatRowMenu.js';
 import { ClientInvoicesBlock } from './ClientInvoicesBlock.js';
@@ -129,6 +130,16 @@ export function DealHome({
   /** Что показано вместо списка: служебный чат или поиск клиента в мессенджерах. */
   const [pane, setPane] = useState<'service' | 'start' | null>(null);
   const [paymentRev, setPaymentRev] = useState(0);
+  const pending = usePendingPayments(dealId);
+  // Сообщение об оплате ушло — перечитать ленту (оно придёт из Битрикс24) и убрать временное.
+  const sentPending = pending.filter((p) => p.status === 'sent').map((p) => p.id).join(',');
+  useEffect(() => {
+    if (!sentPending) return;
+    setRev((n) => n + 1);
+    const ids = sentPending.split(',');
+    const t = setTimeout(() => ids.forEach(dropPendingPayment), 4000);
+    return () => clearTimeout(t);
+  }, [sentPending]);
   useEffect(() => {
     let active = true;
     void apiGet<DealChatsDto>(`/openlines/deal-chats/${dealId}`).then(
@@ -208,6 +219,17 @@ export function DealHome({
   return (
     <div className="deal-ws">
       <section className="day-panel dash-block deal-ws-chat">
+        {!shownId &&
+          pending.map((p) => (
+            <p key={p.id} className={`notice${p.status === 'error' ? ' error' : ''}`} role="status">
+              {p.status === 'sending' ? '⏳ Отправляем счёт клиенту…' : p.status === 'sent' ? '✓ Счёт отправлен клиенту' : `Счёт клиенту не отправлен: ${p.error ?? 'ошибка'}`}{' '}
+              {p.status !== 'sending' && (
+                <button type="button" className="link" onClick={() => dropPendingPayment(p.id)}>
+                  Убрать
+                </button>
+              )}
+            </p>
+          ))}
         {shownPane === 'service' ? (
           <ServiceChatView dealId={dealId} timezone={timezone} onBack={toList} onFind={() => setPane('start')} onBind={() => setBinding(true)} />
         ) : shownPane === 'start' ? (
@@ -253,6 +275,8 @@ export function DealHome({
             onOpenChat={openChat}
             onPayment={canPay ? (id) => setInvoicesOf(id) : undefined}
             paymentRevision={paymentRev}
+            pending={pending}
+            onPendingDrop={dropPendingPayment}
           />
         ) : (
           <div className="dash-attention deal-ws-chats">
@@ -353,6 +377,13 @@ export function DealHome({
         <PaymentDialog
           dealId={dealId}
           timezone={timezone}
+          // «Отправить»: окно закрывается, открывается чат — сообщение там сразу, со статусом отправки.
+          onSending={() => {
+            setPaying(false);
+            setPaymentRev((n) => n + 1);
+            const chat = items.find((c) => !isDeadChat(c)) ?? items[0];
+            if (chat) openChat(chat.chatId);
+          }}
           onClose={() => {
             setPaying(false);
             setPaymentRev((n) => n + 1);

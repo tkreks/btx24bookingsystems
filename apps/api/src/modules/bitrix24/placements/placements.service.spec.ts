@@ -32,7 +32,7 @@ function client(bound: { placement: string; handler: string }[], events: { event
 }
 
 describe('PlacementsService', () => {
-  const svc = new PlacementsService({ appBaseUrl: 'https://app.example.ru', trustedOAuthHosts: [], readOnly: true, sandbox: null });
+  const svc = new PlacementsService({ appBaseUrl: 'https://app.example.ru', trustedOAuthHosts: [] });
 
   it('reports which placements and call events point at our handlers', async () => {
     const { c } = client(

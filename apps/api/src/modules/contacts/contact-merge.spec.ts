@@ -2,7 +2,6 @@ import { ForbiddenException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants.js';
 import { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { RateLimiter } from '../bitrix24/rest/rate-limiter.js';
-import { SandboxWritePolicy } from '../bitrix24/sandbox/sandbox.policy.js';
 import { ActionLogService } from '../audit/action-log.service.js';
 import { PermanentAdminGuard } from '../access/permanent-admin.guard.js';
 import { ContactDuplicatesController } from './contact-duplicates.controller.js';
@@ -21,7 +20,7 @@ const META = {
 type Row = Record<string, unknown>;
 
 /** Портал на fetch: контакты, сделки, update/mergeBatch; mergeBatch — CONFLICT, если поля ещё различаются. */
-function portal(rows: Record<number, Row>, deals: Record<number, number>, opts: { readOnly?: boolean; mergeStatus?: string } = {}) {
+function portal(rows: Record<number, Row>, deals: Record<number, number>, opts: { mergeStatus?: string } = {}) {
   const writes: { method: string; params: Row }[] = [];
   const single = ['NAME', 'POST', 'COMMENTS', 'SOURCE_ID'];
   const one = (method: string, params: Row): { result?: unknown; error?: string; total?: number } => {
@@ -60,15 +59,12 @@ function portal(rows: Record<number, Row>, deals: Record<number, number>, opts: 
     }
     return new Response(JSON.stringify({ result: out }), { status: 200 });
   });
-  const policy = new SandboxWritePolicy({} as never, { id: 'p1', timezone: 'Europe/Moscow' } as never, { dealIds: [], bookingsFrom: null, bookingsTo: null });
   const client = new Bitrix24RestClient({
     clientEndpoint: 'https://portal.example/rest/',
     access: { getAccessToken: async () => 't', refresh: async () => 't' },
     limiter: new RateLimiter(1000, 1000),
     limiterKey: 'm1',
     fetch: fetchMock as unknown as typeof fetch,
-    readOnly: opts.readOnly ?? true,
-    writePolicy: opts.readOnly === false ? undefined : policy,
   });
   return { client, writes, rows };
 }
@@ -185,8 +181,8 @@ describe('объединение', () => {
       await expect(t.service.merge(t.user, body)).rejects.toMatchObject({ status: 400 });
   });
 
-  it('и без режима только чтения (без песочницы) пишет только через разрешение объединения', async () => {
-    const p = portal(rowsFixture(), {}, { readOnly: false });
+  it('контакты пишет только через разрешение объединения', async () => {
+    const p = portal(rowsFixture(), {});
     const t = setup(p);
     await expect(t.service.merge(t.user, { idempotencyKey: 'key-00007', primaryId: 10, ids: [10, 20], choices: {} })).resolves.toMatchObject({ status: 'merged' });
     await expect(p.client.call('crm.contact.update', { id: 10, fields: { NAME: 'x' } })).rejects.toMatchObject({ code: 'CONTACT_WRITE_DISABLED' });

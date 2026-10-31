@@ -43,8 +43,25 @@ export class PaymentJob implements OnModuleInit, OnApplicationShutdown {
           this.logger.warn(`payment ${req.id} (deal ${req.dealId}): ${msg(err)}`);
         }
       }
+      await this.reannulClosed();
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Закрытые заявки, у которых ссылка осталась рабочей (счёт не считался «своим»): удалить неоплаченные оплаты. */
+  private async reannulClosed(): Promise<void> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`SELECT id FROM PaymentRequest WHERE status IN ('expired','cancelled','failed') AND closedAt > (UTC_TIMESTAMP(3) - INTERVAL 7 DAY) AND warnings LIKE '%ссылку не аннулируем%' LIMIT 20`;
+    for (const { id } of rows) {
+      const req = await this.prisma.paymentRequest.findUnique({ where: { id } });
+      const portal = req && (await this.prisma.portal.findUnique({ where: { id: req.portalId } }));
+      if (!req || !portal || portal.status !== 'ACTIVE') continue;
+      try {
+        await this.flow.reannul({ portal, client: this.portals.clientFor(portal), actor: { kind: 'system', name: 'Система: оплаты' } }, req);
+        this.logger.log(`payment ${req.id} (deal ${req.dealId}): payment link annulled after close`);
+      } catch (err) {
+        this.logger.warn(`payment ${req.id} (deal ${req.dealId}): reannul failed: ${msg(err)}`);
+      }
     }
   }
 }

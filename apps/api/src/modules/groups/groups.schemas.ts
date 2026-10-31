@@ -19,6 +19,7 @@ const bookingTypeRule = z
     dealTypeValue: z.string().max(50),
     program: z.string().max(200),
     confirmation: z.array(messageStep).max(20),
+    prepayment: z.array(messageStep).max(20).optional(),
     unavailable: z.boolean().optional(),
   })
   .strict();
@@ -136,9 +137,6 @@ export const appSettingsSchema = z
     dialogMetadataEnabled: z.boolean(),
     dialogTextsEnabled: z.boolean(),
     removeWazzupEmail: z.boolean(),
-    createInBitrix: z.boolean().optional(),
-    updateDealFields: z.boolean().optional(),
-    createGrantedAt: z.string().nullable().optional(), // только для показа, при сохранении игнорируется
     admins: z.array(member).max(200),
     appUsers: z.array(member).max(1000).optional(), // нет в запросе — список не меняется
     heads: z.array(member).max(200).optional(), // нет в запросе — список не меняется

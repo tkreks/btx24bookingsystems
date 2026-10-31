@@ -558,7 +558,6 @@ export function CalendarPage({
         </div>
       </header>
 
-      {session.readOnly && <div className="notice">Режим просмотра: изменения в Битрикс24 пока отключены.</div>}
       {groups && groups.length === 0 && session.canManageApp && (
         <div className="notice">Группы ещё не настроены — показаны все ресурсы портала.</div>
       )}

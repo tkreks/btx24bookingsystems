@@ -222,15 +222,6 @@ export interface AppSettingsDto {
   dialogTextsEnabled: boolean;
   /** Удалять у контакта e-mail с «wazzup» перед запуском оплаты. */
   removeWazzupEmail: boolean;
-  /**
-   * Создавать в Битрикс24 новые брони (любые даты) и новые сделки, пока интеграция в режиме
-   * «только чтение» (решение владельца 2026-10-22). Существующие брони и сделки не меняются.
-   */
-  createInBitrix: boolean;
-  /** Когда разрешение включили (только для показа). */
-  createGrantedAt?: string | null;
-  /** Менять поля существующих сделок (системные поля брони, ссылки и стадии оплаты); удалять — нет. */
-  updateDealFields: boolean;
   admins: { kind: MemberKind; bitrixId: number }[];
   /** Кто ещё может открыть приложение (сотрудники, отделы с вложенными); админы — всегда. */
   appUsers: { kind: MemberKind; bitrixId: number }[];

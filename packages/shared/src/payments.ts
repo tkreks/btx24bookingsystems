@@ -194,6 +194,16 @@ export interface CreatePaymentDto {
 }
 
 /** Файл сообщения об оплате (`StoredFile`). */
+/**
+ * Файл Диска Битрикс24 в сообщении об оплате (файлы типа брони, два PDF): в списке вложений окна оплаты
+ * и в заявке он значится как `disk:<ID>`; остальные вложения — ID загруженных файлов приложения.
+ */
+export const diskFileId = (id: number): string => `disk:${id}`;
+export const parseDiskFileId = (v: string): number | null => {
+  const m = /^disk:(\d{1,12})$/.exec(v);
+  return m ? Number(m[1]) : null;
+};
+
 export interface PaymentFileDto {
   id: string;
   name: string;

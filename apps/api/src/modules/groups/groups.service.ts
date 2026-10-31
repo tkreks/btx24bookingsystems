@@ -90,9 +90,6 @@ export class GroupsService {
       dialogMetadataEnabled: s?.dialogMetadataEnabled ?? false,
       dialogTextsEnabled: s?.dialogTextsEnabled ?? false,
       removeWazzupEmail: s?.removeWazzupEmail ?? false,
-      createInBitrix: s?.createInBitrix ?? false,
-      createGrantedAt: s?.createGrantedAt?.toISOString() ?? null,
-      updateDealFields: s?.updateDealFields ?? false,
       admins: admins.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
       appUsers: appUsers.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
       heads: heads.map((a) => ({ kind: a.kind as MemberKind, bitrixId: a.bitrixId })),
@@ -101,20 +98,10 @@ export class GroupsService {
 
   async saveSettings(portalId: string, userId: number, body: unknown): Promise<AppSettingsDto> {
     const s = this.parse(appSettingsSchema, body);
-    const prev = await this.prisma.portalSettings.findUnique({ where: { portalId } });
-    // Кто и когда включил создание в Битрикс24 — запоминается при включении.
-    const grant =
-      s.createInBitrix === undefined || s.createInBitrix === (prev?.createInBitrix ?? false)
-        ? {}
-        : s.createInBitrix
-          ? { createInBitrix: true, createGrantedByUserId: userId, createGrantedAt: new Date() }
-          : { createInBitrix: false };
     const flags = {
       dialogMetadataEnabled: s.dialogMetadataEnabled,
       dialogTextsEnabled: s.dialogTextsEnabled,
       removeWazzupEmail: s.removeWazzupEmail,
-      ...grant,
-      ...(s.updateDealFields === undefined ? {} : { updateDealFields: s.updateDealFields }),
       updatedByUserId: userId,
     };
     const admins = [...new Map(s.admins.map((a) => [`${a.kind}:${a.bitrixId}`, a])).values()];

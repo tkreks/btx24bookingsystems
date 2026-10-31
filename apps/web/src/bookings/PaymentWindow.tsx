@@ -19,7 +19,9 @@ import {
   type PaymentRequestDto,
   type PaymentRequestKind,
 } from '@btx24/shared';
-import { apiGet, apiPost } from '../api.js';
+import { ApiRequestError, apiGet, apiPost } from '../api.js';
+import { ActiveInvoiceLink } from './ActiveInvoiceLink.js';
+import { finishPendingPayment, pendingText, startPendingPayment } from './pending-payment.js';
 import { openCrm } from '../b24.js';
 import { MinimizeButton } from '../Minimize.js';
 import { MessengerKindIcon } from '../messengers/MessengerSearchButton.js';
@@ -73,6 +75,25 @@ const ChannelLogo = ({ c, size = 26 }: { c: Pick<Channel, 'kind'>; size?: number
   );
 
 /**
+ * Итог фоновой отправки: сообщение ушло — «отправлено»; ссылка ещё формируется — ждём (до 2 минут) и
+ * смотрим статус заявки; не ушло — ошибка с причиной.
+ */
+async function settlePending(id: string, dealId: number, first: PaymentRequestDto): Promise<void> {
+  let r = first;
+  for (let i = 0; i < 24 && r.status === 'link_pending'; i++) {
+    await new Promise((res) => setTimeout(res, 5000));
+    try {
+      const d = await apiGet<DealInvoicesDto>(`/payments/invoices?dealId=${dealId}`);
+      r = d.invoices.find((x) => x.request?.id === first.id)?.request ?? r;
+    } catch {
+      /* Повторим на следующем шаге. */
+    }
+  }
+  if (r.messageSent) finishPendingPayment(id, { ok: true });
+  else finishPendingPayment(id, { ok: false, error: `${paymentFeedback(r)}${r.warnings.length ? ` ${r.warnings.join(' ')}` : ''}`.trim() });
+}
+
+/**
  * Окно «Получить оплату» (макет владельца 2026-10-30, prepayment-modal): вкладки вида платежа, блок
  * данных брони (клиент и сделка, ресурс и время, длительность и сумма сделки, сумма к оплате), сообщение
  * клиенту — текст и вложения правятся на эту отправку (шаблон группы не меняется), внизу — куда
@@ -87,6 +108,7 @@ export function PaymentWindow({
   onClose,
   onCreateBooking,
   onOpenSettings,
+  onSending,
 }: {
   dealId: number;
   bookingId?: number | null;
@@ -97,6 +119,11 @@ export function PaymentWindow({
   onCreateBooking?: (dealId: number) => void;
   /** «Настройки сообщений» — шаблоны оплаты в настройках групп; нет — кнопки нет. */
   onOpenSettings?: () => void;
+  /**
+   * Встройка сделки: «Отправить» закрывает окно и открывает чат — сообщение там сразу, со статусом
+   * «отправляется»; счёт и ссылка создаются в фоне (`pending-payment`). Нет — результат показывает само окно.
+   */
+  onSending?: () => void;
 }) {
   const [dealId, setDealId] = useState(initialDealId);
   const [dealOptions, setDealOptions] = useState<PaymentDealOptionsDto | null>(null);
@@ -122,6 +149,7 @@ export function PaymentWindow({
   const [channelId, setChannelId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [activeKind, setActiveKind] = useState<PaymentRequestKind | null>(null);
   const [copied, setCopied] = useState(false);
   const [submitted, setSubmitted] = useState<PaymentRequestDto | null>(null);
   // Свой ключ на сделку и вид платежа: повторное нажатие не выставит второй счёт.
@@ -276,6 +304,15 @@ export function PaymentWindow({
     if (!canSend || !preview || !channel) return;
     setBusy(true);
     setError('');
+    setActiveKind(null);
+    const pendingId = onSending
+      ? startPendingPayment({
+          dealId,
+          text: pendingText(shownText.trim()),
+          files: files.map((f) => f.name),
+        })
+      : null;
+    onSending?.();
     try {
       const body: CreatePaymentDto & Record<string, unknown> = {
         idempotencyKey: keyFor(`${dealId}:${kind}:${bookingId ?? ''}:${custom ? `${purpose}:${sum}` : ''}`),
@@ -291,8 +328,11 @@ export function PaymentWindow({
       const r = await apiPost<PaymentRequestDto>('/payments', body);
       if (custom) keys.current.clear();
       setSubmitted(r);
+      if (pendingId) void settlePending(pendingId, dealId, r);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось выставить счёт');
+      if (pendingId) finishPendingPayment(pendingId, { ok: false, error: e instanceof Error ? e.message : 'Не удалось выставить счёт' });
+      if (e instanceof ApiRequestError && e.code === 'PAYMENT_ACTIVE') setActiveKind(kind);
     } finally {
       setBusy(false);
     }
@@ -676,6 +716,12 @@ export function PaymentWindow({
           {error && (
             <p className="notice error pw-notice" role="alert">
               {error}
+              {activeKind && (
+                <>
+                  {' '}
+                  <ActiveInvoiceLink dealId={dealId} kind={activeKind} timezone={timezone} />
+                </>
+              )}
             </p>
           )}
           {submitted && !error && (

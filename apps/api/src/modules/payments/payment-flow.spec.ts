@@ -24,18 +24,21 @@ const options = {
 };
 const map = { prepaymentLink: 'UF_LINK', visitDateStart: 'UF_VD' };
 
-function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: string[]; contactChats?: string[]; wrongContact?: boolean; closedSession?: boolean; payments?: { id: number; paid: string }[]; ownInvoice?: boolean; booking?: boolean } = {}) {
+function setup(o: { wazzup?: boolean | null; emails?: { ID: string; VALUE: string }[]; requestOnly?: boolean; busy?: boolean; link?: string; stage?: string; sendFails?: boolean; chats?: string[]; contactChats?: string[]; wrongContact?: boolean; closedSession?: boolean; notMember?: boolean; payments?: { id: number; paid: string }[]; ownInvoice?: boolean; booking?: boolean } = {}) {
   const calls: [string, Record<string, unknown>][] = [];
+  let joined = false;
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push([method, params]);
     if (method === 'crm.item.get') return { result: { item: { id: 6001, categoryId: 2, stageId: o.stage ?? 'DT31_2:N', ufCrmLink: o.link ?? '' } } };
     if (method === 'crm.deal.get') return { result: { ID: '678', CONTACT_ID: '140', ASSIGNED_BY_ID: '236', OPPORTUNITY: '90000', UF_VD: '01.06.2020' } };
-    if (method === 'crm.contact.get') return { result: { NAME: 'Анна' } };
+    if (method === 'crm.contact.get') return { result: { NAME: 'Анна', EMAIL: o.emails ?? [] } };
     if (method === 'crm.deal.fields') return { result: { UF_VD: { type: 'string', title: 'Дата начала визита' }, OPPORTUNITY: { type: 'double', title: 'Сумма' } } };
     if (method === 'crm.contact.fields') return { result: { NAME: { type: 'string', title: 'Имя' } } };
     if (method === 'crm.deal.productrows.get') return { result: [{ PRODUCT_NAME: 'Программа «Алатырь»' }] };
     if (method === 'disk.file.get') return { result: { NAME: 'Правила.pdf', DOWNLOAD_URL: 'https://portal/x' } };
     if (method === 'imopenlines.crm.chat.get') return { result: (params.CRM_ENTITY_TYPE === 'contact' ? (o.contactChats ?? []) : (o.chats ?? ['3301'])).map((CHAT_ID) => ({ CHAT_ID })) };
+    if (method === 'imopenlines.session.join') joined = true;
+    if (method === 'imopenlines.crm.message.add' && o.notMember && !joined) throw new Bitrix24Error('CANCELED', 'Вы не можете отправлять сообщения в указанный чат');
     if (method === 'imopenlines.crm.message.add' && params.CRM_ENTITY_TYPE === 'contact' && !o.sendFails) return { result: 42 };
     if (method === 'imopenlines.crm.message.add' && o.sendFails) throw new Bitrix24Error('ACCESS_DENIED', 'no');
     if (method === 'imopenlines.crm.message.add' && (params.CHAT_ID === 14034 || o.closedSession)) throw new Bitrix24Error('CHAT_NOT_IN_CRM', 'other deal');
@@ -43,13 +46,19 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
     if (method === 'crm.item.payment.list') return { result: o.payments ?? [] };
     return { result: true };
   });
-  const client = { call, download: vi.fn(async () => ({ data: Buffer.from('pdf'), contentType: null })) } as unknown as Bitrix24RestClient;
+  const callContactEmailCleanup = vi.fn(async (_grant: unknown, method: string, params: Record<string, unknown>) => call(method, params));
+  const client = { call, callContactEmailCleanup, download: vi.fn(async () => ({ data: Buffer.from('pdf'), contentType: null })) } as unknown as Bitrix24RestClient;
   let row: PaymentRequest;
   const prisma = {
+    portalSettings: { findUnique: vi.fn(async () => (o.wazzup == null ? null : { removeWazzupEmail: o.wazzup })) },
     storedFile: { findFirst: vi.fn(async () => ({ name: 'Правила.pdf', data: Buffer.from('pdf') })) },
     workGroup: { findUnique: vi.fn(async () => ({ options })), findMany: vi.fn(async () => [{ options }]) },
     bookingRecord: { findUnique: vi.fn(async () => null) },
-    paymentRequest: { update: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { ...row, ...data } as PaymentRequest)) },
+    paymentRequest: {
+      update: vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => (row = { ...row, ...data } as PaymentRequest)),
+      updateMany: vi.fn(async () => ({ count: o.busy ? 0 : 1 })),
+      findFirst: vi.fn(async () => (o.requestOnly ? { id: 'q1' } : null)),
+    },
     appCreatedEntity: {
       findUnique: vi.fn(async () => (o.ownInvoice === false ? null : { id: 'x' })),
       upsert: vi.fn(async () => ({})),
@@ -71,7 +80,7 @@ function setup(o: { link?: string; stage?: string; sendFails?: boolean; chats?: 
       ...over,
     } as PaymentRequest);
   const ctx = { portal, client, actor: { kind: 'system' as const, name: 'test' } };
-  return { flow, calls, ctx, req, journal, prisma, row: () => row };
+  return { flow, calls, ctx, req, journal, prisma, cleanup: callContactEmailCleanup, row: () => row };
 }
 
 describe('PaymentFlow', () => {
@@ -107,6 +116,99 @@ describe('PaymentFlow', () => {
     const r = await t.flow.awaitLink(t.ctx, t.req());
     expect(r.messageSentAt).not.toBeNull();
     expect(t.calls.filter((c) => c[0] === 'im.message.add').map((c) => c[1].DIALOG_ID)).toEqual(['chat4396']);
+  });
+
+  it('сотрудник не в чате → входит в диалог своим токеном и сообщение уходит', async () => {
+    const t = setup({ link: 'https://pay.example/x', notMember: true });
+    const ctx = { ...t.ctx, actor: { kind: 'user' as const, userId: 242, name: 'Тест' } };
+    const r = await t.flow.awaitLink(ctx, t.req());
+    expect(r.messageSentAt).not.toBeNull();
+    expect(t.calls.filter((c) => c[0] === 'imopenlines.session.join')).toHaveLength(1);
+  });
+
+  it('повторная отправка: сообщение уходит снова, срок и первая отправка не меняются', async () => {
+    const t = setup({ link: 'https://pay.example/x' });
+    const deadline = new Date(Date.now() + 3_600_000);
+    const first = new Date(Date.now() - 600_000);
+    const r = await t.flow.resendLink(t.ctx, t.req({ status: 'sent', link: 'https://pay.example/x', deadlineAt: deadline, messageSentAt: first }));
+    expect(t.calls.some((c) => c[0] === 'imopenlines.crm.message.add')).toBe(true);
+    expect(r.deadlineAt).toEqual(deadline);
+    expect(r.status).toBe('sent');
+  });
+
+  it('отправляет другой сотрудник, не создатель счёта → входит в чат он сам', async () => {
+    const t = setup({ link: 'https://pay.example/x', notMember: true });
+    const ctx = { ...t.ctx, actor: { kind: 'user' as const, userId: 777, name: 'Другой' } };
+    const r = await t.flow.awaitLink(ctx, t.req());
+    expect(r.messageSentAt).not.toBeNull();
+    expect(t.calls.filter((c) => c[0] === 'imopenlines.crm.message.add')[0]![1].USER_ID).toBe(777);
+  });
+
+  it('Битрикс24 не принял сообщение → уходит из мессенджера с прежней перепиской', async () => {
+    const t = setup({ link: 'https://pay.example/x', sendFails: true });
+    const fallbackSend = vi.fn(async () => true);
+    const ctx = { ...t.ctx, actor: { kind: 'user' as const, userId: 242, name: 'Тест' }, fallbackSend };
+    const r = await t.flow.awaitLink(ctx, t.req());
+    expect(fallbackSend).toHaveBeenCalledTimes(1);
+    expect(r.messageSentAt).not.toBeNull();
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('запасной путь не нашёл чат → прежнее предупреждение', async () => {
+    const t = setup({ link: 'https://pay.example/x', sendFails: true });
+    const ctx = { ...t.ctx, fallbackSend: vi.fn(async () => false) };
+    const r = await t.flow.awaitLink(ctx, t.req());
+    expect(r.messageSentAt).toBeNull();
+    expect(r.warnings).toEqual([expect.stringContaining('отправьте ссылку вручную')]);
+  });
+
+  it('предоплата по умолчанию: файлы Диска типа брони идут как disk:<ID>; выбранный шаблон главнее', () => {
+    const t = setup();
+    const rules = [{ id: 'h', title: 'Почасовая', keywords: ['x'], dealTypeValue: '', program: '', confirmation: [{ text: '', files: [{ id: 92152, name: 'a.pdf' }, { id: 141098, name: 'b.pdf' }] }] }];
+    const opts = { ...options, payments: { ...options.payments, clientMessage: '' }, bookingTypes: rules } as unknown as Parameters<typeof t.flow.defaultSteps>[0];
+    const steps = t.flow.defaultSteps(opts, 'prepayment', 'Почасовая')!;
+    expect(steps[0]!.files.map((f) => f.fileId)).toEqual(['disk:92152', 'disk:141098']);
+    expect(t.flow.defaultSteps({ ...opts!, payments: { ...opts!.payments, prepaymentTemplateId: 't1' } } as Parameters<typeof t.flow.defaultSteps>[0], 'prepayment', 'Почасовая')).toBeNull();
+  });
+
+  it('цепочку уже отправляет другой процесс → второй не отправляет её повторно', async () => {
+    const t = setup({ link: 'https://pay.example/x', busy: true });
+    const r = await t.flow.awaitLink(t.ctx, t.req());
+    expect(t.calls.some((c) => c[0] === 'imopenlines.crm.message.add')).toBe(false);
+    expect(r.messageSentAt).toBeNull();
+  });
+
+  it('«Удалять e-mail»: удаляется только адрес с wazzup, нормальный остаётся; перед отправкой ссылки', async () => {
+    const t = setup({ link: 'https://pay.example/x', wazzup: true, emails: [{ ID: '11', VALUE: 'anna@mail.ru' }, { ID: '12', VALUE: '79990001122@Wazzup.example' }] });
+    await t.flow.awaitLink(t.ctx, t.req());
+    expect(t.cleanup).toHaveBeenCalledTimes(1);
+    expect(t.cleanup.mock.calls[0]![2]).toMatchObject({ id: 140, fields: { EMAIL: [{ ID: '12', VALUE: '' }] } });
+    const order = t.calls.map((c) => c[0]);
+    expect(order.indexOf('crm.contact.update')).toBeLessThan(order.indexOf('imopenlines.crm.message.add'));
+  });
+
+  it('«Удалять e-mail»: выключено или нет wazzup-адресов — контакт не трогаем', async () => {
+    const off = setup({ link: 'https://pay.example/x', wazzup: false, emails: [{ ID: '12', VALUE: 'x@wazzup.example' }] });
+    await off.flow.awaitLink(off.ctx, off.req());
+    expect(off.cleanup).not.toHaveBeenCalled();
+    const clean = setup({ link: 'https://pay.example/x', wazzup: true, emails: [{ ID: '11', VALUE: 'anna@mail.ru' }] });
+    await clean.flow.awaitLink(clean.ctx, clean.req());
+    expect(clean.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('«Удалять e-mail»: сбой очистки не мешает отправке и не даёт предупреждений', async () => {
+    const t = setup({ link: 'https://pay.example/x', wazzup: true, emails: [{ ID: '12', VALUE: 'x@wazzup.example' }] });
+    t.cleanup.mockRejectedValue(new Error('нет прав'));
+    const r = await t.flow.awaitLink(t.ctx, t.req());
+    expect(r.messageSentAt).not.toBeNull();
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('worker (не сотрудник) в чат не входит → предупреждение', async () => {
+    const t = setup({ link: 'https://pay.example/x', notMember: true });
+    const r = await t.flow.awaitLink(t.ctx, t.req());
+    expect(t.calls.some((c) => c[0] === 'imopenlines.session.join')).toBe(false);
+    expect(r.warnings).toEqual([expect.stringContaining('отправьте ссылку вручную')]);
   });
 
   it('message not delivered → no deadline (booking is not cancelled), warning to send manually', async () => {
@@ -218,12 +320,40 @@ describe('PaymentFlow', () => {
     expect(t.calls.some((c) => c[0] === 'crm.deal.update')).toBe(false);
   });
 
-  it('срок доплаты вышел → ссылка аннулирована, бронь, стадия и клиент не тронуты', async () => {
+  it('счёта нет в журнале созданного, но есть заявка → ссылка всё равно аннулируется по сроку', async () => {
+    const t = setup({ ownInvoice: false, requestOnly: true, payments: [{ id: 9002, paid: 'N' }] });
+    const r = await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() - 1000) }));
+    expect(r.status).toBe('expired');
+    expect(t.calls.filter((c) => c[0] === 'crm.item.payment.delete').map((c) => c[1].id)).toEqual([9002]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('закрытая заявка с пометкой «не аннулируем» → оплаты удаляются, пометка снимается', async () => {
+    const t = setup({ ownInvoice: false, requestOnly: true, payments: [{ id: 9003, paid: 'N' }, { id: 9004, paid: 'Y' }] });
+    await t.flow.reannul(t.ctx, t.req({ status: 'expired', warnings: ['Счёт #6001 создан не приложением — ссылку не аннулируем'] as unknown as PaymentRequest['warnings'] }));
+    expect(t.calls.filter((c) => c[0] === 'crm.item.payment.delete').map((c) => c[1].id)).toEqual([9003]);
+    const saved = (t.prisma.paymentRequest.update as unknown as { mock: { calls: [{ data: { warnings: string[] } }][] } }).mock.calls.at(-1)![0].data.warnings;
+    expect(saved.some((w) => w.includes('не аннулируем'))).toBe(false);
+  });
+
+  it('срок вышел → сначала сообщение клиенту, потом счёт «Не оплачен» и аннулирование ссылки', async () => {
+    const t = setup({ booking: true, payments: [{ id: 9005, paid: 'N' }] });
+    await t.flow.watch(t.ctx, t.req({ status: 'sent', deadlineAt: new Date(Date.now() - 1000) }));
+    const order = t.calls.map((c) => c[0]);
+    const sent = order.indexOf('imopenlines.crm.message.add');
+    expect(sent).toBeGreaterThanOrEqual(0);
+    expect(sent).toBeLessThan(order.indexOf('crm.item.payment.delete'));
+    expect(sent).toBeLessThan(order.indexOf('booking.v1.booking.delete'));
+    expect(t.calls.find((c) => c[0] === 'imopenlines.crm.message.add')![1].MESSAGE).toBe('Бронь на 01.06.2020 снята');
+  });
+
+  it('срок доплаты вышел → клиенту то же сообщение, ссылка аннулирована, бронь и стадия не тронуты', async () => {
     const t = setup({ booking: true, payments: [{ id: 9001, paid: 'N' }] });
     const r = await t.flow.watch(t.ctx, t.req({ kind: 'surcharge', status: 'sent', timeoutMinutes: 60, deadlineAt: new Date(Date.now() - 1000) }));
     expect(r.status).toBe('expired');
     expect(t.calls.filter((c) => c[0] === 'crm.item.payment.delete').map((c) => c[1].id)).toEqual([9001]);
-    expect(t.calls.some((c) => c[0] === 'booking.v1.booking.delete' || c[0] === 'crm.deal.update' || c[0] === 'imopenlines.crm.message.add')).toBe(false);
+    expect(t.calls.some((c) => c[0] === 'booking.v1.booking.delete' || c[0] === 'crm.deal.update')).toBe(false);
+    expect(t.calls.some((c) => c[0] === 'imopenlines.crm.message.add')).toBe(true);
   });
 
   it('invoice set to «not paid» by hand → waiting stops at once, link annulled, booking and client untouched', async () => {

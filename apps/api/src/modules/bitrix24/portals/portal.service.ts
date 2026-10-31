@@ -5,9 +5,8 @@ import { SecretBox, sha256Hex } from '../crypto/secret-box.js';
 import { OAuthClient, type TokenSet, trustedOAuthHost } from '../oauth/oauth.client.js';
 import { Bitrix24Error, REAUTH_CODES } from '../rest/errors.js';
 import { RateLimiter } from '../rest/rate-limiter.js';
-import { Bitrix24RestClient, type AccessProvider, type RestFailure, type WritePolicy } from '../rest/rest-client.js';
+import { Bitrix24RestClient, type AccessProvider, type RestFailure } from '../rest/rest-client.js';
 import { ActionLogService } from '../../audit/action-log.service.js';
-import { SandboxWritePolicy, type SandboxRelations } from '../sandbox/sandbox.policy.js';
 import { B24_CONFIG, B24_FETCH, type Bitrix24Config } from '../bitrix24.tokens.js';
 
 /** Обновляем access-токен заранее, чтобы запрос не упёрся в `expired_token`. */
@@ -76,7 +75,7 @@ export class PortalService {
       getAccessToken: () => this.currentAccessToken(portal.id),
       refresh: (expired) => this.refreshTokens(portal.id, expired),
     };
-    return new Bitrix24RestClient({ clientEndpoint: portal.clientEndpoint, access, limiter: this.limiter, limiterKey: portal.memberId, fetch: this.fetchImpl, readOnly: this.config.readOnly, writePolicy: this.policyFor(portal), onFailure: this.failureLog(portal.id) });
+    return new Bitrix24RestClient({ clientEndpoint: portal.clientEndpoint, access, limiter: this.limiter, limiterKey: portal.memberId, fetch: this.fetchImpl, onFailure: this.failureLog(portal.id) });
   }
 
   /** Последняя запись о сбое: портал+метод+код → когда (одинаковые за минуту склеиваются). */
@@ -120,71 +119,8 @@ export class PortalService {
       limiter: this.limiter,
       limiterKey: memberId,
       fetch: this.fetchImpl,
-      readOnly: this.config.readOnly,
-      writePolicy: portal ? this.policyFor(portal) : undefined,
       onFailure: portal ? this.failureLog(portal.id) : undefined,
     });
-  }
-
-  /** portalId → связанные объекты сделок песочницы (кэш 1 мин): контакты, счета, оплаты, чаты меняются. */
-  private readonly sandboxRelations = new Map<string, { value: SandboxRelations; expiresAt: number }>();
-
-  private policyFor(portal: Portal): WritePolicy | undefined {
-    if (!this.config.readOnly) return undefined;
-    // Без песочницы политика всё равно нужна: разрешение «создавать новые» хранится у портала.
-    const sandbox = this.config.sandbox ?? { dealIds: [], bookingsFrom: null, bookingsTo: null };
-    return new SandboxWritePolicy(
-      this.prisma,
-      portal,
-      sandbox,
-      (dealIds) => this.relationsOfDeals(portal, dealIds),
-      (chatId) => this.dealOfChat(portal, chatId),
-    );
-  }
-
-  /** Сделка, к которой сейчас привязан чат открытой линии (`entity_data_2`: …|DEAL|<id>), — чтением. */
-  private async dealOfChat(portal: Portal, chatId: number): Promise<number | null> {
-    const res = await this.reader(portal).call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
-    return dealOfBindings(res.result?.entity_data_2);
-  }
-
-  private reader(portal: Portal): Bitrix24RestClient {
-    return new Bitrix24RestClient({
-      clientEndpoint: portal.clientEndpoint,
-      access: { getAccessToken: () => this.currentAccessToken(portal.id), refresh: (t) => this.refreshTokens(portal.id, t) },
-      limiter: this.limiter,
-      limiterKey: portal.memberId,
-      fetch: this.fetchImpl,
-      readOnly: true,
-    });
-  }
-
-  /** Контакты, счета, оплаты и чаты открытых линий сделок — только чтением, токеном приложения. */
-  private async relationsOfDeals(portal: Portal, dealIds: number[]): Promise<SandboxRelations> {
-    const hit = this.sandboxRelations.get(portal.id);
-    if (hit && hit.expiresAt > Date.now()) return hit.value;
-    const reader = this.reader(portal);
-    const contacts = new Set<number>();
-    const invoices = new Set<number>();
-    const payments = new Set<number>();
-    const chats = new Set<number>();
-    const paymentsOf = async (entityTypeId: number, entityId: number) => {
-      const res = await reader.call<{ id?: number }[]>('crm.item.payment.list', { entityTypeId, entityId });
-      for (const p of Array.isArray(res.result) ? res.result : []) if (Number(p.id) > 0) payments.add(Number(p.id));
-    };
-    for (const id of dealIds) {
-      const res = await reader.call<{ CONTACT_ID?: string | number }[]>('crm.deal.contact.items.get', { id });
-      for (const c of Array.isArray(res.result) ? res.result : []) if (Number(c.CONTACT_ID) > 0) contacts.add(Number(c.CONTACT_ID));
-      const inv = await reader.listAll<{ id: number }>('crm.item.list', { entityTypeId: 31, filter: { parentId2: id }, select: ['id'] }, { pick: (r) => ((r as { items?: { id: number }[] })?.items ?? []) });
-      for (const i of inv) invoices.add(Number(i.id));
-      await paymentsOf(2, id);
-      const ol = await reader.call<{ CHAT_ID?: string | number }[]>('imopenlines.crm.chat.get', { CRM_ENTITY_TYPE: 'deal', CRM_ENTITY: id, ACTIVE_ONLY: 'N' });
-      for (const c of Array.isArray(ol.result) ? ol.result : []) if (Number(c.CHAT_ID) > 0) chats.add(Number(c.CHAT_ID));
-    }
-    for (const inv of invoices) await paymentsOf(31, inv);
-    const value = { contactIds: [...contacts], invoiceIds: [...invoices], paymentIds: [...payments], chatIds: [...chats] };
-    this.sandboxRelations.set(portal.id, { value, expiresAt: Date.now() + 60_000 });
-    return value;
   }
 
   private async currentAccessToken(portalId: string): Promise<string> {

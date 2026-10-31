@@ -1,17 +1,15 @@
 import { useState } from 'react';
 import {
-  PROGRAM_FROM_KEYWORD,
   clientFileKey,
+  isCertificateRule,
+  PROGRAM_FROM_KEYWORD,
   renderTemplate,
   TEMPLATE_VARIABLES,
-  unknownVariables,
   type BizprocImportDto,
   type BookingTypeRule,
-  type ClientMessageStep,
 } from '@btx24/shared';
 import { apiGet } from '../api.js';
-import { AttachmentButtons } from '../openlines/AttachmentButtons.js';
-import { VarTextarea } from './VarTextarea.js';
+import { MessageStepsEditor } from './MessageStepsEditor.js';
 import { move } from './group-form.js';
 import { Section } from './GroupOptions.js';
 
@@ -70,8 +68,10 @@ export function BookingTypesSection({
   const [preview, setPreview] = useState<number | null>(null);
 
   const patch = (i: number, p: Partial<BookingTypeRule>) => onChange(rules.map((r, j) => (j === i ? { ...r, ...p } : r)));
-  const patchStep = (i: number, k: number, p: Partial<ClientMessageStep>) =>
-    patch(i, { confirmation: rules[i].confirmation.map((s, j) => (j === k ? { ...s, ...p } : s)) });
+  /** Редактор цепочки сообщений типа брони: подтверждение после оплаты или сообщение со ссылкой на оплату. */
+  const stepsEditor = (i: number, r: BookingTypeRule, field: 'confirmation' | 'prepayment', empty: string) => (
+    <MessageStepsEditor steps={r[field] ?? []} onChange={(v) => patch(i, { [field]: v })} label={`${r.title}${field === 'prepayment' ? ': оплата' : ''}`} empty={empty} onUploadingChange={onUploadingChange} />
+  );
 
   const importBp = async () => {
     if (rules.length && !confirm('Заменить типы брони и сообщения на взятые из бизнес-процесса?')) return;
@@ -202,66 +202,9 @@ export function BookingTypesSection({
           </div>
 
           <h4>Подтверждение после оплаты</h4>
-          {!r.confirmation.length && <p className="muted">Сообщений нет — клиенту ничего не уйдёт.</p>}
-          <ol className="message-steps">
-            {r.confirmation.map((s, k) => {
-              const unknown = unknownVariables(s.text);
-              return (
-                <li key={k}>
-                  <VarTextarea
-                    rows={Math.min(12, Math.max(2, s.text.split('\n').length))}
-                    maxLength={4000}
-                    value={s.text}
-                    aria-label={`${r.title}: сообщение ${k + 1}`}
-                    placeholder="Текст (можно пустой, если только файлы)"
-                    onChange={(text) => patchStep(i, k, { text })}
-                  />
-                  {unknown.length > 0 && (
-                    <p className="error">Неизвестные переменные: {unknown.map((u) => `{${u}}`).join(', ')}</p>
-                  )}
-                  <div className="step-files-row">
-                    {s.files.map((f) => (
-                      <span key={clientFileKey(f)} className="pill">
-                        📎 {f.name}
-                        <button
-                          type="button"
-                          aria-label={`Убрать файл ${f.name}`}
-                          onClick={() => patchStep(i, k, { files: s.files.filter((x) => clientFileKey(x) !== clientFileKey(f)) })}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                    <AttachmentButtons onBusyChange={onUploadingChange} remaining={10 - s.files.length} onAdd={(files) => patchStep(i, k, { files: [...s.files, ...files.map((f) => ({ storedFileId: f.id, name: f.name }))] })} />
-                  </div>
-                  <span className="row-actions">
-                    <button type="button" aria-label="Выше" disabled={k === 0} onClick={() => patch(i, { confirmation: move(r.confirmation, k, -1) })}>
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Ниже"
-                      disabled={k === r.confirmation.length - 1}
-                      onClick={() => patch(i, { confirmation: move(r.confirmation, k, 1) })}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Удалить сообщение ${k + 1}`}
-                      onClick={() => patch(i, { confirmation: r.confirmation.filter((_, j) => j !== k) })}
-                    >
-                      ×
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
+          <h4>Подтверждение после оплаты</h4>
+          {stepsEditor(i, r, 'confirmation', 'Сообщений нет — клиенту ничего не уйдёт.')}
           <div className="form-actions">
-            <button type="button" className="link" onClick={() => patch(i, { confirmation: [...r.confirmation, { text: '', files: [] }] })}>
-              + сообщение
-            </button>
             <button type="button" className="link" onClick={() => setPreview(preview === i ? null : i)}>
               {preview === i ? 'Скрыть пример' : 'Пример для клиента'}
             </button>
@@ -282,6 +225,12 @@ export function BookingTypesSection({
               ))}
             </div>
           )}
+
+          <h4>Сообщение со ссылкой на оплату</h4>
+          <p className="muted">
+            Уходит клиенту с предоплатой, если в группе не выбран шаблон оплаты. <code>{'{link}'}</code> — ссылка, <code>{'{prepayment}'}</code> — сумма. Пусто — стандартный текст {isCertificateRule(r.title) ? 'сертификата' : 'брони'} и файлы из подтверждения.
+          </p>
+          {stepsEditor(i, r, 'prepayment', 'Не задано — уходит стандартный текст.')}
         </div>
       ))}
       <button type="button" onClick={() => onChange([...rules, newRule(rules.length)])}>

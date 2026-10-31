@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientResourceName, detectBookingType, PROGRAM_FROM_KEYWORD, renderTemplate, unknownVariables, type BookingTypeRule } from './client-messages.js';
+import { clientResourceName, defaultPrepaymentSteps, detectBookingType, PROGRAM_FROM_KEYWORD, renderTemplate, unknownVariables, type BookingTypeRule } from './client-messages.js';
 
 const rule = (id: string, keywords: string[], program = ''): BookingTypeRule => ({ id, title: id, keywords, dealTypeValue: '', program, confirmation: [] });
 const rules = [
@@ -26,5 +26,24 @@ describe('client messages', () => {
     expect(clientResourceName({ name: 'Баня 3', clientName: 'Дом знахаря' })).toBe('Дом знахаря');
     expect(clientResourceName({ name: 'Баня 3', clientName: '  ' })).toBe('Баня 3');
     expect(clientResourceName({ name: 'Баня 3' })).toBe('Баня 3');
+  });
+});
+
+describe('defaultPrepaymentSteps', () => {
+  const files = [{ id: 1, name: 'a.pdf' }, { id: 2, name: 'b.pdf' }];
+  const typed = (title: string) => ({ ...rule(title, ['x']), title, confirmation: [{ text: '', files }, { text: 'Подтверждаем', files: [] }] });
+  it('бронь и сертификат — свой текст, файлы — из файлового шага подтверждения', () => {
+    const [b] = defaultPrepaymentSteps([typed('Почасовая')], 'Почасовая')!;
+    expect(b!.text).toContain('забронировать банный дом');
+    expect(b!.files).toEqual(files);
+    expect(defaultPrepaymentSteps([typed('Сертификат')], 'Сертификат')![0]!.text).toContain('подарочный сертификат');
+  });
+  it('своё сообщение типа главнее стандартного', () => {
+    const own = [{ text: 'Своё {link}', files: [{ id: 5, name: 'c.pdf' }] }];
+    expect(defaultPrepaymentSteps([{ ...typed('Почасовая'), prepayment: own }], 'Почасовая')).toEqual(own);
+  });
+  it('тип не определён — null', () => {
+    expect(defaultPrepaymentSteps([typed('Почасовая')], undefined)).toBeNull();
+    expect(defaultPrepaymentSteps(undefined, 'Почасовая')).toBeNull();
   });
 });

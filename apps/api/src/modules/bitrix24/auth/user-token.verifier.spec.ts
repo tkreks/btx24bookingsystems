@@ -42,18 +42,6 @@ describe('UserTokenVerifier', () => {
     await expect(verifier.verify('unknown-member', 'user-token')).rejects.toMatchObject({ response: { code: 'PORTAL_NOT_INSTALLED' } });
     expect(b24.restCalls).toHaveLength(0);
   });
-
-  it('user client honours read-only mode', async () => {
-    const ctx = makePortalService({ config: { readOnly: true } });
-    await ctx.service.saveInstallation(
-      { accessToken: 'a', refreshToken: 'r', expiresAt: new Date(Date.now() + 3600_000), memberId: MEMBER, clientEndpoint: CLIENT_ENDPOINT, serverEndpoint: 'https://oauth.bitrix.info/rest/', scope: '', userId: 1, status: 'L' },
-      't',
-    );
-    ctx.b24.rest['user.current'] = { result: { ID: '1' } };
-    ctx.b24.rest['user.admin'] = { result: true };
-    const u = await new UserTokenVerifier(ctx.service).verify(MEMBER, 'tok');
-    await expect(u.client.call('crm.deal.update', { id: 1 })).rejects.toMatchObject({ code: 'READ_ONLY_MODE' });
-  });
 });
 
 describe('B24AuthGuard', () => {

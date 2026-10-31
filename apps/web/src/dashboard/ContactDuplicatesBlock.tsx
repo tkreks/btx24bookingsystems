@@ -29,6 +29,8 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'name', label: 'Имя' },
   { id: 'messenger', label: 'Мессенджер' },
 ];
+/** Сколько групп показываем сразу и сколько добавляет «Показать ещё». */
+const PAGE_SIZE = 5;
 const REASON_ICON: Record<DuplicateReason, 'phone' | 'mail' | 'person' | 'chat'> = { phone: 'phone', email: 'mail', name: 'person', messenger: 'chat' };
 
 /** «79991234567» → «+7 999 123-45-67»; иначе как есть. */
@@ -249,6 +251,7 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
   const [query, setQuery] = useState('');
   const [data, setData] = useState<ContactDuplicatesDto | null>(null);
   const [more, setMore] = useState(false);
+  const [visible, setVisible] = useState(PAGE_SIZE);
   const [error, setError] = useState('');
   const [merging, setMerging] = useState<DuplicateGroupDto | null>(null);
   // Группа только что объединена: дубли «слетаются» в основной контакт и пропадают (как в Битрикс24).
@@ -271,6 +274,7 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
     let active = true;
     setData(null);
     setError('');
+    setVisible(PAGE_SIZE);
     apiGet<ContactDuplicatesDto>(`/contacts/duplicates?${params()}`).then(
       (d) => active && setData(d),
       (e) => active && setError(e instanceof Error ? e.message : 'Не удалось найти дубли'),
@@ -280,6 +284,11 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- params собирается из filter/query
   }, [filter, query]);
+  const showMore = () => {
+    const want = visible + PAGE_SIZE;
+    setVisible(want);
+    if (data && data.groups.length < want) loadMore();
+  };
   const loadMore = () => {
     if (!data?.nextCursor || more) return;
     setMore(true);
@@ -323,7 +332,7 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
       {error && <p className="notice error">{error}</p>}
       {data && !data.groups.length && <p className="muted">{query ? 'По запросу дублей не найдено.' : 'Дублей не найдено.'}</p>}
       <ul className="dup-groups">
-        {data?.groups.map((g) => (
+        {data?.groups.slice(0, visible).map((g) => (
           <GroupCard
             key={g.key}
             group={g}
@@ -342,9 +351,9 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
           />
         ))}
       </ul>
-      {data?.nextCursor && (
-        <button type="button" className="link dup-more" disabled={more} onClick={loadMore}>
-          {more ? 'Загрузка…' : `Показать ещё (${data.total - data.groups.length})`}
+      {data && (visible < data.groups.length || data.nextCursor) && (
+        <button type="button" className="link dup-more" disabled={more} onClick={showMore}>
+          {more ? 'Загрузка…' : `Показать ещё ${Math.min(PAGE_SIZE, Math.max(1, data.total - visible))}`}
         </button>
       )}
       {merging && (

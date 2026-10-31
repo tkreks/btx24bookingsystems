@@ -4,6 +4,9 @@ import {
   DEFAULT_CLIENT_MESSAGE,
   DEFAULT_FAIL_MESSAGE,
   DEFAULT_SURCHARGE_MESSAGE,
+  defaultPrepaymentSteps,
+  diskFileId,
+  parseDiskFileId,
   renderMessage,
   hasPaymentLinkToken,
   withPaymentLink,
@@ -18,7 +21,7 @@ import {
 } from '@btx24/shared';
 import type { PaymentRequest, Portal, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
-import type { Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
+import { ContactEmailCleanupGrant, type Bitrix24RestClient } from '../bitrix24/rest/rest-client.js';
 import { Bitrix24Error } from '../bitrix24/rest/errors.js';
 import { PaidAmountService } from './paid-amount.service.js';
 import { ActionLogService } from '../audit/action-log.service.js';
@@ -29,7 +32,9 @@ import { MessageContextService } from '../bookings/message-context.service.js';
 import { appendServiceMessage } from '../openlines/service-chat.service.js';
 
 /** Сколько ждать ссылку от портала, прежде чем признать счёт неудачным. */
-export const LINK_WAIT_MS = 15 * 60_000;
+export /** Метка «отправляется» старше — считается забытой (сбой процесса), заявку можно отправлять снова. */
+const SENDING_STALE_MS = 5 * 60_000;
+const LINK_WAIT_MS = 15 * 60_000;
 /** Доплату без срока перестаём отслеживать через 60 дней. */
 export const WATCH_LIMIT_MS = 60 * 86_400_000;
 
@@ -81,6 +86,12 @@ export interface FlowContext {
    * этим сообщением (его токеном). Возвращает чат линии; только в запросе сотрудника, у worker'а нет.
    */
   newChat?: (text: string) => Promise<number | null>;
+  /**
+   * Запасной путь, если Битрикс24 не принял сообщение в чат: написать клиенту из мессенджера, где уже была
+   * переписка (последний чат). Только в запросе сотрудника. false — подходящего чата нет.
+   */
+  fallbackSend?: (text: string) => Promise<boolean>;
+  fallbackSendFile?: (file: { name: string; data: Buffer }) => Promise<boolean>;
 }
 
 /**
@@ -164,6 +175,17 @@ export class PaymentFlow {
     return this.deliver(ctx, { ...req, link: req.link }, opts);
   }
 
+  /**
+   * Отправить клиенту ту же ссылку ещё раз (счёт уже отправлялся, ждём оплату): текст и вложения как в
+   * первый раз, срок оплаты не продлевается.
+   */
+  async resendLink(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    if (!req.link) return req;
+    const opts = await this.options(req);
+    if (!opts) return this.fail(req, 'Нет настроек счёта группы');
+    return this.deliver(ctx, { ...req, link: req.link }, opts, true);
+  }
+
   /** Есть ли ссылка у счёта; есть — записать в сделку и отправить клиенту. */
   async awaitLink(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
     const opts = await this.options(req);
@@ -179,8 +201,40 @@ export class PaymentFlow {
     return this.deliver(ctx, { ...req, link }, opts!);
   }
 
+  /**
+   * Настройка «Удалять e-mail у контакта перед отправкой»: у контакта сделки удаляем только адреса с «wazzup»
+   * (платёжный сервис отклоняет оплату с такой почтой), нормальные адреса остаются. Без уведомлений и предупреждений:
+   * сбой (нет прав, нет контакта) не мешает оплате.
+   */
+  async cleanWazzupEmail(ctx: FlowContext, deal: Deal | null): Promise<void> {
+    try {
+      const contactId = Number(deal?.CONTACT_ID) || 0;
+      if (!contactId) return;
+      const settings = await this.prisma.portalSettings.findUnique({ where: { portalId: ctx.portal.id }, select: { removeWazzupEmail: true } });
+      if (!settings?.removeWazzupEmail) return;
+      const contact = (await ctx.client.call<{ EMAIL?: { ID?: string | number; VALUE?: string }[] }>('crm.contact.get', { id: contactId })).result;
+      const bad = (contact?.EMAIL ?? []).filter((e) => Number(e.ID) > 0 && /wazzup/i.test(String(e.VALUE ?? '')));
+      if (!bad.length) return;
+      await ctx.client.callContactEmailCleanup(new ContactEmailCleanupGrant(contactId), 'crm.contact.update', {
+        id: contactId,
+        fields: { EMAIL: bad.map((e) => ({ ID: String(e.ID), VALUE: '' })) },
+        params: { REGISTER_SONET_EVENT: 'N' },
+      });
+      this.logger.log(`contact ${contactId}: removed ${bad.length} wazzup e-mail(s)`);
+    } catch (e) {
+      this.logger.warn(`wazzup e-mail cleanup skipped: ${msg(e)}`);
+    }
+  }
+
   /** Ссылка в сделку, сообщение клиенту, комментарий в сделке; срок — с момента отправки. */
-  private async deliver(ctx: FlowContext, req: PaymentRequest & { link: string }, opts: GroupOptionsDto): Promise<PaymentRequest> {
+  private async deliver(ctx: FlowContext, req: PaymentRequest & { link: string }, opts: GroupOptionsDto, resend = false): Promise<PaymentRequest> {
+    // Цепочка идёт десятки секунд: пока запрос сотрудника её шлёт, заявка ещё «link_pending» — worker не должен
+    // отправить то же самое второй раз (так у сделки 40304 сообщение и файлы ушли дважды).
+    const claim = await this.prisma.paymentRequest.updateMany({
+      where: { id: req.id, OR: [{ sendingAt: null }, { sendingAt: { lt: new Date(Date.now() - SENDING_STALE_MS) } }] },
+      data: { sendingAt: new Date() },
+    });
+    if (claim.count === 0) return req;
     const warnings = this.warningsOf(req);
     const map = await this.fieldMap.get(ctx.portal.id);
     const linkField = req.kind === 'custom' ? null : req.kind === 'prepayment' ? map.prepaymentLink : map.surchargeLink;
@@ -190,7 +244,7 @@ export class PaymentFlow {
     const deal = mc.deal;
     // Свой срок из встройки сделки — и для доплаты; иначе срок группы (только предоплата).
     const minutes = req.timeoutMinutes ?? (req.kind === 'prepayment' ? opts.payments.timeoutMinutes : null);
-    const deadline = minutes ? new Date(Date.now() + minutes * 60_000) : null;
+    const deadline = resend ? req.deadlineAt : minutes ? new Date(Date.now() + minutes * 60_000) : null;
     const vars = {
       ...mc.vars,
       prepayment: money(Number(req.amount)),
@@ -206,12 +260,16 @@ export class PaymentFlow {
           steps: [{ text: ownTextWithLink(own ?? DEFAULT_PAYMENT_LINK_MESSAGE, req.link), files: requestFileIds(req.messageFileIds).map((fileId) => ({ fileId, name: '' })) }],
         }
       : await this.paymentTemplate(ctx.portal.id, req.kind, opts, warnings);
-    const steps = await this.withFileData(
+    const typed = own === null && req.kind !== 'custom' ? this.defaultSteps(opts, req.kind, mc.variables.dealtype) : null;
+    const steps: ChainStep[] = typed
+      ? await this.withFileData(ctx.portal.id, typed.map((st) => ({ ...st, text: renderMessage(st.text, { ...mc, vars }) })), warnings)
+      : await this.withFileData(
       ctx.portal.id,
       tpl.steps.map((st) => ({ ...st, text: renderMessage(st.text, { ...mc, vars }) })),
       warnings,
     );
     const text = steps.map((x) => x.text).filter((x) => x.trim()).join('\n\n');
+    await this.cleanWazzupEmail(ctx, deal);
     const sent = await this.sendChain(ctx, target(req), deal, steps, warnings);
     await this.audit(req, sent ? 'link_sent' : 'link_not_sent', sent ? 'Ссылка на оплату отправлена клиенту' : 'Ссылка на оплату НЕ отправлена клиенту', {
       deadline: sent ? deadline?.toISOString() : null,
@@ -224,8 +282,10 @@ export class PaymentFlow {
       data: {
         link: req.link,
         status: 'sent',
-        messageSentAt: sent ? new Date() : null,
-        deadlineAt: sent ? deadline : null,
+        // Повтор: срок и первая отправка остаются, даже если повторная не дошла.
+        sendingAt: null,
+        messageSentAt: resend ? (sent ? new Date() : req.messageSentAt) : sent ? new Date() : null,
+        deadlineAt: resend ? req.deadlineAt : sent ? deadline : null,
         warnings: warnings as Prisma.InputJsonValue,
         error: null,
       },
@@ -290,6 +350,14 @@ export class PaymentFlow {
   private async expire(ctx: FlowContext, req: PaymentRequest, invoice: Invoice | null): Promise<PaymentRequest> {
     const opts = await this.options(req);
     const warnings = this.warningsOf(req);
+    // Сначала — сообщение клиенту (для любой оплаты и любой группы; срок у заявки свой — группы или заданный
+    // менеджером), и только потом счёт «Не оплачен», аннулирование ссылки и снятие брони.
+    const failText = opts?.payments.failMessage ?? DEFAULT_FAIL_MESSAGE;
+    if (failText.trim()) {
+      const mc = await this.messages(ctx, req.dealId);
+      const text = renderMessage(failText, { ...mc, vars: { ...mc.vars, minutes: req.timeoutMinutes ?? opts?.payments.timeoutMinutes ?? '' } });
+      await this.sendToClient(ctx, target(req), mc.deal, text, warnings);
+    }
     const cat = invoice?.categoryId ?? opts?.payments.invoice?.categoryId;
     if (req.invoiceId && cat !== undefined)
       await this.safe(warnings, 'счёт → «Не оплачен»', () => ctx.client.call('crm.item.update', { entityTypeId: 31, id: req.invoiceId, fields: { stageId: `DT31_${cat}:D` } }));
@@ -305,12 +373,6 @@ export class PaymentFlow {
       }
     }
     if (pre && opts?.payments.failStageId) await this.dealUpdate(ctx, req.dealId, { STAGE_ID: opts.payments.failStageId }, warnings, 'стадия «не оплачено»');
-    const failText = pre ? (opts?.payments.failMessage ?? DEFAULT_FAIL_MESSAGE) : '';
-    if (failText.trim()) {
-      const mc = await this.messages(ctx, req.dealId);
-      const text = renderMessage(failText, { ...mc, vars: { ...mc.vars, minutes: req.timeoutMinutes ?? opts?.payments.timeoutMinutes ?? '' } });
-      await this.sendToClient(ctx, target(req), mc.deal, text, warnings);
-    }
     const removed = pre && req.bookingId ? `, бронь #${req.bookingId} снята` : '';
     await this.comment(ctx, req.dealId, `${req.purpose ?? PAYMENT_KIND_LABELS[req.kind]} по счёту #${req.invoiceId} не поступила в срок: ссылка аннулирована${removed}.`, warnings);
     await this.refreshPaid(ctx, req);
@@ -324,6 +386,18 @@ export class PaymentFlow {
     });
   }
 
+  /**
+   * Дожать аннулирование ссылки у уже закрытой заявки (раньше счёт не считался «своим» — ссылка оставалась
+   * рабочей после срока): удалить неоплаченные оплаты счёта и снять пометку «не аннулируем».
+   */
+  async reannul(ctx: FlowContext, req: PaymentRequest): Promise<void> {
+    if (!req.invoiceId) return;
+    const fresh: string[] = [];
+    await this.annulPayments(ctx, req.invoiceId, fresh);
+    const kept = this.warningsOf(req).filter((w) => !w.includes('ссылку не аннулируем'));
+    await this.prisma.paymentRequest.update({ where: { id: req.id }, data: { warnings: [...kept, ...fresh, ...(fresh.length ? [] : ['Ссылка на оплату аннулирована (повторно, после срока)'])] as Prisma.InputJsonValue } });
+  }
+
   /** Аннулировать ссылку = удалить неоплаченные оплаты своего счёта (их создал портал под наш счёт). */
   private async annulPayments(ctx: FlowContext, invoiceId: number, warnings: string[]): Promise<void> {
     let pays: { id?: number; paid?: string }[] = [];
@@ -334,9 +408,11 @@ export class PaymentFlow {
       warnings.push(`Оплаты счёта #${invoiceId} не прочитаны: ${msg(e)}`);
       return;
     }
-    const own = await this.prisma.appCreatedEntity.findUnique({
-      where: { portalId_entityType_entityId: { portalId: ctx.portal.id, entityType: 'invoice', entityId: invoiceId } },
-    });
+    // Счёт приложения: в журнале созданного или у него есть заявка (ID счёта пишется только при выставлении).
+    const own =
+      (await this.prisma.appCreatedEntity.findUnique({
+        where: { portalId_entityType_entityId: { portalId: ctx.portal.id, entityType: 'invoice', entityId: invoiceId } },
+      })) ?? (await this.prisma.paymentRequest.findFirst({ where: { portalId: ctx.portal.id, invoiceId }, select: { id: true } }));
     if (!own) {
       warnings.push(`Счёт #${invoiceId} создан не приложением — ссылку не аннулируем`);
       return;
@@ -364,6 +440,7 @@ export class PaymentFlow {
       if (!ctx.newChat) {
         // Клиент без мессенджеров (служебный чат сделки) — сообщение туда; клиенту его передаст менеджер.
         if (await this.toServiceChat(ctx, req, text)) return true;
+        if (await this.viaMessenger(ctx, text, warnings)) return true;
         warnings.push(...noChat);
         return false;
       }
@@ -376,14 +453,26 @@ export class PaymentFlow {
         return false;
       }
     }
-    const senders = [...new Set([req.userId ?? 0, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
+    // Первым — тот, кто нажал «отправить» (его токен): только он может войти в чат, где не состоит.
+    const actorId = ctx.actor.kind === 'user' ? ctx.actor.userId : 0;
+    const senders = [...new Set([actorId, req.userId ?? 0, Number(deal?.ASSIGNED_BY_ID) || 0].filter((x) => x > 0))];
     let last = '';
     // Чат клиента со временем переходит к его новой сделке: такой (CHAT_NOT_IN_CRM) пропускаем,
     // берём самый новый чат, который сейчас привязан к этой сделке.
     for (const { chatId, type, entityId } of targets) {
       for (const userId of senders) {
+        const post = () => ctx.client.call<unknown>('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: type, CRM_ENTITY: entityId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
         try {
-          const r = await ctx.client.call<unknown>('imopenlines.crm.message.add', { CRM_ENTITY_TYPE: type, CRM_ENTITY: entityId, USER_ID: userId, CHAT_ID: chatId, MESSAGE: text });
+          let r;
+          try {
+            r = await post();
+          } catch (e) {
+            // Сотрудник не участник чата («CANCELED: Вы не можете отправлять сообщения…»): раз у него есть
+            // доступ к сделке и клиенту, входим в диалог его токеном и повторяем. Worker входить не может.
+            if (ctx.actor.kind !== 'user' || ctx.actor.userId !== userId || !(e instanceof Bitrix24Error) || e.code === 'CHAT_NOT_IN_CRM') throw e;
+            await ctx.client.call('imopenlines.session.join', { CHAT_ID: chatId });
+            r = await post();
+          }
           await this.markSystem(ctx, chatId, userId, r.result, req.source);
           return true;
         } catch (e) {
@@ -398,15 +487,36 @@ export class PaymentFlow {
       try {
         const d = await ctx.client.call<{ entity_data_2?: string }>('imopenlines.dialog.get', { CHAT_ID: chatId });
         if (bindingEntity(d.result?.entity_data_2, type) !== entityId) continue;
-        const r = await ctx.client.call<unknown>('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
+        const post = () => ctx.client.call<unknown>('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: text });
+        let r;
+        try {
+          r = await post();
+        } catch (e) {
+          if (ctx.actor.kind !== 'user') throw e;
+          await ctx.client.call('imopenlines.session.join', { CHAT_ID: chatId });
+          r = await post();
+        }
         await this.markSystem(ctx, chatId, null, r.result, req.source);
         return true;
       } catch (e) {
         last = msg(e);
       }
     }
+    // Битрикс24 не принял сообщение: пишем клиенту из мессенджера, где уже была переписка.
+    if (await this.viaMessenger(ctx, text, warnings)) return true;
     warnings.push(`Сообщение клиенту не отправлено (${last}) — отправьте ссылку вручную`);
     return false;
+  }
+
+  /** Сообщение из мессенджера с прежней перепиской (если запрос сотрудника это умеет). Сбой — предупреждение. */
+  private async viaMessenger(ctx: FlowContext, text: string, warnings: string[]): Promise<boolean> {
+    if (!ctx.fallbackSend) return false;
+    try {
+      return await ctx.fallbackSend(text);
+    } catch (e) {
+      warnings.push(`Через мессенджер не отправлено: ${msg(e)}`);
+      return false;
+    }
   }
 
   /**
@@ -451,7 +561,7 @@ export class PaymentFlow {
       for (const f of st.files) {
         chatId ??= await this.boundChat(ctx, req.dealId);
         if (!chatId && (await this.toServiceChat(ctx, req, `Файл для клиента: «${f.name}» (отправьте сами)`))) continue;
-        if (!chatId) {
+        if (!chatId && !ctx.fallbackSendFile) {
           warnings.push(`Файлы не отправлены: ${NO_WORKING_CHAT}`);
           return false;
         }
@@ -471,8 +581,22 @@ export class PaymentFlow {
             data = (await ctx.client.download(String(file?.DOWNLOAD_URL ?? ''))).data;
             name = file?.NAME ?? f.name;
           }
-          const r = await ctx.client.call<{ messageId?: number }>('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name, content: data.toString('base64') } });
-          await this.markSystem(ctx, chatId!, null, r.result?.messageId, req.source);
+          const upload = () => ctx.client.call<{ messageId?: number }>('im.v2.File.upload', { dialogId: `chat${chatId}`, fields: { name, content: data.toString('base64') } });
+          try {
+            if (!chatId) throw new Error(NO_WORKING_CHAT);
+            let r;
+            try {
+              r = await upload();
+            } catch (e) {
+              if (ctx.actor.kind !== 'user') throw e;
+              await ctx.client.call('imopenlines.session.join', { CHAT_ID: chatId });
+              r = await upload();
+            }
+            await this.markSystem(ctx, chatId, null, r.result?.messageId, req.source);
+          } catch (e) {
+            // Битрикс24 не принял файл — из мессенджера с прежней перепиской.
+            if (!ctx.fallbackSendFile || !(await ctx.fallbackSendFile({ name, data }))) throw e;
+          }
         });
         if (!ok) return false;
       }
@@ -548,11 +672,13 @@ export class PaymentFlow {
     const all = await this.chatTargets(ctx, dealId, contactId);
     const out: typeof all = [];
     const why = new Set<string>();
-    for (const t of all) {
-      const problem = await chatLineProblem(ctx.client, this.prisma, ctx.portal.id, t.chatId);
+    // Проверка линии каждого чата — отдельный запрос к порталу: идут параллельно, порядок чатов сохраняется.
+    const problems = await Promise.all(all.map((t) => chatLineProblem(ctx.client, this.prisma, ctx.portal.id, t.chatId)));
+    all.forEach((t, i) => {
+      const problem = problems[i];
       if (problem) why.add(problem);
       else out.push(t);
-    }
+    });
     if (!out.length) warnings.push(`${NO_WORKING_CHAT}${why.size ? ` (${[...why].join('; ')})` : ''} — сообщение не отправлено`);
     return out;
   }
@@ -598,6 +724,18 @@ export class PaymentFlow {
     return { id: null, name: null, steps: [{ text, files: [] }] };
   }
 
+  /**
+   * Предоплата по умолчанию для типа брони (Бани): когда у группы нет ни шаблона оплаты, ни своего текста —
+   * текст брони или сертификата и файлы Диска типа. null — применяется обычный текст группы.
+   */
+  defaultSteps(opts: GroupOptionsDto | null, kind: PaymentKind, dealtype: string | undefined): PaymentMessageStep[] | null {
+    const p = opts?.payments;
+    if (kind !== 'prepayment' || p?.prepaymentTemplateId || p?.clientMessage) return null;
+    const steps = defaultPrepaymentSteps(opts?.bookingTypes, dealtype);
+    // Файлы Диска — `disk:<ID>`, загруженные в приложение — их ID: дальше как у шаблона оплаты.
+    return steps?.map((st) => ({ text: st.text, files: st.files.map((f) => ({ fileId: 'storedFileId' in f ? f.storedFileId : diskFileId(f.id), name: f.name })) })) ?? null;
+  }
+
   /** Системный шаблон оплаты портала (общий, назначение `payment`); чужой или пропавший — null. */
   async systemPaymentTemplate(portalId: string, id: string): Promise<{ id: string; name: string; steps: PaymentMessageStep[] } | null> {
     const row = await this.prisma.messageTemplate.findFirst({ where: { id, portalId, purpose: 'payment', shared: true } });
@@ -608,12 +746,14 @@ export class PaymentFlow {
 
   /** Файлы шаблона оплаты (`StoredFile`) — содержимое для отправки; пропавший файл — предупреждение. */
   async withFileData(portalId: string, steps: PaymentMessageStep[], warnings: string[]): Promise<ChainStep[]> {
-    const ids = [...new Set(steps.flatMap((st) => st.files.map((f) => f.fileId)))];
+    const ids = [...new Set(steps.flatMap((st) => st.files.map((f) => f.fileId)))].filter((id) => parseDiskFileId(id) === null);
     const rows = ids.length ? await this.prisma.storedFile.findMany({ where: { portalId, id: { in: ids } }, select: { id: true, name: true, data: true } }) : [];
     const byId = new Map(rows.map((r) => [r.id, r]));
     return steps.map((st) => ({
       text: st.text,
-      files: st.files.flatMap((f) => {
+      files: st.files.flatMap((f): ChainStep['files'] => {
+        const disk = parseDiskFileId(f.fileId);
+        if (disk !== null) return [{ id: disk, name: f.name || `Файл Диска #${disk}` }];
         const r = byId.get(f.fileId);
         if (!r) warnings.push('Файл шаблона удалён — отправлено без него');
         return r ? [{ name: r.name, data: Buffer.from(r.data) }] : [];

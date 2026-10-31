@@ -29,24 +29,6 @@ export const envSchema = z.object({
     .default('oauth.bitrix.info,oauth.bitrix24.tech')
     .transform((v) => v.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)),
   /**
-   * Только чтение данных портала: изменяющие методы REST отклоняются до запроса. По умолчанию
-   * включено — изменения на боевом портале разрешаются явно (`B24_READ_ONLY=false`).
-   */
-  B24_READ_ONLY: z
-    .enum(['true', 'false', '1', '0'])
-    .default('true')
-    .transform((v) => v === 'true' || v === '1'),
-  /**
-   * Песочница записи при B24_READ_ONLY=true (решение владельца): изменения разрешены только по
-   * этим сделкам и для броней в периоде [FROM, TO) — даты в поясе портала. Пусто — выключена.
-   */
-  B24_SANDBOX_DEAL_IDS: z
-    .string()
-    .default('')
-    .refine((v) => /^(\d+(,\d+)*)?$/.test(v.replace(/\s/g, '')), 'comma-separated deal ids'),
-  B24_SANDBOX_BOOKINGS_FROM: optionalString(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
-  B24_SANDBOX_BOOKINGS_TO: optionalString(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
-  /**
    * Лимит REST-запросов к одному порталу: устойчивая скорость и всплеск. Битрикс24 — «дырявое
    * ведро» (~50 запросов в запасе, 2 в секунду); api и worker считают отдельно, поэтому всплеск у
    * каждого — 30 (запас 10 давал очередь: дашборд ждал за списком чатов до 16 секунд).
@@ -60,17 +42,10 @@ export const envSchema = z.object({
   MESSENGER_TOKEN: optionalString(z.string().min(16)),
 });
 
-const withSandbox = envSchema.transform((e) => {
-  const dealIds = e.B24_SANDBOX_DEAL_IDS.replace(/\s/g, '').split(',').filter(Boolean).map(Number);
-  const range = e.B24_SANDBOX_BOOKINGS_FROM && e.B24_SANDBOX_BOOKINGS_TO ? { bookingsFrom: e.B24_SANDBOX_BOOKINGS_FROM, bookingsTo: e.B24_SANDBOX_BOOKINGS_TO } : { bookingsFrom: null, bookingsTo: null };
-  const B24_SANDBOX = dealIds.length || range.bookingsFrom ? { dealIds, ...range } : null;
-  return { ...e, B24_SANDBOX };
-});
-
-export type Env = z.infer<typeof withSandbox>;
+export type Env = z.infer<typeof envSchema>;
 
 export function validateEnv(raw: Record<string, unknown>): Env {
-  const parsed = withSandbox.safeParse(raw);
+  const parsed = envSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid environment: ${issues}`);

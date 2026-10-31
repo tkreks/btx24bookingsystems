@@ -92,9 +92,9 @@ export class PaymentsController {
 
   /** Отправить клиенту выставленный счёт (статус «Выставлен»); право проверяет сервис. */
   @Post('requests/:id/send')
-  send(@B24User() user: B24UserContext, @Param('id') id: string): Promise<PaymentRequestDto> {
+  send(@B24User() user: B24UserContext, @Param('id') id: string, @Body() body?: { resend?: boolean }): Promise<PaymentRequestDto> {
     if (!/^[a-z0-9-]{1,40}$/i.test(id)) throw new BadRequestException({ code: 'INVALID_QUERY', message: 'id: идентификатор заявки' });
-    return this.payments.send(user, id);
+    return this.payments.send(user, id, body?.resend === true);
   }
 
   private async requireDetails(user: B24UserContext): Promise<void> {

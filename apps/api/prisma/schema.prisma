@@ -246,7 +246,7 @@ model PortalSettings {
   contactFieldMap       Json?
   /// Учётные записи автоматизаций; это не доказывает, какая программа выполнила изменение.
   contactSystemUserIds  Json?
-  /// Разрешение владельца создавать в Битрикс24 новые брони и сделки при B24_READ_ONLY (2026-10-22).
+  /// Устарело (режим «только чтение» и песочница убраны 2026-10-31): не используется, колонка оставлена для совместимости.
   createInBitrix        Boolean   @default(false)
   createGrantedByUserId Int?
   createGrantedAt       DateTime? @db.DateTime(3)
@@ -311,8 +311,7 @@ model ExternalUserGroup {
   @@id([externalUserId, groupId])
 }
 
-/// Брони, созданные в песочнице записи (B24_SANDBOX_*): только их можно менять/удалять, и
-/// только их удаляет уборка. Реальные брони песочнице недоступны.
+/// Устарело (песочница записи убрана 2026-10-31): таблица оставлена для совместимости, приложение в неё не пишет.
 model SandboxBooking {
   id        String    @id @default(cuid())
   portalId  String
@@ -852,6 +851,8 @@ model PaymentRequest {
   message         String?              @db.Text
   /// Вложения к своему тексту (`StoredFile.id[]`, окно оплаты); null — без файлов / шаблон группы.
   messageFileIds  Json?
+  /// Сообщение клиенту отправляется прямо сейчас (запрос сотрудника или worker): второй отправитель пропускает заявку.
+  sendingAt       DateTime?            @db.DateTime(3)
   createdAt       DateTime             @default(now()) @db.DateTime(3)
   updatedAt       DateTime             @updatedAt @db.DateTime(3)
 

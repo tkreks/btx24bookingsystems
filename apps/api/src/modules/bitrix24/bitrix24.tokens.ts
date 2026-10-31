@@ -5,8 +5,4 @@ export const B24_FETCH = Symbol('B24_FETCH');
 export interface Bitrix24Config {
   appBaseUrl: string | undefined;
   trustedOAuthHosts: string[];
-  /** Только чтение данных портала (B24_READ_ONLY). */
-  readOnly: boolean;
-  /** Песочница записи при readOnly; null — выключена. */
-  sandbox: import('./sandbox/sandbox.policy.js').SandboxConfig | null;
 }
