@@ -152,6 +152,18 @@ export class PaymentFlow {
     return req;
   }
 
+  /**
+   * Отправить клиенту счёт по запросу сотрудника (просмотр счёта, статус «Выставлен»): ссылка уже
+   * есть — сообщение уходит сейчас, срок оплаты идёт с этого момента; ссылки ещё нет — обычный шаг
+   * ожидания ссылки (появилась — отправится сразу, нет — статус не изменится).
+   */
+  async sendLink(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
+    if (req.status === 'link_pending' || !req.link) return this.awaitLink(ctx, req);
+    const opts = await this.options(req);
+    if (!opts) return this.fail(req, 'Нет настроек счёта группы');
+    return this.deliver(ctx, { ...req, link: req.link }, opts);
+  }
+
   /** Есть ли ссылка у счёта; есть — записать в сделку и отправить клиенту. */
   async awaitLink(ctx: FlowContext, req: PaymentRequest): Promise<PaymentRequest> {
     const opts = await this.options(req);

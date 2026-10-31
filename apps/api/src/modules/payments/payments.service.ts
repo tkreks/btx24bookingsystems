@@ -1,15 +1,18 @@
-import { BadRequestException, ConflictException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Optional } from '@nestjs/common';
 import {
   PAYMENT_REQUEST_KINDS,
   PAYMENT_MAX_TIMEOUT_HOURS,
   DEFAULT_PAYMENT_LINK_MESSAGE,
   PAYMENT_MAX_FILES,
+  invoiceDisplayStatus,
   type PaymentFileDto,
   type PaymentRequestKind,
   moneyValue,
   paymentAmount,
   renderMessage,
+  type AwaitingInvoicesDto,
   type GroupOptionsDto,
+  type InvoiceViewDto,
   type PaymentAmountSource,
   BOOKING_REQUIRED_MESSAGE,
   type DealInvoicesDto,
@@ -27,7 +30,7 @@ import type { B24UserContext } from '../bitrix24/auth/user-context.js';
 import { DealFieldMapService } from '../bookings/deal-field-map.service.js';
 import { isCertificatePurchase } from '../bookings/deal-outcome.js';
 import { MessengerChatsService } from '../messengers/messenger-chats.service.js';
-import { msg, PaymentFlow, type FlowContext, type PaymentMessageStep } from './payment-flow.js';
+import { msg, PaymentFlow, requestFileIds, type FlowContext, type PaymentMessageStep } from './payment-flow.js';
 
 const createSchema = z
   .object({
@@ -400,8 +403,10 @@ export class PaymentsService {
   }
 
   /**
-   * Счета клиента для встройки сделки — по всем сделкам контакта сделки: ждут оплаты (заявка приложения
-   * ещё идёт или счёт открыт) или оплачены, пока у брони счёта (без неё — у его сделки) есть незакончившаяся бронь.
+   * Счета клиента для встройки сделки — по всем сделкам контакта сделки, со статусом для тега
+   * (выставлен / ждёт оплату / оплачен / проигран). Активные — счета с действующей бронью (своей или
+   * сделки) в любом статусе, кроме «Проигран», и открытые счета, по которым ещё ждём оплату;
+   * остальные — архив (`archived: true`, окно «Архив» во встройке).
    */
   async clientInvoices(user: B24UserContext, dealId: number, now = new Date()): Promise<ClientInvoicesDto> {
     const deal = await this.flow.deal(user, dealId);
@@ -422,20 +427,27 @@ export class PaymentsService {
     const stages = await this.invoiceStages(user, [...new Set(items.map((i) => Number(i.categoryId ?? 0)))]);
     const [reqs, live] = await Promise.all([
       this.prisma.paymentRequest.findMany({ where: { portalId: user.portal.id, invoiceId: { in: items.map((i) => Number(i.id)) } } }),
-      this.prisma.bookingRecord.findMany({ where: { portalId: user.portal.id, dealId: { in: ids }, status: 'active', endsAt: { gt: now } }, select: { bookingId: true, dealId: true } }),
+      this.prisma.bookingRecord.findMany({
+        where: { portalId: user.portal.id, dealId: { in: ids }, status: 'active', endsAt: { gt: now } },
+        select: { bookingId: true, dealId: true, startsAt: true, endsAt: true },
+        orderBy: { startsAt: 'asc' },
+      }),
     ]);
     const byInvoice = new Map(reqs.map((r) => [r.invoiceId!, r]));
-    const liveBookings = new Set(live.map((b) => b.bookingId));
-    const liveDeals = new Set(live.map((b) => b.dealId));
+    const liveBooking = new Map(live.map((b) => [b.bookingId, b]));
+    // Ближайшая действующая бронь сделки (брони отсортированы по началу).
+    const dealBooking = new Map<number, (typeof live)[number]>();
+    for (const b of live) if (b.dealId !== null && !dealBooking.has(b.dealId)) dealBooking.set(b.dealId, b);
     const invoices: ClientInvoicesDto['invoices'] = [];
     for (const i of items) {
       const sem = stages.get(String(i.stageId ?? ''))?.semantics ?? (String(i.stageId).endsWith(':P') ? 'S' : String(i.stageId).endsWith(':D') ? 'F' : '');
       const req = byInvoice.get(Number(i.id));
       const owner = Number(i.parentId2);
-      const state = sem === 'S' ? 'paid' : sem === 'F' ? null : 'open';
-      if (!state) continue;
-      if (state === 'open' && req && req.status !== 'link_pending' && req.status !== 'sent') continue;
-      if (state === 'paid' && !(req?.bookingId ? liveBookings.has(req.bookingId) : liveDeals.has(owner))) continue;
+      const state = sem === 'S' ? ('paid' as const) : sem === 'F' ? ('failed' as const) : ('open' as const);
+      const status = invoiceDisplayStatus(state, req ? { status: req.status, messageSent: !!req.messageSentAt } : null);
+      const booking = (req?.bookingId ? liveBooking.get(req.bookingId) : undefined) ?? dealBooking.get(owner) ?? null;
+      // Открытый счёт, по которому ещё ждём оплату (заявка идёт или счёт не приложения).
+      const awaiting = state === 'open' && (!req || req.status === 'link_pending' || req.status === 'sent');
       invoices.push({
         invoiceId: Number(i.id),
         dealId: owner,
@@ -444,13 +456,130 @@ export class PaymentsService {
         amount: Number(i.opportunity ?? 0),
         currency: i.currencyId ?? 'RUB',
         state,
+        status,
+        archived: status === 'lost' || (!booking && !awaiting),
         createdAt: i.createdTime ? new Date(i.createdTime).toISOString() : '',
         purpose: req?.purpose || i.title || `Счёт #${i.id}`,
         deadline: state === 'open' ? (req?.deadlineAt?.toISOString() ?? null) : null,
+        requestId: req?.id ?? null,
+        booking: booking ? { bookingId: booking.bookingId, start: booking.startsAt.toISOString(), end: booking.endsAt.toISOString() } : null,
       });
     }
-    invoices.sort((a, b) => (a.state === b.state ? b.createdAt.localeCompare(a.createdAt) : a.state === 'open' ? -1 : 1));
+    // Активные сверху (ждущие оплаты и выставленные — первыми, затем оплаченные), архив внизу; внутри — новые сверху.
+    const rank = (x: ClientInvoicesDto['invoices'][number]) => (x.archived ? 3 : x.status === 'paid' ? 2 : 1);
+    invoices.sort((a, b) => rank(a) - rank(b) || b.createdAt.localeCompare(a.createdAt));
     return { dealId, invoices };
+  }
+
+  /** Счёт в режиме просмотра (окно как в шаге выставления): данные Битрикс24 + заявка приложения. */
+  async invoiceView(user: B24UserContext, dealId: number, invoiceId: number): Promise<InvoiceViewDto> {
+    const invoice = await this.flow.invoice(user, invoiceId).catch(() => null);
+    if (!invoice) throw new BadRequestException({ code: 'INVOICE_NOT_FOUND', message: `Счёт #${invoiceId} не найден или нет доступа` });
+    const owner = Number(invoice.parentId2) || dealId;
+    const deal = await this.flow.deal(user, owner);
+    if (!deal) throw new BadRequestException({ code: 'DEAL_NOT_FOUND', message: `Сделка #${owner} не найдена или нет доступа` });
+    const stages = await this.invoiceStages(user, [Number(invoice.categoryId ?? 0)]);
+    const st = stages.get(String(invoice.stageId ?? ''));
+    const sem = st?.semantics ?? (String(invoice.stageId).endsWith(':P') ? 'S' : String(invoice.stageId).endsWith(':D') ? 'F' : '');
+    const state = sem === 'S' ? ('paid' as const) : sem === 'F' ? ('failed' as const) : ('open' as const);
+    const req = await this.prisma.paymentRequest.findFirst({ where: { portalId: user.portal.id, invoiceId } });
+    const booking = req?.bookingId ? await this.bookingOption(user, req.bookingId) : null;
+    const contactId = Number(deal.CONTACT_ID) || 0;
+    const messageFiles = req ? await this.templateFiles(user.portal.id, [{ text: '', files: requestFileIds(req.messageFileIds).map((fileId) => ({ fileId, name: '' })) }]) : [];
+    return {
+      invoiceId,
+      dealId: owner,
+      dealTitle: String(deal.TITLE ?? '') || `Сделка #${owner}`,
+      dealAmount: dealAmount(deal.OPPORTUNITY),
+      contact: contactId ? await this.contact(user, contactId, {}) : null,
+      amount: Number(invoice.opportunity ?? 0),
+      currency: String(invoice.currencyId ?? '') || 'RUB',
+      stageName: st?.name ?? String(invoice.stageId ?? ''),
+      state,
+      status: invoiceDisplayStatus(state, req ? { status: req.status, messageSent: !!req.messageSentAt } : null),
+      createdAt: invoice.createdTime ? new Date(String(invoice.createdTime)).toISOString() : '',
+      purpose: req?.purpose || String(invoice.title ?? '') || `Счёт #${invoiceId}`,
+      request: req ? toDto(req) : null,
+      messageText: req?.message ?? null,
+      messageFiles,
+      booking,
+      complete: !!req,
+    };
+  }
+
+  /** Бронь заявки для просмотра счёта (любой статус записи журнала) с названиями ресурсов. */
+  private async bookingOption(user: B24UserContext, bookingId: number): Promise<PaymentBookingOption | null> {
+    const r = await this.prisma.bookingRecord.findUnique({ where: { portalId_bookingId: { portalId: user.portal.id, bookingId } } });
+    if (!r) return null;
+    const ids = [...new Set(((r.resourceIds as number[]) ?? []).map(Number))];
+    const names = ids.length ? new Map((await this.prisma.resource.findMany({ where: { portalId: user.portal.id, resourceId: { in: ids } } })).map((x) => [x.resourceId, x.name])) : new Map<number, string>();
+    return { bookingId: r.bookingId, start: r.startsAt.toISOString(), end: r.endsAt.toISOString(), resources: ids.map((id) => names.get(id) ?? `Ресурс ${id}`) };
+  }
+
+  /**
+   * Отправить клиенту выставленный счёт (статус «Выставлен»: сообщение ещё не ушло) — по кнопке из
+   * просмотра счёта. Право — `payment.send` в группе счёта. Срок оплаты пойдёт с момента отправки,
+   * статус станет «Ждёт оплату» автоматически.
+   */
+  async send(user: B24UserContext, requestId: string): Promise<PaymentRequestDto> {
+    let req = await this.prisma.paymentRequest.findFirst({ where: { portalId: user.portal.id, id: requestId } });
+    if (!req) throw new BadRequestException({ code: 'REQUEST_NOT_FOUND', message: 'Счёт не найден' });
+    const a = await this.access.resolve(user);
+    if (!a.isAppAdmin && !a.groups.some((g) => g.group.id === req!.groupId && g.permissions.includes('payment.send')))
+      throw new ForbiddenException({ code: 'NO_PAYMENT_SEND', message: 'Нет права «Отправка ссылок на оплату» в группе счёта' });
+    if (req.messageSentAt) throw new ConflictException({ code: 'ALREADY_SENT', message: 'Счёт уже отправлен клиенту' });
+    if (req.status !== 'link_pending' && req.status !== 'sent')
+      throw new ConflictException({ code: 'NOT_SENDABLE', message: 'Счёт закрыт — отправить нельзя' });
+    const ctx: FlowContext = { portal: user.portal, client: user.client, actor: { kind: 'user', userId: user.userId, name: user.userName } };
+    req = await this.flow.sendLink(ctx, req);
+    return toDto(req);
+  }
+
+  /** Счета, ждущие оплату (ссылка у клиента, срок идёт), — блок дашборда: раньше истекающие сверху. */
+  async awaiting(user: B24UserContext): Promise<AwaitingInvoicesDto> {
+    const a = await this.access.resolve(user);
+    const groupIds = a.groups.filter((g) => g.permissions.includes('payment.send')).map((g) => g.group.id);
+    if (!a.isAppAdmin && !groupIds.length) return { invoices: [] };
+    const rows = await this.prisma.paymentRequest.findMany({
+      where: { portalId: user.portal.id, status: 'sent', messageSentAt: { not: null }, ...(a.isAppAdmin ? {} : { groupId: { in: groupIds } }) },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    rows.sort((x, y) =>
+      x.deadlineAt && y.deadlineAt
+        ? x.deadlineAt.getTime() - y.deadlineAt.getTime()
+        : x.deadlineAt
+          ? -1
+          : y.deadlineAt
+            ? 1
+            : y.createdAt.getTime() - x.createdAt.getTime(),
+    );
+    const titles = await this.dealTitles(user, [...new Set(rows.map((r) => r.dealId))]);
+    return {
+      invoices: rows.map((r) => ({
+        requestId: r.id,
+        invoiceId: r.invoiceId,
+        dealId: r.dealId,
+        dealTitle: titles.get(r.dealId) ?? `Сделка #${r.dealId}`,
+        kind: r.kind,
+        amount: Number(r.amount),
+        purpose: r.purpose,
+        deadline: r.deadlineAt?.toISOString() ?? null,
+        createdAt: r.createdAt.toISOString(),
+        createdBy: r.createdByName,
+      })),
+    };
+  }
+
+  /** Названия сделок правами сотрудника; недоступные — без названия (останется «Сделка #N»). */
+  private async dealTitles(user: B24UserContext, ids: number[]): Promise<Map<number, string>> {
+    if (!ids.length) return new Map();
+    try {
+      const rows = await user.client.listAll<{ ID: string; TITLE?: string }>('crm.deal.list', { filter: { ID: ids }, select: ['ID', 'TITLE'] }, { max: Math.max(ids.length, 50) });
+      return new Map(rows.map((d) => [Number(d.ID), d.TITLE || `Сделка #${d.ID}`]));
+    } catch {
+      return new Map();
+    }
   }
 
   private readonly stageCache = new Map<string, { map: Map<string, { name: string; semantics: string }>; expiresAt: number }>();

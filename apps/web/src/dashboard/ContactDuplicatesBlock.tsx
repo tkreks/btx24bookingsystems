@@ -73,6 +73,16 @@ export function stackView<T>(rest: T[], max = 4): { shown: T[]; more: number } {
   return { shown, more: rest.length - shown.length };
 }
 
+/**
+ * Убрать объединённые (удалённые в Битрикс24) контакты из загруженного списка: они пропадают из всех
+ * групп, группа без пары дублей исчезает целиком, общий счётчик уменьшается на исчезнувшие группы.
+ */
+export function removeMergedContacts(data: ContactDuplicatesDto, removedIds: number[]): ContactDuplicatesDto {
+  const gone = new Set(removedIds);
+  const groups = data.groups.map((g) => ({ ...g, contacts: g.contacts.filter((c) => !gone.has(c.id)) })).filter((g) => g.contacts.length >= 2);
+  return { ...data, groups, total: Math.max(0, data.total - (data.groups.length - groups.length)) };
+}
+
 const CHANNEL_COLORS: Record<string, string> = {
   instagram: '#e94a8d',
   viber: '#8354c9',
@@ -240,8 +250,9 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
   const [data, setData] = useState<ContactDuplicatesDto | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState('');
-  const [rev, setRev] = useState(0);
   const [merging, setMerging] = useState<DuplicateGroupDto | null>(null);
+  // Группа только что объединена: дубли «слетаются» в основной контакт и пропадают (как в Битрикс24).
+  const [vanishing, setVanishing] = useState<{ key: string; removed: number[] } | null>(null);
   // «Не объединять» — только в этом блоке (на сервере не сохраняется): ключ группы → ID контактов.
   const [excluded, setExcluded] = useState<Record<string, ReadonlySet<number>>>({});
 
@@ -268,7 +279,7 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- params собирается из filter/query
-  }, [filter, query, rev]);
+  }, [filter, query]);
   const loadMore = () => {
     if (!data?.nextCursor || more) return;
     setMore(true);
@@ -317,6 +328,7 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
             key={g.key}
             group={g}
             tz={tz}
+            merging={vanishing?.key === g.key}
             excluded={excluded[g.key] ?? NONE}
             onToggle={(id) =>
               setExcluded((all) => {
@@ -340,9 +352,16 @@ export function ContactDuplicatesBlock({ tz }: { tz: string }) {
           group={merging}
           tz={tz}
           onClose={() => setMerging(null)}
-          onMerged={() => {
+          onMerged={(removedIds) => {
+            // Как в Битрикс24: дубли «слетаются» в основной контакт и пропадают; удалённые убираем
+            // из всех групп сразу, не дожидаясь пересборки списка на сервере.
+            const key = merging.key;
             setMerging(null);
-            setRev((n) => n + 1);
+            setVanishing({ key, removed: removedIds });
+            window.setTimeout(() => {
+              setVanishing(null);
+              setData((d) => (d ? removeMergedContacts(d, removedIds) : d));
+            }, 750);
           }}
         />
       )}
@@ -356,14 +375,14 @@ const NONE: ReadonlySet<number> = new Set();
  * Группа дублей: [самый ранний контакт] | [⇄ и «?»] | [второй контакт или стопка с «N контактов»].
  * Больше двух контактов — список раскрывается, у каждого флаг «Не объединять».
  */
-function GroupCard({ group: g, tz, excluded, onToggle, onMerge }: { group: DuplicateGroupDto; tz: string; excluded: ReadonlySet<number>; onToggle: (id: number) => void; onMerge: () => void }) {
+function GroupCard({ group: g, tz, merging = false, excluded, onToggle, onMerge }: { group: DuplicateGroupDto; tz: string; merging?: boolean; excluded: ReadonlySet<number>; onToggle: (id: number) => void; onMerge: () => void }) {
   const [open, setOpen] = useState(false);
   const { first, rest, included } = splitGroup(g.contacts, excluded);
   const stack = stackView(rest);
   const blocker = mergeBlocker(included.length);
   const many = g.contacts.length > 2;
   return (
-    <li className={`dup-group dup-card${open ? ' open' : ''}`}>
+    <li className={`dup-group dup-card${open ? ' open' : ''}${merging ? ' merging' : ''}`}>
       <div className="dup-pair">
         <div className="dup-cell">{first ? <ContactSide c={first} tz={tz} /> : <span className="dup-meta">Все контакты отмечены «Не объединять»</span>}</div>
         <MatchInfo reasons={g.reasons} />
@@ -435,7 +454,7 @@ function GroupCard({ group: g, tz, excluded, onToggle, onMerge }: { group: Dupli
 }
 
 /** Окно сравнения: столбцы — контакты, строки — поля; где значения разные — выбрать, какое оставить. */
-function MergeDialog({ group, tz, onClose, onMerged }: { group: DuplicateGroupDto; tz: string; onClose: () => void; onMerged: () => void }) {
+function MergeDialog({ group, tz, onClose, onMerged }: { group: DuplicateGroupDto; tz: string; onClose: () => void; onMerged: (removedIds: number[]) => void }) {
   const [data, setData] = useState<ContactCompareDto | null>(null);
   const [error, setError] = useState('');
   const [primaryId, setPrimaryId] = useState<number | null>(null);
@@ -605,7 +624,7 @@ function MergeDialog({ group, tz, onClose, onMerged }: { group: DuplicateGroupDt
               : ''}
           </span>
           <div className="pw-send-controls">
-            <button type="button" disabled={busy} onClick={result?.status === 'merged' ? onMerged : onClose}>
+            <button type="button" disabled={busy} onClick={() => (result?.status === 'merged' ? onMerged(result.removedIds) : onClose())}>
               {result ? 'Закрыть' : 'Отмена'}
             </button>
             {!result && (

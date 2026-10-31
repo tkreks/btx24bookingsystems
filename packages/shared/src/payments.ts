@@ -29,6 +29,38 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentRequestStatus, string> = {
   cancelled: 'Отменено',
 };
 
+/**
+ * Статус счёта для интерфейса (решение владельца 2026-10-31): «Выставлен» (подготовлен, клиент ссылку
+ * ещё не получил) — синий, «Ждёт оплату» (ссылка у клиента, срок идёт) — оранжевый, «Оплачен» — зелёный,
+ * «Проигран» (закрыт неуспешно: просрочен, отменён, ошибка) — красный.
+ */
+export const INVOICE_DISPLAY_STATUSES = ['issued', 'waiting', 'paid', 'lost'] as const;
+export type InvoiceDisplayStatus = (typeof INVOICE_DISPLAY_STATUSES)[number];
+export const INVOICE_DISPLAY_LABELS: Record<InvoiceDisplayStatus, string> = {
+  issued: 'Выставлен',
+  waiting: 'Ждёт оплату',
+  paid: 'Оплачен',
+  lost: 'Проигран',
+};
+
+/**
+ * Статус счёта по стадии в Битрикс24 и заявке приложения. Стадия Битрикс24 важнее: оплату и провал
+ * фиксирует портал. Открытый счёт заявки — «Ждёт оплату», только когда ссылка действительно ушла
+ * клиенту (`messageSent`), иначе он лишь «Выставлен»; счёт не приложения — «Ждёт оплату» (о доставке
+ * ссылки ничего не известно, но счёт открыт).
+ */
+export function invoiceDisplayStatus(
+  state: 'open' | 'paid' | 'failed',
+  request: Pick<PaymentRequestDto, 'status' | 'messageSent'> | null,
+): InvoiceDisplayStatus {
+  if (state === 'paid') return 'paid';
+  if (state === 'failed') return 'lost';
+  if (!request) return 'waiting';
+  if (request.status === 'paid') return 'paid';
+  if (request.status === 'expired' || request.status === 'failed' || request.status === 'cancelled') return 'lost';
+  return request.status === 'sent' && request.messageSent ? 'waiting' : 'issued';
+}
+
 /** Смарт-счёт (entityTypeId 31) направления: куда и с какими полями его создавать. */
 export interface InvoiceConfig {
   categoryId: number;
@@ -261,8 +293,9 @@ export function withPaymentLink(text: string, link: string): string {
 }
 
 /**
- * Счёт клиента во встройке сделки (решение владельца 2026-10-26): по всем сделкам контакта — ждёт оплаты
- * или оплачен (виден, пока не закончилась бронь счёта, а без неё — бронь его сделки).
+ * Счёт клиента во встройке сделки (решения владельца 2026-10-26 и 2026-10-31): по всем сделкам
+ * контакта. Активные (`archived: false`) — счета с бронью на будущее время в любом статусе, кроме
+ * «Проигран», и открытые счета, по которым ещё ждём оплату; остальные — архив (кнопка «Архив»).
  */
 export interface ClientInvoiceDto {
   invoiceId: number;
@@ -272,16 +305,70 @@ export interface ClientInvoiceDto {
   thisDeal: boolean;
   amount: number;
   currency: string;
-  state: 'open' | 'paid';
+  state: 'open' | 'paid' | 'failed';
+  /** Статус для тега: выставлен / ждёт оплату / оплачен / проигран. */
+  status: InvoiceDisplayStatus;
+  /** В архив: проигран, либо бронь прошла и оплата не ожидается. */
+  archived: boolean;
   createdAt: string;
   /** Основание: из заявки приложения, иначе название счёта. */
   purpose: string;
   /** Срок ссылки (ISO); null — без срока или счёт выставлен не приложением. */
   deadline: string | null;
+  /** Заявка приложения; null — счёт выставлен не приложением (в просмотре — оговорка о данных). */
+  requestId: string | null;
+  /** Бронь счёта (заявки), иначе ближайшая действующая бронь его сделки; null — действующей брони нет. */
+  booking: { bookingId: number; start: string; end: string } | null;
 }
 
-/** `GET /api/payments/client-invoices?dealId` — сначала ждущие оплаты, новые сверху. */
+/** `GET /api/payments/client-invoices?dealId` — активные сверху (ждущие оплаты первыми), затем архив. */
 export interface ClientInvoicesDto {
   dealId: number;
   invoices: ClientInvoiceDto[];
+}
+
+/** `GET /api/payments/invoice-view?dealId&invoiceId` — счёт в режиме просмотра (окно как в шаге выставления). */
+export interface InvoiceViewDto {
+  invoiceId: number;
+  dealId: number;
+  dealTitle: string;
+  /** Сумма сделки; null — не прочиталась. */
+  dealAmount: number | null;
+  contact: { id: number; name: string } | null;
+  amount: number;
+  currency: string;
+  stageName: string;
+  state: 'open' | 'paid' | 'failed';
+  status: InvoiceDisplayStatus;
+  createdAt: string;
+  purpose: string;
+  /** Заявка приложения (статус, срок, ссылка); null — счёт выставлен не приложением. */
+  request: PaymentRequestDto | null;
+  /** Свой текст сообщения клиенту из заявки; null — отправлялся шаблон группы (текст не сохранён). */
+  messageText: string | null;
+  messageFiles: PaymentFileDto[];
+  booking: PaymentBookingOption | null;
+  /** Данные приложения полные (есть заявка); false — счёт старый или чужой, показываем с оговоркой. */
+  complete: boolean;
+}
+
+/** Счёт, ждущий оплату (ссылка у клиента, срок идёт) — блок дашборда. */
+export interface AwaitingInvoiceDto {
+  requestId: string;
+  invoiceId: number | null;
+  dealId: number;
+  dealTitle: string;
+  kind: PaymentRequestKind;
+  amount: number;
+  /** Основание произвольной оплаты; null — предоплата/доплата. */
+  purpose: string | null;
+  /** Срок оплаты (ISO); null — без срока. */
+  deadline: string | null;
+  createdAt: string;
+  createdBy: string | null;
+}
+
+/** `GET /api/payments/awaiting` — счета в ожидании оплаты: раньше истекающие сверху, без срока — в конце. */
+export interface AwaitingInvoicesDto {
+  invoices: AwaitingInvoiceDto[];
 }

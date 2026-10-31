@@ -200,13 +200,20 @@ describe('PaymentsService', () => {
             { id: 6001, title: 'Приложения', opportunity: 45000, stageId: 'DT31_2:N', categoryId: 2, createdTime: '2026-10-20T10:00:00+03:00', parentId2: 678 },
           ],
     );
-    (t.prisma.bookingRecord as unknown as { findMany: unknown }).findMany = vi.fn(async () => [{ bookingId: 5918, dealId: 678 }]);
-    const r = await t.svc.clientInvoices(t.user, 678);
-    expect(r.invoices.map((i) => [i.invoiceId, i.state, i.thisDeal, i.dealTitle, i.deadline])).toEqual([
-      [7003, 'open', false, 'Домик', null],
-      [6001, 'open', true, 'Баня', '2026-10-22T12:00:00.000Z'],
-      [6002, 'paid', true, 'Баня', null],
+    (t.prisma.bookingRecord as unknown as { findMany: unknown }).findMany = vi.fn(async () => [
+      { bookingId: 5918, dealId: 678, startsAt: new Date('2026-11-02T10:00:00Z'), endsAt: new Date('2026-11-02T14:00:00Z') },
     ]);
+    const r = await t.svc.clientInvoices(t.user, 678);
+    // Активные сверху: ждущие оплаты, затем оплаченные с действующей бронью; архив (проигран, бронь прошла) внизу.
+    expect(r.invoices.map((i) => [i.invoiceId, i.status, i.archived, i.thisDeal, i.dealTitle, i.deadline])).toEqual([
+      [7003, 'waiting', false, false, 'Домик', null],
+      [6001, 'waiting', false, true, 'Баня', '2026-10-22T12:00:00.000Z'],
+      [6002, 'paid', false, true, 'Баня', null],
+      [7004, 'lost', true, false, 'Домик', null],
+      [7001, 'paid', true, false, 'Домик', null],
+    ]);
+    expect(r.invoices.find((i) => i.invoiceId === 6001)).toMatchObject({ requestId: 'r1', booking: { bookingId: 5918 } });
+    expect(r.invoices.find((i) => i.invoiceId === 7001)?.booking).toBeNull();
   });
 
   it('no working open line chat: preview warns, the link message is not sent', async () => {
@@ -322,6 +329,124 @@ describe('PaymentsService', () => {
       delete (options.payments as Record<string, unknown>)[`${kind}TemplateId`];
     }
   });
+  describe('отправка выставленного счёта и ожидающие оплату', () => {
+    const baseReq = (over: Partial<PaymentRequest> = {}) =>
+      ({
+        id: 'rq1',
+        portalId: 'p1',
+        dealId: 678,
+        bookingId: null,
+        groupId: 'g1',
+        kind: 'prepayment',
+        amount: 45000,
+        invoiceId: 6001,
+        link: 'https://pay.example/x',
+        status: 'sent',
+        deadlineAt: null,
+        messageSentAt: null,
+        createdAt: new Date(),
+        warnings: [],
+        purpose: null,
+        timeoutMinutes: null,
+        message: null,
+        messageFileIds: null,
+        createdByUserId: 242,
+        createdByName: 'Тест',
+        error: null,
+        ...over,
+      }) as PaymentRequest;
+    const wire = (t: ReturnType<typeof setup>, req: PaymentRequest) => {
+      (t.prisma.paymentRequest as unknown as Record<string, unknown>).findFirst = vi.fn(async () => req);
+      (t.prisma.paymentRequest as unknown as Record<string, unknown>).update = vi.fn(async ({ data }: { data: Partial<PaymentRequest> }) => Object.assign(req, data));
+    };
+
+    it('send: сообщение уходит, срок с этого момента, статус «ждём оплату»', async () => {
+      const t = setup();
+      const req = baseReq();
+      wire(t, req);
+      const r = await t.svc.send(t.user, 'rq1');
+      expect(r).toMatchObject({ status: 'sent', messageSent: true });
+      expect(r.deadline).not.toBeNull();
+      expect(t.calls.some(([m]) => m === 'imopenlines.crm.message.add')).toBe(true);
+    });
+
+    it('send: ссылки ещё нет — обычное ожидание ссылки (появилась — отправка)', async () => {
+      const t = setup({ link: 'https://pay.example/x' });
+      const req = baseReq({ status: 'link_pending', link: null });
+      wire(t, req);
+      const r = await t.svc.send(t.user, 'rq1');
+      expect(r).toMatchObject({ status: 'sent', messageSent: true });
+    });
+
+    it('send: уже отправлен или закрыт → 409; без payment.send в группе счёта → 403; не найден → 400', async () => {
+      const a = setup();
+      wire(a, baseReq({ messageSentAt: new Date() }));
+      await expect(a.svc.send(a.user, 'rq1')).rejects.toMatchObject({ status: 409, response: { code: 'ALREADY_SENT' } });
+      const b = setup();
+      wire(b, baseReq({ status: 'expired' }));
+      await expect(b.svc.send(b.user, 'rq1')).rejects.toMatchObject({ status: 409, response: { code: 'NOT_SENDABLE' } });
+      const c = setup({ permissions: [] });
+      wire(c, baseReq());
+      await expect(c.svc.send(c.user, 'rq1')).rejects.toMatchObject({ status: 403 });
+      const d = setup();
+      (d.prisma.paymentRequest as unknown as Record<string, unknown>).findFirst = vi.fn(async () => null);
+      await expect(d.svc.send(d.user, 'rq1')).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('awaiting: только свои группы, раньше истекающие сверху, без срока — в конце', async () => {
+      const t = setup();
+      (t.prisma.paymentRequest as unknown as Record<string, unknown>).findMany = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        expect(where).toMatchObject({ portalId: 'p1', status: 'sent', groupId: { in: ['g1'] } });
+        return [
+          baseReq({ id: 'b', dealId: 700, deadlineAt: new Date('2026-11-01T10:00:00Z'), messageSentAt: new Date(), createdAt: new Date('2026-10-30T10:00:00Z') }),
+          baseReq({ id: 'c', dealId: 701, kind: 'custom', purpose: 'Сертификат', deadlineAt: null, messageSentAt: new Date(), createdAt: new Date('2026-10-31T10:00:00Z') }),
+          baseReq({ id: 'a', dealId: 678, deadlineAt: new Date('2026-10-31T09:00:00Z'), messageSentAt: new Date(), createdAt: new Date('2026-10-29T10:00:00Z') }),
+        ];
+      });
+      (t.user.client as unknown as { listAll: unknown }).listAll = vi.fn(async () => [{ ID: '678', TITLE: 'Баня' }]);
+      const r = await t.svc.awaiting(t.user);
+      expect(r.invoices.map((i) => i.requestId)).toEqual(['a', 'b', 'c']);
+      expect(r.invoices[0].dealTitle).toBe('Баня');
+      expect(r.invoices[1].dealTitle).toBe('Сделка #700');
+      expect(r.invoices[2]).toMatchObject({ purpose: 'Сертификат', deadline: null });
+    });
+
+    it('awaiting: без права payment.send — пустой список без чтения базы', async () => {
+      const t = setup({ permissions: [] });
+      const r = await t.svc.awaiting(t.user);
+      expect(r.invoices).toEqual([]);
+      expect(t.prisma.paymentRequest.findMany).not.toHaveBeenCalled();
+    });
+
+    it('invoice-view: данные счёта, заявки, брони и файлов; полнота по наличию заявки', async () => {
+      const t = setup();
+      (t.prisma.paymentRequest as unknown as Record<string, unknown>).findFirst = vi.fn(async () =>
+        baseReq({ bookingId: 5918, link: null, message: 'Оплатите {link}', messageFileIds: ['f1'] as unknown as PaymentRequest['messageFileIds'] }),
+      );
+      (t.prisma.bookingRecord as unknown as Record<string, unknown>).findUnique = vi.fn(async () => ({
+        bookingId: 5918,
+        startsAt: new Date('2026-11-02T10:00:00Z'),
+        endsAt: new Date('2026-11-02T14:00:00Z'),
+        resourceIds: [2],
+      }));
+      const v = await t.svc.invoiceView(t.user, 678, 6001);
+      expect(v).toMatchObject({
+        complete: true,
+        status: 'issued',
+        state: 'open',
+        messageText: 'Оплатите {link}',
+        booking: { bookingId: 5918, resources: ['Баня 2'] },
+        contact: { id: 140, name: 'Анна Петрова' },
+        dealTitle: 'Баня на субботу',
+      });
+      expect(v.messageFiles).toEqual([{ id: 'f1', name: 'прайс.pdf', mime: 'application/pdf', size: 1 }]);
+      // Счёт не приложения: заявки нет — данные неполные.
+      const u = setup();
+      (u.prisma.paymentRequest as unknown as Record<string, unknown>).findFirst = vi.fn(async () => null);
+      expect(await u.svc.invoiceView(u.user, 678, 6003)).toMatchObject({ complete: false, request: null, messageText: null, booking: null });
+    });
+  });
+
   describe('окно оплаты: свой текст и вложения', () => {
     const template = { id: 'tp1', name: 'Предоплата бани', steps: [{ text: 'Оплатите {prepayment} ₽: {link} до {deadline}', fileIds: [] }, { text: 'Правила', fileIds: ['f1'] }] };
 

@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { moneyValue, paymentAmount } from './payments.js';
+import { invoiceDisplayStatus, moneyValue, paymentAmount } from './payments.js';
+
+describe('invoiceDisplayStatus', () => {
+  const req = (status: string, messageSent: boolean) => ({ status, messageSent }) as Parameters<typeof invoiceDisplayStatus>[1];
+  it('стадия Битрикс24 важнее заявки', () => {
+    expect(invoiceDisplayStatus('paid', req('sent', true))).toBe('paid');
+    expect(invoiceDisplayStatus('failed', req('sent', true))).toBe('lost');
+  });
+  it('открытый счёт заявки: ссылка у клиента — ждёт оплату, иначе выставлен', () => {
+    expect(invoiceDisplayStatus('open', req('sent', true))).toBe('waiting');
+    expect(invoiceDisplayStatus('open', req('sent', false))).toBe('issued');
+    expect(invoiceDisplayStatus('open', req('link_pending', false))).toBe('issued');
+    expect(invoiceDisplayStatus('open', req('expired', true))).toBe('lost');
+    expect(invoiceDisplayStatus('open', req('cancelled', false))).toBe('lost');
+    expect(invoiceDisplayStatus('open', req('paid', true))).toBe('paid');
+  });
+  it('счёт не приложения: по стадии, открытый — ждёт оплату', () => {
+    expect(invoiceDisplayStatus('open', null)).toBe('waiting');
+    expect(invoiceDisplayStatus('paid', null)).toBe('paid');
+    expect(invoiceDisplayStatus('failed', null)).toBe('lost');
+  });
+});
 
 describe('paymentAmount', () => {
   it('prepayment: manual from the deal → fixed of the group → percent of the deal', () => {

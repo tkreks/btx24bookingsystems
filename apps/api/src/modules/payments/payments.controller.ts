@@ -1,5 +1,15 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { PAYMENT_REQUEST_KINDS, type ClientInvoicesDto, type DealInvoicesDto, type PaymentDealOptionsDto, type PaymentPreviewDto, type PaymentRequestDto, type PaymentRequestKind } from '@btx24/shared';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  PAYMENT_REQUEST_KINDS,
+  type AwaitingInvoicesDto,
+  type ClientInvoicesDto,
+  type DealInvoicesDto,
+  type InvoiceViewDto,
+  type PaymentDealOptionsDto,
+  type PaymentPreviewDto,
+  type PaymentRequestDto,
+  type PaymentRequestKind,
+} from '@btx24/shared';
 import { AccessService } from '../access/access.service.js';
 import { B24AuthGuard, B24User } from '../bitrix24/auth/b24-auth.guard.js';
 import type { B24UserContext } from '../bitrix24/auth/user-context.js';
@@ -59,11 +69,32 @@ export class PaymentsController {
     return this.payments.invoices(user, int(dealId, 'dealId'));
   }
 
-  /** Счета клиента сделки (все его сделки): ждут оплаты или оплачены до конца брони — блок встройки. */
+  /** Счета клиента сделки (все его сделки) со статусами: активные и архив — блок встройки. */
   @Get('client-invoices')
   async clientInvoices(@B24User() user: B24UserContext, @Query('dealId') dealId?: string): Promise<ClientInvoicesDto> {
     await this.requireDetails(user);
     return this.payments.clientInvoices(user, int(dealId, 'dealId'));
+  }
+
+  /** Счёт в режиме просмотра (окно как в шаге выставления) — по нажатию на счёт во встройке. */
+  @Get('invoice-view')
+  async invoiceView(@B24User() user: B24UserContext, @Query('dealId') dealId?: string, @Query('invoiceId') invoiceId?: string): Promise<InvoiceViewDto> {
+    await this.requireDetails(user);
+    return this.payments.invoiceView(user, int(dealId, 'dealId'), int(invoiceId, 'invoiceId'));
+  }
+
+  /** Счета, ждущие оплату (ссылка у клиента, срок идёт), — блок дашборда. */
+  @Get('awaiting')
+  async awaiting(@B24User() user: B24UserContext): Promise<AwaitingInvoicesDto> {
+    await this.requireDetails(user);
+    return this.payments.awaiting(user);
+  }
+
+  /** Отправить клиенту выставленный счёт (статус «Выставлен»); право проверяет сервис. */
+  @Post('requests/:id/send')
+  send(@B24User() user: B24UserContext, @Param('id') id: string): Promise<PaymentRequestDto> {
+    if (!/^[a-z0-9-]{1,40}$/i.test(id)) throw new BadRequestException({ code: 'INVALID_QUERY', message: 'id: идентификатор заявки' });
+    return this.payments.send(user, id);
   }
 
   private async requireDetails(user: B24UserContext): Promise<void> {

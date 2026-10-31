@@ -5620,6 +5620,10 @@ input[role='switch']:checked::after {
   background: #ecfdf3;
   cursor: pointer;
   overflow: hidden;
+  touch-action: pan-y;
+}
+.wz-res-scale.dragging {
+  cursor: grabbing;
 }
 .wz-res-scale .piece {
   position: absolute;
@@ -5632,40 +5636,64 @@ input[role='switch']:checked::after {
 .wz-res-scale .piece.tech {
   background: #fcd34d;
 }
+/* Ползунок выбранного времени (решение владельца 2026-10-31): виден всегда на выбранном ресурсе,
+   остаётся после нажатия; перетаскивается и перевыбирается одним нажатием в другом месте. */
 .wz-res-scale .pick {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
-  min-width: 3px;
-  border: 2px solid var(--primary);
-  border-radius: 6px;
-  background: rgba(0, 122, 255, 0.18);
+  top: 1px;
+  bottom: 1px;
+  min-width: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #2f93ff, var(--primary));
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.35), inset 0 0 0 1.5px rgba(255, 255, 255, 0.45);
   pointer-events: none;
-  opacity: 0;
-  transition: opacity .15s;
+  cursor: grab;
+  transition: opacity 0.15s;
 }
-/* Выбранный период — только при наведении на шкалу выбранного ресурса (решение владельца 2026-10-26). */
-.wz-res-scale:hover .pick,
-.wz-res-scale:focus-visible .pick {
-  opacity: 1;
+.wz-res-scale .pick::before,
+.wz-res-scale .pick::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 12px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.wz-res-scale .pick::before { left: 4px; }
+.wz-res-scale .pick::after { right: 4px; }
+.wz-res-scale .pick span {
+  padding: 0 10px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* Пока курсор примеряет другое место — прежний выбор полупрозрачный. */
+.wz-res-scale .pick.moving {
+  opacity: 0.35;
 }
 .wz-res-row.busy .wz-res-scale .pick {
-  border-color: #d92d20;
-  background: rgba(217, 45, 32, 0.15);
+  background: linear-gradient(180deg, #f97066, #d92d20);
 }
 /* Накладка при наведении: бронь выбранной длительности от места курсора (решение владельца 2026-10-26). */
 .wz-res-scale .ghost {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 1px;
+  bottom: 1px;
   min-width: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 2px solid var(--primary);
-  border-radius: 6px;
-  background: rgba(0, 122, 255, 0.22);
+  border: 2px dashed var(--primary);
+  border-radius: 7px;
+  background: rgba(0, 122, 255, 0.14);
   pointer-events: none;
 }
 .wz-res-scale .ghost span {
@@ -10946,3 +10974,181 @@ button.dup-name:hover { color: var(--primary); }
   .dup-filter { max-width: 100%; overflow-x: auto; }
   .dup-filter button { padding: 5px 8px; font-size: 12.5px; }
 }
+
+/* ===== Объединение контактов: дубли «слетаются» в основной и пропадают (2026-10-31) ===== */
+.dup-group.merging {
+  overflow: hidden;
+  transition: opacity 0.35s ease 0.55s, transform 0.35s ease 0.55s;
+  opacity: 0;
+  transform: scale(0.96);
+  pointer-events: none;
+}
+.dup-group.merging .dup-pair .dup-cell:last-child {
+  transition: transform 0.6s cubic-bezier(0.5, 0, 0.75, 0.4), opacity 0.6s ease;
+  transform: translateX(-70%) scale(0.2);
+  opacity: 0;
+}
+.dup-group.merging .dup-rows,
+.dup-group.merging .dup-card-foot {
+  transition: opacity 0.4s ease;
+  opacity: 0;
+}
+.dup-group.merging .dup-pair .dup-cell:first-child {
+  animation: dup-absorb 0.7s ease;
+}
+@keyframes dup-absorb {
+  0% { transform: scale(1); }
+  70% { transform: scale(1); }
+  82% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dup-group.merging,
+  .dup-group.merging .dup-pair .dup-cell:last-child { transition: none; animation: none; }
+  .dup-group.merging .dup-pair .dup-cell:first-child { animation: none; }
+}
+
+/* ===== Окно оплаты: блок суммы и предпросмотр текста без переменных (2026-10-31) ===== */
+.pw-detail.pw-detail-amount {
+  margin: 8px -4px 8px 0;
+  padding-right: 16px;
+  padding-left: 16px;
+  border-radius: 12px;
+  background: #e0f2fe;
+}
+.pw-details .pw-detail.pw-detail-amount:nth-child(even) { padding-left: 16px; }
+.pw-preview {
+  position: relative;
+  margin: 0 14px;
+  padding: 10px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: text;
+}
+.pw-preview:hover { border-color: rgba(0, 122, 255, 0.4); }
+.pw-preview-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.pw-var {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--info-bg);
+  color: var(--info-text);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.pw-preview-edit {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11.5px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pw-preview:hover .pw-preview-edit,
+.pw-preview:focus-visible .pw-preview-edit { opacity: 1; }
+.pw-preview.iv-readonly { cursor: default; }
+
+/* ===== Встройка сделки: статусы счетов, отсчёт, архив (2026-10-31) ===== */
+.ci-status {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ci-status.paid { background: var(--ok-bg); color: var(--ok-text); }
+.ci-status.issued { background: var(--info-bg); color: var(--info-text); }
+.ci-status.waiting { background: #ffedd5; color: #c2410c; }
+.ci-status.lost { background: var(--status-fail-bg); color: var(--status-fail-text); }
+.ci-left {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ci-left.late { color: var(--danger); font-weight: 600; }
+.ci-row.st-paid { border-left: 3px solid var(--ok); }
+.ci-row.st-issued { border-left: 3px solid var(--primary); }
+.ci-row.st-waiting { border-left: 3px solid #f97316; }
+.ci-row.st-lost { border-left: 3px solid var(--danger); opacity: 0.85; }
+.ci-archive-btn { justify-self: start; margin-top: 4px; font-size: 12.5px; }
+.sheet.bk.ci-archive { max-width: 720px; }
+.ci-archive-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 18px; }
+.ci-rows.ci-archive-rows { max-height: none; }
+
+/* Просмотр счёта: окно как в шаге выставления, только чтение. */
+.sheet.bk.pw.iv { max-width: 760px; }
+.iv .bk-head h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.iv-body { position: relative; }
+.iv-cover {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 36px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: center;
+}
+.iv-cover .icon { color: var(--warn-text); fill: none; stroke: currentColor; stroke-width: 1.8; }
+.iv-cover p { margin: 0; max-width: 420px; }
+
+/* ===== Дашборд: «Счета, ожидающие оплату» (2026-10-31) ===== */
+.dash-awaiting { display: grid; align-content: start; gap: 8px; }
+.aw-first {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+  text-align: left;
+  cursor: pointer;
+}
+.aw-first:hover { border-color: #fdba74; }
+.aw-first.soon { border-color: #fecaca; background: #fef2f2; }
+.aw-first-left { display: grid; gap: 2px; min-width: 0; }
+.aw-first .aw-amount { font-size: 18px; }
+.aw-countdown { display: grid; justify-items: end; gap: 1px; flex: none; }
+.aw-countdown-label { color: var(--muted); font-size: 11px; }
+.aw-countdown b { color: #c2410c; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.aw-first.soon .aw-countdown b { color: var(--danger); }
+.aw-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 300px; overflow-y: auto; }
+.aw-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.aw-row:hover { border-color: rgba(0, 122, 255, 0.35); background: var(--hover); }
+.aw-amount { flex: none; white-space: nowrap; }
+.aw-deal { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

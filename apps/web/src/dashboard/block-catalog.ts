@@ -86,6 +86,7 @@ export const BLOCK_PREVIEWS: Record<DashboardBlockType, BlockPreviewSpec> = {
   currentBookings: { kind: 'list', lead: 'time', trail: 'status', tone: 'ok' },
   resourceTimelineNow: { kind: 'timeline', tone: 'primary', now: true },
   contactDuplicates: { kind: 'duplicates', tone: 'primary' },
+  awaitingInvoices: { kind: 'list', lead: 'deal', trail: 'time', tone: 'warn' },
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');

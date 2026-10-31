@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ContactCompareFieldDto, DuplicateContactDto, DuplicateGroupDto } from '@btx24/shared';
-import { contactPills, contactsWord, defaultChoice, fmtPhone, groupForMerge, mergeBlocker, splitGroup, stackView } from './ContactDuplicatesBlock.js';
+import type { ContactCompareFieldDto, ContactDuplicatesDto, DuplicateContactDto, DuplicateGroupDto } from '@btx24/shared';
+import { contactPills, contactsWord, defaultChoice, fmtPhone, groupForMerge, mergeBlocker, removeMergedContacts, splitGroup, stackView } from './ContactDuplicatesBlock.js';
 
 const field = (values: Record<string, string | null>): ContactCompareFieldDto => ({ code: 'POST', label: 'Должность', kind: 'single', values, conflict: true });
 
@@ -54,5 +54,24 @@ describe('Дубли контактов', () => {
     });
     expect(contactPills({ phones: [], emails: ['a@b.ru'] }, 1)).toEqual({ shown: [{ kind: 'email', text: 'a@b.ru' }], more: 0 });
     expect(contactPills({ phones: [], emails: [] })).toEqual({ shown: [], more: 0 });
+  });
+
+  it('после объединения удалённые пропадают из всех групп, неполные группы исчезают, счётчик уменьшается', () => {
+    const data: ContactDuplicatesDto = {
+      total: 3,
+      scanned: 100,
+      builtAt: '2026-10-31T00:00:00Z',
+      nextCursor: null,
+      groups: [
+        { key: 'p-1', reasons: [], contacts: [1, 2, 3].map(ct) },
+        { key: 'p-2', reasons: [], contacts: [2, 7].map(ct) },
+        { key: 'p-3', reasons: [], contacts: [8, 9].map(ct) },
+      ],
+    };
+    const r = removeMergedContacts(data, [2, 3]);
+    expect(r.groups.map((g) => [g.key, g.contacts.map((c) => c.id)])).toEqual([['p-3', [8, 9]]]);
+    expect(r.total).toBe(1);
+    // Никто не удалён — список не меняется.
+    expect(removeMergedContacts(data, []).groups).toHaveLength(3);
   });
 });

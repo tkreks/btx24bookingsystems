@@ -53,7 +53,7 @@ const NIGHTS = [1, 2, 3, 5, 7];
 const SLOT_LEGEND: LegendItem[] = [
   { label: 'Занято', swatch: { background: '#f04438' } },
   { label: 'Тех. окно — можно', swatch: { background: '#fcd34d' }, title: 'Пересечение с тех. окном разрешено, с предупреждением' },
-  { label: 'Бронь на выбранную длительность', swatch: { borderColor: 'var(--primary)', background: 'rgba(0, 122, 255, 0.18)' }, title: 'Накладка при наведении на шкалу ресурса; нажатие — выбрать это время' },
+  { label: 'Выбранное время', swatch: { background: 'var(--primary)' }, title: 'Ползунок остаётся на выбранном времени; его можно перетащить или перевыбрать нажатием' },
 ];
 
 /**
@@ -89,6 +89,8 @@ export function SlotPicker({
   const [onlyFree, setOnlyFree] = useState(false);
   const [draft, setDraft] = useState<{ rid: number | null; period: PeriodFields } | null>(null);
   const [hover, setHover] = useState<{ rid: number; start: number } | null>(null);
+  // Ползунок тянут мышью (pointer capture): отпустили — время выбрано там, где он стоит.
+  const [drag, setDrag] = useState<number | null>(null);
   const [askHours, setAskHours] = useState(false);
   const now = useNow();
   const today = todayIn(timezone);
@@ -269,8 +271,8 @@ export function SlotPicker({
               </button>
               <div className="wz-res-timeline">
               <div
-                className={`wz-res-scale${ghost ? ' hovering' : ''}`}
-                title={nightsMode ? 'Выбрать ресурс' : 'Нажмите — бронь с этого времени'}
+                className={`wz-res-scale${ghost ? ' hovering' : ''}${drag === r.id ? ' dragging' : ''}`}
+                title={nightsMode ? 'Выбрать ресурс' : 'Нажмите или перетащите ползунок — бронь с этого времени'}
                 role="button"
                 tabIndex={0}
                 aria-label={`Выбрать время: ${r.name}`}
@@ -281,19 +283,39 @@ export function SlotPicker({
                     else setDraft({ rid: r.id, period: { ...period } });
                   }
                 }}
-                onMouseMove={(e) => {
-                  if (nightsMode) return hover?.rid !== r.id && setHover({ rid: r.id, start: startMs });
+                onPointerDown={(e) => {
+                  if (nightsMode || e.button !== 0) return;
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  setDrag(r.id);
+                  setHover({ rid: r.id, start: startAt(e) });
+                }}
+                onPointerMove={(e) => {
+                  if (nightsMode) {
+                    if (hover?.rid !== r.id) setHover({ rid: r.id, start: startMs });
+                    return;
+                  }
                   const start = startAt(e);
                   if (hover?.rid !== r.id || hover.start !== start) setHover({ rid: r.id, start });
                 }}
-                onMouseLeave={() => setHover(null)}
-                onClick={(e) => pickOnBar(r.id, e)}
+                onPointerUp={(e) => {
+                  setDrag(null);
+                  pickOnBar(r.id, e);
+                }}
+                onPointerCancel={() => setDrag(null)}
+                onPointerLeave={() => drag === null && setHover(null)}
               >
                 {pieces.map((p, i) => (
                   <i key={i} className={`piece ${p.kind}`} style={{ left: `${p.from * 100}%`, width: `${(p.to - p.from) * 100}%` }} />
                 ))}
-                {on && durationMs > 0 && !ghost && <i className="pick" style={{ left: `${frac(startMs) * 100}%`, width: `${(frac(endMs) - frac(startMs)) * 100}%` }} />}
-                {ghost && (
+                {/* Выбранное время — ползунок: остаётся после нажатия, его можно перетащить или перевыбрать одним нажатием. */}
+                {on && durationMs > 0 && !nightsMode && (
+                  <i className={`pick${ghost && ghost.start !== startMs ? ' moving' : ''}`} style={{ left: `${frac(startMs) * 100}%`, width: `${Math.max(0, frac(endMs) - frac(startMs)) * 100}%` }}>
+                    <span>
+                      {fmtTime(new Date(startMs).toISOString(), timezone)}–{fmtTime(new Date(endMs).toISOString(), timezone)}
+                    </span>
+                  </i>
+                )}
+                {ghost && !(on && !nightsMode && ghost.start === startMs) && (
                   <i
                     className={`ghost${ghostState && (ghostState.kind === 'busy' || ghostState.kind === 'stop') ? ' busy' : ''}`}
                     style={{ left: `${frac(ghost.start) * 100}%`, width: `${Math.max(0, frac(ghost.end) - frac(ghost.start)) * 100}%` }}

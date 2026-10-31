@@ -29,6 +29,7 @@ import { apiDelete, apiGet, apiPost, apiPut, logout } from '../api.js';
 import { BlockGrid } from '../dashboard/BlockGrid.js';
 import { OnShiftBlock } from '../dashboard/OnShiftBlock.js';
 import { MessengersBlock } from '../dashboard/MessengersBlock.js';
+import { AwaitingInvoicesBlock } from '../dashboard/AwaitingInvoicesBlock.js';
 import { ContactDuplicatesBlock } from '../dashboard/ContactDuplicatesBlock.js';
 import { KpiGridBlock } from '../dashboard/KpiGridBlock.js';
 import { LiveBookingsBlock } from '../dashboard/LiveBookingsBlock.js';
@@ -302,6 +303,8 @@ export function DashboardPage({
         return session.canManageApp && !session.settingsAccessUntil ? <ContactDuplicatesBlock tz={tz} /> : null;
       case 'upcomingBookings':
         return <LiveBookingsBlock kind="upcoming" timezone={tz} />;
+      case 'awaitingInvoices':
+        return <AwaitingInvoicesBlock timezone={tz} />;
       case 'currentBookings':
         return <LiveBookingsBlock kind="current" timezone={tz} />;
       case 'resourceTimeline':

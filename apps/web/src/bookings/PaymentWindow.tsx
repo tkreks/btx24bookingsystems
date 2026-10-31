@@ -29,6 +29,8 @@ import { fmtLinePhone } from '../openlines/ChannelFilter.js';
 import { Icon } from '../openlines/icons.js';
 import { parseHours } from './CustomPaymentForm.js';
 import { GroupIcon } from './group-icons.js';
+import { MessagePreviewText } from './MessagePreview.js';
+import { deadlinePreview } from './message-preview.js';
 import { paymentFeedback } from './payment-feedback.js';
 
 const SOURCE: Record<PaymentPreviewDto['source'], string> = {
@@ -113,6 +115,8 @@ export function PaymentWindow({
   const [files, setFiles] = useState<PaymentFileDto[]>([]);
   const [filesBusy, setFilesBusy] = useState(false);
   const [templates, setTemplates] = useState<MessageTemplateDto[] | null>(null);
+  // Текст показывается с подставленными значениями; правка — по нажатию (исходный текст с переменными).
+  const [editingText, setEditingText] = useState(false);
   const [menu, setMenu] = useState<'templates' | 'files' | 'channels' | null>(null);
   const [targets, setTargets] = useState<MessengerDealTargetsDto | null | 'failed'>(null);
   const [channelId, setChannelId] = useState<string | null>(null);
@@ -473,7 +477,7 @@ export function PaymentWindow({
                 </div>
               </div>
 
-              <div className="pw-detail">
+              <div className="pw-detail pw-detail-amount">
                 <span className="pw-icon violet" aria-hidden="true">
                   <Icon name="coin" size={24} />
                 </span>
@@ -575,12 +579,45 @@ export function PaymentWindow({
                   </div>
                 )}
               </div>
-              <div className="pw-editor">
-                <textarea rows={4} maxLength={4000} value={shownText} aria-label="Текст сообщения клиенту" disabled={busy} onChange={(e) => setText(e.target.value)} />
-              </div>
-              <p className="pw-hint">
-                <code>{'{link}'}</code> заменится ссылкой на оплату, <code>{'{deadline}'}</code> — сроком оплаты; без <code>{'{link}'}</code> ссылка встанет последней строкой. Шаблон группы не меняется.
-              </p>
+              {editingText ? (
+                <>
+                  <div className="pw-editor">
+                    <textarea rows={4} maxLength={4000} autoFocus value={shownText} aria-label="Текст сообщения клиенту" disabled={busy} onChange={(e) => setText(e.target.value)} />
+                  </div>
+                  <p className="pw-hint">
+                    <code>{'{link}'}</code> заменится ссылкой на оплату, <code>{'{deadline}'}</code> — сроком оплаты; без <code>{'{link}'}</code> ссылка встанет последней строкой. Шаблон группы не меняется.{' '}
+                    <button type="button" className="link" onClick={() => setEditingText(false)}>
+                      Показать с подставленными значениями
+                    </button>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="pw-preview"
+                    role="button"
+                    tabIndex={0}
+                    title="Нажмите, чтобы изменить текст на эту отправку"
+                    aria-label="Текст сообщения клиенту — изменить"
+                    onClick={() => !busy && setEditingText(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (!busy) setEditingText(true);
+                      }
+                    }}
+                  >
+                    <MessagePreviewText
+                      text={shownText}
+                      deadlineText={deadlinePreview(custom ? (typeof h === 'number' ? h * 60 : null) : (preview?.timeoutMinutes ?? null), timezone) || undefined}
+                    />
+                    <span className="pw-preview-edit" aria-hidden="true">
+                      ✎ Изменить
+                    </span>
+                  </div>
+                  <p className="pw-hint">Значения уже подставлены; ссылка на оплату появится при отправке. Нажмите на текст, чтобы изменить его на эту отправку — шаблон группы не меняется.</p>
+                </>
+              )}
               <div className="pw-attachments-head">
                 <strong>
                   <Icon name="clip" size={16} /> Вложения ({files.length})
